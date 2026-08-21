@@ -4,6 +4,10 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Project testing guidance now prefers Browser-based UI inspection and limits Computer Use to native-only behavior that Browser cannot exercise.
+
 ## [0.1.0] - 2026-08-21
 
 ### Added

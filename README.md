@@ -46,7 +46,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- dev
 ```
 
-Browser development uses clearly labeled preview records. Only the Tauri runtime exercises the real SQLite boundary.
+Browser development uses clearly labeled preview records. Prefer the Browser plugin for UI testing and visual inspection; reserve Computer Use for native-only behavior that Browser cannot exercise. Only the Tauri runtime exercises the real SQLite boundary.
 
 Build a local NSIS installer with:
 
