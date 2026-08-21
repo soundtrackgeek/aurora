@@ -21,6 +21,7 @@ export interface Artist {
 
 export interface Track {
   id: string;
+  trackKey: string;
   albumId: string | null;
   title: string;
   artist: string;
@@ -28,9 +29,24 @@ export interface Track {
   releaseYear: number | null;
   rating: number | null;
   loved: boolean;
+  loveState: "neutral" | "loved" | "banned";
+  tagSyncState: "pendingImport" | null;
+  canUndoTagEdit: boolean;
   durationSeconds: number | null;
   genre: string | null;
   playCount: number | null;
+}
+
+type PreviewTrack = Omit<Track, "trackKey" | "loveState" | "tagSyncState" | "canUndoTagEdit">;
+
+function previewTrack(track: PreviewTrack): Track {
+  return {
+    ...track,
+    trackKey: `preview:${track.id}`,
+    loveState: track.loved ? "loved" : "neutral",
+    tagSyncState: null,
+    canUndoTagEdit: false,
+  };
 }
 
 export interface LibrarySnapshot {
@@ -65,13 +81,13 @@ export const browserPreview: LibrarySnapshot = {
     { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755 },
   ],
   tracks: [
-    { id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 },
-    { id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", releaseYear: 2011, rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 },
-    { id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", releaseYear: 2013, rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 },
-    { id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", releaseYear: 2009, rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 },
-    { id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", releaseYear: 2001, rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 },
-    { id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", releaseYear: 2010, rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 },
-    { id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", releaseYear: 2008, rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 },
+    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
+    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", releaseYear: 2011, rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
+    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", releaseYear: 2013, rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
+    previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", releaseYear: 2009, rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
+    previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", releaseYear: 2001, rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
+    previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", releaseYear: 2010, rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
+    previewTrack({ id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", releaseYear: 2008, rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 }),
   ],
 };
 

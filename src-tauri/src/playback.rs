@@ -1,12 +1,11 @@
 use crate::{
-    catalog::{self, TrackSummary},
-    state_store::{StateStore, StoredPlaybackState},
+    catalog::{self, TrackReference, TrackSummary},
+    state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -75,16 +74,23 @@ pub(crate) struct PlaybackRuntime {
 }
 
 impl PlaybackRuntime {
-    pub(crate) fn new(state_path: PathBuf) -> Result<Self, String> {
-        let store = StateStore::new(state_path)?;
+    pub(crate) fn new(store: StateStore) -> Result<Self, String> {
         let stored = store.load()?;
-        let queue_result = if stored.track_ids.is_empty() {
-            Ok(Vec::new())
+        let queue_result = if stored.queue.is_empty() {
+            Ok((Vec::new(), 0))
         } else {
-            catalog::load_tracks_by_ids(&stored.track_ids)
+            catalog::load_tracks_by_references(&stored.queue, &store)
         };
         let (queue, error) = match queue_result {
-            Ok(queue) => (queue, None),
+            Ok((queue, missing)) => {
+                let error = (missing > 0).then(|| {
+                    format!(
+                        "Aurora restored the surviving queue and skipped {missing} unavailable track{}.",
+                        if missing == 1 { "" } else { "s" }
+                    )
+                });
+                (queue, error)
+            }
             Err(error) => (
                 Vec::new(),
                 Some(format!(
@@ -92,7 +98,19 @@ impl PlaybackRuntime {
                 )),
             ),
         };
-        let current_index = stored.current_index.filter(|index| *index < queue.len());
+        let current_index = stored
+            .current_index
+            .and_then(|index| stored.queue.get(index))
+            .and_then(|reference| {
+                queue.iter().position(|track| {
+                    reference
+                        .track_key
+                        .as_ref()
+                        .map_or(track.id == reference.track_id, |key| {
+                            track.track_key == *key
+                        })
+                })
+            });
         let position_seconds = current_index
             .and_then(|index| queue[index].duration_seconds)
             .map(|duration| stored.position_seconds.clamp(0.0, duration as f64))
@@ -139,7 +157,7 @@ impl PlaybackRuntime {
             .current_track()
             .cloned()
             .ok_or_else(|| "The playback queue has no current track.".to_owned())?;
-        let audio_path = catalog::resolve_audio_path(&track.id)?;
+        let audio_path = catalog::resolve_audio_path(&track.id, &track.track_key, &self.store)?;
         let file = File::open(&audio_path)
             .map_err(|error| format!("Aurora could not open this MP3: {error}"))?;
         let byte_len = file
@@ -190,7 +208,16 @@ impl PlaybackRuntime {
 
     fn persist(&self) -> Result<(), String> {
         self.store.save(&StoredPlaybackState {
-            track_ids: self.queue.iter().map(|track| track.id.clone()).collect(),
+            queue: self
+                .queue
+                .iter()
+                .map(|track| StoredQueueEntry {
+                    track_id: track.id.clone(),
+                    track_key: Some(track.track_key.clone()),
+                    directory: Some(track.directory.clone()),
+                    filename: Some(track.filename.clone()),
+                })
+                .collect(),
             current_index: self.current_index,
             position_seconds: self.position_seconds,
             volume: self.volume,
@@ -289,14 +316,14 @@ impl PlaybackRuntime {
 
     pub(crate) fn replace_queue(
         &mut self,
-        track_ids: Vec<String>,
-        start_track_id: String,
+        track_references: Vec<TrackReference>,
+        start_track_key: String,
     ) -> Result<PlaybackSnapshot, String> {
-        let start_index = track_ids
+        let start_index = track_references
             .iter()
-            .position(|track_id| track_id == &start_track_id)
+            .position(|reference| reference.track_key == start_track_key)
             .ok_or_else(|| "The selected track is not part of this queue.".to_owned())?;
-        let queue = catalog::load_tracks_by_ids(&track_ids)?;
+        let queue = catalog::load_tracks_by_ids(&track_references, &self.store)?;
         self.queue = queue;
         self.current_index = Some(start_index);
         self.position_seconds = 0.0;
@@ -477,6 +504,14 @@ impl PlaybackRuntime {
         self.error = None;
         self.persist()?;
         Ok(self.snapshot())
+    }
+
+    pub(crate) fn refresh_track_metadata(&mut self, updated: &TrackSummary) {
+        for track in &mut self.queue {
+            if track.track_key == updated.track_key {
+                *track = updated.clone();
+            }
+        }
     }
 }
 

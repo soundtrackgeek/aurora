@@ -1,29 +1,34 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.2.0 adds native MP3 playback, a durable listening queue, transport controls, and contained album-cover thumbnails while keeping the imported catalog read-only.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.3.0 adds transactional MusicBee-compatible MP3 rating, Love/Ban, and Release Year edits while keeping the imported Music Library catalog read-only.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.2.0 slice
+## Current 0.3.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Clickable artist planets that query 50 tracks for the selected artist.
 - Debounced, safely quoted FTS5 prefix search across the entire catalog.
-- Read-only inspector for rating, Love, Release Year, genre, duration, and optional Last.fm popularity.
+- Inspector editor for half-star ratings, Love/Neutral/Ban, and Release Year, plus read-only genre, duration, and optional Last.fm popularity.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
 - A bounded 200-track queue with play-now, reorder, remove, and clear actions.
 - Durable queue, current track, position, volume, shuffle, and repeat state in Aurora's own SQLite database.
+- Stable queue identity based on the normalized MP3 path, verified alongside every transient track ID so queue items survive Music Library TSV imports without being retargeted.
+- Transactional same-folder MP3 writes using MusicBee's exact POPM byte map, `LOVE RATING`, and Release Time conventions.
+- Conflict detection, post-write tag/audio verification, Windows atomic replacement, retained rollback copies, crash recovery, and one-step undo. Ambiguous or externally changed files are never auto-overwritten; Aurora retains both versions for manual recovery.
+- Aurora-owned tag overlays that update the UI immediately and reconcile automatically after a later MusicBee TSV import updates Music Library.
+- Half-star track reconciliation reads Music Library's raw rating when its older normalized field is null; removed-track overlays are excluded from library totals.
 - Album covers served through a narrow Rust protocol that resolves exact album IDs, contains canonical paths to the configured archive, rejects oversized sources, and caches 64–512 px WebP thumbnails.
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-Tag editing is intentionally not enabled yet. Playback reads audio files but never mutates them. The exact MusicBee MP3 conventions are documented in [docs/musicbee-tags.md](docs/musicbee-tags.md); file mutation still needs its own backup, verification, rollback, and concurrency-tested slice. See [docs/playback-contract.md](docs/playback-contract.md) for playback authority and lifecycle rules.
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic overlay in its own state database until the normal MusicBee TSV export and Music Library import catch up. See [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
 
 ## Data model
 
-The primary catalog currently contains roughly 1.095 million MP3 tracks, 71,952 albums, and 20,379 album artists. Aurora opens the active WAL-backed database with SQLite read-only flags and `query_only`; it does not use immutable mode and does not write ratings back into this imported catalog.
+The primary catalog currently contains 1,096,162 MP3 tracks, 72,000 albums, and 20,392 album artists. Aurora opens the active WAL-backed database with SQLite read-only flags and `query_only`; it does not use immutable mode and does not write ratings back into this imported catalog.
 
 The broad MusicBrainz cache and curated overlay are deferred from startup. See [docs/database-contract.md](docs/database-contract.md) for verified sizes, responsibilities, query limits, and authority rules.
 
@@ -61,7 +66,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.2.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.3.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

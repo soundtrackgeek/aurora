@@ -9,13 +9,13 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 ## Authorities and identity
 
 - The existing music-library database is authoritative for catalog display, but Aurora opens it read-only.
-- Audio files become authoritative for rating, Love/Ban, and Release Year after the future verified tag writer lands.
-- Aurora-owned playback state lives in a separate writable Aurora database. Future optimistic tag writes and operation journals belong there too.
-- Existing integer track IDs and opaque string album IDs are preserved. Artist identity needs an explicit normalized key before cross-database joins; display text is never used as a durable provider identity.
+- Audio files are authoritative for rating, Love/Ban, and Release Year after an Aurora edit.
+- Aurora-owned playback state, optimistic tag overlays, and the tag-operation journal live in a separate writable Aurora database.
+- Integer track IDs are transient because Music Library's full TSV import replaces rows. Aurora persists queue and overlay identity with the normalized directory plus filename; album IDs remain opaque strings.
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.2.0 acceptance checks
+## 0.3.0 acceptance checks
 
 - Launch without modifying the 3+ GiB catalog or its WAL.
 - Return a bounded startup payload rather than serializing the million-track library.
@@ -26,25 +26,31 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Start a selected catalog track through a bounded track-ID command without exposing its file path to React.
 - Control play/pause, seek, previous/next, volume, shuffle, repeat-one, and repeat-all from the persistent footer.
 - Reorder, remove, play, and clear a queue capped at 200 tracks.
-- Restore queue order, current track, position, volume, shuffle, and repeat state after restart.
+- Restore queue order, current track, position, volume, shuffle, and repeat state after restart and after a full Music Library import changes track IDs.
+- Reject a live play or tag command when its transient ID no longer matches its stable path key, and preserve available queue entries when individual files disappear.
 - Resolve album covers by exact album ID through a contained Rust protocol and cached bounded thumbnails.
-- Produce a Windows GUI executable and NSIS updater artifact with aligned `0.2.0` versions.
+- Read a selected MP3's current MusicBee rating, Love/Ban, and Release Time without exposing its path to React.
+- Save all three fields as one verified transaction using a same-folder working copy and Windows atomic replacement.
+- Preserve non-target ID3 frames, tag version, ID3v1/trailing data, and audio bytes; retain both files without overwriting either when verification or journal recovery finds an ambiguous external change.
+- Detect external edits before replacement, retain the latest 20 rollback copies, recover interrupted writes on startup, and support safe one-step undo.
+- Show the file edit immediately from Aurora's own overlay without writing Music Library; clear it when a later catalog import matches.
+- Reconcile 3.5/4.5 ratings from validated raw catalog values even when the current importer leaves its normalized field empty.
+- Produce a Windows GUI executable and NSIS updater artifact with aligned `0.3.0` versions.
 
 ## Performance budget
 
 Warm source measurements are approximately 26–89 ms for the current bounded queries before WebView transport. The UI requests no more than 50 catalog rows per query and accepts no more than 200 IDs for a playback queue. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.2.0
+## Explicit non-goals for 0.3.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
-- Writing ratings, Love/Ban, Release Year, or any other file tags.
 - Editing the imported catalog directly.
+- Editing non-MP3 files or ID3 fields other than MusicBee rating, Love/Ban, and Release Time.
 - Embedded album-art extraction, biographies, lyrics, playlists, or MusicBrainz discovery UI.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
 ## Planned sections
 
-1. Transactional MP3 rating/Love/Release Year writer with backup, verification, rollback, and MusicBee conflict detection.
-2. Album/artist routes and keyset-paginated library browsing.
-3. Listening history, ReplayGain, device selection, and gapless playback research.
-4. Lazy MusicBrainz discovery and curated overlay workflows.
+1. Album/artist routes and keyset-paginated library browsing.
+2. Listening history, ReplayGain, device selection, and gapless playback research.
+3. Lazy MusicBrainz discovery and curated overlay workflows.

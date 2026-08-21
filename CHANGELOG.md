@@ -4,6 +4,36 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-22
+
+### Added
+
+- MusicBee-compatible MP3 editing for half-star rating, Love/Neutral/Ban, and Release Year.
+- Durable tag-operation journal, same-folder working copies, retained rollback backups, startup crash recovery, and one-step verified undo.
+- Aurora-owned tag overlay that reflects file edits immediately and reconciles after a later MusicBee TSV import.
+- Stable normalized-path track identity for restoring playback queues across Music Library imports that replace integer track IDs.
+- Recovery coverage for the crash window immediately after atomic replacement and before its journal checkpoint.
+- Recovery for Windows `ReplaceFileW` partial-failure states where the original has moved to Aurora's backup but the canonical MP3 path is temporarily absent.
+- Conservative conflict recovery that only completes a known Aurora file state and retains every copy instead of overwriting an ambiguous external edit.
+- Browser-preview coverage for save, undo, half-stars, and stale-edit conflicts.
+
+### Changed
+
+- The inspector now reads current tags from the selected MP3 and exposes a compact metadata editor.
+- Rating display and editing support MusicBee's complete 0.5–5.0 scale.
+- Aurora state schema advances to version 4 for stable queue references, tag overlays, save history, and crash-recoverable undo.
+- Half-star catalog reads fall back to validated `rating_raw` values when Music Library leaves `normalized_rating` empty.
+- Queue restoration preserves surviving entries when individual files have disappeared, and tag refreshes no longer reset filtered selection.
+
+### Security
+
+- Rust resolves every edit target from a bounded catalog ID; React cannot submit an arbitrary file path.
+- Writes preserve the existing ID3 version, non-target frames, ID3v1/trailing bytes, and MP3 audio payload.
+- Aurora verifies path identity, size, timestamps, target frames, preserved frames, and audio hash around atomic `ReplaceFileW` replacement.
+- Native play and tag commands require both the transient catalog ID and stable path key; Windows blocks concurrent writers during the final check and replacement.
+- Undo refuses to replace a file when any unrelated ID3 frame, ID3v1/trailing byte, or audio byte changed after Aurora's edit.
+- The shared Music Library catalog remains enforced read-only; only Aurora's private SQLite state and explicitly saved MP3 tags are writable.
+
 ## [0.2.0] - 2026-08-21
 
 ### Added

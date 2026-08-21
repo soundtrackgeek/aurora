@@ -1,6 +1,6 @@
 # Database contract
 
-Verified read-only on 2026-08-21. All three databases passed `PRAGMA quick_check`.
+Verified read-only on 2026-08-22. All three databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0.
 
 ## Sources
 
@@ -15,13 +15,13 @@ The originally supplied cache path included a nonexistent `musicbrainz` director
 
 ## Verified catalog scale
 
-- 1,095,055 tracks, all with `.mp3` filenames
-- 71,952 albums
-- 20,379 distinct album artists
-- 682 canonical genre values
-- 148,272 rated tracks, normalized as `20`, `40`, `60`, `80`, or `100`
-- 5,642 loved tracks, represented as `love = 'L'`
-- 673,346 tracks with a distinct `release_year`
+- 1,096,162 tracks, all with `.mp3` filenames
+- 72,000 albums
+- 20,392 distinct album artists
+- 687 canonical genre values
+- 148,400 normalized rated tracks, plus two current raw half-star rows
+- 5,647 loved tracks, represented as `love = 'L'`
+- 674,222 tracks with a distinct `release_year`
 
 `year` and `release_year` are not aliases: 209,447 tracks have both populated with different values. Aurora must preserve Release Year as its own field.
 
@@ -35,6 +35,8 @@ The originally supplied cache path included a nonexistent `musicbrainz` director
 - Treat album IDs as opaque strings even when they begin with `mb:`; they are not necessarily MusicBrainz UUIDs.
 - There is no local listening-history field. `lastfm_track_popularity.play_count` is sparse global Last.fm popularity and must never be labeled as the user's plays.
 - File metadata writes update audio files plus Aurora optimistic state. The source catalog reconciles later through its importer/rescan.
+- Treat `rating_raw` values on MusicBee's exact half-star scale as the catalog fallback when the current importer leaves `normalized_rating` null.
+- Pending overlays from an older import remain durable but are excluded from summary totals when their exact track path is absent from the current import.
 
 ## Runtime repository shape
 
@@ -43,7 +45,7 @@ LibraryRepository
 ├── catalog: read-only music-library.sqlite3
 ├── musicbrainz_cache: lazy read-only connection
 ├── overlay: lazy curated read-only/sync adapter
-└── aurora_state: app-owned writable SQLite database for durable playback state
+└── aurora_state: app-owned writable SQLite for playback, tag overlays, and recovery journal
 ```
 
 The overlay's current live rows already match the copies in the main database, so it is not an additional hot-path dependency.

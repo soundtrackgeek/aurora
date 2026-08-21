@@ -2,13 +2,19 @@ mod artwork;
 mod catalog;
 mod playback;
 mod state_store;
+mod tag_model;
+mod tagging;
 
-use catalog::{LibrarySnapshot, TrackSummary};
+use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
+use state_store::StateStore;
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tag_model::TagEditRequest;
+use tagging::{TagService, TrackTagSnapshot};
+use tauri::{AppHandle, Manager, State};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
+type TagState = Mutex<TagService>;
 
 fn with_playback<T>(
     state: State<'_, PlaybackState>,
@@ -21,24 +27,33 @@ fn with_playback<T>(
 }
 
 #[tauri::command]
-async fn library_snapshot() -> Result<LibrarySnapshot, String> {
-    tauri::async_runtime::spawn_blocking(catalog::load_default_snapshot)
-        .await
-        .map_err(|error| format!("The catalog worker stopped unexpectedly: {error}"))?
+async fn library_snapshot(app: AppHandle) -> Result<LibrarySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        catalog::load_default_snapshot(&store)
+    })
+    .await
+    .map_err(|error| format!("The catalog worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
-async fn artist_tracks(artist: String) -> Result<Vec<TrackSummary>, String> {
-    tauri::async_runtime::spawn_blocking(move || catalog::load_artist_tracks(artist))
-        .await
-        .map_err(|error| format!("The artist worker stopped unexpectedly: {error}"))?
+async fn artist_tracks(app: AppHandle, artist: String) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        catalog::load_artist_tracks(artist, &store)
+    })
+    .await
+    .map_err(|error| format!("The artist worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
-async fn search_tracks(query: String) -> Result<Vec<TrackSummary>, String> {
-    tauri::async_runtime::spawn_blocking(move || catalog::load_search_tracks(query))
-        .await
-        .map_err(|error| format!("The search worker stopped unexpectedly: {error}"))?
+async fn search_tracks(app: AppHandle, query: String) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        catalog::load_search_tracks(query, &store)
+    })
+    .await
+    .map_err(|error| format!("The search worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -49,11 +64,11 @@ fn playback_state(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, S
 #[tauri::command]
 fn playback_replace_queue(
     state: State<'_, PlaybackState>,
-    track_ids: Vec<String>,
-    start_track_id: String,
+    track_references: Vec<TrackReference>,
+    start_track_key: String,
 ) -> Result<PlaybackSnapshot, String> {
     with_playback(state, |runtime| {
-        runtime.replace_queue(track_ids, start_track_id)
+        runtime.replace_queue(track_references, start_track_key)
     })
 }
 
@@ -126,6 +141,75 @@ fn playback_clear_queue(state: State<'_, PlaybackState>) -> Result<PlaybackSnaps
     with_playback(state, PlaybackRuntime::clear_queue)
 }
 
+fn refresh_playback_track(app: &AppHandle, track: &TrackSummary) {
+    let playback = app.state::<PlaybackState>();
+    if let Ok(mut runtime) = playback.lock() {
+        runtime.refresh_track_metadata(track);
+    }
+}
+
+#[tauri::command]
+async fn track_tag_state(
+    app: AppHandle,
+    track_id: String,
+    track_key: String,
+) -> Result<TrackTagSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            service.inspect(&track_id, &track_key)?
+        };
+        refresh_playback_track(&app, &result.track);
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("The tag reader stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn update_track_tags(
+    app: AppHandle,
+    request: TagEditRequest,
+) -> Result<TrackTagSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            service.update(request)?
+        };
+        refresh_playback_track(&app, &result.track);
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("The tag writer stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn undo_track_tag_edit(
+    app: AppHandle,
+    track_id: String,
+    track_key: String,
+) -> Result<TrackTagSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            service.undo(&track_id, &track_key)?
+        };
+        refresh_playback_track(&app, &result.track);
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("The tag undo worker stopped unexpectedly: {error}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -135,9 +219,13 @@ pub fn run() {
         })
         .setup(|app| {
             let state_directory = app.path().app_data_dir()?;
-            let runtime = PlaybackRuntime::new(state_directory.join("aurora-state.sqlite3"))
+            let store = StateStore::new(state_directory.join("aurora-state.sqlite3"))
                 .map_err(std::io::Error::other)?;
+            let runtime = PlaybackRuntime::new(store.clone()).map_err(std::io::Error::other)?;
+            let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
+            app.manage(store);
             app.manage(Mutex::new(runtime));
+            app.manage(Mutex::new(tag_service));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -164,6 +252,9 @@ pub fn run() {
             playback_remove_queue_item,
             playback_move_queue_item,
             playback_clear_queue,
+            track_tag_state,
+            update_track_tags,
+            undo_track_tag_edit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

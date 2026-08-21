@@ -83,9 +83,11 @@ export async function getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
 
 export async function playTrackQueue(tracks: Track[], startTrackId: string): Promise<PlaybackSnapshot> {
   if (isTauriRuntime()) {
+    const startTrack = tracks.find((track) => track.id === startTrackId);
+    if (!startTrack) throw new Error("The selected track is not part of this queue.");
     return command("playback_replace_queue", {
-      trackIds: tracks.map((track) => track.id),
-      startTrackId,
+      trackReferences: tracks.map((track) => ({ id: track.id, trackKey: track.trackKey })),
+      startTrackKey: startTrack.trackKey,
     });
   }
   const currentIndex = tracks.findIndex((track) => track.id === startTrackId);

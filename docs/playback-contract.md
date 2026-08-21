@@ -1,11 +1,11 @@
 # Playback contract
 
-Aurora 0.2.0 owns playback and queue state without claiming ownership of the imported catalog or audio metadata.
+Aurora 0.3.0 owns playback and queue state without claiming write ownership of the imported catalog.
 
 ## Trust boundary
 
-- React sends only catalog track IDs. A queue command accepts at most 200 decimal IDs.
-- Rust re-queries each ID from the read-only catalog and constructs the audio path from its indexed directory and single-component MP3 filename.
+- React sends catalog track IDs paired with their stable normalized path keys. A queue command accepts at most 200 pairs.
+- Rust re-queries each ID, requires the current path key to match, and constructs the audio path from its indexed directory and single-component MP3 filename.
 - Absolute filenames, nested filenames, non-MP3 extensions, missing records, and missing files are rejected.
 - No native command accepts an arbitrary path from the WebView.
 
@@ -18,16 +18,17 @@ Aurora 0.2.0 owns playback and queue state without claiming ownership of the imp
 
 ## Persistence
 
-Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data directory. Schema version 1 persists:
+Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data directory. Schema version 4 persists:
 
 - queue order and current index;
 - approximate playback position;
 - volume;
 - shuffle state;
 - repeat mode.
+- a normalized path key plus the exact indexed directory and filename for every queue entry.
 
-Position is checkpointed in roughly ten-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them.
+Position is checkpointed in roughly ten-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them. Exact directory and filename re-resolution keeps queues valid when a full TSV import replaces source track IDs; unavailable entries are skipped without discarding surviving tracks.
 
 ## Deliberate limits
 
-Version 0.2.0 does not write MP3 tags, edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Those are separate slices because they require different integrity and audio-quality tests.
+Version 0.3.0 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).

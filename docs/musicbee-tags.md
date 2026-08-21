@@ -1,6 +1,6 @@
 # MusicBee tag contract
 
-Verified against the current MusicBee configuration and representative local MP3 files on 2026-08-21. Aurora 0.1.0 does not write these tags.
+Verified against the current MusicBee configuration and representative local MP3 files on 2026-08-21. Aurora 0.3.0 writes only the three fields in this contract.
 
 ## Local format
 
@@ -29,9 +29,9 @@ Unrated means the `MusicBee` POPM frame is absent. A present byte `0` is reserve
 
 Local evidence lives at `C:\MusicBeeNew\AppData\MusicBee3Settings.ini` and `C:\MusicBeeNew\Configuration.xml`. The conventions align with the [ID3v2.3 POPM specification](https://id3.org/id3v2.3.0) and MusicBee's published tag mapping.
 
-## Required writer safety
+## Implemented writer safety
 
-The first writer should target MP3 with the Rust `id3` crate and:
+Aurora's Rust writer:
 
 1. Preserve the existing ID3 version; create v2.3 only when no ID3v2 tag exists.
 2. Mutate only MusicBee's POPM, `LOVE RATING`, and the appropriate release frame.
@@ -40,4 +40,6 @@ The first writer should target MP3 with the Rust `id3` crate and:
 5. Recheck original size, modification time, and file identity immediately before replacement.
 6. Replace with Windows `ReplaceFileW`, retain a backup, and keep a durable pending-write journal until verification succeeds.
 
-MusicBee's continuous folder monitoring is disabled locally. Aurora will need immediate optimistic state and a documented MusicBee rescan path.
+Aurora keeps at most 20 verified rollback copies as hidden, uniquely owned siblings of edited files. A one-step undo is offered only when the file still has the values Aurora wrote and its audio payload matches the backup.
+
+MusicBee's continuous folder monitoring is disabled locally. Aurora therefore updates its private overlay immediately. The catalog catches up through the existing MusicBee rescan/export and Music Library TSV import workflow; Aurora then removes a matching overlay automatically.

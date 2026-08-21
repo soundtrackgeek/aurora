@@ -2,6 +2,7 @@ import {
   Activity,
   Album,
   AudioLines,
+  Ban,
   BadgeCheck,
   ChevronDown,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
   Settings,
   Sparkles,
   Star,
+  StarHalf,
   Tags,
   UsersRound,
   X,
@@ -32,6 +34,7 @@ import "./App.css";
 import { Artwork } from "./components/Artwork";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
+import { TagEditor } from "./components/TagEditor";
 import {
   filterTracks,
   formatCount,
@@ -69,7 +72,9 @@ function Rating({ value }: { value: number | null }) {
   return (
     <span className="rating" aria-label={value === null ? "Unrated" : `${value} out of 5 stars`}>
       {[1, 2, 3, 4, 5].map((star) => (
-        <Star key={star} aria-hidden="true" className={value !== null && value >= star ? "is-filled" : undefined} />
+        value !== null && value === star - 0.5
+          ? <StarHalf key={star} aria-hidden="true" className="is-filled" />
+          : <Star key={star} aria-hidden="true" className={value !== null && value >= star ? "is-filled" : undefined} />
       ))}
     </span>
   );
@@ -196,8 +201,10 @@ function App() {
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
 
+  const libraryReady = snapshot !== null;
+
   useEffect(() => {
-    if (!snapshot) return;
+    if (!libraryReady) return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -225,7 +232,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [snapshot, query, activeArtist]);
+  }, [libraryReady, query, activeArtist]);
 
   const tracks = useMemo(
     () => exploredTracks ?? filterTracks(snapshot?.tracks ?? [], query, isTauriRuntime() ? null : activeArtist),
@@ -235,6 +242,26 @@ function App() {
   function playTrack(track: Track, queue = tracks) {
     setSelectedTrack(track);
     void playback.play(queue, track.id);
+  }
+
+  function applyTrackChange(updated: Track) {
+    const previous = selectedTrack?.id === updated.id ? selectedTrack : null;
+    setSelectedTrack((current) => current?.id === updated.id ? updated : current);
+    setExploredTracks((current) => current?.map((track) => track.id === updated.id ? updated : track) ?? current);
+    setSnapshot((current) => {
+      if (!current) return current;
+      const lovedDelta = previous ? Number(updated.loved) - Number(previous.loved) : 0;
+      const ratedDelta = previous ? Number(updated.rating !== null) - Number(previous.rating !== null) : 0;
+      return {
+        ...current,
+        summary: {
+          ...current.summary,
+          loved: Math.max(0, current.summary.loved + lovedDelta),
+          rated: Math.max(0, current.summary.rated + ratedDelta),
+        },
+        tracks: current.tracks.map((track) => track.id === updated.id ? updated : track),
+      };
+    });
   }
 
   function selectArtist(artist: Artist) {
@@ -293,7 +320,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.2.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.3.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -366,8 +393,8 @@ function App() {
                           <td><div className="track-title"><Artwork track={track} /><strong>{track.title}</strong></div></td>
                           <td>{track.artist}</td><td>{track.album}</td><td>{track.releaseYear ?? "—"}</td>
                           <td><Rating value={track.rating} /></td><td>{formatDuration(track.durationSeconds)}</td><td>{track.genre ?? "—"}</td>
-                          <td>{track.loved ? <Heart className="loved" aria-label="Loved" /> : <Heart aria-label="Not loved" />}</td>
-                          <td><MoreHorizontal aria-label="More actions" /></td>
+                          <td>{track.loveState === "loved" ? <Heart className="loved" aria-label="Loved" /> : track.loveState === "banned" ? <Ban className="banned" aria-label="Banned" /> : <Heart aria-label="Neutral" />}</td>
+                          <td>{track.tagSyncState === "pendingImport" ? <span className="sync-dot" aria-label="MP3 change pending Music Library import" /> : <MoreHorizontal aria-label="More actions" />}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -402,14 +429,12 @@ function App() {
               <button type="button" className="inspector-play" onClick={() => playTrack(selectedTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
-              <div><dt>Rating</dt><dd><Rating value={selectedTrack.rating} /></dd></div>
-              <div><dt>Love</dt><dd>{selectedTrack.loved ? <><Heart className="loved" aria-hidden="true" /> Loved</> : "Not loved"}</dd></div>
-              <div><dt>Release year</dt><dd>{selectedTrack.releaseYear ?? "Unknown"}</dd></div>
               <div><dt>Genre</dt><dd>{selectedTrack.genre ?? "Unknown"}</dd></div>
               <div><dt>Last.fm plays</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
             </dl>
-            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Safe listening</strong>Playback reads this MP3. File tag editing remains locked in 0.2.0.</span></div>
+            <TagEditor key={selectedTrack.id} track={selectedTrack} onTrackChange={applyTrackChange} />
+            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
           </div>
         ) : <EmptyInspector />}
       </aside>
