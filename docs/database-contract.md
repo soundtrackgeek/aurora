@@ -9,7 +9,7 @@ Verified read-only on 2026-08-21. All three databases passed `PRAGMA quick_check
 | `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` | 3.02 GiB | Hot catalog, FTS, albums, ratings, Love, enrichment |
 | `%USERPROFILE%\OneDrive\_musicbackup\musicbrainz_cache.db` | 145 MiB | Lazy broad MusicBrainz discovery cache |
 | `%USERPROFILE%\OneDrive\_musicbackup\musicbrainz-overlay-sync.sqlite3` | 5.5 MiB | Curated sync/export overlay |
-| `C:\_code\music_backup_v5\AlbumCovers` | 15.3 GiB | 76,329 source images for a future thumbnail protocol |
+| `C:\_code\music_backup_v5\AlbumCovers` | 15.3 GiB | 76,329 source images for the contained thumbnail protocol |
 
 The originally supplied cache path included a nonexistent `musicbrainz` directory. The verified filename is `musicbrainz_cache.db` directly under `_musicbackup`.
 
@@ -43,7 +43,7 @@ LibraryRepository
 ├── catalog: read-only music-library.sqlite3
 ├── musicbrainz_cache: lazy read-only connection
 ├── overlay: lazy curated read-only/sync adapter
-└── aurora_state: future app-owned writable SQLite database
+└── aurora_state: app-owned writable SQLite database for durable playback state
 ```
 
 The overlay's current live rows already match the copies in the main database, so it is not an additional hot-path dependency.
@@ -65,4 +65,4 @@ album_covers.album_id PRIMARY KEY
 
 It matches 70,628 of 72,000 current albums: 98.09% coverage, 1,372 missing, and no ambiguity. Normalizing basenames recovers no additional albums and makes 25 mappings ambiguous. Aurora must therefore use `album_id`, not reconstructed or normalized `Artist - Album (Year)` filenames.
 
-The cover section should expose a narrow `aurora-cover://album/{album-id}?size=256`-style protocol. Rust will resolve the indexed path, canonicalize and contain it within the configured cover root, decode off the UI thread, and cache 256/512 px WebP thumbnails using the album ID plus source mtime/size. It should return a placeholder for missing or invalid images and avoid base64 IPC or broad WebView filesystem access.
+Aurora exposes a narrow `aurora-cover://album/{album-id}?size=256`-style protocol. Rust resolves the indexed path, canonicalizes and contains it within the configured cover root, rejects zero-byte and over-32-MiB originals, and caches 64/128/256/512 px WebP thumbnails using the album ID plus source mtime/size. Missing or invalid images fall back in React; the WebView receives neither base64 IPC payloads nor broad filesystem access.

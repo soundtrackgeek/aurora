@@ -4,14 +4,12 @@ import {
   AudioLines,
   BadgeCheck,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   CircleUserRound,
   Clock3,
   Disc3,
   Download,
   FlaskConical,
-  Forward,
   Gauge,
   Heart,
   LibraryBig,
@@ -21,19 +19,19 @@ import {
   Pause,
   Play,
   RefreshCw,
-  Repeat2,
   Search,
   Settings,
-  Shuffle,
   Sparkles,
   Star,
   Tags,
   UsersRound,
-  Volume2,
   X,
 } from "lucide-react";
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import { Artwork } from "./components/Artwork";
+import { PlayerBar } from "./components/PlayerBar";
+import { QueuePanel } from "./components/QueuePanel";
 import {
   filterTracks,
   formatCount,
@@ -46,6 +44,7 @@ import {
   type LibrarySnapshot,
   type Track,
 } from "./library";
+import { usePlayback } from "./playback";
 import { useAuroraUpdater } from "./updater";
 
 const navigation = [
@@ -66,20 +65,6 @@ const previewPlaylists = [
   { label: "Unplayed", count: "listening queue", icon: Disc3 },
 ];
 
-function Artwork({ track, size = "small" }: { track: Track; size?: "small" | "large" }) {
-  const seed = [...track.artist].reduce((sum, character) => sum + (character.codePointAt(0) ?? 0), 0);
-  const words = track.artist.match(/[\p{L}\p{N}]+/gu) ?? ["?"];
-  const initials = words.length === 1
-    ? words[0].slice(0, 2).toLocaleUpperCase()
-    : words.slice(0, 2).map((word) => word[0]).join("").toLocaleUpperCase();
-  return (
-    <div className={`artwork artwork--${size}`} style={{ "--art-seed": seed } as CSSProperties} aria-hidden="true">
-      <span>{initials}</span>
-      <AudioLines />
-    </div>
-  );
-}
-
 function Rating({ value }: { value: number | null }) {
   return (
     <span className="rating" aria-label={value === null ? "Unrated" : `${value} out of 5 stars`}>
@@ -95,7 +80,7 @@ function EmptyInspector() {
     <div className="inspector-empty">
       <Disc3 aria-hidden="true" />
       <h2>Select a track</h2>
-      <p>Ratings and file-backed Love editing arrive in the next section.</p>
+      <p>Select a song, then press play or double-click its library row.</p>
     </div>
   );
 }
@@ -180,9 +165,11 @@ function App() {
   const [reloadToken, setReloadToken] = useState(0);
   const [exploredTracks, setExploredTracks] = useState<Track[] | null>(null);
   const [isExploring, setIsExploring] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const updater = useAuroraUpdater();
+  const playback = usePlayback();
 
   useEffect(() => {
     let cancelled = false;
@@ -245,6 +232,11 @@ function App() {
     [exploredTracks, snapshot?.tracks, query, activeArtist],
   );
 
+  function playTrack(track: Track, queue = tracks) {
+    setSelectedTrack(track);
+    void playback.play(queue, track.id);
+  }
+
   function selectArtist(artist: Artist) {
     const nextArtist = activeArtist === artist.name ? null : artist.name;
     setActiveArtist(nextArtist);
@@ -301,7 +293,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.1.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.2.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -356,8 +348,21 @@ function App() {
                     <thead><tr><th className="track-index">#</th><th>Title</th><th>Artist</th><th>Album</th><th>Year</th><th>Rating</th><th><Clock3 aria-label="Duration" /></th><th>Genre</th><th><Heart aria-label="Loved" /></th><th /></tr></thead>
                     <tbody>
                       {tracks.map((track, index) => (
-                        <tr key={track.id} className={selectedTrack?.id === track.id ? "is-selected" : undefined} onClick={() => setSelectedTrack(track)}>
-                          <td className="track-index"><span>{index + 1}</span><Play aria-hidden="true" /></td>
+                        <tr
+                          key={track.id}
+                          className={[
+                            selectedTrack?.id === track.id ? "is-selected" : "",
+                            playback.state.currentTrack?.id === track.id ? "is-playing" : "",
+                          ].filter(Boolean).join(" ") || undefined}
+                          onClick={() => setSelectedTrack(track)}
+                          onDoubleClick={() => playTrack(track)}
+                        >
+                          <td className="track-index">
+                            <span>{index + 1}</span>
+                            <button type="button" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); playTrack(track); }}>
+                              {playback.state.currentTrack?.id === track.id && playback.state.status === "playing" ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+                            </button>
+                          </td>
                           <td><div className="track-title"><Artwork track={track} /><strong>{track.title}</strong></div></td>
                           <td>{track.artist}</td><td>{track.album}</td><td>{track.releaseYear ?? "—"}</td>
                           <td><Rating value={track.rating} /></td><td>{formatDuration(track.durationSeconds)}</td><td>{track.genre ?? "—"}</td>
@@ -392,7 +397,10 @@ function App() {
         {selectedTrack ? (
           <div className="inspector-scroll">
             <Artwork track={selectedTrack} size="large" />
-            <div className="track-hero-copy"><h2>{selectedTrack.title}</h2><p>{selectedTrack.artist}</p><span>{selectedTrack.album}</span></div>
+            <div className="track-hero-copy">
+              <div><h2>{selectedTrack.title}</h2><p>{selectedTrack.artist}</p><span>{selectedTrack.album}</span></div>
+              <button type="button" className="inspector-play" onClick={() => playTrack(selectedTrack)}><Play aria-hidden="true" /> Play</button>
+            </div>
             <dl className="metadata-list">
               <div><dt>Rating</dt><dd><Rating value={selectedTrack.rating} /></dd></div>
               <div><dt>Love</dt><dd>{selectedTrack.loved ? <><Heart className="loved" aria-hidden="true" /> Loved</> : "Not loved"}</dd></div>
@@ -401,23 +409,37 @@ function App() {
               <div><dt>Last.fm plays</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
             </dl>
-            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Read-only foundation</strong>File tag editing is deliberately locked in 0.1.0.</span></div>
+            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Safe listening</strong>Playback reads this MP3. File tag editing remains locked in 0.2.0.</span></div>
           </div>
         ) : <EmptyInspector />}
       </aside>
 
-      <footer className="player">
-        {selectedTrack ? <div className="now-playing"><Artwork track={selectedTrack} /><div><strong>{selectedTrack.title}</strong><span>{selectedTrack.artist} · {selectedTrack.album}</span></div>{selectedTrack.loved && <Heart className="loved" aria-label="Loved" />}</div> : <div className="now-playing"><Disc3 aria-hidden="true" /><span>No track selected</span></div>}
-        <div className="transport" aria-label="Playback controls unavailable in 0.1.0">
-          <button type="button" aria-label="Shuffle" disabled><Shuffle aria-hidden="true" /></button>
-          <button type="button" aria-label="Previous" disabled><ChevronLeft aria-hidden="true" /></button>
-          <button type="button" className="transport__play" aria-label="Play" disabled><Pause aria-hidden="true" /></button>
-          <button type="button" aria-label="Next" disabled><ChevronRight aria-hidden="true" /></button>
-          <button type="button" aria-label="Repeat" disabled><Repeat2 aria-hidden="true" /></button>
-        </div>
-        <div className="timeline" aria-hidden="true"><span>0:00</span><div><i /></div><span>{formatDuration(selectedTrack?.durationSeconds ?? null)}</span></div>
-        <div className="volume"><Volume2 aria-hidden="true" /><div><span /></div><small>70</small><Forward aria-hidden="true" /></div>
-      </footer>
+      {queueOpen && (
+        <QueuePanel
+          playback={playback.state}
+          onClose={() => setQueueOpen(false)}
+          onPlay={(trackId) => void playback.play(playback.state.queue, trackId)}
+          onMove={(from, to) => void playback.move(from, to)}
+          onRemove={(index) => void playback.remove(index)}
+          onClear={() => void playback.clear()}
+        />
+      )}
+
+      <PlayerBar
+        playback={playback.state}
+        isWorking={playback.isWorking}
+        error={playback.error}
+        queueOpen={queueOpen}
+        onDismissError={playback.dismissError}
+        onToggle={() => void playback.toggle()}
+        onPrevious={() => void playback.previous()}
+        onNext={() => void playback.next()}
+        onSeek={(position) => void playback.seek(position)}
+        onVolume={(volume) => void playback.setVolume(volume)}
+        onShuffle={(enabled) => void playback.setShuffle(enabled)}
+        onRepeat={(mode) => void playback.setRepeatMode(mode)}
+        onToggleQueue={() => setQueueOpen((open) => !open)}
+      />
 
       {updater.state.isPromptOpen && <UpdateDialog version={updater.state.version} phase={updater.state.phase} progress={updater.state.progress} message={updater.state.message} onInstall={() => void updater.install()} onDismiss={updater.dismiss} />}
     </div>

@@ -4,9 +4,26 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
+### Added
+
+- Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, repeat-all, and repeat-one controls.
+- Durable, bounded listening queue with play-now, reorder, remove, and clear actions.
+- Aurora-owned SQLite state for queue order, current item, position, volume, shuffle, and repeat state across restarts.
+- Contained `aurora-cover` protocol with exact album-ID resolution and cached 64–512 px WebP thumbnails.
+- Browser-preview playback simulator and interaction coverage for transport and queue behavior.
+
 ### Changed
 
 - Project testing guidance now prefers Browser-based UI inspection and limits Computer Use to native-only behavior that Browser cannot exercise.
+- Track rows and the inspector now expose direct play actions; the persistent footer is a functional player.
+
+### Security
+
+- Playback accepts bounded catalog track IDs and re-resolves file paths in Rust; the WebView cannot request arbitrary files.
+- Album art is canonicalized beneath the configured archive and source images above 32 MiB are rejected.
+- The imported catalog and audio metadata remain read-only; file-tag editing is not part of 0.2.0.
 
 ## [0.1.0] - 2026-08-21
 

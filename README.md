@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer for a personal music universe. Version 0.1.0 establishes the Tauri 2 desktop shell, reads the existing catalog without modifying it, turns top artists into clickable planets, searches the million-track FTS index, and ships through signed in-app updates.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.2.0 adds native MP3 playback, a durable listening queue, transport controls, and contained album-cover thumbnails while keeping the imported catalog read-only.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.1.0 slice
+## Current 0.2.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
@@ -12,10 +12,14 @@ Aurora is a fast, local-first Windows 11 explorer for a personal music universe.
 - Clickable artist planets that query 50 tracks for the selected artist.
 - Debounced, safely quoted FTS5 prefix search across the entire catalog.
 - Read-only inspector for rating, Love, Release Year, genre, duration, and optional Last.fm popularity.
+- Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
+- A bounded 200-track queue with play-now, reorder, remove, and clear actions.
+- Durable queue, current track, position, volume, shuffle, and repeat state in Aurora's own SQLite database.
+- Album covers served through a narrow Rust protocol that resolves exact album IDs, contains canonical paths to the configured archive, rejects oversized sources, and caches 64–512 px WebP thumbnails.
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-Playback and tag editing are intentionally not enabled yet. The exact MusicBee MP3 conventions are documented in [docs/musicbee-tags.md](docs/musicbee-tags.md), but file mutation needs its own backup, verification, rollback, and concurrency-tested slice.
+Tag editing is intentionally not enabled yet. Playback reads audio files but never mutates them. The exact MusicBee MP3 conventions are documented in [docs/musicbee-tags.md](docs/musicbee-tags.md); file mutation still needs its own backup, verification, rollback, and concurrency-tested slice. See [docs/playback-contract.md](docs/playback-contract.md) for playback authority and lifecycle rules.
 
 ## Data model
 
@@ -23,7 +27,7 @@ The primary catalog currently contains roughly 1.095 million MP3 tracks, 71,952 
 
 The broad MusicBrainz cache and curated overlay are deferred from startup. See [docs/database-contract.md](docs/database-contract.md) for verified sizes, responsibilities, query limits, and authority rules.
 
-The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,329 images and already maps to current albums through `album_covers.album_id` with 98.09% coverage. 0.1.0 keeps lightweight generated placeholders; the cover section will add a contained, thumbnail-caching protocol instead of exposing or decoding large originals in the WebView.
+The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,329 images and maps to current albums through `album_covers.album_id` with 98.09% coverage. Rust now resolves and decodes those images outside the WebView; missing or invalid art falls back to Aurora's generated artwork.
 
 ## Requirements
 
@@ -31,6 +35,7 @@ The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,32
 - Node.js 22+
 - Rust stable with the MSVC target and Windows C++ build tools
 - The music catalog at the default `%APPDATA%` path above
+- The referenced MP3 files and album-cover archive mounted at their cataloged paths for playback and real artwork
 
 ## Develop and verify
 
@@ -56,7 +61,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.1.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.2.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 
@@ -71,7 +76,7 @@ The repository already has `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVAT
 - `aurora-updater.key.pub` — public updater key
 - `aurora-updater-password.dpapi.xml` — passphrase protected for the current Windows account
 
-Back up the private key and passphrase separately and securely. Losing either prevents installed Aurora copies from accepting future updates. This updater signature proves artifact integrity; it is separate from optional Windows Authenticode signing, so unsigned 0.1.0 installers may still show an Unknown publisher/SmartScreen warning.
+Back up the private key and passphrase separately and securely. Losing either prevents installed Aurora copies from accepting future updates. This updater signature proves artifact integrity; it is separate from optional Windows Authenticode signing, so installers may still show an Unknown publisher/SmartScreen warning.
 
 ## Architecture brief
 

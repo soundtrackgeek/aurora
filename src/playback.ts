@@ -1,0 +1,282 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
+import { isTauriRuntime, type Track } from "./library";
+
+export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
+export type RepeatMode = "off" | "all" | "one";
+
+export interface PlaybackSnapshot {
+  queue: Track[];
+  currentIndex: number | null;
+  currentTrack: Track | null;
+  status: PlaybackStatus;
+  positionSeconds: number;
+  volume: number;
+  shuffle: boolean;
+  repeatMode: RepeatMode;
+  error: string | null;
+}
+
+const emptyPlayback: PlaybackSnapshot = {
+  queue: [],
+  currentIndex: null,
+  currentTrack: null,
+  status: "stopped",
+  positionSeconds: 0,
+  volume: 0.7,
+  shuffle: false,
+  repeatMode: "off",
+  error: null,
+};
+
+let browserPlayback: PlaybackSnapshot = { ...emptyPlayback };
+let browserStartedAt = 0;
+
+function cloneBrowserPlayback(): PlaybackSnapshot {
+  return {
+    ...browserPlayback,
+    queue: [...browserPlayback.queue],
+    currentTrack: browserPlayback.currentTrack ? { ...browserPlayback.currentTrack } : null,
+  };
+}
+
+function chooseBrowserNext(): number | null {
+  const { currentIndex, queue, repeatMode, shuffle } = browserPlayback;
+  if (currentIndex === null || queue.length === 0) return null;
+  if (repeatMode === "one") return currentIndex;
+  if (shuffle && queue.length > 1) return (currentIndex + 3) % queue.length;
+  if (currentIndex + 1 < queue.length) return currentIndex + 1;
+  return repeatMode === "all" ? 0 : null;
+}
+
+function refreshBrowserClock(): void {
+  if (browserPlayback.status !== "playing" || browserPlayback.currentIndex === null) return;
+  const elapsed = Math.max(0, (performance.now() - browserStartedAt) / 1000);
+  const duration = browserPlayback.currentTrack?.durationSeconds ?? Number.POSITIVE_INFINITY;
+  if (elapsed < duration) {
+    browserPlayback = { ...browserPlayback, positionSeconds: elapsed };
+    return;
+  }
+  const next = chooseBrowserNext();
+  if (next === null) {
+    browserPlayback = { ...browserPlayback, status: "stopped", positionSeconds: duration };
+    return;
+  }
+  browserStartedAt = performance.now();
+  browserPlayback = {
+    ...browserPlayback,
+    currentIndex: next,
+    currentTrack: browserPlayback.queue[next],
+    positionSeconds: 0,
+  };
+}
+
+async function command(name: string, args?: Record<string, unknown>): Promise<PlaybackSnapshot> {
+  return invoke<PlaybackSnapshot>(name, args);
+}
+
+export async function getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_state");
+  refreshBrowserClock();
+  return cloneBrowserPlayback();
+}
+
+export async function playTrackQueue(tracks: Track[], startTrackId: string): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) {
+    return command("playback_replace_queue", {
+      trackIds: tracks.map((track) => track.id),
+      startTrackId,
+    });
+  }
+  const currentIndex = tracks.findIndex((track) => track.id === startTrackId);
+  if (currentIndex < 0) throw new Error("The selected track is not part of this queue.");
+  browserStartedAt = performance.now();
+  browserPlayback = {
+    ...browserPlayback,
+    queue: [...tracks],
+    currentIndex,
+    currentTrack: tracks[currentIndex],
+    status: "playing",
+    positionSeconds: 0,
+    error: null,
+  };
+  return cloneBrowserPlayback();
+}
+
+export async function togglePlayback(): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_toggle");
+  refreshBrowserClock();
+  if (!browserPlayback.currentTrack) throw new Error("Choose a track before starting playback.");
+  if (browserPlayback.status === "playing") {
+    browserPlayback = { ...browserPlayback, status: "paused" };
+  } else {
+    browserStartedAt = performance.now() - browserPlayback.positionSeconds * 1000;
+    browserPlayback = { ...browserPlayback, status: "playing", error: null };
+  }
+  return cloneBrowserPlayback();
+}
+
+export async function nextTrack(): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_next");
+  const next = chooseBrowserNext();
+  if (next === null) throw new Error("There is no next track in the queue.");
+  browserStartedAt = performance.now();
+  browserPlayback = {
+    ...browserPlayback,
+    currentIndex: next,
+    currentTrack: browserPlayback.queue[next],
+    status: "playing",
+    positionSeconds: 0,
+    error: null,
+  };
+  return cloneBrowserPlayback();
+}
+
+export async function previousTrack(): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_previous");
+  refreshBrowserClock();
+  const current = browserPlayback.currentIndex;
+  if (current === null) throw new Error("The queue has no previous track.");
+  const previous = browserPlayback.positionSeconds > 3 ? current : Math.max(0, current - 1);
+  browserStartedAt = performance.now();
+  browserPlayback = {
+    ...browserPlayback,
+    currentIndex: previous,
+    currentTrack: browserPlayback.queue[previous],
+    status: "playing",
+    positionSeconds: 0,
+    error: null,
+  };
+  return cloneBrowserPlayback();
+}
+
+export async function seekPlayback(positionSeconds: number): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_seek", { positionSeconds });
+  const duration = browserPlayback.currentTrack?.durationSeconds ?? 0;
+  const position = Math.min(Math.max(positionSeconds, 0), duration);
+  browserStartedAt = performance.now() - position * 1000;
+  browserPlayback = { ...browserPlayback, positionSeconds: position };
+  return cloneBrowserPlayback();
+}
+
+export async function changePlaybackVolume(volume: number): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_set_volume", { volume });
+  browserPlayback = { ...browserPlayback, volume: Math.min(Math.max(volume, 0), 1) };
+  return cloneBrowserPlayback();
+}
+
+export async function changeShuffle(enabled: boolean): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_set_shuffle", { enabled });
+  browserPlayback = { ...browserPlayback, shuffle: enabled };
+  return cloneBrowserPlayback();
+}
+
+export async function changeRepeatMode(repeatMode: RepeatMode): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_set_repeat_mode", { repeatMode });
+  browserPlayback = { ...browserPlayback, repeatMode };
+  return cloneBrowserPlayback();
+}
+
+export async function removeQueueItem(index: number): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_remove_queue_item", { index });
+  if (index < 0 || index >= browserPlayback.queue.length) throw new Error("This queue item no longer exists.");
+  const queue = browserPlayback.queue.filter((_, itemIndex) => itemIndex !== index);
+  let currentIndex = browserPlayback.currentIndex;
+  if (queue.length === 0) {
+    browserPlayback = { ...emptyPlayback, volume: browserPlayback.volume, shuffle: browserPlayback.shuffle, repeatMode: browserPlayback.repeatMode };
+    return cloneBrowserPlayback();
+  }
+  if (currentIndex !== null && index < currentIndex) currentIndex -= 1;
+  if (currentIndex !== null && currentIndex >= queue.length) currentIndex = queue.length - 1;
+  browserPlayback = {
+    ...browserPlayback,
+    queue,
+    currentIndex,
+    currentTrack: currentIndex === null ? null : queue[currentIndex],
+  };
+  return cloneBrowserPlayback();
+}
+
+export async function moveQueueItem(from: number, to: number): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_move_queue_item", { from, to });
+  if (from < 0 || to < 0 || from >= browserPlayback.queue.length || to >= browserPlayback.queue.length) {
+    throw new Error("The queue changed before this reorder completed.");
+  }
+  const currentId = browserPlayback.currentTrack?.id;
+  const queue = [...browserPlayback.queue];
+  const [track] = queue.splice(from, 1);
+  queue.splice(to, 0, track);
+  const currentIndex = currentId ? queue.findIndex((item) => item.id === currentId) : null;
+  browserPlayback = { ...browserPlayback, queue, currentIndex };
+  return cloneBrowserPlayback();
+}
+
+export async function clearPlaybackQueue(): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_clear_queue");
+  browserPlayback = { ...emptyPlayback, volume: browserPlayback.volume, shuffle: browserPlayback.shuffle, repeatMode: browserPlayback.repeatMode };
+  return cloneBrowserPlayback();
+}
+
+export function usePlayback() {
+  const [state, setState] = useState<PlaybackSnapshot>(emptyPlayback);
+  const [isWorking, setIsWorking] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setState(await getPlaybackSnapshot());
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    const firstRefresh = window.setTimeout(() => void refresh(), 0);
+    const timer = window.setInterval(() => void refresh(), 500);
+    return () => {
+      window.clearTimeout(firstRefresh);
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+
+  const run = useCallback(async (action: () => Promise<PlaybackSnapshot>) => {
+    setIsWorking(true);
+    setCommandError(null);
+    setDismissedError(null);
+    try {
+      const next = await action();
+      setState(next);
+      return next;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCommandError(message);
+      return null;
+    } finally {
+      setIsWorking(false);
+    }
+  }, []);
+
+  const visibleError = commandError ?? state.error;
+
+  return {
+    state,
+    isWorking,
+    error: visibleError === dismissedError ? null : visibleError,
+    dismissError: () => {
+      setDismissedError(visibleError);
+      setCommandError(null);
+    },
+    play: (tracks: Track[], startTrackId: string) => run(() => playTrackQueue(tracks, startTrackId)),
+    toggle: () => run(togglePlayback),
+    next: () => run(nextTrack),
+    previous: () => run(previousTrack),
+    seek: (positionSeconds: number) => run(() => seekPlayback(positionSeconds)),
+    setVolume: (volume: number) => run(() => changePlaybackVolume(volume)),
+    setShuffle: (enabled: boolean) => run(() => changeShuffle(enabled)),
+    setRepeatMode: (repeatMode: RepeatMode) => run(() => changeRepeatMode(repeatMode)),
+    remove: (index: number) => run(() => removeQueueItem(index)),
+    move: (from: number, to: number) => run(() => moveQueueItem(from, to)),
+    clear: () => run(clearPlaybackQueue),
+  };
+}

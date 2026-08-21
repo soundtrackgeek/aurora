@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { filterTracks, formatCount, formatDuration, type Track } from "./library";
 
 const tracks: Track[] = [
-  { id: "1", title: "Sæglópur", artist: "Sigur Rós", album: "Takk...", releaseYear: 2005, rating: 5, loved: true, durationSeconds: 473, genre: "Post-rock", playCount: 12 },
-  { id: "2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 4.5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 42 },
+  { id: "1", albumId: "album-1", title: "Sæglópur", artist: "Sigur Rós", album: "Takk...", releaseYear: 2005, rating: 5, loved: true, durationSeconds: 473, genre: "Post-rock", playCount: 12 },
+  { id: "2", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 4.5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 42 },
 ];
 
 describe("library presentation", () => {
