@@ -1,4 +1,4 @@
-import { Cloud, CloudOff, Laptop, RefreshCw, TriangleAlert } from "lucide-react";
+import { Cloud, CloudOff, Laptop, Monitor, RefreshCw, TriangleAlert } from "lucide-react";
 import type { LaptopModeStatus } from "../laptopMode";
 
 interface LaptopModeButtonProps {
@@ -32,7 +32,7 @@ export function LaptopModeButton({ status, busy, error, onToggle }: LaptopModeBu
         disabled={busy || status === null}
         onClick={onToggle}
       >
-        <Laptop aria-hidden="true" />
+        {enabled ? <Laptop aria-hidden="true" /> : <Monitor aria-hidden="true" />}
         <span className="laptop-mode-control__dot" aria-hidden="true" />
       </button>
       <div className="laptop-mode-popover" id="laptop-mode-details" role="tooltip">

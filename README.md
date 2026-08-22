@@ -1,17 +1,18 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.7.0 adds a persistent per-computer Laptop Mode, exact drive-root translation, and conflict-aware OneDrive snapshots for Aurora-owned state.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.7.1 makes Desktop and Laptop Mode visually distinct and repairs harmless OneDrive split branches without weakening protection for real conflicts.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.7.0 slice
+## Current 0.7.1 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
-- Persistent icon-only Laptop Mode: each computer remembers its own mode in `aurora-device.json`, outside the shared state database.
+- Persistent icon-only device mode: a monitor identifies Desktop Mode, a laptop identifies Laptop Mode, and each computer remembers its own choice in `aurora-device.json` outside the shared state database.
 - Exact runtime-only drive translation from `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`; the catalog and stable track identities remain unchanged.
 - Verified SQLite state snapshots at `%USERPROFILE%\OneDrive\_musicbackup\aurora-state.sqlite3`, published at most once per minute and once more on clean shutdown.
 - First-run laptop recovery copies a valid OneDrive snapshot into Aurora app data before SQLite opens. Newer clean snapshots are also applied only before open, with a retained local safety copy.
 - Sync lineage, generations, and logical revisions detect two-computer divergence. Aurora reports a conflict and preserves both files instead of using unsafe newest-file-wins behavior.
+- Equivalent OneDrive branches reconcile automatically when only transient catalog IDs, playback position, import-run markers, or retry timestamps differ. Stable queue identity and user-authored tag, journal, playback-setting, and curation differences still block automatic replacement.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
@@ -88,7 +89,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.7.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.7.1`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

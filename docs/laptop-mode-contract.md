@@ -28,4 +28,6 @@ On startup, a valid remote snapshot supplies a missing local file. If the remote
 
 ## Conflict rule
 
-Lineage, generation, snapshot identity, and logical content revisions—not file modification times—determine whether publishing is safe. If both machines changed from the same snapshot, or their histories are unrelated, Aurora stops automatic replacement and reports a conflict. Both databases remain intact. Version 0.7.0 intentionally requires manual selection of the state to keep, followed by an Aurora restart; it does not guess or merge records.
+Lineage, generation, snapshot identity, and logical content revisions—not file modification times—determine whether publishing is safe. SQLite files are not expected to be byte-identical: local WAL layout and catalog-local bookkeeping can legitimately differ from a compact OneDrive snapshot.
+
+When same-lineage branches disagree only in playback position, transient catalog track IDs, overlay import-run markers, or reconciliation timestamps, Aurora 0.7.1 verifies that their stable and user-authored state agrees and then adopts the canonical snapshot identity without replacing either database. If stable queues, playback settings, desired tags, edit journals, or curation differ—or the histories are unrelated—Aurora stops automatic replacement and reports a conflict. Both databases and any OneDrive conflict copies remain intact for manual recovery.

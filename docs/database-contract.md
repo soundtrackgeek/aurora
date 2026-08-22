@@ -1,6 +1,6 @@
 # Database contract
 
-Verified read-only on 2026-08-22. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 6.
+Verified read-only on 2026-08-22. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 7.
 
 ## Sources
 
@@ -54,11 +54,11 @@ The overlay's current live rows already match the copies in the main database, s
 
 The shared Music Library catalog keeps its desktop paths. Laptop Mode translates complete roots only when Rust crosses a filesystem boundary: `D:\MUSIC` to `Y:\MUSIC`, `G:\_BACKUP\SCORES` to `V:\_BACKUP\SCORES`, and `H:\Synthwave` to `U:\Synthwave`. Queries, imported rows, normalized track keys, and the catalog itself remain unchanged. Shared tag-journal paths are translated back to the active device before recovery or undo.
 
-Aurora's writable source of truth remains `%APPDATA%\com.soundtrackgeek.aurora\aurora-state.sqlite3` while the process is running. Schema version 6 adds a single sync-lineage row and mutation triggers for Aurora-owned playback, tag, and curation tables. The OneDrive file is a verified point-in-time snapshot, not a second live SQLite connection.
+Aurora's writable source of truth remains `%APPDATA%\com.soundtrackgeek.aurora\aurora-state.sqlite3` while the process is running. Schema version 6 added a single sync-lineage row and mutation triggers for Aurora-owned playback, tag, and curation tables. Schema version 7 makes those triggers authority-aware: playback position, transient catalog track IDs, and overlay reconciliation bookkeeping do not create shared revisions. The OneDrive file is a verified point-in-time snapshot, not a second live SQLite connection.
 
 Publishing uses `VACUUM INTO`, seals a new generation in the staged snapshot, runs `PRAGMA quick_check`, retains `aurora-state.previous.sqlite3`, and then uses Windows atomic replacement. Local metadata is marked mirrored only after the remote snapshot is installed and re-read. A missing local file is restored before open; a newer remote generation replaces only a clean, closed local database and first retains `aurora-state.pre-onedrive.sqlite3`.
 
-Lineage and generation mismatches detect unrelated or divergent copies. Aurora does not use modification time as authority, does not replace an open state database, and does not attempt an unsafe record-level merge. See [laptop-mode-contract.md](laptop-mode-contract.md) for the user-visible behavior and recovery rules.
+Lineage and generation mismatches detect unrelated or divergent copies. When same-lineage snapshot IDs disagree, Aurora compares stable queue identity, non-position playback settings, desired tag overlays, the tag-operation journal, and MusicBrainz curation in both directions. If those agree, it adopts the canonical snapshot identity while retaining device-local catalog bookkeeping. Otherwise the conflict remains. Aurora does not use modification time as authority, does not replace an open state database, and does not attempt an unsafe record-level merge. See [laptop-mode-contract.md](laptop-mode-contract.md) for the user-visible behavior and recovery rules.
 
 ## MusicBrainz identity and release-group contract
 

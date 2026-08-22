@@ -4,6 +4,24 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-22
+
+### Added
+
+- A monitor icon for Desktop Mode and a laptop icon for Laptop Mode, making the active device mode visible without opening the status popover.
+- Semantic snapshot comparison that can reconcile same-lineage OneDrive branches when their stable and user-authored state agrees.
+- Regression coverage modeled on the observed `JornComputer`/`Keiya` generation-8 split, including transient track IDs, playback position, catalog import runs, and overlay timestamps.
+
+### Fixed
+
+- Aurora no longer remains permanently conflicted when OneDrive gives two equivalent snapshots different snapshot IDs at the same generation.
+- Passive playback-position saves, catalog-local transient track IDs, and tag-overlay reconciliation bookkeeping no longer increment the shared content revision or trigger needless OneDrive publishes.
+
+### Security
+
+- Equivalent-branch repair updates only local sync metadata after a read-only, bidirectional comparison. It does not replace either database or delete OneDrive conflict copies.
+- Different stable queues, playback settings, desired MP3 tags, tag-operation journals, or MusicBrainz decisions remain a hard conflict and are never auto-merged.
+
 ## [0.7.0] - 2026-08-22
 
 ### Added

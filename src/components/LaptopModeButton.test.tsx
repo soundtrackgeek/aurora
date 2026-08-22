@@ -19,13 +19,29 @@ const status: LaptopModeStatus = {
 describe("LaptopModeButton", () => {
   it("exposes an icon-only accessible toggle and the exact mapping", () => {
     const onToggle = vi.fn();
-    render(<LaptopModeButton status={status} busy={false} error={null} onToggle={onToggle} />);
+    const { rerender } = render(
+      <LaptopModeButton status={status} busy={false} error={null} onToggle={onToggle} />,
+    );
 
     const button = screen.getByRole("button", { name: /Enable Laptop Mode/ });
     expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button.querySelector(".lucide-monitor")).toBeInTheDocument();
+    expect(button.querySelector(".lucide-laptop")).not.toBeInTheDocument();
     expect(screen.getAllByText("D:\\MUSIC")).toHaveLength(2);
     fireEvent.click(button);
     expect(onToggle).toHaveBeenCalledOnce();
+
+    rerender(
+      <LaptopModeButton
+        status={{ ...status, laptopMode: true, modeLabel: "Laptop Mode" }}
+        busy={false}
+        error={null}
+        onToggle={onToggle}
+      />,
+    );
+    const laptopButton = screen.getByRole("button", { name: /Disable Laptop Mode/ });
+    expect(laptopButton.querySelector(".lucide-laptop")).toBeInTheDocument();
+    expect(laptopButton.querySelector(".lucide-monitor")).not.toBeInTheDocument();
   });
 
   it("surfaces conflicts without pretending the mirror is synchronized", () => {

@@ -16,7 +16,16 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.7.0 acceptance checks
+## 0.7.1 acceptance checks
+
+- Show a monitor in Desktop Mode and a laptop in Laptop Mode while preserving the accessible toggle label and pressed state.
+- Do not publish a new OneDrive generation for playback-position polling, a catalog import changing transient track IDs, or reconciliation-only overlay timestamps/import-run IDs.
+- Reconcile same-lineage branches automatically when stable queue identity, non-position playback settings, desired tag overlays, the tag-operation journal, and MusicBrainz curation agree.
+- Keep device-local bookkeeping intact while adopting the canonical OneDrive snapshot identity; never require byte-identical SQLite files.
+- Preserve the conflict state when any stable or user-authored field differs.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.7.1` versions.
+
+## 0.7.0 foundation checks
 
 - Toggle Laptop Mode from an accessible icon-only top-bar control and restore that per-device choice after a full process restart.
 - Translate only complete `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` roots to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave` at filesystem boundaries; never rewrite the shared catalog or its stable identities.
@@ -89,7 +98,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.7.0
+## Explicit non-goals for 0.7.1
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
@@ -105,7 +114,7 @@ Live source measurements including SQLite process startup are approximately 26�
 - Silently resolving simultaneous two-computer edits; preserving both states is safer than guessing from file timestamps.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections after 0.7.0
+## Planned sections after 0.7.1
 
 1. Listening history, ReplayGain, device selection, and gapless playback research.
 2. Smart playlists and saved explorer views after the browsing/filter contract is proven.

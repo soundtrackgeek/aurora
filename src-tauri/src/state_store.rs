@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -324,7 +324,7 @@ impl StateStore {
                 "#,
             )
             .map_err(|error| format!("Could not ensure Aurora's state-sync metadata: {error}"))?;
-        for table in [
+        let synchronized_tables = [
             "playback_queue",
             "playback_state",
             "tag_overlays",
@@ -332,12 +332,24 @@ impl StateStore {
             "musicbrainz_artist_decisions",
             "musicbrainz_release_decisions",
             "musicbrainz_curation_events",
-        ] {
-            for (operation, timing) in [
-                ("insert", "INSERT"),
-                ("update", "UPDATE"),
-                ("delete", "DELETE"),
-            ] {
+        ];
+        if current < 7 {
+            for table in synchronized_tables {
+                for operation in ["insert", "update", "delete"] {
+                    transaction
+                        .execute_batch(&format!(
+                            "DROP TRIGGER IF EXISTS state_sync_{table}_{operation};"
+                        ))
+                        .map_err(|error| {
+                            format!(
+                                "Could not replace Aurora's {table} state-sync trigger: {error}"
+                            )
+                        })?;
+                }
+            }
+        }
+        for table in synchronized_tables {
+            for (operation, timing) in [("insert", "INSERT"), ("delete", "DELETE")] {
                 transaction
                     .execute_batch(&format!(
                         r#"
@@ -354,6 +366,69 @@ impl StateStore {
                     })?;
             }
         }
+        transaction
+            .execute_batch(
+                r#"
+                CREATE TRIGGER IF NOT EXISTS state_sync_playback_queue_update
+                AFTER UPDATE ON playback_queue
+                WHEN NOT (
+                  OLD.position IS NEW.position AND OLD.track_key IS NEW.track_key
+                  AND OLD.directory IS NEW.directory AND OLD.filename IS NEW.filename
+                ) BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_playback_state_update
+                AFTER UPDATE ON playback_state
+                WHEN NOT (
+                  OLD.current_index IS NEW.current_index AND OLD.volume IS NEW.volume
+                  AND OLD.shuffle IS NEW.shuffle AND OLD.repeat_mode IS NEW.repeat_mode
+                ) BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_tag_overlays_update
+                AFTER UPDATE ON tag_overlays
+                WHEN NOT (
+                  OLD.track_key IS NEW.track_key AND OLD.rating IS NEW.rating
+                  AND OLD.love_state IS NEW.love_state
+                  AND OLD.release_year IS NEW.release_year
+                  AND OLD.last_operation_id IS NEW.last_operation_id
+                ) BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_tag_edit_operations_update
+                AFTER UPDATE ON tag_edit_operations BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_musicbrainz_artist_decisions_update
+                AFTER UPDATE ON musicbrainz_artist_decisions BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_musicbrainz_release_decisions_update
+                AFTER UPDATE ON musicbrainz_release_decisions BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_musicbrainz_curation_events_update
+                AFTER UPDATE ON musicbrainz_curation_events BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
+                "#,
+            )
+            .map_err(|error| {
+                format!("Could not ensure Aurora's selective state-sync triggers: {error}")
+            })?;
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|error| {
@@ -410,25 +485,46 @@ impl StateStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| format!("Could not begin saving Aurora's queue: {error}"))?;
-        transaction
-            .execute("DELETE FROM playback_queue", [])
-            .map_err(|error| format!("Could not replace Aurora's queue: {error}"))?;
-        {
-            let mut insert = transaction
+        let stored_queue = {
+            let mut statement = transaction
                 .prepare(
-                    "INSERT INTO playback_queue(position, track_id, track_key, directory, filename) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "SELECT track_id, track_key, directory, filename FROM playback_queue ORDER BY position",
                 )
-                .map_err(|error| format!("Could not prepare Aurora's queue save: {error}"))?;
-            for (position, entry) in state.queue.iter().enumerate() {
-                insert
-                    .execute(params![
-                        position as i64,
-                        entry.track_id,
-                        entry.track_key,
-                        entry.directory,
-                        entry.filename
-                    ])
-                    .map_err(|error| format!("Could not save Aurora's queue: {error}"))?;
+                .map_err(|error| format!("Could not inspect Aurora's saved queue: {error}"))?;
+            statement
+                .query_map([], |row| {
+                    Ok(StoredQueueEntry {
+                        track_id: row.get(0)?,
+                        track_key: row.get(1)?,
+                        directory: row.get(2)?,
+                        filename: row.get(3)?,
+                    })
+                })
+                .map_err(|error| format!("Could not read Aurora's saved queue: {error}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("Could not decode Aurora's saved queue: {error}"))?
+        };
+        if !same_queue_identity(&stored_queue, &state.queue) {
+            transaction
+                .execute("DELETE FROM playback_queue", [])
+                .map_err(|error| format!("Could not replace Aurora's queue: {error}"))?;
+            {
+                let mut insert = transaction
+                    .prepare(
+                        "INSERT INTO playback_queue(position, track_id, track_key, directory, filename) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    )
+                    .map_err(|error| format!("Could not prepare Aurora's queue save: {error}"))?;
+                for (position, entry) in state.queue.iter().enumerate() {
+                    insert
+                        .execute(params![
+                            position as i64,
+                            entry.track_id,
+                            entry.track_key,
+                            entry.directory,
+                            entry.filename
+                        ])
+                        .map_err(|error| format!("Could not save Aurora's queue: {error}"))?;
+                }
             }
         }
         transaction
@@ -437,7 +533,10 @@ impl StateStore {
                 UPDATE playback_state
                 SET current_index = ?1, position_seconds = ?2, volume = ?3,
                     shuffle = ?4, repeat_mode = ?5
-                WHERE singleton = 1
+                WHERE singleton = 1 AND NOT (
+                  current_index IS ?1 AND position_seconds IS ?2 AND volume IS ?3
+                  AND shuffle IS ?4 AND repeat_mode IS ?5
+                )
                 "#,
                 params![
                     state.current_index.map(|value| value as i64),
@@ -1046,6 +1145,15 @@ fn overlay_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TagOverlay> {
     })
 }
 
+fn same_queue_identity(left: &[StoredQueueEntry], right: &[StoredQueueEntry]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.track_key == right.track_key
+                && left.directory == right.directory
+                && left.filename == right.filename
+        })
+}
+
 fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TagOperation> {
     let before_love_state: String = row.get(6)?;
     let after_love_state: String = row.get(9)?;
@@ -1315,7 +1423,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .expect("schema version"),
-            6
+            7
         );
         assert_eq!(
             connection
@@ -1350,6 +1458,110 @@ mod tests {
         assert_eq!(after, before + 1);
 
         drop(connection);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn passive_playback_and_catalog_refreshes_do_not_create_sync_changes() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let initial = StoredPlaybackState {
+            queue: vec![StoredQueueEntry {
+                track_id: "desktop-import-id".to_owned(),
+                track_key: Some(r"d:\music\artist\track.mp3".to_owned()),
+                directory: Some(r"D:\MUSIC\Artist".to_owned()),
+                filename: Some("Track.mp3".to_owned()),
+            }],
+            current_index: Some(0),
+            position_seconds: 5.0,
+            ..StoredPlaybackState::default()
+        };
+        store.save(&initial).expect("initial playback state");
+        let catalog_values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let desired_values = TagValues {
+            rating: Some(4.0),
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        store
+            .upsert_overlay(
+                r"d:\music\artist\track.mp3",
+                r"D:\MUSIC\Artist",
+                "Track.mp3",
+                &catalog_values,
+                &desired_values,
+                51,
+                None,
+            )
+            .expect("initial overlay");
+        let revision_before: i64 = store
+            .open()
+            .expect("read state revision")
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision before passive refresh");
+
+        let passive_refresh = StoredPlaybackState {
+            queue: vec![StoredQueueEntry {
+                track_id: "laptop-import-id".to_owned(),
+                ..initial.queue[0].clone()
+            }],
+            position_seconds: 18.0,
+            ..initial.clone()
+        };
+        store
+            .save(&passive_refresh)
+            .expect("passive playback refresh");
+        store
+            .upsert_overlay(
+                r"d:\music\artist\track.mp3",
+                r"D:\MUSIC\Artist",
+                "Track.mp3",
+                &catalog_values,
+                &desired_values,
+                52,
+                None,
+            )
+            .expect("catalog reconciliation refresh");
+        let revision_after_passive: i64 = store
+            .open()
+            .expect("read passive revision")
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision after passive refresh");
+        assert_eq!(revision_after_passive, revision_before);
+        let restored = store.load().expect("restored playback state");
+        assert_eq!(restored.position_seconds, 18.0);
+        assert_eq!(restored.queue[0].track_id, "desktop-import-id");
+
+        store
+            .save(&StoredPlaybackState {
+                volume: 0.4,
+                ..passive_refresh
+            })
+            .expect("meaningful playback change");
+        let revision_after_volume: i64 = store
+            .open()
+            .expect("read meaningful revision")
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision after volume change");
+        assert_eq!(revision_after_volume, revision_before + 1);
+
         drop(store);
         let _ = fs::remove_file(path);
     }

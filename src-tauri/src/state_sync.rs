@@ -136,9 +136,10 @@ impl StateSyncService {
     }
 
     fn try_sync(&mut self, bypass_throttle: bool) -> Result<StateMirrorStatus, String> {
-        if let StartupSyncOutcome::Conflict(message) = &self.startup_outcome {
-            return Ok(self.status("conflict", message.clone(), None));
-        }
+        let startup_conflict = match &self.startup_outcome {
+            StartupSyncOutcome::Conflict(message) => Some(message.clone()),
+            _ => None,
+        };
         if let StartupSyncOutcome::Unavailable(message) = &self.startup_outcome {
             let message = message.clone();
             self.startup_outcome = StartupSyncOutcome::None;
@@ -165,6 +166,10 @@ impl StateSyncService {
             None
         };
 
+        if !remote_exists && let Some(message) = startup_conflict {
+            return Ok(self.status("conflict", message, local.last_synced_at_ms));
+        }
+
         if remote_exists && remote.is_none() && !self.allow_legacy_replace {
             return Ok(self.status(
                 "conflict",
@@ -180,6 +185,19 @@ impl StateSyncService {
                     "This device and OneDrive have unrelated Aurora state histories. Both files were left untouched."
                         .to_owned(),
                     local.last_synced_at_ms,
+                ));
+            }
+            let snapshot_matches =
+                remote.generation == local.generation && remote.snapshot_id == local.snapshot_id;
+            if !snapshot_matches && semantic_state_matches(self.store.path(), &self.remote_path)? {
+                let reconciled = adopt_remote_snapshot_identity(&self.store, &local, remote)?;
+                self.startup_outcome = StartupSyncOutcome::None;
+                self.allow_legacy_replace = false;
+                return Ok(self.status(
+                    "synced",
+                    "Aurora reconciled equivalent state from both computers; only device-local catalog bookkeeping differed."
+                        .to_owned(),
+                    reconciled.last_synced_at_ms,
                 ));
             }
             if remote.generation > local.generation {
@@ -290,6 +308,121 @@ fn ensure_sync_identity(store: &StateStore) -> Result<(), String> {
             .map_err(|error| format!("Could not initialize Aurora's state lineage: {error}"))?;
     }
     Ok(())
+}
+
+fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool, String> {
+    let connection = Connection::open_with_flags(
+        local_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| format!("Could not inspect Aurora's local sync state: {error}"))?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| format!("Could not configure Aurora's state comparison: {error}"))?;
+    connection
+        .pragma_update(None, "query_only", true)
+        .map_err(|error| format!("Could not protect Aurora's state comparison: {error}"))?;
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS remote_state",
+            [remote_path.to_string_lossy().as_ref()],
+        )
+        .map_err(|error| {
+            format!("Could not attach Aurora's OneDrive snapshot read-only: {error}")
+        })?;
+
+    for (table, columns) in [
+        ("playback_queue", "position, track_key, directory, filename"),
+        (
+            "playback_state",
+            "singleton, current_index, volume, shuffle, repeat_mode",
+        ),
+        (
+            "tag_overlays",
+            "track_key, rating, love_state, release_year, last_operation_id",
+        ),
+        (
+            "tag_edit_operations",
+            "id, track_key, target_path, temp_path, backup_path, before_rating, before_love_state, before_release_year, after_rating, after_love_state, after_release_year, source_fingerprint, status, created_at_ms, updated_at_ms, error_message",
+        ),
+        (
+            "musicbrainz_artist_decisions",
+            "local_artist_key, display_artist, decision, artist_mbid, canonical_name, created_at_ms, updated_at_ms",
+        ),
+        (
+            "musicbrainz_release_decisions",
+            "local_artist_key, display_artist, artist_mbid, release_mbid, decision, local_album_id, created_at_ms, updated_at_ms",
+        ),
+        (
+            "musicbrainz_curation_events",
+            "id, entity_kind, local_artist_key, artist_mbid, release_mbid, before_json, after_json, created_at_ms",
+        ),
+    ] {
+        let differs: bool = connection
+            .query_row(
+                &format!(
+                    r#"
+                    SELECT EXISTS(
+                      SELECT {columns} FROM main.{table}
+                      EXCEPT
+                      SELECT {columns} FROM remote_state.{table}
+                    ) OR EXISTS(
+                      SELECT {columns} FROM remote_state.{table}
+                      EXCEPT
+                      SELECT {columns} FROM main.{table}
+                    )
+                    "#
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                format!("Could not compare Aurora's {table} state across computers: {error}")
+            })?;
+        if differs {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn adopt_remote_snapshot_identity(
+    store: &StateStore,
+    local: &SyncMetadata,
+    remote: &SyncMetadata,
+) -> Result<SyncMetadata, String> {
+    let connection = store.open()?;
+    let updated = connection
+        .execute(
+            r#"
+            UPDATE state_sync_meta SET
+              snapshot_id = ?1, generation = ?2,
+              content_revision = ?3, mirrored_revision = ?3,
+              last_synced_at_ms = ?4
+            WHERE singleton = 1 AND lineage_id = ?5
+              AND snapshot_id = ?6 AND generation = ?7
+              AND content_revision = ?8 AND mirrored_revision = ?9
+            "#,
+            params![
+                remote.snapshot_id,
+                remote.generation,
+                remote.content_revision,
+                remote.last_synced_at_ms,
+                local.lineage_id,
+                local.snapshot_id,
+                local.generation,
+                local.content_revision,
+                local.mirrored_revision,
+            ],
+        )
+        .map_err(|error| format!("Could not reconcile Aurora's equivalent state: {error}"))?;
+    if updated != 1 {
+        return Err(
+            "Aurora state changed while equivalent snapshots were reconciled. Aurora will retry without overwriting either file."
+                .to_owned(),
+        );
+    }
+    read_required_metadata(store.path())
 }
 
 fn publish_snapshot(
@@ -666,7 +799,10 @@ fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state_store::StoredPlaybackState;
+    use crate::{
+        state_store::{StoredPlaybackState, StoredQueueEntry},
+        tag_model::{LoveState, TagValues},
+    };
 
     fn temporary_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -767,6 +903,113 @@ mod tests {
         assert_eq!(remote_store.load().expect("remote playback").volume, 0.25);
 
         drop(remote_store);
+        drop(laptop_sync);
+        drop(desktop_sync);
+        drop(laptop);
+        drop(desktop);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn equivalent_onedrive_branches_reconcile_device_local_bookkeeping() {
+        let root = temporary_root("equivalent-branches");
+        fs::create_dir_all(&root).expect("temporary root");
+        let desktop_path = root.join("desktop.sqlite3");
+        let laptop_path = root.join("laptop.sqlite3");
+        let remote = root.join("aurora-state.sqlite3");
+        let desktop = StateStore::new(desktop_path).expect("desktop state");
+        desktop
+            .save(&StoredPlaybackState {
+                queue: vec![StoredQueueEntry {
+                    track_id: "desktop-import-id".to_owned(),
+                    track_key: Some(r"d:\music\artist\track.mp3".to_owned()),
+                    directory: Some(r"D:\MUSIC\Artist".to_owned()),
+                    filename: Some("Track.mp3".to_owned()),
+                }],
+                current_index: Some(0),
+                position_seconds: 6.0,
+                ..StoredPlaybackState::default()
+            })
+            .expect("desktop playback");
+        desktop
+            .upsert_overlay(
+                r"d:\music\artist\track.mp3",
+                r"D:\MUSIC\Artist",
+                "Track.mp3",
+                &TagValues {
+                    rating: None,
+                    love_state: LoveState::Neutral,
+                    release_year: None,
+                },
+                &TagValues {
+                    rating: Some(4.0),
+                    love_state: LoveState::Neutral,
+                    release_year: None,
+                },
+                51,
+                None,
+            )
+            .expect("desktop overlay");
+        let mut desktop_sync =
+            StateSyncService::new(desktop.clone(), remote.clone(), StartupSyncOutcome::None)
+                .expect("desktop sync");
+        assert_eq!(desktop_sync.sync_now(true).sync_state, "synced");
+        assert_eq!(
+            prepare_state_before_open(&laptop_path, &remote),
+            StartupSyncOutcome::Restored
+        );
+        let laptop = StateStore::new(laptop_path.clone()).expect("laptop state");
+
+        {
+            let connection = laptop.open().expect("edit laptop bookkeeping");
+            connection
+                .execute_batch(
+                    r#"
+                    UPDATE playback_queue SET track_id = 'laptop-import-id';
+                    UPDATE playback_state SET position_seconds = 18;
+                    UPDATE tag_overlays
+                    SET catalog_import_run_id = 52, updated_at_ms = updated_at_ms + 1000;
+                    UPDATE state_sync_meta
+                    SET snapshot_id = 'snapshot-keiya', generation = 8,
+                        content_revision = 71, mirrored_revision = 71;
+                    "#,
+                )
+                .expect("simulate laptop branch");
+        }
+        {
+            let connection = Connection::open(&remote).expect("edit remote branch metadata");
+            connection
+                .execute_batch(
+                    r#"
+                    UPDATE state_sync_meta
+                    SET snapshot_id = 'snapshot-desktop', generation = 8,
+                        content_revision = 70, mirrored_revision = 70;
+                    "#,
+                )
+                .expect("simulate desktop branch");
+        }
+        assert!(
+            semantic_state_matches(&laptop_path, &remote).expect("compare equivalent branches")
+        );
+
+        let mut laptop_sync = StateSyncService::new(
+            laptop.clone(),
+            remote.clone(),
+            StartupSyncOutcome::Conflict("simulated OneDrive conflict".to_owned()),
+        )
+        .expect("laptop sync");
+        let status = laptop_sync.sync_now(true);
+        assert_eq!(status.sync_state, "synced");
+        assert!(status.message.contains("reconciled equivalent state"));
+        let reconciled = read_required_metadata(&laptop_path).expect("reconciled metadata");
+        assert_eq!(reconciled.snapshot_id, "snapshot-desktop");
+        assert_eq!(reconciled.generation, 8);
+        assert_eq!(reconciled.content_revision, 70);
+        assert_eq!(
+            laptop.load().expect("laptop bookkeeping retained").queue[0].track_id,
+            "laptop-import-id"
+        );
+
         drop(laptop_sync);
         drop(desktop_sync);
         drop(laptop);
