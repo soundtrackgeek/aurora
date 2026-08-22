@@ -3,6 +3,7 @@ use crate::{
         ArtistSummary, TrackSummary, apply_overlays, build_fts_prefix_query, default_catalog_path,
         map_track_row, open_catalog,
     },
+    ratings,
     state_store::StateStore,
     tag_model::LoveState,
 };
@@ -88,6 +89,9 @@ pub(crate) struct AlbumPageRequest {
     pub(crate) page_size: Option<u16>,
     pub(crate) cursor: Option<ExploreCursor>,
     pub(crate) search: Option<String>,
+    pub(crate) rating: Option<f64>,
+    #[serde(default)]
+    pub(crate) unrated: bool,
     pub(crate) year_from: Option<i32>,
     pub(crate) year_to: Option<i32>,
     #[serde(default)]
@@ -112,6 +116,7 @@ pub(crate) struct AlbumSummary {
     pub(crate) loved_tracks: i64,
     pub(crate) duration_seconds: i64,
     pub(crate) rating: Option<f64>,
+    pub(crate) album_score: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -488,7 +493,7 @@ fn track_page_from_connection(
         sql.push_str(" AND t.normalized_rating = ?");
         params.push(Value::Integer(rating));
     } else if request.unrated {
-        sql.push_str(" AND t.normalized_rating IS NULL");
+        sql.push_str(" AND (t.normalized_rating IS NULL OR t.normalized_rating <= 0)");
     }
     if let Some(love_state) = request.love_state {
         match love_state {
@@ -586,6 +591,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
         loved_tracks: row.get(7)?,
         duration_seconds: row.get(8)?,
         rating: effective_rating.map(|rating| rating as f64 / 20.0),
+        album_score: row.get(9)?,
     })
 }
 
@@ -624,6 +630,7 @@ fn album_page_from_connection(
 ) -> Result<AlbumPage, String> {
     let page_size = page_size(request.page_size)?;
     validate_year_selection(request.year_from, request.year_to, request.missing_year)?;
+    let rating = rating_value(request.rating, request.unrated)?;
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
     let artist = bounded_optional_text(&request.artist, "Artist filter", MAX_FILTER_CHARS)?;
     let search = bounded_optional_text(&request.search, "Search text", MAX_SEARCH_CHARS)?;
@@ -648,6 +655,12 @@ fn album_page_from_connection(
     if let Some(match_query) = match_query {
         sql.push_str(" AND album_search_fts MATCH ?");
         params.push(Value::Text(match_query));
+    }
+    if let Some(rating) = rating {
+        sql.push_str(" AND CAST(ROUND(a.effective_album_rating / 10.0) AS INTEGER) * 10 = ?");
+        params.push(Value::Integer(rating));
+    } else if request.unrated {
+        sql.push_str(" AND (a.effective_album_rating IS NULL OR a.effective_album_rating <= 0)");
     }
     push_year_filters(
         &mut sql,
@@ -860,7 +873,7 @@ fn album_detail_from_connection(
     album_id: &str,
     store: Option<&StateStore>,
 ) -> Result<AlbumDetail, String> {
-    let album = connection
+    let mut album = connection
         .query_row(
             "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating FROM albums AS a WHERE a.id = ?",
             [album_id],
@@ -880,6 +893,15 @@ fn album_detail_from_connection(
     let tracks_truncated = tracks.len() > usize::from(MAX_PAGE_SIZE);
     tracks.truncate(usize::from(MAX_PAGE_SIZE));
     apply_overlays(&mut tracks, store)?;
+    if let Some(store) = store {
+        let live = ratings::live_album_from_connection(connection, album_id, store)?;
+        album.total_tracks = live.total_tracks;
+        album.rated_tracks = live.rated_tracks;
+        album.loved_tracks = live.loved_tracks;
+        album.duration_seconds = live.duration_seconds;
+        album.rating = live.effective_rating;
+        album.album_score = live.album_score;
+    }
     Ok(AlbumDetail {
         album,
         tracks,
@@ -1084,6 +1106,28 @@ mod tests {
         .expect("album search");
         assert_eq!(albums.items.len(), 1);
         assert_eq!(albums.items[0].id, "a1");
+
+        let four_and_a_half = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                rating: Some(4.5),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("album rating band");
+        assert_eq!(four_and_a_half.items.len(), 1);
+        assert_eq!(four_and_a_half.items[0].id, "a1");
+
+        let unrated = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                unrated: true,
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("unrated albums");
+        assert_eq!(unrated.items.len(), 1);
+        assert_eq!(unrated.items[0].id, "a2");
 
         let artists = artist_page_from_connection(
             &connection,

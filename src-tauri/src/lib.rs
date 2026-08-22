@@ -10,6 +10,7 @@ mod history;
 mod laptop_mode;
 mod musicbrainz;
 mod playback;
+mod ratings;
 mod replay_gain;
 mod shortcuts;
 mod state_store;
@@ -31,6 +32,10 @@ use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
+use ratings::{
+    CompletionKind, RatingAlbumPage, RatingAlbumQueueRequest, RatingCollectionRequest,
+    RatingsOverview,
+};
 use state_store::StateStore;
 use std::sync::Mutex;
 use tag_model::TagEditRequest;
@@ -187,6 +192,55 @@ async fn year_queue_tracks(
     })
     .await
     .map_err(|error| format!("The year-playback worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn ratings_overview(app: AppHandle) -> Result<RatingsOverview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        ratings::load_ratings_overview(&store)
+    })
+    .await
+    .map_err(|error| format!("The Ratings overview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn rating_album_page(
+    app: AppHandle,
+    kind: CompletionKind,
+) -> Result<RatingAlbumPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        ratings::load_rating_album_page(kind, &store)
+    })
+    .await
+    .map_err(|error| format!("The album-rating worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn rating_collection_tracks(
+    app: AppHandle,
+    request: RatingCollectionRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        ratings::load_rating_collection(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The rating-collection worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn rating_album_queue_tracks(
+    app: AppHandle,
+    request: RatingAlbumQueueRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        ratings::load_rating_album_queue(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The album-rating queue worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -671,6 +725,10 @@ pub fn run() {
             year_overview,
             year_detail,
             year_queue_tracks,
+            ratings_overview,
+            rating_album_page,
+            rating_collection_tracks,
+            rating_album_queue_tracks,
             artist_intelligence,
             musicbrainz_review_page,
             update_artist_identity_decision,

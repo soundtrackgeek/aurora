@@ -4,6 +4,39 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-22
+
+### Added
+
+- A dedicated Ratings Studio with separate Track Ratings and effective Album Ratings constellations, clickable whole- and half-star bands, real cover samples, and the 5 Star Collection.
+- Mutually exclusive Almost Complete, Partially Rated, and Unrated Album lanes with bounded cover shelves, selected-album track details, and Play Unrated Tracks.
+- Music Library's exact effective-album-rating precedence and Album Score formula, including clearly labelled provisional means for incomplete albums.
+- Numeric Album Score badges in Ratings and ordinary Album detail once every track on the album is rated.
+- Browser preview artwork sourced read-only from the user's real cover archive, plus persistent preview star/Love edits for interaction testing.
+
+### Changed
+
+- Album Explorer now accepts and visibly exposes exact rounded half-star and unrated album filters, so a Ratings constellation handoff preserves the selected band.
+- Ratings overview and completion-lane requests are separated; switching lanes no longer reruns the million-track overview query.
+- Ratings Studio stars and Love save instantly through the existing verified MP3 and Aurora overlay pipeline, then refresh spectra, completion, provisional means, and Album Score.
+- Album detail recalculates completion, effective rating, Love count, and Album Score against pending Aurora overlays without writing the shared Music Library database.
+- A normalized zero rating is treated defensively as unrated, while Music Library's two raw half-star records remain represented in their exact 3.5 and 4.5 bands.
+
+### Performance
+
+- The live 1,096,288-track and 72,012-album Ratings overview completes in about 1.7 seconds on the current catalog; album shelves are capped at 14 and playback requests at 100 tracks.
+- Completion pages, rating collections, and selected-album queues remain bounded and stale responses cannot replace newer selections.
+
+### Accessibility
+
+- Rating scopes, whole- and half-star bands, completion lanes, album cards, instant track controls, and playback actions use semantic tabs, buttons, pressed states, labels, and visible keyboard focus.
+- The 1280 × 720 layout retains all persistent shell controls without horizontal overflow; sidebars remain independently collapsible.
+
+### Known limits
+
+- Album Score remains Music Library's unbounded numeric rank measure and is intentionally not converted to stars. A future Charts page may rank it but is not part of 0.14.0.
+- Aurora does not write Album Rating or Album Score into `music-library.sqlite3`; imported catalog values and verified MP3/Aurora overlays are combined read-only.
+
 ## [0.13.0] - 2026-08-22
 
 ### Added

@@ -17,6 +17,18 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.14.0 acceptance checks
+
+- Keep track stars and effective album stars as separate, clickable constellations with exact whole- and half-star counts.
+- Follow Music Library's effective album-rating precedence: explicit Album Rating first, otherwise a rounded normalized track mean only when every track is rated.
+- Keep partial album means provisional and exclude them from album-rating bands.
+- Reproduce Music Library's exact Album Score formula as an unbounded numeric measure; never convert it to stars.
+- Split incomplete albums into mutually exclusive Almost Complete, Partially Rated, and Unrated lanes, with at most 14 album candidates and 100 queued tracks per request.
+- Save track stars and Love instantly through the verified MP3 transaction and Aurora overlay, then refresh only bounded Ratings state.
+- Show Album Score in ordinary Album detail only after all tracks are rated, including pending Aurora overlays, without writing the shared catalog.
+- Preserve exact rating-band handoff into Album Explorer, accessible controls, real cover art, stale-response protection, and responsive shell behavior.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.14.0` versions.
+
 ## 0.13.0 acceptance checks
 
 - Preserve `albums.year` as Original Year and `albums.release_year` as Release Year; never substitute one clock for the other.
@@ -165,7 +177,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.13.0
+## Explicit non-goals for 0.14.0
 
 - Crossfade, equalization, ReplayGain calculation/tag writing, preamp controls, and other DSP.
 - Editing the imported catalog directly.
@@ -188,9 +200,12 @@ Live source measurements including SQLite process startup are approximately 26�
 - Creating, importing, pinning, editing, or synchronizing playlists.
 - Inferring edition lineage, release identity, label, catalog number, or format from matching titles or years; the paired clocks describe catalog dates, not authoritative release relationships.
 - Loading every album or track for a selected year into React, or expanding Play Year beyond the bounded queue contract.
+- Converting Album Score into stars, inventing an Aurora-only album rating, or writing Album Rating/Album Score into the shared catalog.
+- A Charts page or historical Album Score trend; 0.14.0 establishes the exact score contract and display surfaces first.
 
-## Planned sections after 0.13.0
+## Planned sections after 0.14.0
 
-1. Smart playlists, saved explorer views, and real pinning after the navigation shell is proven.
-2. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
-3. Crossfade or an equalizer only after real use proves a need; neither belongs in the lossless handoff path by default.
+1. Charts built on the exact numeric Album Score, with eligibility and score components visible rather than hidden behind a star conversion.
+2. Smart playlists, saved explorer views, and real pinning after the navigation shell is proven.
+3. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
+4. Crossfade or an equalizer only after real use proves a need; neither belongs in the lossless handoff path by default.

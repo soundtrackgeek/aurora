@@ -60,6 +60,8 @@ const albums: ExplorerAlbum[] = [
     durationSeconds: 2_844,
     genre: "Synthwave",
     lovedTracks: 4,
+    ratedTracks: 9,
+    albumScore: 412.4,
   },
 ];
 
@@ -153,6 +155,28 @@ describe("DeepExplorer", () => {
     expect(screen.getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps album rating filters visible and only shows Album Score at full completion", () => {
+    const onFiltersChange = vi.fn();
+    const completeAlbum = { ...albums[0], ratedTracks: albums[0].totalTracks };
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          filters: { ...filters, rating: 4.5, sort: "ratingDesc" },
+          albums: [completeAlbum],
+          selectedAlbumId: completeAlbum.id,
+          onFiltersChange,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Rating")).toHaveValue("4.5");
+    expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Rating"), { target: { value: "unrated" } });
+    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, rating: "unrated", sort: "ratingDesc" });
   });
 
   it("exposes bounded loading, error, empty, and load-more states", () => {

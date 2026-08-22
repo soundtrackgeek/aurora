@@ -4,6 +4,7 @@ import {
   AudioLines,
   ChevronRight,
   Disc3,
+  Gauge,
   Heart,
   ListMusic,
   LoaderCircle,
@@ -50,6 +51,8 @@ export interface ExplorerAlbum {
   durationSeconds: number | null;
   genre: string | null;
   lovedTracks: number;
+  ratedTracks: number;
+  albumScore: number | null;
 }
 
 export interface ExplorerPageInfo {
@@ -422,6 +425,9 @@ function AlbumDetail({
             {album.releaseYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}
           </small>
+          {album.ratedTracks === album.totalTracks && album.albumScore !== null
+            ? <span className="deep-explorer-album-score"><Gauge aria-hidden="true" /> Album Score {album.albumScore.toFixed(1)}</span>
+            : null}
         </div>
         <button type="button" className="deep-explorer-icon-button" aria-label="Close album details" onClick={onClose}>
           <X aria-hidden="true" />
@@ -581,15 +587,15 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onChange={(event) => updateFilters({ query: event.currentTarget.value })}
           />
         </label>
+        {view !== "artists" ? <label>
+          <span>Rating</span>
+          <select value={String(filters.rating)} onChange={(event) => updateFilters({ rating: ratingFilterValue(event.currentTarget.value) })}>
+            <option value="all">All ratings</option>
+            <option value="unrated">Unrated</option>
+            {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
+          </select>
+        </label> : null}
         {view === "tracks" ? <>
-          <label>
-            <span>Rating</span>
-            <select value={String(filters.rating)} onChange={(event) => updateFilters({ rating: ratingFilterValue(event.currentTarget.value) })}>
-              <option value="all">All ratings</option>
-              <option value="unrated">Unrated</option>
-              {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
-            </select>
-          </label>
           <label>
             <span>Love</span>
             <select value={filters.love} onChange={(event) => updateFilters({ love: event.currentTarget.value as ExplorerLoveFilter })}>

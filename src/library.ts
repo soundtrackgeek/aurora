@@ -99,6 +99,7 @@ export interface AlbumSummary {
   lovedTracks: number;
   durationSeconds: number | null;
   rating: number | null;
+  albumScore: number | null;
 }
 
 export type AlbumSort = "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc";
@@ -107,6 +108,8 @@ export interface AlbumPageRequest {
   pageSize?: number;
   cursor?: ExplorerCursor;
   search?: string;
+  rating?: number;
+  unrated?: boolean;
   yearFrom?: number;
   yearTo?: number;
   yearBasis?: YearBasis;
@@ -183,12 +186,25 @@ export const browserPreview: LibrarySnapshot = {
   ],
 };
 
+const browserPreviewTrackUpdates = new Map<string, Track>();
+
 export function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
 
+const browserPreviewCoverIds = new Set([
+  "preview-viva", "preview-plastic-beach", "preview-discovery", "preview-hurry-up",
+  "preview-rainbows", "preview-american-idiot", "preview-drive", "preview-outrun",
+]);
+
 export function albumCoverUrl(albumId: string | null, size: 64 | 128 | 256 | 512): string | null {
-  if (!albumId || !isTauriRuntime()) return null;
+  if (!albumId) return null;
+  if (!isTauriRuntime()) {
+    const previewId = albumId.split(":", 1)[0];
+    return browserPreviewCoverIds.has(previewId)
+      ? `/__aurora-preview-cover/${encodeURIComponent(previewId)}?size=${size}`
+      : null;
+  }
   return `http://aurora-cover.localhost/album/${encodeURIComponent(albumId)}?size=${size}`;
 }
 
@@ -202,7 +218,12 @@ export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {
 
 export function updateBrowserPreviewTrack(updated: Track): void {
   if (isTauriRuntime()) return;
+  browserPreviewTrackUpdates.set(updated.id, updated);
   browserPreview.tracks = browserPreview.tracks.map((track) => track.id === updated.id ? updated : track);
+}
+
+export function currentBrowserPreviewTrack(track: Track): Track {
+  return isTauriRuntime() ? track : (browserPreviewTrackUpdates.get(track.id) ?? track);
 }
 
 export async function loadArtistTracks(artist: string): Promise<Track[]> {
@@ -230,6 +251,13 @@ function browserAlbumSummaries(): AlbumSummary[] {
     const duration = tracks.some((track) => track.durationSeconds !== null)
       ? tracks.reduce((total, track) => total + (track.durationSeconds ?? 0), 0)
       : null;
+    const rating = rated.length === tracks.length && rated.length
+      ? rated.reduce((total, track) => total + (track.rating ?? 0), 0) / rated.length
+      : null;
+    const durationSeconds = duration ?? 0;
+    const fiveStarSeconds = tracks.reduce((total, track) => total + (track.rating === 5 ? track.durationSeconds ?? 0 : 0), 0);
+    const lovedTracks = tracks.filter((track) => track.loved).length;
+    const albumScore = rating === null ? null : (((rating * 20 * .5) + (durationSeconds > 0 ? fiveStarSeconds / durationSeconds * 100 : 0) + (fiveStarSeconds / 60 * .3)) / 10) + lovedTracks * 100;
     return {
       id,
       title: tracks[0].album,
@@ -238,9 +266,10 @@ function browserAlbumSummaries(): AlbumSummary[] {
       genre: tracks[0].genre,
       totalTracks: tracks.length,
       ratedTracks: rated.length,
-      lovedTracks: tracks.filter((track) => track.loved).length,
+      lovedTracks,
       durationSeconds: duration,
-      rating: rated.length ? rated.reduce((total, track) => total + (track.rating ?? 0), 0) / rated.length : null,
+      rating,
+      albumScore,
     };
   });
 }
@@ -283,6 +312,8 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
     : album.releaseYear;
   const items = browserAlbumSummaries()
     .filter((album) => includesExplorerText([album.title, album.artist, album.genre], request.search))
+    .filter((album) => request.rating === undefined || (album.rating !== null && Math.round(album.rating * 2) / 2 === request.rating))
+    .filter((album) => !request.unrated || album.rating === null)
     .filter((album) => request.yearFrom === undefined || (yearFor(album) !== null && yearFor(album)! >= request.yearFrom))
     .filter((album) => request.yearTo === undefined || (yearFor(album) !== null && yearFor(album)! <= request.yearTo))
     .filter((album) => !request.missingYear || yearFor(album) === null)

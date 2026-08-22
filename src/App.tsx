@@ -50,6 +50,11 @@ import {
   type YearsLoadState,
 } from "./components/library/YearsExplorer";
 import {
+  RatingAlbumInspector,
+  RatingsStudio,
+  type RatingsLoadState,
+} from "./components/ratings/RatingsStudio";
+import {
   SidebarNavigation,
   type SidebarDestination,
 } from "./components/navigation/SidebarNavigation";
@@ -125,6 +130,18 @@ import {
   type TagValues,
 } from "./tags";
 import { useAuroraUpdater } from "./updater";
+import {
+  loadRatingAlbumPage,
+  loadRatingAlbumQueue,
+  loadRatingAlbumTracks,
+  loadRatingCollection,
+  loadRatingsOverview,
+  type CompletionKind,
+  type RatingAlbum,
+  type RatingAlbumPage,
+  type RatingMode,
+  type RatingsOverview,
+} from "./ratings";
 import {
   listenForGlobalShortcutResults,
   loadGlobalShortcutSettings,
@@ -235,6 +252,8 @@ async function loadExplorerPage(
   if (view === "albums") {
     const page = await exploreAlbums({
       ...shared,
+      rating: typeof filters.rating === "number" ? filters.rating : undefined,
+      unrated: filters.rating === "unrated" || undefined,
       yearFrom: filters.yearFrom ?? undefined,
       yearTo: filters.yearTo ?? undefined,
       yearBasis: filters.yearBasis,
@@ -427,6 +446,18 @@ function App() {
   const [selectedYearAlbum, setSelectedYearAlbum] = useState<YearAlbum | null>(null);
   const [yearAlbumTracks, setYearAlbumTracks] = useState<Track[]>([]);
   const [yearAlbumBusy, setYearAlbumBusy] = useState(false);
+  const [ratingsOverview, setRatingsOverview] = useState<RatingsOverview | null>(null);
+  const [ratingsPage, setRatingsPage] = useState<RatingAlbumPage | null>(null);
+  const [ratingsLoadState, setRatingsLoadState] = useState<RatingsLoadState>("loading");
+  const [ratingsPageState, setRatingsPageState] = useState<RatingsLoadState>("loading");
+  const [ratingsError, setRatingsError] = useState<string | null>(null);
+  const [ratingsPageError, setRatingsPageError] = useState<string | null>(null);
+  const [ratingsReloadToken, setRatingsReloadToken] = useState(0);
+  const [ratingsCompletion, setRatingsCompletion] = useState<CompletionKind>("almostComplete");
+  const [selectedRatingAlbum, setSelectedRatingAlbum] = useState<RatingAlbum | null>(null);
+  const [ratingAlbumTracks, setRatingAlbumTracks] = useState<Track[]>([]);
+  const [ratingsQueueBusy, setRatingsQueueBusy] = useState(false);
+  const [ratingsQueueMessage, setRatingsQueueMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("audio");
   const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
@@ -448,6 +479,10 @@ function App() {
   const yearDetailRequestRef = useRef(0);
   const yearAlbumRequestRef = useRef(0);
   const yearLoadedTokenRef = useRef(-1);
+  const ratingsRequestRef = useRef(0);
+  const ratingsPageRequestRef = useRef(0);
+  const ratingsAlbumRequestRef = useRef(0);
+  const ratingsLoadedTokenRef = useRef(-1);
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
@@ -585,6 +620,7 @@ function App() {
       || activeNav === "History"
       || activeNav === "Genres"
       || activeNav === "Years"
+      || activeNav === "Ratings"
     ) return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
@@ -722,6 +758,79 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [activeNav, libraryReady, yearOverview, yearReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Ratings") return;
+    const requestId = ++ratingsRequestRef.current;
+    ratingsPageRequestRef.current += 1;
+    ratingsAlbumRequestRef.current += 1;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setRatingsLoadState("loading");
+      setRatingsPageState("loading");
+      setRatingsPage(null);
+      setRatingsError(null);
+      setRatingsPageError(null);
+      setRatingsQueueMessage(null);
+      void loadRatingsOverview()
+        .then((overview) => {
+          if (cancelled || requestId !== ratingsRequestRef.current) return;
+          setRatingsOverview(overview);
+          ratingsLoadedTokenRef.current = ratingsReloadToken;
+          setRatingsLoadState("ready");
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== ratingsRequestRef.current) return;
+          setRatingsError(error instanceof Error ? error.message : String(error));
+          setRatingsLoadState("error");
+          setRatingsPageState("error");
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, ratingsReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Ratings" || !ratingsOverview) return;
+    if (ratingsLoadedTokenRef.current !== ratingsReloadToken) return;
+    const pageRequestId = ++ratingsPageRequestRef.current;
+    ratingsAlbumRequestRef.current += 1;
+    let cancelled = false;
+    setRatingsPageState("loading");
+    setRatingsPageError(null);
+    const request = ratingsCompletion === "almostComplete"
+      ? Promise.resolve(ratingsOverview.initialPage)
+      : loadRatingAlbumPage(ratingsCompletion);
+    void request
+      .then((page) => {
+        if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
+        setRatingsPage(page);
+        setRatingsPageState("ready");
+        const initialAlbum = page.albums[0] ?? null;
+        setSelectedRatingAlbum(initialAlbum);
+        setRatingAlbumTracks([]);
+        if (!initialAlbum) return;
+        setInspectorView("album");
+        const albumRequestId = ++ratingsAlbumRequestRef.current;
+        void loadRatingAlbumTracks(initialAlbum)
+          .then((tracks) => {
+            if (!cancelled && albumRequestId === ratingsAlbumRequestRef.current) {
+              setRatingAlbumTracks(tracks);
+            }
+          })
+          .catch(() => undefined);
+      })
+      .catch((error: unknown) => {
+        if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
+        setRatingsPageError(error instanceof Error ? error.message : String(error));
+        setRatingsPageState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNav, libraryReady, ratingsCompletion, ratingsOverview, ratingsReloadToken]);
 
   useEffect(() => {
     if (!genreRadioSession) return;
@@ -1045,6 +1154,89 @@ function App() {
     }
   }
 
+  function openRatingAlbum(album: RatingAlbum) {
+    const requestId = ++ratingsAlbumRequestRef.current;
+    setSelectedRatingAlbum(album);
+    setInspectorView("album");
+    setRatingAlbumTracks([]);
+    void loadRatingAlbumTracks(album)
+      .then((tracks) => {
+        if (requestId === ratingsAlbumRequestRef.current) setRatingAlbumTracks(tracks);
+      })
+      .catch((error: unknown) => {
+        if (requestId === ratingsAlbumRequestRef.current) {
+          setRatingsPageError(error instanceof Error ? error.message : String(error));
+        }
+      });
+  }
+
+  async function playRatingCollection(mode: RatingMode, rating: number | null) {
+    if (ratingsQueueBusy) return;
+    setRatingsQueueBusy(true);
+    setRatingsQueueMessage(null);
+    try {
+      const tracks = await loadRatingCollection(mode, rating, 100);
+      if (!tracks.length) {
+        setRatingsQueueMessage("No playable tracks matched this rating band.");
+        return;
+      }
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) {
+        selectTrack(tracks[0]);
+        setRatingsQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from this ${mode === "tracks" ? "track" : "album"} rating band.`);
+      }
+    } catch (error) {
+      setRatingsQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRatingsQueueBusy(false);
+    }
+  }
+
+  async function playRatingAlbumUnrated(album: RatingAlbum) {
+    if (ratingsQueueBusy) return;
+    setRatingsQueueBusy(true);
+    setRatingsQueueMessage(null);
+    try {
+      const tracks = await loadRatingAlbumQueue(album, true, 100);
+      if (!tracks.length) {
+        setRatingsQueueMessage(`${album.title} has no unrated tracks left.`);
+        return;
+      }
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) {
+        selectTrack(tracks[0]);
+        setRatingsQueueMessage(`Loaded ${formatCount(tracks.length)} unrated tracks from ${album.title}.`);
+      }
+    } catch (error) {
+      setRatingsQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRatingsQueueBusy(false);
+    }
+  }
+
+  function exploreRatingCollection(mode: RatingMode, rating: number | null) {
+    expandLibraryNavigation();
+    if (mode === "tracks") {
+      setActiveNav("Songs");
+      setExplorerView("tracks");
+      setExplorerFilters({
+        ...defaultExplorerFilters,
+        rating: (rating ?? "unrated") as ExplorerFilters["rating"],
+        sort: rating === null ? "newest" : "ratingDesc",
+      });
+      return;
+    }
+    setActiveNav("Albums");
+    setExplorerView("albums");
+    setExplorerFilters({
+      ...defaultExplorerFilters,
+      rating: (rating ?? "unrated") as ExplorerFilters["rating"],
+      sort: rating === null ? "releaseYearDesc" : "ratingDesc",
+    });
+  }
+
   async function toggleLaptopMode() {
     if (!laptopModeStatus || laptopModeBusy) return;
     setLaptopModeBusy(true);
@@ -1072,6 +1264,7 @@ function App() {
     setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setYearAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setRatingAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setGenreDetail((current) => {
       if (!current) return current;
       return {
@@ -1154,6 +1347,9 @@ function App() {
         ...current,
         [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
       }));
+      if (activeNav === "Ratings") {
+        setRatingsReloadToken((value) => value + 1);
+      }
     } catch (error) {
       applyTrackChange(track, optimistic, false);
       const message = error instanceof Error ? error.message : String(error);
@@ -1188,7 +1384,7 @@ function App() {
     if (label !== "Universe" && label !== "Observatory" && label !== "History") {
       expandLibraryNavigation();
     }
-    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Years") return;
+    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Years" || label === "Ratings") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -1382,6 +1578,7 @@ function App() {
     void loadAlbumDetail(album.id)
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
+        setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? detail.album : candidate));
         setAlbumTracks(detail.tracks);
         setAlbumTracksTruncated(detail.tracksTruncated);
         setAlbumDetailState("ready");
@@ -1576,7 +1773,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.13.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.14.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1730,6 +1927,31 @@ function App() {
                 onRetry={() => setYearReloadToken((value) => value + 1)}
                 onRetryDetail={() => yearDetail && selectYear(yearDetail.selection)}
               />
+            ) : activeNav === "Ratings" ? (
+              <RatingsStudio
+                overview={ratingsOverview}
+                page={ratingsPage}
+                selectedAlbum={selectedRatingAlbum}
+                albumTracks={ratingAlbumTracks}
+                loadState={ratingsLoadState}
+                pageState={ratingsPageState}
+                errorMessage={ratingsError}
+                pageError={ratingsPageError}
+                queueBusy={ratingsQueueBusy}
+                queueMessage={ratingsQueueMessage}
+                busyTrackKeys={inlineSavingKeys}
+                onCompletionChange={setRatingsCompletion}
+                onSelectAlbum={openRatingAlbum}
+                onSelectTrack={selectTrack}
+                onPlayTrack={(track) => playTrack(track, ratingAlbumTracks)}
+                onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+                onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+                onPlayCollection={(mode, rating) => void playRatingCollection(mode, rating)}
+                onExploreCollection={exploreRatingCollection}
+                onPlayUnrated={(album) => void playRatingAlbumUnrated(album)}
+                onRetry={() => setRatingsReloadToken((value) => value + 1)}
+                onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
+              />
             ) : <>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
@@ -1808,7 +2030,7 @@ function App() {
       {layoutPreferences.rightSidebar === "expanded" && <aside className="inspector">
         <div className="inspector-tabs" role="tablist" aria-label="Library details">
           <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
-          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum} onClick={() => setInspectorView("album")}>Album</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum && !selectedRatingAlbum} onClick={() => setInspectorView("album")}>Album</button>
           <button
             type="button"
             role="tab"
@@ -1821,7 +2043,11 @@ function App() {
           >Artist</button>
           <button type="button" role="tab" aria-selected="false" disabled>Lyrics</button>
         </div>
-        {inspectorView === "album" && selectedYearAlbum ? (
+        {inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
+          <div className="inspector-scroll">
+            <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} />
+          </div>
+        ) : inspectorView === "album" && selectedYearAlbum ? (
           <div className="inspector-scroll">
             <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} />
           </div>

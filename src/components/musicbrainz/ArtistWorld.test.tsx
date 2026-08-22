@@ -6,7 +6,7 @@ import { ArtistWorld } from "./ArtistWorld";
 
 const detail: ArtistDetail = {
   artist: { id: "m83", name: "M83", trackCount: 94, albumCount: 9, playCount: 4218 },
-  albums: [{ id: "mb:fantasy", title: "Fantasy", artist: "M83", releaseYear: 2023, genre: "Electronic", totalTracks: 13, ratedTracks: 4, lovedTracks: 2, durationSeconds: 3200, rating: 4 }],
+  albums: [{ id: "mb:fantasy", title: "Fantasy", artist: "M83", releaseYear: 2023, genre: "Electronic", totalTracks: 13, ratedTracks: 4, lovedTracks: 2, durationSeconds: 3200, rating: 4, albumScore: null }],
   albumsTruncated: false,
 };
 

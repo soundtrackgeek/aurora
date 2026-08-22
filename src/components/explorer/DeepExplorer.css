@@ -173,6 +173,7 @@
 .deep-explorer-album-detail h3 { margin: 3px 0 4px; font-size: 15px; font-weight: 500; }
 .deep-explorer-album-detail p { margin: 0; color: #b8c2cd; font-size: 10px; }
 .deep-explorer-album-detail small { display: block; margin-top: 5px; color: var(--explorer-muted); font-size: 8px; }
+.deep-explorer-album-score { display: inline-flex; align-items: center; gap: 5px; margin-top: 7px; color: #c77ae7; font-size: 8px; }.deep-explorer-album-score svg { width: 11px; height: 11px; fill: currentColor; }
 .deep-explorer-icon-button { display: grid; place-items: center; align-self: start; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: #83909f; background: rgba(255,255,255,.035); cursor: pointer; }
 .deep-explorer-icon-button svg { width: 13px; height: 13px; }
 

@@ -1,35 +1,74 @@
-# Aurora 0.13.0 Years design QA
+# Ratings Studio 0.14.0 design QA
 
-## Inputs
+## Evidence
 
-- Release-lens reference: `docs/design/years-0.13.0-release-lens.png`.
-- Original-lens reference: `docs/design/years-0.13.0-original-lens.png`.
-- Implementation: live Aurora Browser preview at the matching 1536 × 1024 desktop viewport, with the left Library rail, Album inspector, and persistent player visible.
-- States: Release Year 2025 and Original Year 1982, both in Two Clocks mode with Blade Runner selected.
-- Comparison method: each full-resolution reference and its matching live Browser screenshot were inspected together in the same comparison input.
+- Source visual truth: `C:\_code\aurora\docs\design\ratings-0.14.0-combined.png`
+- Rendered implementation: `C:\_code\aurora\docs\design\ratings-0.14.0-implementation-final.png`
+- Full-view comparison: `C:\_code\aurora\docs\design\ratings-0.14.0-comparison.png`
+- Focused Ratings/completion comparison: `C:\_code\aurora\docs\design\ratings-0.14.0-focus-comparison.png`
+- Responsive evidence: `C:\_code\aurora\docs\design\ratings-0.14.0-responsive-1280x720.png`
+- Source pixels: 1487 × 1058.
+- Implementation pixels: 1487 × 1058 at a 1487 × 1058 CSS viewport, `deviceScaleFactor: 1`.
+- Density normalization: none required; source and implementation use equal pixel dimensions.
+- State: Windows dark shell, expanded left rail, open right Album inspector, Track Ratings selected at 5 stars, Almost Complete selected, Viva La Vida selected, and a five-star collection playing in the persistent player.
+
+## Findings
+
+- No actionable P0, P1, or P2 differences remain.
+- [P3] The implemented constellation uses restrained, data-driven real-cover piles rather than the mock's taller cinematic particle towers. The hierarchy, six rating stops, selection glow, band counts, and dark violet/cyan direction remain intact. Increasing the decorative aura later would be polish, not a usability or fidelity blocker.
+- [Intentional data correction] The mock says 947,796 unrated tracks. The live catalog has 947,794 after its two raw half-star values are correctly represented in the 3.5 and 4.5 bands. The implementation follows source data rather than preserving a stale mock total.
+- [Intentional product correction] The mock displays Album Score for an 80%-rated album. The accepted product contract requires Album Score to appear only at 100% track-rating completion, so the implementation shows a provisional mean and a numeric-score placeholder until the album is complete.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Segoe UI Variable/Segoe UI matches Aurora's established Windows 11 shell. Heading, eyebrow, count, metadata, and table weights preserve the mock's hierarchy without clipping at the target viewport.
+- Spacing and layout rhythm: the three-column shell, top constellation, completion tabs/shelf, selected-album workbench, right inspector, and persistent player align with the target composition. The final 1280 × 720 pass has no horizontal overflow.
+- Colors and visual tokens: the implementation retains Aurora's near-black surfaces, cool blue borders, violet selection/glow, cyan accents, restrained elevation, and accessible contrast.
+- Image quality and asset fidelity: Browser preview and native Aurora use real cover imagery. Matching preview albums are served read-only from `C:\_code\music_backup_v5\AlbumCovers`; missing source imagery is not substituted with emoji, inline SVG, or a fake raster mock.
+- Copy and content: Ratings, Taste Constellation, rating scope, completion lanes, provisional mean, Album Score, collection actions, and track controls match the selected design and the verified Music Library semantics.
+
+## Focused comparison
+
+The focused comparison covers the dense constellation, completion tabs, real cover shelf, selected-album summary, and instant rating/Love table. It was needed because the full-shell comparison makes 7–10 px metadata and track controls too small to judge reliably. The focused evidence confirms readable hierarchy, sharp cover crops, aligned tab states, bounded density, and non-overlapping row controls.
 
 ## Comparison history
 
-1. The initial paired implementation established the reference's midnight shell, cyan Original Year clock, violet Release Year clock, flowing edition relationships, grouped cover shelf, inspector, and persistent player.
-2. The first live comparison found a P2 label collision near the selected Release Year marker. The duplicate floating label was removed, its accessible live announcement was retained, and the selected-year labels were repositioned beside their clock markers.
-3. The final comparisons preserve the two distinct date authorities, selected-year glow, directional aggregated flows, compact edition groupings, purple primary actions, and right-side Album context. Packaged Aurora replaces the Browser preview's labeled generated covers with the user's real cover archive through the existing album-art protocol.
+1. Initial evidence: `C:\_code\aurora\docs\design\ratings-0.14.0-implementation-1.png` at 1440 × 1024.
+   - Earlier [P2]: Browser preview showed synthetic fallback covers throughout the constellation, shelf, detail, and inspector.
+   - Fix: added a dev-only, allowlisted cover bridge to the existing local archive and made preview album IDs resolve real source images.
+   - Post-fix evidence: `ratings-0.14.0-implementation-2.png` and the final comparison show sharp, correctly cropped real covers.
+2. Interaction review after the artwork fix.
+   - Earlier [P2]: album-band Explore filtered internally but Album Explorer hid the active Rating filter, weakening orientation.
+   - Fix: exposed the exact rounded half-star/unrated filter in Album Explorer and verified a 4.5-star handoff.
+   - Post-fix evidence: Browser accessibility snapshot showed Albums selected, Rating 4.5 selected, and only matching preview albums loaded.
+3. Responsive review at 1280 × 720.
+   - Earlier [P2]: the completion detail's fixed minimum columns caused 8 px of horizontal scroll in the main viewport.
+   - Fix: converted the detail grid to a flexible `minmax(0, …)` track and constrained the album summary's intrinsic width.
+   - Post-fix evidence: `ratings-0.14.0-responsive-1280x720.png`; Browser measurements report `.main-scroll` 744/744 and `.ratings-studio` 712/712 client/scroll widths.
 
-## Responsive and interaction checks
+## Primary interactions tested
 
-- At the normal 1280 × 720 Browser viewport, `body.clientWidth` and `body.scrollWidth` both measured 1280 px; no page-level horizontal overflow was observed.
-- Release landscape, Original landscape, and Two Clocks all switch to their correct semantic chart.
-- Selecting Release Year 2025 and Original Year 1982 redraws the flows, shelf, summary, and selected Album context.
-- Missing Original Year opens its separate lens; Explore hands Songs `yearBasis = original` with the missing filter enabled.
-- Explore Original 1982 hands Songs exact `1982` lower and upper bounds with `yearBasis = original`.
-- Play Release 2025 populated a bounded 64-track preview queue and started the matching representative track.
-- Browser console check after the complete interaction sequence: no warnings or errors.
-- The live read-only 72,012-album catalog overview test completed its paired query in approximately 0.34 seconds and returned bounded timelines and at most 100 albums.
+- Open Ratings from the Library navigation.
+- Switch Track Ratings and Album Ratings.
+- Select whole-star and half-star bands.
+- Switch Almost Complete, Partially Rated, and Unrated Album tabs.
+- Select an album and inspect its bounded tracks.
+- Save a 5-star rating and toggle Love instantly; both persisted through the Ratings refresh and updated remaining count/provisional mean.
+- Play the five-star collection and keep the Album inspector open.
+- Explore an exact 4.5-star album band in Album Explorer.
+- Resize between 1487 × 1058 and 1280 × 720.
+- Browser console check: 0 errors, 0 warnings in the final test tab.
 
-## Final findings
+## Follow-up polish
 
-- P0: none.
-- P1: none.
-- P2: none.
-- P3: Browser preview uses labeled generated album covers because the contained native artwork protocol is available only in packaged Tauri; this does not affect the packaged release.
+- A future visual-only pass may enrich the constellation's cover aura while keeping the real data tiles, hit targets, and reduced-motion behavior intact.
 
-Final result: passed
+## Implementation checklist
+
+- [x] Match the selected shell, constellation, completion workbench, inspector, and player composition.
+- [x] Use real cover assets and exact live counts.
+- [x] Preserve the latest Album Score eligibility rule over conflicting mock content.
+- [x] Verify core controls, responsive layout, and console health in Browser.
+- [x] Recompare source and final implementation at equal dimensions.
+
+final result: passed
