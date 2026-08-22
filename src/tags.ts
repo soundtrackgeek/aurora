@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime, type Track } from "./library";
+import { isTauriRuntime, updateBrowserPreviewTrack, type Track } from "./library";
 
 export type LoveState = "neutral" | "loved" | "banned";
 
@@ -18,6 +18,31 @@ export interface TrackTagState {
 export interface TrackTagSnapshot {
   track: Track;
   tagState: TrackTagState;
+}
+
+export interface TagReconciliationChange {
+  trackKey: string;
+  values: TagValues;
+  syncState: "pendingImport" | null;
+}
+
+export interface TagReconciliationIssue {
+  trackKey: string;
+  message: string;
+}
+
+export interface TagReconciliationReport {
+  processed: number;
+  reconciled: number;
+  externalChanges: number;
+  catalogCaughtUp: number;
+  unchanged: number;
+  unavailable: number;
+  invalid: number;
+  conflicted: number;
+  hasMore: boolean;
+  changes: TagReconciliationChange[];
+  issues: TagReconciliationIssue[];
 }
 
 const browserUndo = new Map<string, Track>();
@@ -40,6 +65,17 @@ export function trackWithTagValues(track: Track, values: TagValues): Track {
     releaseYear: values.releaseYear,
     tagSyncState: "pendingImport",
     canUndoTagEdit: true,
+  };
+}
+
+export function trackWithReconciledTags(track: Track, change: TagReconciliationChange): Track {
+  return {
+    ...track,
+    rating: change.values.rating,
+    loveState: change.values.loveState,
+    loved: change.values.loveState === "loved",
+    releaseYear: change.values.releaseYear,
+    tagSyncState: change.syncState,
   };
 }
 
@@ -73,6 +109,7 @@ export async function updateTrackTags(
     browserUndo.set(track.id, current);
     const updated = trackWithTagValues(current, desired);
     browserTracks.set(track.id, updated);
+    updateBrowserPreviewTrack(updated);
     return browserSnapshot(updated);
   }
   return invoke<TrackTagSnapshot>("update_track_tags", {
@@ -87,7 +124,27 @@ export async function undoTrackTagEdit(track: Track): Promise<TrackTagSnapshot> 
     browserUndo.delete(track.id);
     const restored = { ...previous, canUndoTagEdit: false, tagSyncState: null };
     browserTracks.set(track.id, restored);
+    updateBrowserPreviewTrack(restored);
     return browserSnapshot(restored);
   }
   return invoke<TrackTagSnapshot>("undo_track_tag_edit", { trackId: track.id, trackKey: track.trackKey });
+}
+
+export async function reconcilePendingTags(): Promise<TagReconciliationReport> {
+  if (!isTauriRuntime()) {
+    return {
+      processed: 0,
+      reconciled: 0,
+      externalChanges: 0,
+      catalogCaughtUp: 0,
+      unchanged: 0,
+      unavailable: 0,
+      invalid: 0,
+      conflicted: 0,
+      hasMore: false,
+      changes: [],
+      issues: [],
+    };
+  }
+  return invoke<TagReconciliationReport>("refresh_external_tag_changes");
 }

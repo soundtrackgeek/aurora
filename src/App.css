@@ -117,6 +117,7 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .topbar__actions > button { display: flex; align-items: center; gap: 6px; min-width: 34px; height: 34px; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: #ccd5df; }
 .topbar__actions > button:not(:disabled) { cursor: pointer; }
 .topbar__actions .update-badge { padding: 0 10px; color: #e3c8ff; background: rgba(139,67,214,.18); font-size: 11px; }
+.tag-sync-message { max-width: 260px; overflow: hidden; color: #8fdde8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 
 .main-content { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; }
 .main-scroll { height: 100%; padding: 16px 16px 13px; overflow: auto; scrollbar-color: #2b3541 transparent; scrollbar-width: thin; }

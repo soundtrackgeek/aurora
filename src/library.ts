@@ -58,6 +58,90 @@ export interface LibrarySnapshot {
   tracks: Track[];
 }
 
+export interface ExplorerCursor {
+  value: string;
+  id: string;
+}
+
+export type TrackSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc";
+
+export interface TrackPageRequest {
+  pageSize?: number;
+  cursor?: ExplorerCursor;
+  search?: string;
+  rating?: number;
+  unrated?: boolean;
+  loveState?: Track["loveState"];
+  yearFrom?: number;
+  yearTo?: number;
+  genre?: string;
+  artist?: string;
+  sort?: TrackSort;
+}
+
+export interface TrackPage {
+  items: Track[];
+  nextCursor: ExplorerCursor | null;
+}
+
+export interface AlbumSummary {
+  id: string;
+  title: string;
+  artist: string;
+  releaseYear: number | null;
+  genre: string | null;
+  totalTracks: number;
+  ratedTracks: number;
+  lovedTracks: number;
+  durationSeconds: number | null;
+  rating: number | null;
+}
+
+export type AlbumSort = "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc";
+
+export interface AlbumPageRequest {
+  pageSize?: number;
+  cursor?: ExplorerCursor;
+  search?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  genre?: string;
+  artist?: string;
+  sort?: AlbumSort;
+}
+
+export interface AlbumPage {
+  items: AlbumSummary[];
+  nextCursor: ExplorerCursor | null;
+}
+
+export type ArtistSort = "nameAsc" | "trackCountDesc";
+
+export interface ArtistPageRequest {
+  pageSize?: number;
+  cursor?: ExplorerCursor;
+  search?: string;
+  genre?: string;
+  sort?: ArtistSort;
+}
+
+export interface ArtistPage {
+  items: Artist[];
+  nextCursor: ExplorerCursor | null;
+}
+
+export interface AlbumDetail {
+  album: AlbumSummary;
+  tracks: Track[];
+  tracksTruncated: boolean;
+}
+
+export interface ArtistDetail {
+  artist: Artist;
+  albums: AlbumSummary[];
+  albumsTruncated: boolean;
+}
+
 export const browserPreview: LibrarySnapshot = {
   sourceState: "browser-preview",
   sourceLabel: "Browser preview data",
@@ -108,6 +192,11 @@ export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {
   return invoke<LibrarySnapshot>("library_snapshot");
 }
 
+export function updateBrowserPreviewTrack(updated: Track): void {
+  if (isTauriRuntime()) return;
+  browserPreview.tracks = browserPreview.tracks.map((track) => track.id === updated.id ? updated : track);
+}
+
 export async function loadArtistTracks(artist: string): Promise<Track[]> {
   if (!isTauriRuntime()) {
     return browserPreview.tracks.filter((track) => track.artist === artist);
@@ -120,6 +209,124 @@ export async function searchLibraryTracks(query: string): Promise<Track[]> {
     return filterTracks(browserPreview.tracks, query, null);
   }
   return invoke<Track[]>("search_tracks", { query });
+}
+
+function browserAlbumSummaries(): AlbumSummary[] {
+  const groups = new Map<string, Track[]>();
+  for (const track of browserPreview.tracks) {
+    if (!track.albumId) continue;
+    groups.set(track.albumId, [...(groups.get(track.albumId) ?? []), track]);
+  }
+  return [...groups.entries()].map(([id, tracks]) => {
+    const rated = tracks.filter((track) => track.rating !== null);
+    const duration = tracks.some((track) => track.durationSeconds !== null)
+      ? tracks.reduce((total, track) => total + (track.durationSeconds ?? 0), 0)
+      : null;
+    return {
+      id,
+      title: tracks[0].album,
+      artist: tracks[0].artist,
+      releaseYear: tracks[0].releaseYear,
+      genre: tracks[0].genre,
+      totalTracks: tracks.length,
+      ratedTracks: rated.length,
+      lovedTracks: tracks.filter((track) => track.loved).length,
+      durationSeconds: duration,
+      rating: rated.length ? rated.reduce((total, track) => total + (track.rating ?? 0), 0) / rated.length : null,
+    };
+  });
+}
+
+function includesExplorerText(values: Array<string | null>, search?: string): boolean {
+  const query = search?.trim().toLocaleLowerCase();
+  return !query || values.join("\u0000").toLocaleLowerCase().includes(query);
+}
+
+function previewTrackPage(request: TrackPageRequest): TrackPage {
+  const items = browserPreview.tracks
+    .filter((track) => includesExplorerText([track.title, track.artist, track.album, track.genre], request.search))
+    .filter((track) => request.rating === undefined || track.rating === request.rating)
+    .filter((track) => !request.unrated || track.rating === null)
+    .filter((track) => request.loveState === undefined || track.loveState === request.loveState)
+    .filter((track) => request.yearFrom === undefined || (track.releaseYear !== null && track.releaseYear >= request.yearFrom))
+    .filter((track) => request.yearTo === undefined || (track.releaseYear !== null && track.releaseYear <= request.yearTo))
+    .filter((track) => !request.genre || track.genre === request.genre)
+    .filter((track) => !request.artist || track.artist === request.artist)
+    .sort((left, right) => {
+      switch (request.sort) {
+        case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+        case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
+        case "albumAsc": return left.album.localeCompare(right.album) || left.title.localeCompare(right.title);
+        case "releaseYearDesc": return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
+        case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
+        default: return right.id.localeCompare(left.id);
+      }
+    });
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+}
+
+function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
+  const items = browserAlbumSummaries()
+    .filter((album) => includesExplorerText([album.title, album.artist, album.genre], request.search))
+    .filter((album) => request.yearFrom === undefined || (album.releaseYear !== null && album.releaseYear >= request.yearFrom))
+    .filter((album) => request.yearTo === undefined || (album.releaseYear !== null && album.releaseYear <= request.yearTo))
+    .filter((album) => !request.genre || album.genre === request.genre)
+    .filter((album) => !request.artist || album.artist === request.artist)
+    .sort((left, right) => {
+      switch (request.sort) {
+        case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+        case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
+        case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
+        default: return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
+      }
+    });
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+}
+
+function previewArtistPage(request: ArtistPageRequest): ArtistPage {
+  const genreArtists = request.genre
+    ? new Set(browserPreview.tracks.filter((track) => track.genre === request.genre).map((track) => track.artist))
+    : null;
+  const items = browserPreview.artists
+    .filter((artist) => includesExplorerText([artist.name], request.search))
+    .filter((artist) => !genreArtists || genreArtists.has(artist.name))
+    .sort((left, right) => request.sort === "trackCountDesc"
+      ? right.trackCount - left.trackCount || left.name.localeCompare(right.name)
+      : left.name.localeCompare(right.name));
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+}
+
+export async function exploreTracks(request: TrackPageRequest): Promise<TrackPage> {
+  if (!isTauriRuntime()) return previewTrackPage(request);
+  return invoke<TrackPage>("explore_tracks", { request });
+}
+
+export async function exploreAlbums(request: AlbumPageRequest): Promise<AlbumPage> {
+  if (!isTauriRuntime()) return previewAlbumPage(request);
+  return invoke<AlbumPage>("explore_albums", { request });
+}
+
+export async function exploreArtists(request: ArtistPageRequest): Promise<ArtistPage> {
+  if (!isTauriRuntime()) return previewArtistPage(request);
+  return invoke<ArtistPage>("explore_artists", { request });
+}
+
+export async function loadAlbumDetail(albumId: string): Promise<AlbumDetail> {
+  if (!isTauriRuntime()) {
+    const album = browserAlbumSummaries().find((candidate) => candidate.id === albumId);
+    if (!album) throw new Error("That album is no longer available.");
+    return { album, tracks: browserPreview.tracks.filter((track) => track.albumId === albumId), tracksTruncated: false };
+  }
+  return invoke<AlbumDetail>("album_detail", { albumId });
+}
+
+export async function loadArtistDetail(artist: string): Promise<ArtistDetail> {
+  if (!isTauriRuntime()) {
+    const summary = browserPreview.artists.find((candidate) => candidate.name === artist);
+    if (!summary) throw new Error("That artist is no longer available.");
+    return { artist: summary, albums: browserAlbumSummaries().filter((album) => album.artist === artist), albumsTruncated: false };
+  }
+  return invoke<ArtistDetail>("artist_detail", { artist });
 }
 
 export function formatCount(value: number): string {

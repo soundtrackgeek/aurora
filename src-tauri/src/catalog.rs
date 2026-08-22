@@ -130,7 +130,7 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
     Ok(connection)
 }
 
-fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
+pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
     let rating: Option<i64> = row.get(5)?;
     let love: Option<String> = row.get(6)?;
     let id: i64 = row.get(0)?;
@@ -171,7 +171,10 @@ pub(crate) fn normalize_track_key(directory: &str, filename: &str) -> String {
     format!("{}\\{}", directory.trim_end_matches('\\'), filename.trim()).to_lowercase()
 }
 
-fn apply_overlays(tracks: &mut [TrackSummary], store: Option<&StateStore>) -> Result<(), String> {
+pub(crate) fn apply_overlays(
+    tracks: &mut [TrackSummary],
+    store: Option<&StateStore>,
+) -> Result<(), String> {
     let Some(store) = store else {
         return Ok(());
     };

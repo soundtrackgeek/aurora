@@ -15,7 +15,20 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.3.0 acceptance checks
+## 0.4.0 acceptance checks
+
+- Browse Tracks, Albums, and Artists beyond the initial 50-row snapshot through bounded keyset pages; no offset walk or million-row WebView state.
+- Filter tracks by bounded search text, exact half-star or unrated state, Love/Neutral/Ban, release-year range, genre, and artist with stale-request protection.
+- Sort only through explicit indexed or otherwise bounded choices and retain active filters and track selection while drilling down.
+- Open a dedicated artist focus from a universe planet or explorer result, switch that focus between tracks and albums, then open an album's bounded track listing of up to 100 tracks.
+- Play or queue a track collection from artist and album views while keeping the persistent player and inspector available.
+- Preserve inline verified rating and Love writes in every track list and keep keyboard row navigation usable without triggering playback accidentally.
+- Re-read only pending-overlay MP3 files when Aurora refreshes external MusicBee changes; never scan the full audio library for synchronization.
+- Treat the MP3 as authoritative, update or remove stale overlays when the catalog catches up, preserve the operation journal, and surface skipped or invalid pending files without writing them.
+- Keep every native explorer request validated and bounded to at most 100 records and preserve read-only SQLite enforcement.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.4.0` versions.
+
+## Existing foundation checks
 
 - Launch without modifying the 3+ GiB catalog or its WAL.
 - Return a bounded startup payload rather than serializing the million-track library.
@@ -35,22 +48,23 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Detect external edits before replacement, retain the latest 20 rollback copies, recover interrupted writes on startup, and support safe one-step undo.
 - Show the file edit immediately from Aurora's own overlay without writing Music Library; clear it when a later catalog import matches.
 - Reconcile 3.5/4.5 ratings from validated raw catalog values even when the current importer leaves its normalized field empty.
-- Produce a Windows GUI executable and NSIS updater artifact with aligned `0.3.0` versions.
+- Produce a Windows GUI executable and NSIS updater artifact with aligned release versions.
 
 ## Performance budget
 
-Warm source measurements are approximately 26–89 ms for the current bounded queries before WebView transport. The UI requests no more than 50 catalog rows per query and accepts no more than 200 IDs for a playback queue. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
+Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.3.0
+## Explicit non-goals for 0.4.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
 - Editing non-MP3 files or ID3 fields other than MusicBee rating, Love/Ban, and Release Time.
 - Embedded album-art extraction, biographies, lyrics, playlists, or MusicBrainz discovery UI.
+- A recursive filesystem watcher or full-library MP3 tag scan; synchronization is intentionally bounded to pending overlays and selected tracks.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections
+## Planned sections after 0.4.0
 
-1. Album/artist routes and keyset-paginated library browsing.
+1. Lazy MusicBrainz discovery and curated overlay workflows.
 2. Listening history, ReplayGain, device selection, and gapless playback research.
-3. Lazy MusicBrainz discovery and curated overlay workflows.
+3. Smart playlists and saved explorer views after the browsing/filter contract is proven.

@@ -4,6 +4,35 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-22
+
+### Added
+
+- Deep Explorer views for Tracks, Albums, and Artists with opaque keyset cursors, 50-row pages, and native hard caps of 100 records.
+- Exact half-star/unrated, Love/Neutral/Ban, release-year, genre, artist, and safely quoted full-text filters with validated view-specific sorts.
+- Album cover grid and bounded album details with playback, keyboard row navigation, and immediate rating/Love controls.
+- Artist drill-down from both Explorer results and universe planets; the exact artist focus carries across its track and album views.
+- Bounded focus-time reconciliation for pending Aurora tag overlays when MusicBee changes an MP3 externally.
+
+### Changed
+
+- Explore now uses feature-owned responsive layouts that keep rating and Love controls visible at Aurora's default Windows size.
+- A selected MP3 refreshes on application focus unless the inspector contains unsaved work.
+- Browser preview tag edits now survive Explorer reloads just as native Aurora overlays do.
+- Pending files that cannot currently be read rotate behind later reconciliation work instead of starving the queue.
+
+### Performance
+
+- Live checks on 1,096,162 tracks measured common bounded queries at approximately 26–84 ms including SQLite process startup.
+- Global title A–Z remains the borderline path at approximately 120 ms because the shared catalog has no title-only index.
+
+### Security
+
+- Every explorer value uses bind parameters; only validated sort enums affect SQL structure, and mismatched cursor/sort pairs are rejected.
+- Explorer and detail commands preserve SQLite read-only/query-only enforcement and never return more than 100 records.
+- External synchronization reads only pending-overlay MP3s, never scans the library, never writes an MP3, and preserves Aurora's operation journal and undo history.
+- MP3 tags remain authoritative while Music Library's imported SQLite catalog remains read-only.
+
 ## [0.3.1] - 2026-08-22
 
 ### Added

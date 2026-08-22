@@ -1,6 +1,6 @@
 use crate::{
     catalog::{self, ResolvedTrack, TrackSummary},
-    state_store::StateStore,
+    state_store::{StateStore, TagOverlay},
     tag_model::{LoveState, TagEditRequest, TagSyncState, TagValues, TrackTagState},
 };
 use id3::{
@@ -22,6 +22,7 @@ const MUSICBEE_POPM_OWNER: &str = "MusicBee";
 const LOVE_RATING_DESCRIPTION: &str = "LOVE RATING";
 const RELEASE_TIME_DESCRIPTION: &str = "TDRL";
 const RETAINED_BACKUPS: usize = 20;
+const MAX_PENDING_RECONCILIATION_BATCH: usize = 200;
 
 const MUSICBEE_RATINGS: [(f64, u8); 10] = [
     (0.5, 13),
@@ -43,6 +44,88 @@ pub(crate) struct TrackTagSnapshot {
     pub(crate) tag_state: TrackTagState,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TagReconciliationChange {
+    pub(crate) track_key: String,
+    pub(crate) values: TagValues,
+    pub(crate) sync_state: Option<TagSyncState>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TagReconciliationIssue {
+    pub(crate) track_key: String,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TagReconciliationReport {
+    pub(crate) processed: usize,
+    pub(crate) reconciled: usize,
+    pub(crate) external_changes: usize,
+    pub(crate) catalog_caught_up: usize,
+    pub(crate) unchanged: usize,
+    pub(crate) unavailable: usize,
+    pub(crate) invalid: usize,
+    pub(crate) conflicted: usize,
+    pub(crate) has_more: bool,
+    pub(crate) changes: Vec<TagReconciliationChange>,
+    pub(crate) issues: Vec<TagReconciliationIssue>,
+}
+
+impl TagReconciliationReport {
+    fn new(has_more: bool) -> Self {
+        Self {
+            processed: 0,
+            reconciled: 0,
+            external_changes: 0,
+            catalog_caught_up: 0,
+            unchanged: 0,
+            unavailable: 0,
+            invalid: 0,
+            conflicted: 0,
+            has_more,
+            changes: Vec::new(),
+            issues: Vec::new(),
+        }
+    }
+
+    fn record_failure(&mut self, track_key: &str, failure: PendingOverlayFailure) {
+        match failure.kind {
+            PendingOverlayFailureKind::Unavailable => self.unavailable += 1,
+            PendingOverlayFailureKind::Invalid => self.invalid += 1,
+            PendingOverlayFailureKind::Conflicted => self.conflicted += 1,
+            PendingOverlayFailureKind::State => {}
+        }
+        self.issues.push(TagReconciliationIssue {
+            track_key: track_key.to_owned(),
+            message: failure.message,
+        });
+    }
+}
+
+struct PendingOverlayOutcome {
+    values: TagValues,
+    external_change: bool,
+    catalog_caught_up: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PendingOverlayFailureKind {
+    Unavailable,
+    Invalid,
+    Conflicted,
+    State,
+}
+
+#[derive(Debug)]
+struct PendingOverlayFailure {
+    kind: PendingOverlayFailureKind,
+    message: String,
+}
+
 pub(crate) struct TagService {
     store: StateStore,
 }
@@ -62,6 +145,170 @@ impl TagService {
         let resolved = catalog::resolve_track(track_id, track_key, &self.store)?;
         let values = read_tag_values_from_path(&resolved.audio_path)?;
         self.snapshot_with_values(resolved, values, None)
+    }
+
+    pub(crate) fn reconcile_pending_overlays(
+        &self,
+        requested_limit: usize,
+    ) -> Result<TagReconciliationReport, String> {
+        let limit = requested_limit.clamp(1, MAX_PENDING_RECONCILIATION_BATCH);
+        let mut overlays = self.store.pending_overlays(limit + 1)?;
+        let has_more = overlays.len() > limit;
+        overlays.truncate(limit);
+        let mut report = TagReconciliationReport::new(has_more);
+
+        for overlay in overlays {
+            report.processed += 1;
+            if overlay.track_key
+                != catalog::normalize_track_key(&overlay.directory, &overlay.filename)
+            {
+                self.record_pending_failure(
+                    &mut report,
+                    &overlay.track_key,
+                    PendingOverlayFailure {
+                        kind: PendingOverlayFailureKind::Unavailable,
+                        message:
+                            "This pending track no longer matches its stable catalog identity."
+                                .to_owned(),
+                    },
+                )?;
+                continue;
+            }
+            let catalog_values = match catalog::catalog_tag_values_by_path(
+                &overlay.directory,
+                &overlay.filename,
+            ) {
+                Ok(Some(values)) => values,
+                Ok(None) => {
+                    self.record_pending_failure(
+                        &mut report,
+                        &overlay.track_key,
+                        PendingOverlayFailure {
+                            kind: PendingOverlayFailureKind::Unavailable,
+                            message: "This pending track is no longer present in Music Library's catalog."
+                                .to_owned(),
+                        },
+                    )?;
+                    continue;
+                }
+                Err(error) => {
+                    self.record_pending_failure(
+                        &mut report,
+                        &overlay.track_key,
+                        PendingOverlayFailure {
+                            kind: PendingOverlayFailureKind::Unavailable,
+                            message: error,
+                        },
+                    )?;
+                    continue;
+                }
+            };
+            let audio_path =
+                match validated_pending_overlay_path(&overlay.directory, &overlay.filename) {
+                    Ok(path) => path,
+                    Err(failure) => {
+                        self.record_pending_failure(&mut report, &overlay.track_key, failure)?;
+                        continue;
+                    }
+                };
+            match self.reconcile_pending_overlay(
+                &overlay,
+                &catalog_values.0,
+                catalog_values.1,
+                &audio_path,
+            ) {
+                Ok(outcome) => {
+                    report.reconciled += 1;
+                    if outcome.external_change {
+                        report.external_changes += 1;
+                    }
+                    if outcome.catalog_caught_up {
+                        report.catalog_caught_up += 1;
+                    }
+                    if !outcome.external_change && !outcome.catalog_caught_up {
+                        report.unchanged += 1;
+                    } else {
+                        report.changes.push(TagReconciliationChange {
+                            track_key: overlay.track_key,
+                            sync_state: (!outcome.catalog_caught_up)
+                                .then_some(TagSyncState::PendingImport),
+                            values: outcome.values,
+                        });
+                    }
+                }
+                Err(failure) => {
+                    if matches!(failure.kind, PendingOverlayFailureKind::State) {
+                        return Err(failure.message);
+                    }
+                    self.record_pending_failure(&mut report, &overlay.track_key, failure)?;
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    fn record_pending_failure(
+        &self,
+        report: &mut TagReconciliationReport,
+        track_key: &str,
+        failure: PendingOverlayFailure,
+    ) -> Result<(), String> {
+        self.store.defer_overlay_reconciliation(track_key)?;
+        report.record_failure(track_key, failure);
+        Ok(())
+    }
+
+    fn reconcile_pending_overlay(
+        &self,
+        overlay: &TagOverlay,
+        catalog_values: &TagValues,
+        catalog_import_run_id: i64,
+        audio_path: &Path,
+    ) -> Result<PendingOverlayOutcome, PendingOverlayFailure> {
+        let before_fingerprint =
+            FileFingerprint::read(audio_path).map_err(|message| PendingOverlayFailure {
+                kind: PendingOverlayFailureKind::Unavailable,
+                message,
+            })?;
+        let values =
+            read_tag_values_from_path(audio_path).map_err(|message| PendingOverlayFailure {
+                kind: PendingOverlayFailureKind::Invalid,
+                message,
+            })?;
+        let after_fingerprint =
+            FileFingerprint::read(audio_path).map_err(|message| PendingOverlayFailure {
+                kind: PendingOverlayFailureKind::Unavailable,
+                message,
+            })?;
+        if before_fingerprint != after_fingerprint {
+            return Err(PendingOverlayFailure {
+                kind: PendingOverlayFailureKind::Conflicted,
+                message: "The MP3 changed while Aurora reconciled it; its pending state was left untouched."
+                    .to_owned(),
+            });
+        }
+
+        let external_change = values != overlay.values;
+        let catalog_caught_up = values == *catalog_values;
+        self.store
+            .upsert_overlay(
+                &overlay.track_key,
+                &overlay.directory,
+                &overlay.filename,
+                catalog_values,
+                &values,
+                catalog_import_run_id,
+                overlay.last_operation_id,
+            )
+            .map_err(|message| PendingOverlayFailure {
+                kind: PendingOverlayFailureKind::State,
+                message,
+            })?;
+        Ok(PendingOverlayOutcome {
+            values,
+            external_change,
+            catalog_caught_up,
+        })
     }
 
     pub(crate) fn update(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
@@ -628,6 +875,39 @@ impl TagService {
         }
         Ok(())
     }
+}
+
+fn validated_pending_overlay_path(
+    directory: &str,
+    filename: &str,
+) -> Result<PathBuf, PendingOverlayFailure> {
+    let directory_path = Path::new(directory);
+    let filename_path = Path::new(filename);
+    if !directory_path.is_absolute()
+        || filename_path.is_absolute()
+        || filename_path.components().count() != 1
+        || !matches!(
+            filename_path.components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+    {
+        return Err(PendingOverlayFailure {
+            kind: PendingOverlayFailureKind::Unavailable,
+            message: "The catalog contains an unsafe pending-track location.".to_owned(),
+        });
+    }
+    let audio_path = directory_path.join(filename_path);
+    let is_mp3 = audio_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"));
+    if !is_mp3 || !audio_path.is_file() {
+        return Err(PendingOverlayFailure {
+            kind: PendingOverlayFailureKind::Unavailable,
+            message: "The pending MP3 is unavailable at its catalog location.".to_owned(),
+        });
+    }
+    Ok(audio_path)
 }
 
 fn read_tag_for_write(path: &Path) -> Result<(Tag, Version), String> {
@@ -1225,6 +1505,200 @@ mod tests {
         });
         tag.write_to_path(path, version).expect("write fixture tag");
         audio
+    }
+
+    fn replace_musicbee_values(path: &Path, values: &TagValues) {
+        let (mut tag, version) = read_tag_for_write(path).expect("read fixture tags");
+        let before = read_tag_values(&tag).expect("read fixture values");
+        apply_tag_changes(&mut tag, version, &before, values).expect("apply MusicBee values");
+        tag.write_to_path(path, version)
+            .expect("write MusicBee values");
+    }
+
+    fn seed_pending_overlay(
+        store: &StateStore,
+        target: &Path,
+        catalog_values: &TagValues,
+        overlay_values: &TagValues,
+    ) -> TagOverlay {
+        let directory = target
+            .parent()
+            .expect("target directory")
+            .to_string_lossy()
+            .into_owned();
+        let filename = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("target filename");
+        let track_key = target.to_string_lossy().to_lowercase();
+        store
+            .upsert_overlay(
+                &track_key,
+                &directory,
+                filename,
+                catalog_values,
+                overlay_values,
+                52,
+                Some(41),
+            )
+            .expect("seed overlay");
+        store
+            .pending_overlays(1)
+            .expect("read pending overlay")
+            .remove(0)
+    }
+
+    fn remove_state_fixture(path: &Path) {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(PathBuf::from(format!("{}-wal", path.display())));
+        let _ = fs::remove_file(PathBuf::from(format!("{}-shm", path.display())));
+    }
+
+    #[test]
+    fn pending_reconciliation_adopts_external_musicbee_rating() {
+        let target = fixture_path("external-rating");
+        write_fixture(&target, Version::Id3v23);
+        let catalog_values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let aurora_values = TagValues {
+            rating: Some(2.0),
+            ..catalog_values.clone()
+        };
+        replace_musicbee_values(&target, &aurora_values);
+        let state_path = fixture_path("external-rating-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let overlay = seed_pending_overlay(&store, &target, &catalog_values, &aurora_values);
+
+        let musicbee_values = TagValues {
+            rating: Some(4.0),
+            ..catalog_values.clone()
+        };
+        replace_musicbee_values(&target, &musicbee_values);
+        let service = TagService {
+            store: store.clone(),
+        };
+        let outcome = service
+            .reconcile_pending_overlay(&overlay, &catalog_values, 53, &target)
+            .expect("reconcile external rating");
+
+        assert!(outcome.external_change);
+        assert!(!outcome.catalog_caught_up);
+        let reconciled = store.pending_overlays(1).expect("reconciled overlay");
+        assert_eq!(reconciled[0].values, musicbee_values);
+        assert_eq!(reconciled[0].last_operation_id, Some(41));
+
+        let _ = fs::remove_file(target);
+        remove_state_fixture(&state_path);
+    }
+
+    #[test]
+    fn pending_reconciliation_removes_overlay_after_catalog_catches_up() {
+        let target = fixture_path("catalog-catch-up");
+        write_fixture(&target, Version::Id3v23);
+        let old_catalog = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let current = TagValues {
+            rating: Some(2.0),
+            ..old_catalog.clone()
+        };
+        replace_musicbee_values(&target, &current);
+        let state_path = fixture_path("catalog-catch-up-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let overlay = seed_pending_overlay(&store, &target, &old_catalog, &current);
+        let service = TagService {
+            store: store.clone(),
+        };
+
+        let outcome = service
+            .reconcile_pending_overlay(&overlay, &current, 53, &target)
+            .expect("reconcile catalog catch-up");
+
+        assert!(!outcome.external_change);
+        assert!(outcome.catalog_caught_up);
+        assert!(store.pending_overlays(1).expect("overlays").is_empty());
+
+        let _ = fs::remove_file(target);
+        remove_state_fixture(&state_path);
+    }
+
+    #[test]
+    fn pending_reconciliation_leaves_unchanged_mp3_pending() {
+        let target = fixture_path("unchanged-pending");
+        write_fixture(&target, Version::Id3v23);
+        let catalog_values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let current = TagValues {
+            rating: Some(2.0),
+            ..catalog_values.clone()
+        };
+        replace_musicbee_values(&target, &current);
+        let state_path = fixture_path("unchanged-pending-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let overlay = seed_pending_overlay(&store, &target, &catalog_values, &current);
+        let service = TagService {
+            store: store.clone(),
+        };
+
+        let outcome = service
+            .reconcile_pending_overlay(&overlay, &catalog_values, 53, &target)
+            .expect("reconcile unchanged file");
+
+        assert!(!outcome.external_change);
+        assert!(!outcome.catalog_caught_up);
+        assert_eq!(
+            store.pending_overlays(1).expect("overlays")[0].values,
+            current
+        );
+
+        let _ = fs::remove_file(target);
+        remove_state_fixture(&state_path);
+    }
+
+    #[test]
+    fn pending_reconciliation_retains_overlay_when_mp3_is_missing() {
+        let target = fixture_path("missing-pending");
+        write_fixture(&target, Version::Id3v23);
+        let catalog_values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let current = TagValues {
+            rating: Some(2.0),
+            ..catalog_values.clone()
+        };
+        let state_path = fixture_path("missing-pending-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let overlay = seed_pending_overlay(&store, &target, &catalog_values, &current);
+        fs::remove_file(&target).expect("remove MP3");
+        let service = TagService {
+            store: store.clone(),
+        };
+
+        let result = service.reconcile_pending_overlay(&overlay, &catalog_values, 53, &target);
+        let Err(failure) = result else {
+            panic!("missing MP3 should not reconcile");
+        };
+
+        assert!(matches!(
+            failure.kind,
+            PendingOverlayFailureKind::Unavailable
+        ));
+        assert_eq!(
+            store.pending_overlays(1).expect("overlays")[0].values,
+            current
+        );
+
+        remove_state_fixture(&state_path);
     }
 
     #[test]

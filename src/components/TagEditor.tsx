@@ -29,6 +29,8 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
   const [canUndo, setCanUndo] = useState(track.canUndoTagEdit);
   const [syncState, setSyncState] = useState(track.tagSyncState);
   const requestRef = useRef(0);
+  const dirtyRef = useRef(false);
+  const workingRef = useRef(true);
 
   function applySnapshot(snapshot: TrackTagSnapshot, nextPhase: EditorPhase) {
     setConfirmed(snapshot.tagState.values);
@@ -67,6 +69,32 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
   );
   const isDirty = JSON.stringify(desired) !== JSON.stringify(confirmed) || Number.isNaN(parsedYear);
   const isWorking = phase === "loading" || phase === "saving";
+
+  useEffect(() => {
+    dirtyRef.current = isDirty;
+    workingRef.current = isWorking;
+  }, [isDirty, isWorking]);
+
+  useEffect(() => {
+    function refreshExternalTags() {
+      if (dirtyRef.current || workingRef.current) return;
+      const requestId = ++requestRef.current;
+      void readTrackTagState(track)
+        .then((snapshot) => {
+          if (requestId !== requestRef.current) return;
+          applySnapshot(snapshot, "ready");
+        })
+        .catch((error: unknown) => {
+          if (requestId !== requestRef.current) return;
+          setPhase("error");
+          setMessage(error instanceof Error ? error.message : String(error));
+        });
+    }
+    window.addEventListener("focus", refreshExternalTags);
+    return () => window.removeEventListener("focus", refreshExternalTags);
+    // This editor is keyed by track identity; a new track gets a new component lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function save() {
     if (Number.isNaN(parsedYear)) {

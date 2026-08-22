@@ -1,16 +1,19 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.3.1 makes MusicBee-compatible rating and Love edits immediate from the Explore table while keeping the imported Music Library catalog read-only.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.4.0 adds bounded deep browsing across Tracks, Albums, and Artists while keeping the imported Music Library catalog read-only and MP3 tags authoritative.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.3.1 slice
+## Current 0.4.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
-- Clickable artist planets that query 50 tracks for the selected artist.
-- Debounced, safely quoted FTS5 prefix search across the entire catalog.
+- Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
+- Exact half-star/unrated, Love/Neutral/Ban, release-year, genre, and artist filters, plus safely quoted FTS5 prefix search across the entire catalog.
+- Validated sorts for newest, title, artist, album, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
+- Clickable artist planets and artist results that open an exact artist focus which can be switched between tracks and albums.
+- Album cover grids with bounded album track details, playback activation, keyboard row navigation, and inline tag controls.
 - Inspector editor for half-star ratings, Love/Neutral/Ban, and Release Year, plus read-only genre, duration, and optional Last.fm popularity.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
@@ -20,6 +23,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Transactional same-folder MP3 writes using MusicBee's exact POPM byte map, `LOVE RATING`, and Release Time conventions.
 - Conflict detection, post-write tag/audio verification, Windows atomic replacement, retained rollback copies, crash recovery, and one-step undo. Ambiguous or externally changed files are never auto-overwritten; Aurora retains both versions for manual recovery.
 - Aurora-owned tag overlays that update the UI immediately and reconcile automatically after a later MusicBee TSV import updates Music Library.
+- Focus-time MusicBee reconciliation that reads only pending-overlay MP3s in bounded batches, treats their tags as authoritative, clears caught-up overlays, and rotates unavailable files so they cannot starve later work.
 - Half-star track reconciliation reads Music Library's raw rating when its older normalized field is null; removed-track overlays are excluded from library totals.
 - Album covers served through a narrow Rust protocol that resolves exact album IDs, contains canonical paths to the configured archive, rejects oversized sources, and caches 64–512 px WebP thumbnails.
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
@@ -29,7 +33,7 @@ The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Mu
 
 ## Data model
 
-The primary catalog currently contains 1,096,162 MP3 tracks, 72,000 albums, and 20,392 album artists. Aurora opens the active WAL-backed database with SQLite read-only flags and `query_only`; it does not use immutable mode and does not write ratings back into this imported catalog.
+The primary catalog currently contains 1,096,162 MP3 tracks, 72,000 albums, and 20,392 album artists. Aurora opens the active WAL-backed database with SQLite read-only flags and `query_only`; it does not use immutable mode and does not write ratings back into this imported catalog. Live checks measured common bounded explorer paths at approximately 26–84 ms including SQLite process startup. Global title A–Z is the known slower path at approximately 120 ms because the shared catalog has no title-only index.
 
 The broad MusicBrainz cache and curated overlay are deferred from startup. See [docs/database-contract.md](docs/database-contract.md) for verified sizes, responsibilities, query limits, and authority rules.
 
@@ -67,7 +71,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.3.1`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.4.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

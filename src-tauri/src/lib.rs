@@ -1,16 +1,21 @@
 mod artwork;
 mod catalog;
+mod explorer;
 mod playback;
 mod state_store;
 mod tag_model;
 mod tagging;
 
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
+use explorer::{
+    AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
+    TrackPage, TrackPageRequest,
+};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use state_store::StateStore;
 use std::sync::Mutex;
 use tag_model::TagEditRequest;
-use tagging::{TagService, TrackTagSnapshot};
+use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager, State};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
@@ -54,6 +59,47 @@ async fn search_tracks(app: AppHandle, query: String) -> Result<Vec<TrackSummary
     })
     .await
     .map_err(|error| format!("The search worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn explore_tracks(app: AppHandle, request: TrackPageRequest) -> Result<TrackPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        explorer::load_track_page(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The track explorer stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn explore_albums(request: AlbumPageRequest) -> Result<AlbumPage, String> {
+    tauri::async_runtime::spawn_blocking(move || explorer::load_album_page(request))
+        .await
+        .map_err(|error| format!("The album explorer stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn explore_artists(request: ArtistPageRequest) -> Result<ArtistPage, String> {
+    tauri::async_runtime::spawn_blocking(move || explorer::load_artist_page(request))
+        .await
+        .map_err(|error| format!("The artist explorer stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn album_detail(app: AppHandle, album_id: String) -> Result<AlbumDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        explorer::load_album_detail(album_id, &store)
+    })
+    .await
+    .map_err(|error| format!("The album detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn artist_detail(artist: String) -> Result<ArtistDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || explorer::load_artist_detail(artist))
+        .await
+        .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -210,6 +256,19 @@ async fn undo_track_tag_edit(
     .map_err(|error| format!("The tag undo worker stopped unexpectedly: {error}"))?
 }
 
+#[tauri::command]
+async fn refresh_external_tag_changes(app: AppHandle) -> Result<TagReconciliationReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<TagState>();
+        let service = state
+            .lock()
+            .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
+        service.reconcile_pending_overlays(100)
+    })
+    .await
+    .map_err(|error| format!("The external-tag refresh stopped unexpectedly: {error}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -240,6 +299,11 @@ pub fn run() {
             library_snapshot,
             artist_tracks,
             search_tracks,
+            explore_tracks,
+            explore_albums,
+            explore_artists,
+            album_detail,
+            artist_detail,
             playback_state,
             playback_replace_queue,
             playback_toggle,
@@ -255,6 +319,7 @@ pub fn run() {
             track_tag_state,
             update_track_tags,
             undo_track_tag_edit,
+            refresh_external_tag_changes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

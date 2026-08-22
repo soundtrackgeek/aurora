@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Track } from "./library";
-import { readTrackTagState, tagValuesForTrack, trackWithTagValues, undoTrackTagEdit, updateTrackTags } from "./tags";
+import { browserPreview, exploreTracks, type Track } from "./library";
+import {
+  readTrackTagState,
+  reconcilePendingTags,
+  tagValuesForTrack,
+  trackWithReconciledTags,
+  trackWithTagValues,
+  undoTrackTagEdit,
+  updateTrackTags,
+} from "./tags";
 
 function track(id: string): Track {
   return {
@@ -75,5 +83,41 @@ describe("tag editing preview boundary", () => {
       }),
     ).rejects.toThrow(/changed after the editor opened/i);
     expect((await readTrackTagState(original)).tagState.values.loveState).toBe("banned");
+  });
+
+  it("applies an authoritative external reconciliation without changing undo availability", () => {
+    const original = { ...track("external-change"), canUndoTagEdit: true, tagSyncState: "pendingImport" as const };
+    const reconciled = trackWithReconciledTags(original, {
+      trackKey: original.trackKey,
+      values: { rating: 4, loveState: "loved", releaseYear: 2002 },
+      syncState: null,
+    });
+    expect(reconciled).toMatchObject({
+      rating: 4,
+      loved: true,
+      releaseYear: 2002,
+      tagSyncState: null,
+      canUndoTagEdit: true,
+    });
+  });
+
+  it("does no filesystem reconciliation in browser preview", async () => {
+    await expect(reconcilePendingTags()).resolves.toMatchObject({ processed: 0, changes: [], hasMore: false });
+  });
+
+  it("keeps a saved inline edit when the browser Explorer reloads", async () => {
+    const original = browserPreview.tracks[0];
+    const desired = { ...tagValuesForTrack(original), rating: 2, loveState: "neutral" as const };
+    const saved = await updateTrackTags(original, tagValuesForTrack(original), desired);
+
+    const reloaded = await exploreTracks({ artist: original.artist });
+    expect(reloaded.items.find((candidate) => candidate.id === original.id)).toMatchObject({
+      rating: 2,
+      loved: false,
+      loveState: "neutral",
+      tagSyncState: "pendingImport",
+    });
+
+    await undoTrackTagEdit(saved.track);
   });
 });

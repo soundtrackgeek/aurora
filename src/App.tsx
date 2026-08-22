@@ -3,9 +3,7 @@ import {
   Album,
   AudioLines,
   BadgeCheck,
-  ChevronDown,
   ChevronRight,
-  CircleAlert,
   CircleUserRound,
   Clock3,
   Disc3,
@@ -14,10 +12,7 @@ import {
   Gauge,
   Heart,
   LibraryBig,
-  Menu,
-  MoreHorizontal,
   Music2,
-  Pause,
   Play,
   RefreshCw,
   Search,
@@ -28,27 +23,44 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
-import { InlineLoveControl, InlineRatingControl } from "./components/InlineTagControls";
+import {
+  DeepExplorer,
+  type ExplorerAlbum,
+  type ExplorerFilters,
+  type ExplorerLoadState,
+  type ExplorerSort,
+  type ExplorerView,
+} from "./components/explorer/DeepExplorer";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { TagEditor } from "./components/TagEditor";
 import {
-  filterTracks,
+  exploreAlbums,
+  exploreArtists,
+  exploreTracks,
   formatCount,
   formatDuration,
-  isTauriRuntime,
-  loadArtistTracks,
+  loadAlbumDetail,
   loadLibrarySnapshot,
-  searchLibraryTracks,
+  type AlbumSummary,
   type Artist,
+  type ExplorerCursor,
   type LibrarySnapshot,
   type Track,
 } from "./library";
 import { usePlayback } from "./playback";
-import { tagValuesForTrack, trackWithTagValues, updateTrackTags, type TagValues } from "./tags";
+import {
+  reconcilePendingTags,
+  tagValuesForTrack,
+  trackWithReconciledTags,
+  trackWithTagValues,
+  updateTrackTags,
+  type TagReconciliationChange,
+  type TagValues,
+} from "./tags";
 import { useAuroraUpdater } from "./updater";
 
 const navigation = [
@@ -68,6 +80,81 @@ const previewPlaylists = [
   { label: "Night Drive", count: "smart playlist", icon: Music2 },
   { label: "Unplayed", count: "listening queue", icon: Disc3 },
 ];
+
+const defaultExplorerFilters: ExplorerFilters = {
+  query: "",
+  rating: "all",
+  love: "all",
+  yearFrom: null,
+  yearTo: null,
+  genre: null,
+  artist: null,
+  sort: "newest",
+};
+
+const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
+  tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "releaseYearDesc", "ratingDesc"],
+  albums: ["releaseYearDesc", "titleAsc", "artistAsc", "ratingDesc"],
+  artists: ["artistAsc", "trackCountDesc"],
+};
+
+const defaultSort: Record<ExplorerView, ExplorerSort> = {
+  tracks: "newest",
+  albums: "releaseYearDesc",
+  artists: "artistAsc",
+};
+
+type ExplorerResult = {
+  tracks: Track[];
+  albums: AlbumSummary[];
+  artists: Artist[];
+  nextCursor: ExplorerCursor | null;
+};
+
+async function loadExplorerPage(
+  view: ExplorerView,
+  filters: ExplorerFilters,
+  cursor?: ExplorerCursor,
+): Promise<ExplorerResult> {
+  const shared = {
+    pageSize: 50,
+    cursor,
+    search: filters.query.trim() || undefined,
+    genre: filters.genre ?? undefined,
+  };
+  if (view === "tracks") {
+    const page = await exploreTracks({
+      ...shared,
+      rating: typeof filters.rating === "number" ? filters.rating : undefined,
+      unrated: filters.rating === "unrated" || undefined,
+      loveState: filters.love === "all" ? undefined : filters.love,
+      yearFrom: filters.yearFrom ?? undefined,
+      yearTo: filters.yearTo ?? undefined,
+      artist: filters.artist ?? undefined,
+      sort: explorerSorts.tracks.includes(filters.sort)
+        ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc"
+        : "newest",
+    });
+    return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor };
+  }
+  if (view === "albums") {
+    const page = await exploreAlbums({
+      ...shared,
+      yearFrom: filters.yearFrom ?? undefined,
+      yearTo: filters.yearTo ?? undefined,
+      artist: filters.artist ?? undefined,
+      sort: explorerSorts.albums.includes(filters.sort)
+        ? filters.sort as "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc"
+        : "releaseYearDesc",
+    });
+    return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor };
+  }
+  const page = await exploreArtists({
+    ...shared,
+    sort: filters.sort === "trackCountDesc" ? "trackCountDesc" : "nameAsc",
+  });
+  return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor };
+}
 
 function EmptyInspector() {
   return (
@@ -152,19 +239,32 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
 function App() {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [activeArtist, setActiveArtist] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [activeNav, setActiveNav] = useState("Universe");
   const [reloadToken, setReloadToken] = useState(0);
-  const [exploredTracks, setExploredTracks] = useState<Track[] | null>(null);
-  const [isExploring, setIsExploring] = useState(false);
+  const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
+  const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(defaultExplorerFilters);
+  const [explorerTracks, setExplorerTracks] = useState<Track[]>([]);
+  const [explorerAlbums, setExplorerAlbums] = useState<AlbumSummary[]>([]);
+  const [explorerArtists, setExplorerArtists] = useState<Artist[]>([]);
+  const [explorerCursor, setExplorerCursor] = useState<ExplorerCursor | null>(null);
+  const [explorerLoadState, setExplorerLoadState] = useState<ExplorerLoadState>("loading");
+  const [explorerError, setExplorerError] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [explorerReloadToken, setExplorerReloadToken] = useState(0);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
+  const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
+  const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
+  const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
-  const [inlineErrors, setInlineErrors] = useState<Record<string, string>>({});
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
+  const albumRequestRef = useRef(0);
+  const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
   const playback = usePlayback();
@@ -201,38 +301,99 @@ function App() {
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      const request = query.trim()
-        ? searchLibraryTracks(query)
-        : activeArtist
-          ? loadArtistTracks(activeArtist)
-          : Promise.resolve<Track[] | null>(null);
-      setIsExploring(Boolean(query.trim() || activeArtist));
-      void request
-        .then((nextTracks) => {
+      setExplorerLoadState("loading");
+      setExplorerError(null);
+      setExplorerCursor(null);
+      setSelectedAlbumId(null);
+      setAlbumTracks([]);
+      setAlbumTracksTruncated(false);
+      void loadExplorerPage(explorerView, explorerFilters)
+        .then((page) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
-          setExploredTracks(nextTracks);
-          setIsExploring(false);
-          if (nextTracks?.length) setSelectedTrack(nextTracks[0]);
+          setExplorerTracks(page.tracks);
+          setExplorerAlbums(page.albums);
+          setExplorerArtists(page.artists);
+          setExplorerCursor(page.nextCursor);
+          setExplorerLoadState("ready");
         })
         .catch((error: unknown) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
-          console.warn("Aurora exploration request failed", error);
-          setExploredTracks([]);
-          setIsExploring(false);
+          setExplorerError(error instanceof Error ? error.message : String(error));
+          setExplorerLoadState("error");
         });
-    }, query.trim() ? 160 : 0);
+    }, explorerFilters.query.trim() ? 160 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [libraryReady, query, activeArtist]);
+  }, [libraryReady, explorerView, explorerFilters, explorerReloadToken]);
 
-  const tracks = useMemo(
-    () => exploredTracks ?? filterTracks(snapshot?.tracks ?? [], query, isTauriRuntime() ? null : activeArtist),
-    [exploredTracks, snapshot?.tracks, query, activeArtist],
-  );
+  const applyReconciliationChanges = useCallback((changes: TagReconciliationChange[]) => {
+    if (changes.length === 0) return;
+    const byTrackKey = new Map(changes.map((change) => [change.trackKey, change]));
+    const reconcile = (track: Track) => {
+      const change = byTrackKey.get(track.trackKey);
+      return change ? trackWithReconciledTags(track, change) : track;
+    };
+    setExplorerTracks((current) => current.map(reconcile));
+    setAlbumTracks((current) => current.map(reconcile));
+    setSelectedTrack((current) => current ? reconcile(current) : current);
+    setSnapshot((current) => current ? { ...current, tracks: current.tracks.map(reconcile) } : current);
+  }, []);
 
-  function playTrack(track: Track, queue = tracks) {
+  const refreshExternalTagChanges = useCallback(async () => {
+    if (reconciliationRunningRef.current) return;
+    reconciliationRunningRef.current = true;
+    let totalChanges = 0;
+    let totalIssues = 0;
+    let hasMore = false;
+    let firstIssue: string | null = null;
+    try {
+      for (let batch = 0; batch < 10; batch += 1) {
+        const report = await reconcilePendingTags();
+        applyReconciliationChanges(report.changes);
+        totalChanges += report.externalChanges;
+        totalIssues += report.issues.length;
+        firstIssue ??= report.issues[0]?.message ?? null;
+        hasMore = report.hasMore;
+        if (!report.hasMore || report.processed === 0) break;
+      }
+      if (totalChanges > 0) {
+        setSyncMessage(`Refreshed ${formatCount(totalChanges)} external tag ${totalChanges === 1 ? "change" : "changes"}`);
+      } else if (totalIssues > 0 || hasMore) {
+        setSyncMessage(totalIssues === 1 && firstIssue
+          ? firstIssue
+          : `${formatCount(totalIssues)} tag ${totalIssues === 1 ? "item needs" : "items need"} attention`);
+      } else {
+        setSyncMessage(null);
+      }
+    } catch (error) {
+      console.warn("Aurora could not reconcile pending tags", error);
+      setSyncMessage("Tag refresh will retry when Aurora regains focus");
+    } finally {
+      reconciliationRunningRef.current = false;
+    }
+  }, [applyReconciliationChanges]);
+
+  useEffect(() => {
+    if (!libraryReady) return;
+    const initialRefresh = window.setTimeout(() => void refreshExternalTagChanges(), 0);
+    const refreshOnFocus = () => void refreshExternalTagChanges();
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [libraryReady, reloadToken, refreshExternalTagChanges]);
+
+  function playTrack(
+    track: Track,
+    queue = albumTracks.some((candidate) => candidate.id === track.id)
+      ? albumTracks
+      : explorerTracks.length > 0
+        ? explorerTracks
+        : snapshot?.tracks ?? [],
+  ) {
     setSelectedTrack(track);
     void playback.play(queue, track.id);
   }
@@ -242,7 +403,8 @@ function App() {
     if (updateSelected) {
       setSelectedTrack((current) => current?.id === updated.id ? updated : current);
     }
-    setExploredTracks((current) => current?.map((track) => track.id === updated.id ? updated : track) ?? current);
+    setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setSnapshot((current) => {
       if (!current) return current;
       const lovedDelta = baseline ? Number(updated.loved) - Number(baseline.loved) : 0;
@@ -266,11 +428,7 @@ function App() {
 
     inlineSaveRef.current.add(track.trackKey);
     setInlineSavingKeys((current) => new Set(current).add(track.trackKey));
-    setInlineErrors((current) => {
-      const next = { ...current };
-      delete next[track.trackKey];
-      return next;
-    });
+    setSyncMessage(null);
 
     const optimistic = trackWithTagValues(track, desired);
     applyTrackChange(optimistic, track, false);
@@ -283,10 +441,8 @@ function App() {
       }));
     } catch (error) {
       applyTrackChange(track, optimistic, false);
-      setInlineErrors((current) => ({
-        ...current,
-        [track.trackKey]: error instanceof Error ? error.message : String(error),
-      }));
+      const message = error instanceof Error ? error.message : String(error);
+      setSyncMessage(`Could not save ${track.title}: ${message}`);
     } finally {
       inlineSaveRef.current.delete(track.trackKey);
       setInlineSavingKeys((current) => {
@@ -297,18 +453,93 @@ function App() {
     }
   }
 
-  function selectArtist(artist: Artist) {
-    const nextArtist = activeArtist === artist.name ? null : artist.name;
-    setActiveArtist(nextArtist);
-    if (nextArtist) {
-      const firstTrack = snapshot?.tracks.find((track) => track.artist === nextArtist);
-      if (firstTrack) setSelectedTrack(firstTrack);
+  function changeExplorerView(view: ExplorerView) {
+    setExplorerView(view);
+    setExplorerFilters((current) => ({
+      ...current,
+      sort: explorerSorts[view].includes(current.sort) ? current.sort : defaultSort[view],
+    }));
+    if (view !== "albums") setSelectedAlbumId(null);
+  }
+
+  function navigate(label: string) {
+    setActiveNav(label);
+    if (label === "Albums") changeExplorerView("albums");
+    else if (label === "Artists") changeExplorerView("artists");
+    else changeExplorerView("tracks");
+  }
+
+  function focusArtist(artist: Artist) {
+    setSelectedArtistId(artist.id);
+    setActiveNav("Artists");
+    setExplorerView("tracks");
+    setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: "newest" }));
+  }
+
+  function selectAlbum(album: ExplorerAlbum | null) {
+    const requestId = ++albumRequestRef.current;
+    setSelectedAlbumId(album?.id ?? null);
+    setAlbumTracks([]);
+    setAlbumTracksTruncated(false);
+    if (!album) {
+      setAlbumDetailState("ready");
+      return;
+    }
+    setAlbumDetailState("loading");
+    void loadAlbumDetail(album.id)
+      .then((detail) => {
+        if (requestId !== albumRequestRef.current) return;
+        setAlbumTracks(detail.tracks);
+        setAlbumTracksTruncated(detail.tracksTruncated);
+        setAlbumDetailState("ready");
+      })
+      .catch((error: unknown) => {
+        if (requestId !== albumRequestRef.current) return;
+        console.warn("Aurora could not open album details", error);
+        setAlbumDetailState("error");
+      });
+  }
+
+  async function loadMoreExplorerResults() {
+    if (!explorerCursor || isLoadingMore) return;
+    const requestId = ++exploreRequestRef.current;
+    setIsLoadingMore(true);
+    try {
+      const page = await loadExplorerPage(explorerView, explorerFilters, explorerCursor);
+      if (requestId !== exploreRequestRef.current) return;
+      setExplorerTracks((current) => [...current, ...page.tracks]);
+      setExplorerAlbums((current) => [...current, ...page.albums]);
+      setExplorerArtists((current) => [...current, ...page.artists]);
+      setExplorerCursor(page.nextCursor);
+    } catch (error) {
+      if (requestId === exploreRequestRef.current) {
+        setExplorerError(error instanceof Error ? error.message : String(error));
+        setExplorerLoadState("error");
+      }
+    } finally {
+      if (requestId === exploreRequestRef.current) setIsLoadingMore(false);
     }
   }
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
   }
+
+  const genres = useMemo(() => Array.from(new Set([
+    ...(snapshot?.tracks.map((track) => track.genre).filter((genre): genre is string => Boolean(genre)) ?? []),
+    ...explorerTracks.map((track) => track.genre).filter((genre): genre is string => Boolean(genre)),
+    ...explorerAlbums.map((album) => album.genre).filter((genre): genre is string => Boolean(genre)),
+  ])).sort((left, right) => left.localeCompare(right)).slice(0, 200), [snapshot?.tracks, explorerTracks, explorerAlbums]);
+  const artistOptions = useMemo(() => Array.from(new Set([
+    ...(snapshot?.artists.map((artist) => artist.name) ?? []),
+    ...explorerArtists.map((artist) => artist.name),
+    ...explorerTracks.map((track) => track.artist),
+  ])).sort((left, right) => left.localeCompare(right)).slice(0, 200), [snapshot?.artists, explorerArtists, explorerTracks]);
+  const explorerLoaded = explorerView === "tracks"
+    ? explorerTracks.length
+    : explorerView === "albums"
+      ? explorerAlbums.length
+      : explorerArtists.length;
 
   const summary = snapshot?.summary;
   const stats = [
@@ -333,7 +564,7 @@ function App() {
               type="button"
               key={label}
               className={activeNav === label ? "is-active" : undefined}
-              onClick={() => setActiveNav(label)}
+              onClick={() => navigate(label)}
             >
               <Icon aria-hidden="true" />
               <span>{label}</span>
@@ -353,7 +584,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.3.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.4.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -361,10 +592,19 @@ function App() {
       <header className="topbar">
         <form className="search" role="search" onSubmit={submitSearch}>
           <Search aria-hidden="true" />
-          <input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value) setActiveArtist(null); }} placeholder="Search your universe…" aria-label="Search your music universe" />
-          {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery("")}><X aria-hidden="true" /></button> : <kbd>Ctrl K</kbd>}
+          <input
+            ref={searchRef}
+            value={explorerFilters.query}
+            onChange={(event) => setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
+            placeholder="Search your universe…"
+            aria-label="Search your music universe"
+          />
+          {explorerFilters.query
+            ? <button type="button" aria-label="Clear search" onClick={() => setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
+            : <kbd>Ctrl K</kbd>}
         </form>
         <div className="topbar__actions">
+          {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
           <button type="button" aria-label="Audio tools" disabled><AudioLines aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
@@ -376,7 +616,8 @@ function App() {
         <div className="main-scroll">
           {snapshot ? (
             <>
-              <Universe artists={snapshot.artists} activeArtist={activeArtist} onSelect={selectArtist} />
+              {activeNav === "Universe" ? <>
+              <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
               <section className="stats" aria-label="Library overview">
                 {stats.map(({ label, value, detail, icon: Icon, tone }) => (
                   <article className={`stat stat--${tone}`} key={label}>
@@ -391,78 +632,45 @@ function App() {
                   {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
                 </article>
               </section>
+              </> : null}
 
-              <section className="library-panel" aria-labelledby="library-heading">
-                <div className="library-toolbar">
-                  <div><p className="eyebrow">Explore</p><h2 id="library-heading">{activeArtist ?? "All songs"}</h2></div>
-                  <div className="toolbar-controls">
-                    {activeArtist && <button type="button" className="filter-chip is-active" onClick={() => setActiveArtist(null)}>{activeArtist}<X aria-hidden="true" /></button>}
-                    <button type="button" className="filter-chip" disabled>Genre <ChevronDown aria-hidden="true" /></button>
-                    <button type="button" className="filter-chip" disabled>Release year <ChevronDown aria-hidden="true" /></button>
-                    <button type="button" className="view-toggle is-active" aria-label="Table view"><Menu aria-hidden="true" /></button>
-                  </div>
-                </div>
-
-                <div className="track-table-wrap">
-                  <table className="track-table">
-                    <thead><tr><th className="track-index">#</th><th>Title</th><th>Artist</th><th>Album</th><th>Year</th><th>Rating</th><th><Clock3 aria-label="Duration" /></th><th>Genre</th><th><Heart aria-label="Loved" /></th><th /></tr></thead>
-                    <tbody>
-                      {tracks.map((track, index) => {
-                        const isSavingTags = inlineSavingKeys.has(track.trackKey);
-                        const inlineError = inlineErrors[track.trackKey];
-                        return (
-                          <tr
-                          key={track.id}
-                          className={[
-                            selectedTrack?.id === track.id ? "is-selected" : "",
-                            playback.state.currentTrack?.id === track.id ? "is-playing" : "",
-                          ].filter(Boolean).join(" ") || undefined}
-                          aria-busy={isSavingTags}
-                          onClick={() => setSelectedTrack(track)}
-                          onDoubleClick={() => playTrack(track)}
-                          >
-                            <td className="track-index">
-                              <span>{index + 1}</span>
-                              <button type="button" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); playTrack(track); }}>
-                                {playback.state.currentTrack?.id === track.id && playback.state.status === "playing" ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
-                              </button>
-                            </td>
-                            <td><div className="track-title"><Artwork track={track} /><strong>{track.title}</strong></div></td>
-                            <td>{track.artist}</td><td>{track.album}</td><td>{track.releaseYear ?? "—"}</td>
-                            <td>
-                              <InlineRatingControl
-                                title={track.title}
-                                rating={track.rating}
-                                busy={isSavingTags}
-                                onRatingChange={(rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
-                              />
-                            </td>
-                            <td>{formatDuration(track.durationSeconds)}</td><td>{track.genre ?? "—"}</td>
-                            <td>
-                              <InlineLoveControl
-                                title={track.title}
-                                loveState={track.loveState}
-                                busy={isSavingTags}
-                                onLoveChange={(loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
-                              />
-                            </td>
-                            <td className="inline-tag-status">
-                              {isSavingTags
-                                ? <RefreshCw className="is-spinning" aria-label="Saving and verifying MP3 tags" />
-                                : inlineError
-                                  ? <CircleAlert className="inline-tag-error" role="img" aria-label={`MP3 tag save failed: ${inlineError}`}><title>{inlineError}</title></CircleAlert>
-                                  : track.tagSyncState === "pendingImport"
-                                    ? <span className="sync-dot" aria-label="MP3 change pending Music Library import" />
-                                    : <MoreHorizontal aria-label="More actions" />}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  {tracks.length === 0 && <div className="empty-results" aria-live="polite">{isExploring ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Search aria-hidden="true" />}<h3>{isExploring ? "Searching the catalog…" : "No tracks in this view"}</h3><p>{isExploring ? "Aurora is querying the indexed source." : "Clear the search or artist filter to keep exploring."}</p></div>}
-                </div>
-              </section>
+              <DeepExplorer
+                view={explorerView}
+                filters={explorerFilters}
+                tracks={explorerTracks}
+                albums={explorerAlbums}
+                artists={explorerArtists}
+                genres={genres}
+                artistOptions={artistOptions}
+                selectedTrackId={selectedTrack?.id ?? null}
+                selectedAlbumId={selectedAlbumId}
+                selectedArtistId={selectedArtistId}
+                albumTracks={albumTracks}
+                albumTracksTruncated={albumTracksTruncated}
+                loadState={explorerLoadState}
+                errorMessage={explorerError}
+                albumDetailState={albumDetailState}
+                pageInfo={{ loaded: explorerLoaded, hasMore: explorerCursor !== null, isLoadingMore }}
+                busyTrackKeys={inlineSavingKeys}
+                onViewChange={changeExplorerView}
+                onFiltersChange={setExplorerFilters}
+                onSelectTrack={setSelectedTrack}
+                onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
+                onSelectAlbum={selectAlbum}
+                onSelectArtist={(artist) => { if (artist) focusArtist(artist); else setSelectedArtistId(null); }}
+                onLoadMore={() => void loadMoreExplorerResults()}
+                onRetry={() => {
+                  if (selectedAlbumId && albumDetailState === "error") {
+                    const album = explorerAlbums.find((candidate) => candidate.id === selectedAlbumId);
+                    if (album) selectAlbum(album);
+                  } else {
+                    setExplorerReloadToken((value) => value + 1);
+                  }
+                }}
+                onClearFilters={() => setExplorerFilters({ ...defaultExplorerFilters, sort: defaultSort[explorerView] })}
+                onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+                onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+              />
             </>
           ) : loadError ? (
             <section className="load-state load-state--error" role="alert">

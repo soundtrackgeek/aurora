@@ -389,6 +389,55 @@ impl StateStore {
             .map_err(|error| format!("Could not decode Aurora's tag reconciliation: {error}"))
     }
 
+    pub(crate) fn pending_overlays(&self, limit: usize) -> Result<Vec<TagOverlay>, String> {
+        if limit == 0 || limit > 201 {
+            return Err("Aurora's pending-tag reconciliation batch is invalid.".to_owned());
+        }
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT track_key, directory, filename, rating, love_state, release_year,
+                       catalog_rating, catalog_love_state, catalog_release_year,
+                       catalog_import_run_id, last_operation_id
+                FROM tag_overlays
+                ORDER BY updated_at_ms, track_key
+                LIMIT ?1
+                "#,
+            )
+            .map_err(|error| {
+                format!("Could not prepare Aurora's pending-tag reconciliation: {error}")
+            })?;
+        statement
+            .query_map(params![limit as i64], overlay_from_row)
+            .map_err(|error| {
+                format!("Could not read Aurora's pending-tag reconciliation: {error}")
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                format!("Could not decode Aurora's pending-tag reconciliation: {error}")
+            })
+    }
+
+    pub(crate) fn defer_overlay_reconciliation(&self, track_key: &str) -> Result<(), String> {
+        let connection = self.open()?;
+        let timestamp = now_ms();
+        connection
+            .execute(
+                r#"
+                UPDATE tag_overlays
+                SET updated_at_ms = CASE
+                  WHEN updated_at_ms >= ?2 THEN updated_at_ms + 1
+                  ELSE ?2
+                END
+                WHERE track_key = ?1
+                "#,
+                params![track_key, timestamp],
+            )
+            .map_err(|error| format!("Could not defer a pending-tag retry: {error}"))?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn upsert_overlay(
         &self,
