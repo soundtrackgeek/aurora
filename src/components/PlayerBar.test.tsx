@@ -46,6 +46,12 @@ function snapshot(positionSeconds: number): PlaybackSnapshot {
     shuffle: false,
     repeatMode: "off",
     error: null,
+    outputDeviceLabel: "Speakers (Realtek Audio)",
+    usingDeviceFallback: false,
+    replayGainMode: "track",
+    replayGainDb: -6.4,
+    replayGainSource: "track",
+    clippingPrevented: false,
   };
 }
 
@@ -66,6 +72,7 @@ function props(positionSeconds = 60) {
     onRepeat: vi.fn(),
     onRatingChange: vi.fn(),
     onLoveChange: vi.fn(),
+    onOpenAudioSettings: vi.fn(),
     onToggleQueue: vi.fn(),
   };
 }
@@ -90,6 +97,14 @@ describe("PlayerBar", () => {
     fireEvent.click(player.getByRole("button", { name: "Love Midnight City" }));
     expect(playerProps.onRatingChange).toHaveBeenCalledWith(track, null);
     expect(playerProps.onLoveChange).toHaveBeenCalledWith(track, "loved");
+  });
+
+  it("shows the active output and applied gain and opens audio settings", () => {
+    const playerProps = props();
+    render(<PlayerBar {...playerProps} />);
+    const audio = screen.getByRole("button", { name: /Open audio settings.*Speakers.*−?6\.4 dB/i });
+    fireEvent.click(audio);
+    expect(playerProps.onOpenAudioSettings).toHaveBeenCalledOnce();
   });
 
   it("releases the seek draft after the committed seek finishes", async () => {

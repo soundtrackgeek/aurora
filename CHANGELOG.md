@@ -4,6 +4,34 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-22
+
+### Added
+
+- Device-local Windows output selection in Audio Settings using CPAL's stable endpoint IDs, including a distinct Windows-default choice and current-default labeling.
+- ReplayGain Off, Track, and Album modes for MusicBee-compatible `REPLAYGAIN_TRACK_GAIN`, `REPLAYGAIN_TRACK_PEAK`, `REPLAYGAIN_ALBUM_GAIN`, and `REPLAYGAIN_ALBUM_PEAK` ID3 text frames.
+- Peak-based clipping prevention for positive ReplayGain and Track fallback when Album mode encounters an MP3 without album frames.
+- Gapless-capable native queue handoff that resolves, opens, and appends the next MP3 to the same Rodio player during the final 15 seconds.
+- A compact now-playing readout for the active output, effective gain, clipping protection, and fallback state.
+- Atomic per-computer audio preferences in `aurora-audio.json`, intentionally outside shared SQLite and OneDrive synchronization.
+
+### Changed
+
+- Settings now has Audio and Shortcuts sections, loaded concurrently so either native boundary can report its own failure.
+- Native playback reconciles a pre-queued source transition before transport or global-shortcut actions, preserving the actual now-playing track as the rating and Love target.
+- Output stream errors automatically reopen the current track at its observed position on the Windows default without changing the preferred device setting.
+
+### Security
+
+- The WebView receives endpoint labels and stable IDs but never supplies an audio-file path. Rust validates the selected CPAL ID and matches it only against currently enumerated output devices.
+- ReplayGain reads optional ID3 frames after catalog ID plus stable path-key resolution and does not write or rewrite the MP3.
+
+### Known limits
+
+- Seamless handoff requires a valid next MP3 with known duration to be prepared before the current source ends. Aurora safely falls back to the ordinary transition if preparation is impossible.
+- ReplayGain affects playback only. Aurora 0.10.0 does not calculate missing gain tags, edit existing ReplayGain frames, crossfade, equalize, or apply other DSP.
+- An unavailable preferred output remains selected and is retried when Aurora next creates an output stream; Aurora does not switch back mid-track after falling back.
+
 ## [0.9.0] - 2026-08-22
 
 ### Added

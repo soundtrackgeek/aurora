@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction, and version 0.8.3 makes seek command ordering explicit.
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; and version 0.10.0 adds the [audio-output contract](audio-output-contract.md).
 
 ## Trust boundary
 
@@ -11,10 +11,12 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 
 ## Runtime behavior
 
-- The audio device is opened lazily on the first play action, so browsing remains available when an output device is absent.
+- The selected audio device is opened lazily on the first play action, so browsing remains available when an output device is absent. A missing, failed, or disconnected preference falls back to the Windows default without changing the saved preference.
 - Play/pause, seek, previous/next, volume, shuffle, repeat-all, and repeat-one are native operations.
 - Starting a visible track replaces the current bounded queue with the current result set and begins at that track.
-- Natural completion advances according to repeat and shuffle state while the frontend polls playback state.
+- During the final 15 seconds of a known-duration track, Aurora prepares the authoritative repeat/shuffle successor and appends it to the same native player. Natural audio handoff therefore does not wait for frontend polling; polling reconciles metadata and history after the source boundary.
+- Every transport and global-shortcut action reconciles a prepared source boundary before resolving the current track.
+- Optional ReplayGain is applied per source before the independent player-volume multiplier. See the audio-output contract for tag precedence and peak limiting.
 - A stopped track positioned at its natural end restarts from zero when Play is pressed; an explicitly paused track resumes from its paused position.
 - Range input displays a local draft only while its exact seek command is pending. The most recently issued command owns the resulting snapshot, older overlapping responses are ignored, and polling resumes after all active commands finish.
 - Native playback—not React polling—is responsible for beginning, observing, seeking, and finalizing listening-history sessions.
@@ -24,7 +26,7 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 
 ## Persistence
 
-Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data directory. Schema version 4 persists:
+Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data directory. The current schema persists:
 
 - queue order and current index;
 - approximate playback position;
@@ -37,6 +39,8 @@ Position is checkpointed in roughly ten-second buckets and once more during wind
 
 Decoded peaks are derived data in device-local `aurora-waveforms.sqlite3`. A cache row is reused only while MP3 size and modification time still match, is capped to the 2,000 most recently accessed tracks, and is not copied to OneDrive or included in Aurora's shared-state lineage.
 
+Output endpoint and ReplayGain preferences are versioned separately in device-local `aurora-audio.json`. They do not enter shared-state conflict lineage or OneDrive synchronization.
+
 ## Deliberate limits
 
-Version 0.8.3 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).
+Version 0.10.0 does not edit the source catalog, calculate or write ReplayGain, crossfade, equalize, or apply other DSP. A seamless queue handoff depends on preparing a valid known-duration successor; the ordinary transition remains the safe fallback. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).

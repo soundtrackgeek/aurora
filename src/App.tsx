@@ -50,7 +50,7 @@ import {
 } from "./components/history/ListeningHistory";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
-import { SettingsDialog } from "./components/SettingsDialog";
+import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
 import { TagEditor } from "./components/TagEditor";
 import {
   exploreAlbums,
@@ -113,11 +113,18 @@ import { useAuroraUpdater } from "./updater";
 import {
   listenForGlobalShortcutResults,
   loadGlobalShortcutSettings,
+  defaultShortcutBindings,
   updateGlobalShortcutSettings,
   type GlobalShortcutSettingsRequest,
   type GlobalShortcutStatus,
   type GlobalShortcutResult,
 } from "./shortcuts";
+import {
+  loadAudioSettings,
+  updateAudioSettings,
+  type AudioSettingsRequest,
+  type AudioSettingsStatus,
+} from "./audio";
 
 const navigation = [
   { label: "Universe", icon: Sparkles },
@@ -363,9 +370,13 @@ function App() {
   const [historyThresholdMessage, setHistoryThresholdMessage] = useState<string | null>(null);
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("audio");
   const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
   const [shortcutSaving, setShortcutSaving] = useState(false);
   const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [audioStatus, setAudioStatus] = useState<AudioSettingsStatus | null>(null);
+  const [audioSaving, setAudioSaving] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
@@ -421,13 +432,34 @@ function App() {
   useEffect(() => {
     if (!settingsOpen) return;
     let cancelled = false;
-    void loadGlobalShortcutSettings()
-      .then((status) => {
-        if (!cancelled) setShortcutStatus(status);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setShortcutError(error instanceof Error ? error.message : String(error));
-      });
+    void Promise.allSettled([loadGlobalShortcutSettings(), loadAudioSettings()]).then(([shortcuts, audio]) => {
+      if (cancelled) return;
+      if (shortcuts.status === "fulfilled") setShortcutStatus(shortcuts.value);
+      else {
+        const message = shortcuts.reason instanceof Error ? shortcuts.reason.message : String(shortcuts.reason);
+        setShortcutStatus({
+          enabled: true,
+          registered: false,
+          platformAvailable: true,
+          error: message,
+          warning: null,
+          bindings: defaultShortcutBindings,
+        });
+      }
+      if (audio.status === "fulfilled") setAudioStatus(audio.value);
+      else {
+        const message = audio.reason instanceof Error ? audio.reason.message : String(audio.reason);
+        setAudioStatus({
+          settings: { outputDeviceId: "system-default", replayGainMode: "off" },
+          devices: [],
+          activeDeviceId: null,
+          activeDeviceLabel: null,
+          usingFallback: false,
+          message: null,
+          error: message,
+        });
+      }
+    });
     return () => { cancelled = true; };
   }, [settingsOpen]);
 
@@ -720,6 +752,25 @@ function App() {
     } finally {
       setShortcutSaving(false);
     }
+  }
+
+  async function saveAudioSettings(request: AudioSettingsRequest) {
+    setAudioSaving(true);
+    setAudioError(null);
+    try {
+      setAudioStatus(await updateAudioSettings(request));
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAudioSaving(false);
+    }
+  }
+
+  function openSettings(tab: SettingsTab = "audio") {
+    setSettingsInitialTab(tab);
+    setShortcutError(null);
+    setAudioError(null);
+    setSettingsOpen(true);
   }
 
   async function saveInlineTagChange(track: Track, desired: TagValues) {
@@ -1117,7 +1168,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.9.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.10.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1163,7 +1214,7 @@ function App() {
             error={laptopModeError}
             onToggle={() => void toggleLaptopMode()}
           />
-          <button type="button" aria-label="Audio tools" disabled><AudioLines aria-hidden="true" /></button>
+          <button type="button" aria-label="Audio settings" title="Audio settings" onClick={() => openSettings("audio")}><AudioLines aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
           <button
@@ -1179,10 +1230,7 @@ function App() {
           >
             <RightSidebarIcon aria-hidden="true" />
           </button>
-          <button type="button" aria-label="Settings" title="Settings" onClick={() => {
-            setShortcutError(null);
-            setSettingsOpen(true);
-          }}><Settings aria-hidden="true" /></button>
+          <button type="button" aria-label="Settings" title="Settings" onClick={() => openSettings("audio")}><Settings aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -1393,26 +1441,32 @@ function App() {
           ...tagValuesForTrack(track),
           loveState,
         })}
+        onOpenAudioSettings={() => openSettings("audio")}
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />
 
       {updater.state.isPromptOpen && <UpdateDialog version={updater.state.version} phase={updater.state.phase} progress={updater.state.progress} message={updater.state.message} onInstall={() => void updater.install()} onDismiss={updater.dismiss} />}
-      {settingsOpen && shortcutStatus && (
+      {settingsOpen && shortcutStatus && audioStatus && (
         <SettingsDialog
-          status={shortcutStatus}
-          saving={shortcutSaving}
-          error={shortcutError}
-          onSave={(request) => void saveGlobalShortcuts(request)}
+          shortcutStatus={shortcutStatus}
+          audioStatus={audioStatus}
+          shortcutSaving={shortcutSaving}
+          audioSaving={audioSaving}
+          shortcutError={shortcutError}
+          audioError={audioError}
+          initialTab={settingsInitialTab}
+          onSaveShortcuts={(request) => void saveGlobalShortcuts(request)}
+          onSaveAudio={(request) => void saveAudioSettings(request)}
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {settingsOpen && !shortcutStatus && (
+      {settingsOpen && (!shortcutStatus || !audioStatus) && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setSettingsOpen(false);
         }}>
           <div className="settings-loading" role="status">
-            <span>{shortcutError ?? "Loading settings…"}</span>
-            {shortcutError && <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X aria-hidden="true" /></button>}
+            <span>{shortcutError ?? audioError ?? "Loading settings…"}</span>
+            {(shortcutError || audioError) && <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X aria-hidden="true" /></button>}
           </div>
         </div>
       )}

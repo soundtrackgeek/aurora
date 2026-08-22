@@ -1,4 +1,5 @@
 mod artwork;
+mod audio_settings;
 mod catalog;
 mod curation;
 mod curation_store;
@@ -8,6 +9,7 @@ mod history;
 mod laptop_mode;
 mod musicbrainz;
 mod playback;
+mod replay_gain;
 mod shortcuts;
 mod state_store;
 mod state_sync;
@@ -15,6 +17,7 @@ mod tag_model;
 mod tagging;
 mod waveform;
 
+use audio_settings::{AudioSettingsRequest, AudioSettingsStatus, AudioSettingsStore};
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
 use curation::{ArtistDecisionRequest, CurationExportResult, ReleaseDecisionRequest};
 use explorer::{
@@ -471,6 +474,19 @@ fn global_shortcut_settings(app: AppHandle) -> Result<shortcuts::GlobalShortcutS
 }
 
 #[tauri::command]
+fn audio_settings(state: State<'_, PlaybackState>) -> Result<AudioSettingsStatus, String> {
+    with_playback(state, |runtime| Ok(runtime.audio_settings_status()))
+}
+
+#[tauri::command]
+fn update_audio_settings(
+    state: State<'_, PlaybackState>,
+    request: AudioSettingsRequest,
+) -> Result<AudioSettingsStatus, String> {
+    with_playback(state, |runtime| runtime.update_audio_settings(request))
+}
+
+#[tauri::command]
 fn update_global_shortcut_settings(
     app: AppHandle,
     request: shortcuts::GlobalShortcutSettingsRequest,
@@ -534,7 +550,8 @@ pub fn run() {
                 startup_sync,
             )
             .map_err(std::io::Error::other)?;
-            let runtime = PlaybackRuntime::new(store.clone(), history.clone())
+            let audio_store = AudioSettingsStore::load(state_directory.join("aurora-audio.json"));
+            let runtime = PlaybackRuntime::new(store.clone(), history.clone(), audio_store)
                 .map_err(std::io::Error::other)?;
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
             let _ = laptop_runtime.status(true);
@@ -603,6 +620,8 @@ pub fn run() {
             set_history_play_threshold,
             global_shortcut_settings,
             update_global_shortcut_settings,
+            audio_settings,
+            update_audio_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

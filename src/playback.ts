@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { previewAudioSnapshot, type ReplayGainMode } from "./audio";
 import { isTauriRuntime, type Track } from "./library";
 
 export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
@@ -15,6 +16,12 @@ export interface PlaybackSnapshot {
   shuffle: boolean;
   repeatMode: RepeatMode;
   error: string | null;
+  outputDeviceLabel: string | null;
+  usingDeviceFallback: boolean;
+  replayGainMode: ReplayGainMode;
+  replayGainDb: number | null;
+  replayGainSource: ReplayGainMode | null;
+  clippingPrevented: boolean;
 }
 
 const emptyPlayback: PlaybackSnapshot = {
@@ -27,6 +34,12 @@ const emptyPlayback: PlaybackSnapshot = {
   shuffle: false,
   repeatMode: "off",
   error: null,
+  outputDeviceLabel: "Speakers (Realtek Audio)",
+  usingDeviceFallback: false,
+  replayGainMode: "off",
+  replayGainDb: null,
+  replayGainSource: null,
+  clippingPrevented: false,
 };
 
 let browserPlayback: PlaybackSnapshot = { ...emptyPlayback };
@@ -50,6 +63,21 @@ function chooseBrowserNext(): number | null {
 }
 
 function refreshBrowserClock(): void {
+  const audio = previewAudioSnapshot();
+  const replayGainMode = audio.settings.replayGainMode;
+  browserPlayback = {
+    ...browserPlayback,
+    outputDeviceLabel: audio.activeDeviceLabel,
+    usingDeviceFallback: audio.usingFallback,
+    replayGainMode,
+    replayGainDb: replayGainMode === "off" || !browserPlayback.currentTrack
+      ? null
+      : replayGainMode === "album" ? -8.1 : -6.4,
+    replayGainSource: replayGainMode === "off" || !browserPlayback.currentTrack
+      ? null
+      : replayGainMode,
+    clippingPrevented: false,
+  };
   if (browserPlayback.status !== "playing" || browserPlayback.currentIndex === null) return;
   const elapsed = Math.max(0, (performance.now() - browserStartedAt) / 1000);
   const duration = browserPlayback.currentTrack?.durationSeconds ?? Number.POSITIVE_INFINITY;

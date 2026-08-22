@@ -17,6 +17,18 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.10.0 acceptance checks
+
+- Enumerate Windows output endpoints with stable IDs, persist the selection per device, and keep browsing available when audio is unavailable.
+- Continue on the Windows default when the preferred endpoint is absent, cannot open, or reports a stream failure; retain the preferred endpoint for a later retry.
+- Apply Off, Track, and Album ReplayGain from MusicBee-compatible ID3 user-text frames, with Album-to-Track fallback and tagged-peak clipping prevention.
+- Keep ReplayGain read-only: never calculate or rewrite gain tags and never mutate audio bytes.
+- Resolve, open, and append the next known-duration MP3 before the current source ends so the native audio handoff does not depend on React polling.
+- Reconcile a prepared source boundary before transport or global-shortcut actions so now-playing rating and Love retain the correct target.
+- Preserve shuffle, repeat, queue editing, waveform, listening history, and global-shortcut contracts while invalidating a stale prepared successor when queue policy changes.
+- Show Audio beside Shortcuts in Settings and expose the active output, effective gain, clipping protection, and fallback state compactly in the player.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.10.0` versions.
+
 ## 0.9.0 acceptance checks
 
 - Register play/pause, next, rating 0–5, and Love as Windows-wide shortcuts with the requested defaults while Aurora is running.
@@ -120,9 +132,9 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.9.0
+## Explicit non-goals for 0.10.0
 
-- Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
+- Crossfade, equalization, ReplayGain calculation/tag writing, preamp controls, and other DSP.
 - Editing the imported catalog directly.
 - Editing non-MP3 files or ID3 fields other than MusicBee rating, Love/Ban, and Release Time.
 - Embedded album-art extraction, biographies, lyrics, playlists, or online MusicBrainz synchronization.
@@ -139,8 +151,8 @@ Live source measurements including SQLite process startup are approximately 26�
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 - Synchronizing Windows shortcut choices between computers or overriding a binding already owned by MusicBee or another process.
 
-## Planned sections after 0.9.0
+## Planned sections after 0.10.0
 
-1. ReplayGain, output-device selection, and gapless playback research.
-2. Smart playlists and saved explorer views after the browsing/filter contract is proven.
-3. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
+1. Smart playlists and saved explorer views after the browsing/filter contract is proven.
+2. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
+3. Crossfade or an equalizer only after real use proves a need; neither belongs in the lossless handoff path by default.

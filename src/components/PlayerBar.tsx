@@ -1,4 +1,5 @@
 import {
+  Headphones,
   ListMusic,
   Pause,
   Play,
@@ -50,6 +51,7 @@ export function PlayerBar({
   onRepeat,
   onRatingChange,
   onLoveChange,
+  onOpenAudioSettings,
   onToggleQueue,
 }: {
   playback: PlaybackSnapshot;
@@ -67,6 +69,7 @@ export function PlayerBar({
   onRepeat: (mode: RepeatMode) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, loveState: LoveState) => void;
+  onOpenAudioSettings: () => void;
   onToggleQueue: () => void;
 }) {
   const [seekDraft, setSeekDraft] = useState<{ trackKey: string; value: number } | null>(null);
@@ -130,6 +133,12 @@ export function PlayerBar({
   const endTime = showRemaining
     ? `−${formatDuration(Math.max(duration - position, 0))}`
     : formatDuration(track?.durationSeconds ?? null);
+  const gainLabel = playback.replayGainMode === "off"
+    ? "ReplayGain off"
+    : playback.replayGainDb === null
+      ? `${playback.replayGainMode === "album" ? "Album" : "Track"} untagged`
+      : `${playback.replayGainDb > 0 ? "+" : ""}${playback.replayGainDb.toFixed(1)} dB${playback.clippingPrevented ? " protected" : ""}`;
+  const audioLabel = `${playback.outputDeviceLabel ?? "Output opens on play"} · ${gainLabel}`;
 
   return (
     <>
@@ -155,7 +164,12 @@ export function PlayerBar({
               </div>
               <span>{track.artist} · {track.album}</span>
               <div className="now-playing__details">
-                <small>{technicalSummary(waveform, waveformFailed)}</small>
+                <div className="now-playing__technical">
+                  <small>{technicalSummary(waveform, waveformFailed)}</small>
+                  <button type="button" className={playback.usingDeviceFallback ? "is-fallback" : undefined} title={audioLabel} aria-label={`Open audio settings. ${audioLabel}`} onClick={onOpenAudioSettings}>
+                    <Headphones aria-hidden="true" /><span>{audioLabel}</span>
+                  </button>
+                </div>
                 <InlineRatingControl
                   title={track.title}
                   rating={track.rating}
