@@ -5,6 +5,7 @@ mod curation;
 mod curation_store;
 mod device_mode;
 mod explorer;
+mod genres;
 mod history;
 mod laptop_mode;
 mod musicbrainz;
@@ -24,6 +25,7 @@ use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
     TrackPage, TrackPageRequest,
 };
+use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
 use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
@@ -123,6 +125,42 @@ async fn artist_detail(artist: String) -> Result<ArtistDetail, String> {
 }
 
 #[tauri::command]
+async fn genre_index(app: AppHandle) -> Result<Vec<GenreSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        let store = app.state::<StateStore>();
+        genres::load_genre_index(&history, &store)
+    })
+    .await
+    .map_err(|error| format!("The genre-atlas worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn genre_detail(app: AppHandle, genre: String) -> Result<GenreDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        let store = app.state::<StateStore>();
+        genres::load_genre_detail(genre, &history, &store)
+    })
+    .await
+    .map_err(|error| format!("The genre-detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn genre_queue_tracks(
+    app: AppHandle,
+    request: GenreQueueRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        let store = app.state::<StateStore>();
+        genres::load_genre_queue(request, &history, &store)
+    })
+    .await
+    .map_err(|error| format!("The genre-queue worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn artist_intelligence(app: AppHandle, artist: String) -> Result<ArtistIntelligence, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
@@ -206,6 +244,14 @@ fn playback_replace_queue(
     with_playback(state, |runtime| {
         runtime.replace_queue(track_references, start_track_key)
     })
+}
+
+#[tauri::command]
+fn playback_append_queue(
+    state: State<'_, PlaybackState>,
+    track_references: Vec<TrackReference>,
+) -> Result<PlaybackSnapshot, String> {
+    with_playback(state, |runtime| runtime.append_queue(track_references))
 }
 
 #[tauri::command]
@@ -590,6 +636,9 @@ pub fn run() {
             explore_artists,
             album_detail,
             artist_detail,
+            genre_index,
+            genre_detail,
+            genre_queue_tracks,
             artist_intelligence,
             musicbrainz_review_page,
             update_artist_identity_decision,
@@ -598,6 +647,7 @@ pub fn run() {
             export_musicbrainz_curation,
             playback_state,
             playback_replace_queue,
+            playback_append_queue,
             playback_toggle,
             playback_next,
             playback_previous,

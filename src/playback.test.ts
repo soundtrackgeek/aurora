@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { browserPreview } from "./library";
 import {
+  appendTrackQueue,
   changeRepeatMode,
   changeShuffle,
   clearPlaybackQueue,
@@ -47,5 +48,27 @@ describe("browser playback adapter", () => {
     state = await togglePlayback();
     expect(state.status).toBe("playing");
     expect(state.positionSeconds).toBe(0);
+  });
+
+  it("refills a bounded queue without replacing the current track", async () => {
+    const source = browserPreview.tracks[0];
+    const initial = Array.from({ length: 200 }, (_, index) => ({
+      ...source,
+      id: `initial-${index}`,
+      trackKey: `preview:initial-${index}`,
+      title: `Initial ${index}`,
+    }));
+    await playTrackQueue(initial, initial[181].id);
+    const additions = Array.from({ length: 100 }, (_, index) => ({
+      ...source,
+      id: `addition-${index}`,
+      trackKey: `preview:addition-${index}`,
+      title: `Addition ${index}`,
+    }));
+    const state = await appendTrackQueue(additions);
+    expect(state.currentTrack?.id).toBe("initial-181");
+    expect(state.currentIndex).toBe(20);
+    expect(state.queue).toHaveLength(139);
+    expect(state.queue[state.queue.length - 1]?.id).toBe("addition-99");
   });
 });

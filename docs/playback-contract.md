@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; and version 0.10.0 adds the [audio-output contract](audio-output-contract.md).
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; version 0.10.0 adds the [audio-output contract](audio-output-contract.md); and version 0.11.0 adds bounded append/refill behavior for [Genre Atlas](genre-atlas-contract.md).
 
 ## Trust boundary
 
@@ -14,6 +14,7 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 - The selected audio device is opened lazily on the first play action, so browsing remains available when an output device is absent. A missing, failed, or disconnected preference falls back to the Windows default without changing the saved preference.
 - Play/pause, seek, previous/next, volume, shuffle, repeat-all, and repeat-one are native operations.
 - Starting a visible track replaces the current bounded queue with the current result set and begins at that track.
+- Appending a genre batch de-duplicates stable track identities, retains at most 20 entries before the current track, preserves the current and prepared successor, and keeps the complete queue at or below 200 tracks.
 - During the final 15 seconds of a known-duration track, Aurora prepares the authoritative repeat/shuffle successor and appends it to the same native player. Natural audio handoff therefore does not wait for frontend polling; polling reconciles metadata and history after the source boundary.
 - Every transport and global-shortcut action reconciles a prepared source boundary before resolving the current track.
 - Optional ReplayGain is applied per source before the independent player-volume multiplier. See the audio-output contract for tag precedence and peak limiting.
@@ -43,4 +44,4 @@ Output endpoint and ReplayGain preferences are versioned separately in device-lo
 
 ## Deliberate limits
 
-Version 0.10.0 does not edit the source catalog, calculate or write ReplayGain, crossfade, equalize, or apply other DSP. A seamless queue handoff depends on preparing a valid known-duration successor; the ordinary transition remains the safe fallback. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).
+Version 0.11.0 does not edit the source catalog, calculate or write ReplayGain, crossfade, equalize, or apply other DSP. A seamless queue handoff depends on preparing a valid known-duration successor; the ordinary transition remains the safe fallback. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).

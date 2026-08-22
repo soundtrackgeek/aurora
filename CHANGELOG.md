@@ -4,6 +4,33 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-22
+
+### Added
+
+- A dedicated Genre Atlas with a searchable, sortable index of canonical catalog genres instead of the generic track explorer previously shown by Genres.
+- Bounded genre worlds with representative covers, catalog scale and year range, release-decade distribution, top albums and artists, personal listening memory, and related genres explained by shared album artists.
+- Genre Radio, Shuffle, Loved, Highest Rated, Rediscover, and Unrated Expedition queues, requested in batches of at most 100 tracks and capped at Aurora's 200-track queue limit.
+- Queue append and automatic genre refill below 20 remaining tracks while retaining the current track and up to 20 recently played entries.
+- Instant half-star and Love controls in Genre Atlas highlights using the existing verified MP3 transaction and optimistic Aurora-state overlay.
+
+### Changed
+
+- Genre Atlas loads lazily only when Genres is active, with independent index/detail loading, stale-request protection, failure states, and retries.
+- Rating and Love changes now update visible genre aggregates immediately while the verified file write completes.
+- The live queue can be extended without replacing playback or breaking the prepared gapless successor.
+
+### Security
+
+- Genre requests accept an exact bounded canonical-genre value and return bounded rows; React never supplies an audio path.
+- The Music Library catalog and all MusicBrainz databases remain read-only. Genre Atlas does not rename, merge, or write genre tags.
+
+### Known limits
+
+- Related genres are a shared-artist navigation signal, not an authoritative genre taxonomy.
+- Listening memory begins with Aurora history and does not infer MusicBee or Last.fm plays. Rediscover is therefore most useful after Aurora has recorded listening history.
+- Genre queues are finite within the current catalog and selected filter; Aurora reports when an expedition has exhausted its eligible tracks.
+
 ## [0.10.0] - 2026-08-22
 
 ### Added

@@ -10,12 +10,16 @@ use crate::{
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fs::File,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const PRELOAD_WINDOW_SECONDS: f64 = 15.0;
+const MAX_PLAYBACK_QUEUE: usize = 200;
+const MAX_QUEUE_APPEND_BATCH: usize = 100;
+const RETAINED_QUEUE_HISTORY: usize = 20;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,6 +79,43 @@ pub(crate) struct PlaybackSnapshot {
 struct PreparedTrack {
     index: usize,
     gain: ReplayGainAdjustment,
+}
+
+fn append_queue_entries(
+    queue: &mut Vec<TrackSummary>,
+    current_index: &mut usize,
+    prepared_next: &mut Option<PreparedTrack>,
+    additions: Vec<TrackSummary>,
+) -> usize {
+    let keep_from = current_index.saturating_sub(RETAINED_QUEUE_HISTORY);
+    if keep_from > 0 {
+        queue.drain(..keep_from);
+        *current_index -= keep_from;
+        if prepared_next
+            .as_ref()
+            .is_some_and(|prepared| prepared.index < keep_from)
+        {
+            *prepared_next = None;
+        } else if let Some(prepared) = prepared_next.as_mut() {
+            prepared.index -= keep_from;
+        }
+    }
+    let mut keys = queue
+        .iter()
+        .map(|track| track.track_key.clone())
+        .collect::<HashSet<_>>();
+    let capacity = MAX_PLAYBACK_QUEUE.saturating_sub(queue.len());
+    let mut appended = 0;
+    for track in additions {
+        if appended >= capacity {
+            break;
+        }
+        if keys.insert(track.track_key.clone()) {
+            queue.push(track);
+            appended += 1;
+        }
+    }
+    appended
 }
 
 pub(crate) struct PlaybackRuntime {
@@ -626,6 +667,31 @@ impl PlaybackRuntime {
         Ok(self.snapshot())
     }
 
+    pub(crate) fn append_queue(
+        &mut self,
+        track_references: Vec<TrackReference>,
+    ) -> Result<PlaybackSnapshot, String> {
+        if track_references.is_empty() || track_references.len() > MAX_QUEUE_APPEND_BATCH {
+            return Err(format!(
+                "Queue refill batches must contain between 1 and {MAX_QUEUE_APPEND_BATCH} tracks."
+            ));
+        }
+        self.synchronize_audio_runtime();
+        let mut current_index = self
+            .current_index
+            .ok_or_else(|| "Choose a track before extending its queue.".to_owned())?;
+        let additions = catalog::load_tracks_by_ids(&track_references, &self.store)?;
+        append_queue_entries(
+            &mut self.queue,
+            &mut current_index,
+            &mut self.prepared_next,
+            additions,
+        );
+        self.current_index = Some(current_index);
+        self.persist()?;
+        Ok(self.snapshot())
+    }
+
     pub(crate) fn toggle(&mut self) -> Result<PlaybackSnapshot, String> {
         self.synchronize_audio_runtime();
         if self.current_index.is_none() {
@@ -986,6 +1052,29 @@ fn resume_position(
 mod tests {
     use super::*;
 
+    fn queue_track(index: usize) -> TrackSummary {
+        TrackSummary {
+            id: index.to_string(),
+            track_key: format!("d:\\music\\track-{index}.mp3"),
+            album_id: Some("album".to_owned()),
+            title: format!("Track {index}"),
+            artist: "Artist".to_owned(),
+            album: "Album".to_owned(),
+            release_year: Some(2026),
+            rating: None,
+            loved: false,
+            love_state: crate::tag_model::LoveState::Neutral,
+            tag_sync_state: None,
+            can_undo_tag_edit: false,
+            duration_seconds: Some(240),
+            genre: Some("Synthwave".to_owned()),
+            play_count: None,
+            directory: "D:\\MUSIC".to_owned(),
+            filename: format!("track-{index}.mp3"),
+            catalog_import_run_id: 1,
+        }
+    }
+
     #[test]
     fn repeat_modes_round_trip_through_storage() {
         for mode in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
@@ -1007,6 +1096,43 @@ mod tests {
             resume_position(PlaybackStatus::Stopped, 120.0, Some(243)),
             120.0
         );
+    }
+
+    #[test]
+    fn queue_refill_keeps_recent_history_current_track_and_prepared_successor() {
+        let mut queue = (0..MAX_PLAYBACK_QUEUE).map(queue_track).collect::<Vec<_>>();
+        let mut current_index = 181;
+        let mut prepared = Some(PreparedTrack {
+            index: 182,
+            gain: ReplayGainAdjustment::default(),
+        });
+        let appended = append_queue_entries(
+            &mut queue,
+            &mut current_index,
+            &mut prepared,
+            (200..300).map(queue_track).collect(),
+        );
+        assert_eq!(appended, 100);
+        assert_eq!(queue.len(), 139);
+        assert_eq!(current_index, RETAINED_QUEUE_HISTORY);
+        assert_eq!(queue[current_index].id, "181");
+        assert_eq!(prepared.as_ref().map(|next| next.index), Some(21));
+    }
+
+    #[test]
+    fn queue_refill_deduplicates_track_identity() {
+        let mut queue = vec![queue_track(1)];
+        let mut current_index = 0;
+        let mut prepared = None;
+        let appended = append_queue_entries(
+            &mut queue,
+            &mut current_index,
+            &mut prepared,
+            vec![queue_track(1), queue_track(2)],
+        );
+        assert_eq!(appended, 1);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[1].id, "2");
     }
 
     #[test]

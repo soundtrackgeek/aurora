@@ -48,6 +48,7 @@ import {
   type HistoryDateRange,
   type HistoryLoadState,
 } from "./components/history/ListeningHistory";
+import { GenreAtlas, type GenreAtlasLoadState } from "./components/genres/GenreAtlas";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
@@ -90,6 +91,16 @@ import {
   type HistoryPage,
   type TrackHistoryInsight,
 } from "./history";
+import {
+  loadGenreDetail,
+  loadGenreIndex,
+  loadGenreQueue,
+  saveGenreRadioSession,
+  type GenreDetail,
+  type GenreQueueMode,
+  type GenreRadioSession,
+  type GenreSummary,
+} from "./genres";
 import {
   loadLaptopModeStatus,
   updateLaptopMode,
@@ -167,6 +178,27 @@ const defaultSort: Record<ExplorerView, ExplorerSort> = {
   albums: "releaseYearDesc",
   artists: "artistAsc",
 };
+
+function genreSummaryWithTrackChange(
+  summary: GenreSummary,
+  before: Track,
+  after: Track,
+): GenreSummary {
+  if (summary.name !== before.genre || before.genre !== after.genre) return summary;
+  const ratedTracks = Math.max(
+    0,
+    summary.ratedTracks + Number(after.rating !== null) - Number(before.rating !== null),
+  );
+  const ratingSum = (summary.averageRating ?? 0) * summary.ratedTracks
+    - (before.rating ?? 0)
+    + (after.rating ?? 0);
+  return {
+    ...summary,
+    ratedTracks,
+    averageRating: ratedTracks > 0 ? Math.min(5, Math.max(0, ratingSum / ratedTracks)) : null,
+    lovedTracks: Math.max(0, summary.lovedTracks + Number(after.loved) - Number(before.loved)),
+  };
+}
 
 type ExplorerResult = {
   tracks: Track[];
@@ -369,6 +401,19 @@ function App() {
   const [historySavingThreshold, setHistorySavingThreshold] = useState(false);
   const [historyThresholdMessage, setHistoryThresholdMessage] = useState<string | null>(null);
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const [genreAtlasGenres, setGenreAtlasGenres] = useState<GenreSummary[]>([]);
+  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [genreDetail, setGenreDetail] = useState<GenreDetail | null>(null);
+  const [genreSearch, setGenreSearch] = useState("");
+  const [genreIndexState, setGenreIndexState] = useState<GenreAtlasLoadState>("loading");
+  const [genreDetailState, setGenreDetailState] = useState<GenreAtlasLoadState>("loading");
+  const [genreIndexError, setGenreIndexError] = useState<string | null>(null);
+  const [genreDetailError, setGenreDetailError] = useState<string | null>(null);
+  const [genreIndexReloadToken, setGenreIndexReloadToken] = useState(0);
+  const [genreDetailReloadToken, setGenreDetailReloadToken] = useState(0);
+  const [genreQueueBusy, setGenreQueueBusy] = useState<GenreQueueMode | null>(null);
+  const [genreQueueMessage, setGenreQueueMessage] = useState<string | null>(null);
+  const [genreRadioSession, setGenreRadioSession] = useState<GenreRadioSession | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("audio");
   const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
@@ -383,11 +428,18 @@ function App() {
   const artistRequestRef = useRef(0);
   const reviewRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
+  const genreIndexRequestRef = useRef(0);
+  const genreDetailRequestRef = useRef(0);
+  const genreQueueRequestRef = useRef(0);
+  const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
   const updater = useAuroraUpdater();
   const playback = usePlayback();
+  const appendPlayback = playback.append;
+  const selectedGenreRef = useRef(selectedGenre);
+  selectedGenreRef.current = selectedGenre;
 
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
@@ -510,7 +562,7 @@ function App() {
   const libraryReady = snapshot !== null;
 
   useEffect(() => {
-    if (!libraryReady || activeNav === "Observatory" || activeNav === "History") return;
+    if (!libraryReady || activeNav === "Observatory" || activeNav === "History" || activeNav === "Genres") return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -546,6 +598,94 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Genres") return;
+    const requestId = ++genreIndexRequestRef.current;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setGenreIndexState("loading");
+      setGenreIndexError(null);
+      void loadGenreIndex()
+        .then((items) => {
+          if (cancelled || requestId !== genreIndexRequestRef.current) return;
+          setGenreAtlasGenres(items);
+          setSelectedGenre((current) => current && items.some((item) => item.name === current)
+            ? current
+            : items[0]?.name ?? null);
+          setGenreIndexState("ready");
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== genreIndexRequestRef.current) return;
+          setGenreIndexError(error instanceof Error ? error.message : String(error));
+          setGenreIndexState("error");
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, genreIndexReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Genres" || !selectedGenre) return;
+    const requestId = ++genreDetailRequestRef.current;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setGenreDetailState("loading");
+      setGenreDetailError(null);
+      void loadGenreDetail(selectedGenre)
+        .then((detail) => {
+          if (cancelled || requestId !== genreDetailRequestRef.current) return;
+          setGenreDetail(detail);
+          setGenreDetailState("ready");
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== genreDetailRequestRef.current) return;
+          setGenreDetailError(error instanceof Error ? error.message : String(error));
+          setGenreDetailState("error");
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, selectedGenre, genreDetailReloadToken]);
+
+  useEffect(() => {
+    if (!genreRadioSession) return;
+    if (playback.state.queue.length === 0 || playback.state.currentIndex === null) return;
+    const remaining = playback.state.queue.length - playback.state.currentIndex - 1;
+    if (remaining >= 20 || genreRefillRunningRef.current) return;
+    const requestId = ++genreQueueRequestRef.current;
+    genreRefillRunningRef.current = true;
+    const excluded = playback.state.queue.map((track) => track.trackKey);
+    void loadGenreQueue({
+      genre: genreRadioSession.genre,
+      mode: genreRadioSession.mode,
+      limit: 100,
+      excludeTrackKeys: excluded,
+    })
+      .then(async (tracks) => {
+        if (requestId !== genreQueueRequestRef.current) return;
+        if (tracks.length === 0) {
+          setGenreQueueMessage(`Aurora reached the end of this ${genreRadioSession.genre} expedition.`);
+          return;
+        }
+        const next = await appendPlayback(tracks);
+        if (requestId === genreQueueRequestRef.current && next) {
+          setGenreQueueMessage(`Added ${formatCount(tracks.length)} more ${genreRadioSession.genre} tracks.`);
+        }
+      })
+      .catch((error: unknown) => {
+        if (requestId === genreQueueRequestRef.current) {
+          setGenreQueueMessage(`Could not refill Genre Radio: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      })
+      .finally(() => {
+        if (requestId === genreQueueRequestRef.current) genreRefillRunningRef.current = false;
+      });
+  }, [appendPlayback, genreRadioSession, playback.state.currentIndex, playback.state.queue]);
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Observatory") return;
@@ -690,8 +830,51 @@ function App() {
         ? explorerTracks
         : snapshot?.tracks ?? [],
   ) {
+    endGenreQueue();
     selectTrack(track);
     void playback.play(queue, track.id);
+  }
+
+  function endGenreQueue() {
+    genreQueueRequestRef.current += 1;
+    genreRefillRunningRef.current = false;
+    setGenreRadioSession(null);
+    saveGenreRadioSession(null);
+    setGenreQueueMessage(null);
+  }
+
+  async function startGenreQueue(mode: GenreQueueMode) {
+    if (!selectedGenre || genreQueueBusy) return;
+    const requestedGenre = selectedGenre;
+    const requestId = ++genreQueueRequestRef.current;
+    genreRefillRunningRef.current = false;
+    setGenreQueueBusy(mode);
+    setGenreQueueMessage(null);
+    try {
+      const tracks = await loadGenreQueue({
+        genre: requestedGenre,
+        mode,
+        limit: 100,
+        excludeTrackKeys: [],
+      });
+      if (requestId !== genreQueueRequestRef.current || selectedGenreRef.current !== requestedGenre) return;
+      if (tracks.length === 0) {
+        setGenreQueueMessage(`No ${requestedGenre} tracks match this expedition yet.`);
+        return;
+      }
+      const next = await playback.play(tracks, tracks[0].id);
+      if (requestId !== genreQueueRequestRef.current || selectedGenreRef.current !== requestedGenre || !next) return;
+      const session: GenreRadioSession = { version: 1, genre: requestedGenre, mode };
+      setGenreRadioSession(session);
+      saveGenreRadioSession(session);
+      setGenreQueueMessage(`Loaded ${formatCount(tracks.length)} tracks. Aurora will refill with bounded batches.`);
+    } catch (error) {
+      if (requestId === genreQueueRequestRef.current) {
+        setGenreQueueMessage(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (requestId === genreQueueRequestRef.current) setGenreQueueBusy(null);
+    }
   }
 
   async function toggleLaptopMode() {
@@ -720,6 +903,17 @@ function App() {
     }
     setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setGenreDetail((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        summary: baseline ? genreSummaryWithTrackChange(current.summary, baseline, updated) : current.summary,
+        highlights: current.highlights.map((track) => track.id === updated.id ? updated : track),
+      };
+    });
+    if (baseline) {
+      setGenreAtlasGenres((current) => current.map((summary) => genreSummaryWithTrackChange(summary, baseline, updated)));
+    }
     playback.refreshTrack(updated);
     setSnapshot((current) => {
       if (!current) return current;
@@ -816,7 +1010,7 @@ function App() {
 
   function navigate(label: string) {
     setActiveNav(label);
-    if (label === "Observatory" || label === "History") return;
+    if (label === "Observatory" || label === "History" || label === "Genres") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -834,6 +1028,12 @@ function App() {
     setActiveNav("Artists");
     setExplorerView("tracks");
     setExplorerFilters((current) => ({ ...current, artist: artistName, sort: "newest" }));
+  }
+
+  function exploreGenreInLibrary(genre: string) {
+    setActiveNav("Songs");
+    setExplorerView("tracks");
+    setExplorerFilters({ ...defaultExplorerFilters, genre, sort: "newest" });
   }
 
   function openArtistInspector(artistName: string) {
@@ -1079,6 +1279,7 @@ function App() {
   }
 
   function playHistoryTrack(track: Track) {
+    endGenreQueue();
     selectTrack(track);
     void playback.play([track], track.id);
   }
@@ -1102,6 +1303,34 @@ function App() {
     : explorerView === "albums"
       ? explorerAlbums.length
       : explorerArtists.length;
+  const topbarSearchValue = activeNav === "Observatory"
+    ? reviewSearch
+    : activeNav === "History"
+      ? historySearch
+      : activeNav === "Genres"
+        ? genreSearch
+        : explorerFilters.query;
+  const topbarSearchPlaceholder = activeNav === "Observatory"
+    ? "Search artists to review…"
+    : activeNav === "History"
+      ? "Search listening history…"
+      : activeNav === "Genres"
+        ? "Search your genre atlas…"
+        : "Search your universe…";
+  const topbarSearchLabel = activeNav === "Observatory"
+    ? "Search MusicBrainz review artists"
+    : activeNav === "History"
+      ? "Search listening history"
+      : activeNav === "Genres"
+        ? "Search genres"
+        : "Search your music universe";
+
+  function updateTopbarSearch(value: string) {
+    if (activeNav === "Observatory") setReviewSearch(value);
+    else if (activeNav === "History") setHistorySearch(value);
+    else if (activeNav === "Genres") setGenreSearch(value);
+    else setExplorerFilters((current) => ({ ...current, query: value }));
+  }
 
   const summary = snapshot?.summary;
   const stats = [
@@ -1168,7 +1397,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.10.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.11.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1192,17 +1421,13 @@ function App() {
             <Search aria-hidden="true" />
             <input
               ref={searchRef}
-              value={activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query}
-              onChange={(event) => activeNav === "Observatory"
-                ? setReviewSearch(event.target.value)
-                : activeNav === "History"
-                  ? setHistorySearch(event.target.value)
-                  : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
-              placeholder={activeNav === "Observatory" ? "Search artists to review…" : activeNav === "History" ? "Search listening history…" : "Search your universe…"}
-              aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : activeNav === "History" ? "Search listening history" : "Search your music universe"}
+              value={topbarSearchValue}
+              onChange={(event) => updateTopbarSearch(event.target.value)}
+              placeholder={topbarSearchPlaceholder}
+              aria-label={topbarSearchLabel}
             />
-            {(activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query)
-              ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : activeNav === "History" ? setHistorySearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
+            {topbarSearchValue
+              ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
               : <kbd>Ctrl K</kbd>}
           </form>
         </div>
@@ -1276,6 +1501,35 @@ function App() {
                 onPlayTrack={playHistoryTrack}
                 onLoadMore={() => void loadMoreHistory()}
                 onRefresh={() => setHistoryReloadToken((value) => value + 1)}
+              />
+            ) : activeNav === "Genres" ? (
+              <GenreAtlas
+                genres={genreAtlasGenres}
+                selectedGenre={selectedGenre}
+                detail={genreDetail}
+                search={genreSearch}
+                indexState={genreIndexState}
+                detailState={genreDetailState}
+                indexError={genreIndexError}
+                detailError={genreDetailError}
+                queueBusy={genreQueueBusy}
+                queueMessage={genreQueueMessage}
+                radioSession={genreRadioSession}
+                busyTrackKeys={inlineSavingKeys}
+                onSearchChange={setGenreSearch}
+                onSelectGenre={setSelectedGenre}
+                onRetryIndex={() => setGenreIndexReloadToken((value) => value + 1)}
+                onRetryDetail={() => setGenreDetailReloadToken((value) => value + 1)}
+                onQueue={(mode) => void startGenreQueue(mode)}
+                onOpenTracks={exploreGenreInLibrary}
+                onOpenArtist={(artist) => {
+                  exploreArtistInLibrary(artist);
+                  openArtistInspector(artist);
+                }}
+                onSelectTrack={selectTrack}
+                onPlayTrack={(track) => playTrack(track, genreDetail?.highlights ?? [track])}
+                onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+                onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
               />
             ) : <>
               {activeNav === "Universe" ? <>
@@ -1413,7 +1667,10 @@ function App() {
           onPlay={(trackId) => void playback.play(playback.state.queue, trackId)}
           onMove={(from, to) => void playback.move(from, to)}
           onRemove={(index) => void playback.remove(index)}
-          onClear={() => void playback.clear()}
+          onClear={() => {
+            endGenreQueue();
+            void playback.clear();
+          }}
         />
       )}
 

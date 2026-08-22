@@ -17,6 +17,17 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.11.0 acceptance checks
+
+- Replace the generic Genres explorer with a dedicated index of the catalog's exact canonical genres, without adding genre work to startup.
+- Search and sort the full bounded index by size, rating, Love, recent listening, unexplored status, or name.
+- Show bounded representative albums, artists, highlights, decades, personal listening metrics, and shared-artist connections for one selected genre.
+- Keep every genre queue within the selected canonical genre and return at most 100 tracks per request.
+- Append a refill below 20 remaining tracks without replacing the current track, retain at most 20 prior entries, de-duplicate stable identities, and cap the queue at 200.
+- Save rating and Love from genre highlights through the existing verified MP3 plus Aurora overlay transaction and update genre aggregates optimistically.
+- Preserve the read-only catalog boundary and avoid renaming, merging, or writing genre tags.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.11.0` versions.
+
 ## 0.10.0 acceptance checks
 
 - Enumerate Windows output endpoints with stable IDs, persist the selection per device, and keep browsing available when audio is unavailable.
@@ -132,7 +143,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.10.0
+## Explicit non-goals for 0.11.0
 
 - Crossfade, equalization, ReplayGain calculation/tag writing, preamp controls, and other DSP.
 - Editing the imported catalog directly.
@@ -150,8 +161,10 @@ Live source measurements including SQLite process startup are approximately 26�
 - A shared multi-writer history database, record-level OneDrive merge, live cross-device streaming, or deletion/editing of historical sessions.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 - Synchronizing Windows shortcut choices between computers or overriding a binding already owned by MusicBee or another process.
+- Treating shared artists as an authoritative taxonomy, rewriting compound/raw genre tags, or adding automatic genre merging.
+- Loading unbounded genre track sets into React or persisting an infinite radio queue.
 
-## Planned sections after 0.10.0
+## Planned sections after 0.11.0
 
 1. Smart playlists and saved explorer views after the browsing/filter contract is proven.
 2. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.

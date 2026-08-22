@@ -152,6 +152,14 @@ pub(crate) struct TrackHistoryInsight {
     last_listened_at_ms: Option<i64>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct GenreHistoryInsight {
+    pub(crate) sessions: i64,
+    pub(crate) plays: i64,
+    pub(crate) listened_seconds: f64,
+    pub(crate) last_listened_at_ms: Option<i64>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveHistorySession {
     session_id: String,
@@ -917,6 +925,98 @@ impl HistoryStore {
         Ok(insight)
     }
 
+    pub(crate) fn genre_insights(&self) -> Result<HashMap<String, GenreHistoryInsight>, String> {
+        let mut insights: HashMap<String, GenreHistoryInsight> = HashMap::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection
+                .prepare(
+                    r#"
+                    SELECT TRIM(genre), COUNT(*), COALESCE(SUM(registered_play), 0),
+                           COALESCE(SUM(listened_seconds), 0), MAX(started_at_ms)
+                    FROM listening_sessions
+                    WHERE NULLIF(TRIM(genre), '') IS NOT NULL
+                    GROUP BY TRIM(genre)
+                    "#,
+                )
+                .map_err(|error| format!("Could not prepare Aurora's genre history: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        GenreHistoryInsight {
+                            sessions: row.get(1)?,
+                            plays: row.get(2)?,
+                            listened_seconds: row.get::<_, f64>(3)?.max(0.0),
+                            last_listened_at_ms: row.get(4)?,
+                        },
+                    ))
+                })
+                .map_err(|error| format!("Could not read Aurora's genre history: {error}"))?;
+            for row in rows {
+                let (genre, candidate) = row
+                    .map_err(|error| format!("Could not decode Aurora's genre history: {error}"))?;
+                let combined = insights.entry(genre_identity(&genre)).or_default();
+                combined.sessions = combined.sessions.saturating_add(candidate.sessions);
+                combined.plays = combined.plays.saturating_add(candidate.plays);
+                combined.listened_seconds += candidate.listened_seconds;
+                combined.last_listened_at_ms =
+                    match (combined.last_listened_at_ms, candidate.last_listened_at_ms) {
+                        (Some(current), Some(next)) => Some(current.max(next)),
+                        (None, next) => next,
+                        (current, None) => current,
+                    };
+            }
+        }
+        Ok(insights)
+    }
+
+    pub(crate) fn played_track_keys_for_genre(
+        &self,
+        genre: &str,
+    ) -> Result<HashSet<String>, String> {
+        if genre.trim().is_empty() || genre.chars().count() > 256 {
+            return Err("Genre selection is invalid.".to_owned());
+        }
+        let mut keys = HashSet::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection
+                .prepare(
+                    "SELECT DISTINCT track_key FROM listening_sessions \
+                     WHERE registered_play = 1 AND TRIM(genre) = TRIM(?1) COLLATE NOCASE",
+                )
+                .map_err(|error| {
+                    format!("Could not prepare Aurora's played genre tracks: {error}")
+                })?;
+            let rows = statement
+                .query_map([genre], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("Could not read Aurora's played genre tracks: {error}"))?;
+            for row in rows {
+                keys.insert(row.map_err(|error| {
+                    format!("Could not decode Aurora's played genre tracks: {error}")
+                })?);
+            }
+        }
+        Ok(keys)
+    }
+
     fn available_sources(&self) -> Vec<PathBuf> {
         let mut sources = vec![self.path.clone()];
         if !self.remote_directory.is_dir() {
@@ -1040,6 +1140,10 @@ impl HistoryStore {
         }
         Ok("Saved this device's listening history to OneDrive.".to_owned())
     }
+}
+
+pub(crate) fn genre_identity(genre: &str) -> String {
+    genre.trim().to_lowercase()
 }
 
 fn query_top_rows(connection: &Connection, limit: usize) -> Result<Vec<HistoryTopRow>, String> {

@@ -133,6 +133,35 @@ export async function playTrackQueue(tracks: Track[], startTrackId: string): Pro
   return cloneBrowserPlayback();
 }
 
+export async function appendTrackQueue(tracks: Track[]): Promise<PlaybackSnapshot> {
+  if (tracks.length === 0 || tracks.length > 100) throw new Error("Queue refill batches must contain between 1 and 100 tracks.");
+  if (isTauriRuntime()) {
+    return command("playback_append_queue", {
+      trackReferences: tracks.map((track) => ({ id: track.id, trackKey: track.trackKey })),
+    });
+  }
+  const current = browserPlayback.currentIndex;
+  if (current === null) throw new Error("Choose a track before extending its queue.");
+  const keepFrom = Math.max(0, current - 20);
+  const queue = browserPlayback.queue.slice(keepFrom);
+  const currentIndex = current - keepFrom;
+  const keys = new Set(queue.map((track) => track.trackKey));
+  for (const track of tracks) {
+    if (queue.length >= 200) break;
+    if (!keys.has(track.trackKey)) {
+      queue.push(track);
+      keys.add(track.trackKey);
+    }
+  }
+  browserPlayback = {
+    ...browserPlayback,
+    queue,
+    currentIndex,
+    currentTrack: queue[currentIndex],
+  };
+  return cloneBrowserPlayback();
+}
+
 export async function togglePlayback(): Promise<PlaybackSnapshot> {
   if (isTauriRuntime()) return command("playback_toggle");
   refreshBrowserClock();
@@ -319,6 +348,11 @@ export function usePlayback() {
     }));
   }, []);
 
+  const append = useCallback(
+    (tracks: Track[]) => run(() => appendTrackQueue(tracks)),
+    [run],
+  );
+
   return {
     state,
     isWorking,
@@ -328,6 +362,7 @@ export function usePlayback() {
       setCommandError(null);
     },
     play: (tracks: Track[], startTrackId: string) => run(() => playTrackQueue(tracks, startTrackId)),
+    append,
     toggle: () => run(togglePlayback),
     next: () => run(nextTrack),
     previous: () => run(previousTrack),

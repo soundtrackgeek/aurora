@@ -379,7 +379,7 @@ pub(crate) fn query_snapshot(
     })
 }
 
-fn query_tracks<P: rusqlite::Params>(
+pub(crate) fn query_tracks<P: rusqlite::Params>(
     connection: &Connection,
     sql: &str,
     params: P,
