@@ -1,5 +1,7 @@
 mod artwork;
 mod catalog;
+mod curation;
+mod curation_store;
 mod explorer;
 mod musicbrainz;
 mod playback;
@@ -8,11 +10,12 @@ mod tag_model;
 mod tagging;
 
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
+use curation::{ArtistDecisionRequest, CurationExportResult, ReleaseDecisionRequest};
 use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
     TrackPage, TrackPageRequest,
 };
-use musicbrainz::ArtistIntelligence;
+use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use state_store::StateStore;
 use std::sync::Mutex;
@@ -105,10 +108,73 @@ async fn artist_detail(artist: String) -> Result<ArtistDetail, String> {
 }
 
 #[tauri::command]
-async fn artist_intelligence(artist: String) -> Result<ArtistIntelligence, String> {
-    tauri::async_runtime::spawn_blocking(move || musicbrainz::load_artist_intelligence(artist))
-        .await
-        .map_err(|error| format!("The MusicBrainz worker stopped unexpectedly: {error}"))?
+async fn artist_intelligence(app: AppHandle, artist: String) -> Result<ArtistIntelligence, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        musicbrainz::load_artist_intelligence_with_store(artist, &store)
+    })
+    .await
+    .map_err(|error| format!("The MusicBrainz worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn musicbrainz_review_page(
+    app: AppHandle,
+    request: ArtistReviewPageRequest,
+) -> Result<ArtistReviewPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        musicbrainz::load_artist_review_page(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The MusicBrainz review worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn update_artist_identity_decision(
+    app: AppHandle,
+    request: ArtistDecisionRequest,
+) -> Result<ArtistIntelligence, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        curation::update_artist_decision(&store, request)
+    })
+    .await
+    .map_err(|error| format!("The artist curation worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn update_release_group_decision(
+    app: AppHandle,
+    request: ReleaseDecisionRequest,
+) -> Result<ArtistIntelligence, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        curation::update_release_decision(&store, request)
+    })
+    .await
+    .map_err(|error| format!("The release curation worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn undo_musicbrainz_curation(app: AppHandle) -> Result<Option<ArtistIntelligence>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        curation::undo_latest(&store)
+    })
+    .await
+    .map_err(|error| format!("The curation undo worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn export_musicbrainz_curation(app: AppHandle) -> Result<CurationExportResult, String> {
+    let app_for_worker = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app_for_worker.state::<StateStore>();
+        curation::export_overlay_snapshot(&app_for_worker, &store)
+    })
+    .await
+    .map_err(|error| format!("The curation export worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -314,6 +380,11 @@ pub fn run() {
             album_detail,
             artist_detail,
             artist_intelligence,
+            musicbrainz_review_page,
+            update_artist_identity_decision,
+            update_release_group_decision,
+            undo_musicbrainz_curation,
+            export_musicbrainz_curation,
             playback_state,
             playback_replace_queue,
             playback_toggle,

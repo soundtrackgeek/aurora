@@ -4,6 +4,39 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-22
+
+### Added
+
+- Observatory review queue with bounded local pages, text search, conflict/unconfirmed/decided filters, and a persistent artist inspector.
+- Explicit artist confirmation, ignore, clear, release-to-local-album link, not-in-scope, release ignore, and release clear actions.
+- Aurora-owned MusicBrainz decision tables and append-only curation history in state schema version 5, including one-step undo across restarts.
+- Complete Music Library overlay-compatible SQLite snapshot export with an Aurora manifest and preserved pre-existing overlay rows.
+- Browser previews and Rust/React coverage for candidate precedence, restart persistence, undo, local-album uniqueness, release validation, and exact export values.
+
+### Changed
+
+- Explicit Aurora artist decisions take display precedence over imported sources while any external MBID disagreement remains visible as a conflict.
+- Release decisions display their exact provenance and only become editable after an authoritative artist identity has been established.
+- Album links are restricted to an album belonging to the same normalized artist; a local album can belong to at most one Aurora release decision.
+- Clearing or changing an artist identity is blocked while dependent Aurora release mappings would be orphaned.
+
+### Performance
+
+- Review pages are capped at 100 rows and scan at most five bounded, indexed batches from the imported candidate-bearing artist-info table.
+- MusicBrainz databases remain absent from startup and ordinary Explorer queries.
+
+### Security
+
+- The live catalog, broad cache, and shared MusicBrainz overlay remain read-only. Export first creates a consistent new snapshot and applies Aurora decisions in one SQLite transaction.
+- Candidate confirmation accepts only a valid UUID currently present in the selected artist's local sources; release decisions require a visible release group and a same-artist local album.
+- Export maps Aurora's internal `linked` state to Music Library's exact `include` value and uses its timestamp and tombstone contract.
+
+### Known limits
+
+- Observatory 0.6.0 reviews candidate-bearing artists represented in the imported MusicBrainz artist-info table; it does not enumerate every catalog artist.
+- Export produces a new overlay file in Aurora's app-data folder. Aurora does not silently replace or live-sync the shared OneDrive overlay.
+
 ## [0.5.0] - 2026-08-22
 
 ### Added

@@ -2,7 +2,7 @@ use crate::tag_model::{LoveState, TagValues};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::{collections::HashSet, fs, path::PathBuf, time::Duration};
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -240,6 +240,59 @@ impl StateStore {
                     .map_err(|error| format!("Could not upgrade Aurora's undo journal: {error}"))?;
             }
         }
+        transaction
+            .execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS musicbrainz_artist_decisions (
+                  local_artist_key TEXT PRIMARY KEY,
+                  display_artist TEXT NOT NULL,
+                  decision TEXT NOT NULL CHECK (decision IN ('confirmed', 'ignored')),
+                  artist_mbid TEXT,
+                  canonical_name TEXT,
+                  created_at_ms INTEGER NOT NULL,
+                  updated_at_ms INTEGER NOT NULL,
+                  CHECK (
+                    (decision = 'confirmed' AND artist_mbid IS NOT NULL AND length(trim(artist_mbid)) > 0)
+                    OR
+                    (decision = 'ignored' AND artist_mbid IS NULL)
+                  )
+                );
+
+                CREATE TABLE IF NOT EXISTS musicbrainz_release_decisions (
+                  local_artist_key TEXT NOT NULL,
+                  display_artist TEXT NOT NULL,
+                  artist_mbid TEXT NOT NULL,
+                  release_mbid TEXT NOT NULL,
+                  decision TEXT NOT NULL CHECK (decision IN ('linked', 'not-in-scope', 'ignored')),
+                  local_album_id TEXT,
+                  created_at_ms INTEGER NOT NULL,
+                  updated_at_ms INTEGER NOT NULL,
+                  PRIMARY KEY (local_artist_key, artist_mbid, release_mbid),
+                  CHECK (
+                    (decision = 'linked' AND local_album_id IS NOT NULL AND length(trim(local_album_id)) > 0)
+                    OR
+                    (decision IN ('not-in-scope', 'ignored') AND local_album_id IS NULL)
+                  )
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_musicbrainz_release_local_album
+                  ON musicbrainz_release_decisions(local_artist_key, local_album_id)
+                  WHERE decision = 'linked';
+
+                CREATE TABLE IF NOT EXISTS musicbrainz_curation_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  entity_kind TEXT NOT NULL CHECK (entity_kind IN ('artist', 'release')),
+                  local_artist_key TEXT NOT NULL,
+                  artist_mbid TEXT,
+                  release_mbid TEXT,
+                  before_json TEXT,
+                  after_json TEXT,
+                  created_at_ms INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_musicbrainz_curation_events_created
+                  ON musicbrainz_curation_events(id DESC);
+                "#,
+            )
+            .map_err(|error| format!("Could not ensure Aurora's MusicBrainz curation schema: {error}"))?;
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|error| {

@@ -13,9 +13,21 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora-owned playback state, optimistic tag overlays, and the tag-operation journal live in a separate writable Aurora database.
 - Integer track IDs are transient because Music Library's full TSV import replaces rows. Aurora persists queue and overlay identity with the normalized directory plus filename; album IDs remain opaque strings.
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
+- Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.5.0 acceptance checks
+## 0.6.0 acceptance checks
+
+- Open Observatory from the persistent navigation and page candidate-bearing artists without adding MusicBrainz work to startup or ordinary Explorer queries.
+- Filter review items by needs-review, conflict, unconfirmed, Aurora decision, or all-candidate state and search by artist without exceeding 100 returned rows.
+- Confirm only a currently visible valid candidate, ignore or clear an artist, preserve external conflict evidence, and survive a process restart.
+- Require an authoritative artist before release curation; link only a visible release group to a local album owned by the same artist, or mark it not in scope/ignored.
+- Prevent one local album from being linked to multiple MusicBrainz groups and prevent artist changes that would orphan release mappings.
+- Undo the latest artist or release action from durable history.
+- Export a new complete overlay-compatible SQLite snapshot while preserving the live catalog, cache, and OneDrive overlay byte-for-byte.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.6.0` versions.
+
+## 0.5.0 foundation checks
 
 - Open Constellations from a universe planet, Artist result, or the selected track's Artist tab without adding MusicBrainz work to startup or Explorer queries.
 - Resolve artists through the normalized local artist key and label only verified, non-ignored curated overlay links as verified.
@@ -65,7 +77,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.5.0
+## Explicit non-goals for 0.6.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
@@ -74,11 +86,13 @@ Live source measurements including SQLite process startup are approximately 26�
 - Release editions, labels, formats, catalog numbers, recordings, works, aliases, and relationship edges; the audited local sources do not contain them.
 - Automatic local-album-to-release-group assignment; title comparison is incomplete and can be ambiguous.
 - Accepting cache-only identity candidates as verified or silently resolving a source conflict.
+- Enumerating every catalog artist in Observatory; 0.6.0 covers candidate-bearing imported artist-info rows.
+- Silently replacing or continuously syncing the shared OneDrive MusicBrainz overlay; export is deliberate and produces a new complete snapshot.
 - A recursive filesystem watcher or full-library MP3 tag scan; synchronization is intentionally bounded to pending overlays and selected tracks.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections after 0.5.0
+## Planned sections after 0.6.0
 
-1. Review workflows for unconfirmed/conflicting identities and curated local-album release decisions.
-2. Listening history, ReplayGain, device selection, and gapless playback research.
-3. Smart playlists and saved explorer views after the browsing/filter contract is proven.
+1. Listening history, ReplayGain, device selection, and gapless playback research.
+2. Smart playlists and saved explorer views after the browsing/filter contract is proven.
+3. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.

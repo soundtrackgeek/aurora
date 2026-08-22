@@ -1,6 +1,10 @@
-use crate::catalog::{default_catalog_path, open_catalog};
+use crate::{
+    catalog::{default_catalog_path, open_catalog},
+    curation_store::StoredArtistDecision,
+    state_store::StateStore,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env,
@@ -46,12 +50,24 @@ impl MusicBrainzSource {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArtistIdentity {
-    mbid: String,
-    canonical_name: String,
-    match_method: String,
-    confidence: Option<f64>,
-    provenance: &'static str,
-    cache_name_count: Option<i64>,
+    pub(crate) mbid: String,
+    pub(crate) canonical_name: String,
+    pub(crate) match_method: String,
+    pub(crate) confidence: Option<f64>,
+    pub(crate) provenance: &'static str,
+    pub(crate) cache_name_count: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArtistCandidate {
+    pub(crate) mbid: String,
+    pub(crate) canonical_name: String,
+    pub(crate) match_method: String,
+    pub(crate) confidence: Option<f64>,
+    pub(crate) provenance: &'static str,
+    pub(crate) cache_name_count: Option<i64>,
+    pub(crate) verified_source: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -73,28 +89,61 @@ pub(crate) struct ArtistProfile {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MusicBrainzRelease {
-    mbid: String,
-    title: String,
-    year: Option<i64>,
-    primary_type: Option<String>,
-    secondary_types: Vec<String>,
-    status: Option<String>,
-    track_count: Option<i64>,
-    provenance: &'static str,
-    decision: Option<String>,
-    local_album_id: Option<String>,
+    pub(crate) mbid: String,
+    pub(crate) title: String,
+    pub(crate) year: Option<i64>,
+    pub(crate) primary_type: Option<String>,
+    pub(crate) secondary_types: Vec<String>,
+    pub(crate) status: Option<String>,
+    pub(crate) track_count: Option<i64>,
+    pub(crate) provenance: &'static str,
+    pub(crate) decision: Option<String>,
+    pub(crate) decision_provenance: Option<&'static str>,
+    pub(crate) local_album_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArtistIntelligence {
-    artist: String,
-    match_state: &'static str,
-    identity: Option<ArtistIdentity>,
-    profile: Option<ArtistProfile>,
-    releases: Vec<MusicBrainzRelease>,
-    releases_truncated: bool,
-    sources: Vec<MusicBrainzSource>,
+    pub(crate) artist: String,
+    pub(crate) artist_key: String,
+    pub(crate) match_state: &'static str,
+    pub(crate) identity: Option<ArtistIdentity>,
+    pub(crate) candidates: Vec<ArtistCandidate>,
+    pub(crate) decision: Option<StoredArtistDecision>,
+    pub(crate) has_external_conflict: bool,
+    pub(crate) profile: Option<ArtistProfile>,
+    pub(crate) releases: Vec<MusicBrainzRelease>,
+    pub(crate) releases_truncated: bool,
+    pub(crate) sources: Vec<MusicBrainzSource>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ArtistReviewPageRequest {
+    pub(crate) page_size: Option<u16>,
+    pub(crate) cursor: Option<String>,
+    pub(crate) filter: Option<String>,
+    pub(crate) search: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArtistReviewItem {
+    pub(crate) artist_key: String,
+    pub(crate) display_artist: String,
+    pub(crate) match_state: &'static str,
+    pub(crate) identity: Option<ArtistIdentity>,
+    pub(crate) candidates: Vec<ArtistCandidate>,
+    pub(crate) decision: Option<StoredArtistDecision>,
+    pub(crate) has_external_conflict: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArtistReviewPage {
+    pub(crate) items: Vec<ArtistReviewItem>,
+    pub(crate) next_cursor: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -125,9 +174,10 @@ struct CatalogIdentity {
 struct ReleaseDecision {
     decision: String,
     local_album_id: Option<String>,
+    provenance: &'static str,
 }
 
-fn default_source_paths() -> Result<(PathBuf, PathBuf), String> {
+pub(crate) fn default_source_paths() -> Result<(PathBuf, PathBuf), String> {
     let profile = env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .ok_or_else(|| "Windows USERPROFILE is unavailable.".to_owned())?;
@@ -135,7 +185,7 @@ fn default_source_paths() -> Result<(PathBuf, PathBuf), String> {
     Ok((root.join(CACHE_FILENAME), root.join(OVERLAY_FILENAME)))
 }
 
-fn validate_artist(artist: &str) -> Result<(String, String), String> {
+pub(crate) fn validate_artist(artist: &str) -> Result<(String, String), String> {
     let artist = artist.trim();
     if artist.is_empty() || artist.chars().count() > MAX_ARTIST_CHARS {
         return Err("Artist identity is invalid.".to_owned());
@@ -153,6 +203,18 @@ fn validate_artist(artist: &str) -> Result<(String, String), String> {
         .join(" ")
         .to_lowercase();
     Ok((artist.to_owned(), key))
+}
+
+pub(crate) fn valid_mbid(value: &str) -> bool {
+    let value = value.trim();
+    value.len() == 36
+        && value.chars().enumerate().all(|(index, character)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                character == '-'
+            } else {
+                character.is_ascii_hexdigit()
+            }
+        })
 }
 
 fn open_source(path: &Path, label: &str) -> Result<Connection, String> {
@@ -286,6 +348,7 @@ fn overlay_decisions(
             ReleaseDecision {
                 decision: row.get(1)?,
                 local_album_id: row.get(2)?,
+                provenance: "curatedOverlay",
             },
         ))
     })?;
@@ -313,6 +376,7 @@ fn cache_releases(
             status: row.get(6)?,
             provenance: "broadCache",
             decision: None,
+            decision_provenance: None,
             local_album_id: None,
         })
     })?;
@@ -340,6 +404,7 @@ fn overlay_releases(
             status: row.get(5)?,
             provenance: "curatedOverlay",
             decision: None,
+            decision_provenance: None,
             local_album_id: None,
         })
     })?;
@@ -367,6 +432,7 @@ fn catalog_releases(
             status: row.get(6)?,
             provenance: "catalogImport",
             decision: None,
+            decision_provenance: None,
             local_album_id: None,
         })
     })?;
@@ -386,19 +452,52 @@ fn split_secondary_types(value: Option<&str>) -> Vec<String> {
 
 fn resolve_identity(
     artist: &str,
+    local: Option<&StoredArtistDecision>,
     overlay: Option<&OverlayIdentity>,
     catalog: Option<&CatalogIdentity>,
     cache: Option<&CacheIdentity>,
-) -> (&'static str, Option<ArtistIdentity>) {
+) -> (&'static str, Option<ArtistIdentity>, bool) {
+    if local.is_some_and(|decision| decision.decision == "ignored") {
+        return (
+            "ignored",
+            None,
+            overlay.is_some() || catalog.is_some() || cache.is_some(),
+        );
+    }
+    if let Some(decision) = local.filter(|decision| {
+        decision.decision == "confirmed" && decision.artist_mbid.as_deref().is_some_and(valid_mbid)
+    }) {
+        let mbid = decision.artist_mbid.clone().unwrap_or_default();
+        let external_conflict = overlay
+            .and_then(|candidate| candidate.mbid.as_deref())
+            .is_some_and(|candidate| {
+                valid_mbid(candidate) && !candidate.eq_ignore_ascii_case(&mbid)
+            })
+            || catalog.is_some_and(|candidate| !candidate.mbid.eq_ignore_ascii_case(&mbid))
+            || cache.is_some_and(|candidate| !candidate.mbid.eq_ignore_ascii_case(&mbid));
+        return (
+            "verified",
+            Some(ArtistIdentity {
+                mbid,
+                canonical_name: decision
+                    .canonical_name
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| decision.display_artist.clone()),
+                match_method: "aurora-confirmed".to_owned(),
+                confidence: Some(1.0),
+                provenance: "auroraState",
+                cache_name_count: cache.map(|candidate| candidate.name_count),
+            }),
+            external_conflict,
+        );
+    }
     if overlay.is_some_and(|identity| identity.ignored) {
-        return ("ignored", None);
+        return ("ignored", None, false);
     }
     if let Some(curated) = overlay.filter(|identity| {
         identity.verification_state == "verified"
-            && identity
-                .mbid
-                .as_ref()
-                .is_some_and(|mbid| !mbid.trim().is_empty())
+            && identity.mbid.as_ref().is_some_and(|mbid| valid_mbid(mbid))
     }) {
         let mbid = curated
             .mbid
@@ -430,11 +529,12 @@ fn resolve_identity(
                 provenance: curated.provenance,
                 cache_name_count,
             }),
+            state == "conflict",
         );
     }
     if let Some(imported) = catalog {
         if cache.is_some_and(|candidate| candidate.mbid != imported.mbid) {
-            return ("conflict", None);
+            return ("conflict", None, true);
         }
         return (
             "unconfirmed",
@@ -446,6 +546,7 @@ fn resolve_identity(
                 provenance: "catalogImport",
                 cache_name_count: cache.map(|candidate| candidate.name_count),
             }),
+            false,
         );
     }
     if let Some(exact) = cache {
@@ -459,9 +560,61 @@ fn resolve_identity(
                 provenance: "cacheExact",
                 cache_name_count: Some(exact.name_count),
             }),
+            false,
         );
     }
-    ("unmatched", None)
+    ("unmatched", None, false)
+}
+
+fn identity_candidates(
+    artist: &str,
+    overlay: Option<&OverlayIdentity>,
+    catalog: Option<&CatalogIdentity>,
+    cache: Option<&CacheIdentity>,
+) -> Vec<ArtistCandidate> {
+    let mut candidates = Vec::new();
+    if let Some(curated) = overlay
+        .filter(|candidate| !candidate.ignored && candidate.mbid.as_deref().is_some_and(valid_mbid))
+    {
+        candidates.push(ArtistCandidate {
+            mbid: curated.mbid.clone().unwrap_or_default().to_lowercase(),
+            canonical_name: curated
+                .canonical_name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| curated.display_artist.clone()),
+            match_method: curated.match_method.clone(),
+            confidence: curated.confidence,
+            provenance: curated.provenance,
+            cache_name_count: None,
+            verified_source: curated.verification_state == "verified",
+        });
+    }
+    if let Some(imported) = catalog.filter(|candidate| valid_mbid(&candidate.mbid)) {
+        candidates.push(ArtistCandidate {
+            mbid: imported.mbid.to_lowercase(),
+            canonical_name: imported.display_artist.clone(),
+            match_method: "catalog-import".to_owned(),
+            confidence: None,
+            provenance: "catalogImport",
+            cache_name_count: cache
+                .filter(|candidate| candidate.mbid.eq_ignore_ascii_case(&imported.mbid))
+                .map(|candidate| candidate.name_count),
+            verified_source: false,
+        });
+    }
+    if let Some(exact) = cache.filter(|candidate| valid_mbid(&candidate.mbid)) {
+        candidates.push(ArtistCandidate {
+            mbid: exact.mbid.to_lowercase(),
+            canonical_name: artist.to_owned(),
+            match_method: "exact-name-cache".to_owned(),
+            confidence: None,
+            provenance: "cacheExact",
+            cache_name_count: Some(exact.name_count),
+            verified_source: false,
+        });
+    }
+    candidates
 }
 
 fn finalize_releases(
@@ -471,6 +624,7 @@ fn finalize_releases(
     for release in &mut releases {
         if let Some(decision) = decisions.get(&release.mbid) {
             release.decision = Some(decision.decision.clone());
+            release.decision_provenance = Some(decision.provenance);
             release.local_album_id = decision.local_album_id.clone();
         }
     }
@@ -487,8 +641,27 @@ fn finalize_releases(
     (releases, truncated)
 }
 
+pub(crate) fn load_artist_intelligence_with_store(
+    artist: String,
+    store: &StateStore,
+) -> Result<ArtistIntelligence, String> {
+    load_artist_intelligence_internal(artist, Some(store))
+}
+
+#[cfg(test)]
 pub(crate) fn load_artist_intelligence(artist: String) -> Result<ArtistIntelligence, String> {
+    load_artist_intelligence_internal(artist, None)
+}
+
+fn load_artist_intelligence_internal(
+    artist: String,
+    store: Option<&StateStore>,
+) -> Result<ArtistIntelligence, String> {
     let (artist, artist_key) = validate_artist(&artist)?;
+    let local_decision = store
+        .map(|store| store.artist_decision(&artist_key))
+        .transpose()?
+        .flatten();
     let (cache_path, overlay_path) = default_source_paths()?;
 
     let mut cache_source = MusicBrainzSource::connected("broadCache", "Broad MusicBrainz cache");
@@ -591,8 +764,15 @@ pub(crate) fn load_artist_intelligence(artist: String) -> Result<ArtistIntellige
         None
     };
     let curated_identity = curated_identity.or(catalog_curated_identity);
-    let (match_state, identity) = resolve_identity(
+    let candidates = identity_candidates(
         &artist,
+        curated_identity.as_ref(),
+        imported_identity.as_ref(),
+        cached_identity.as_ref(),
+    );
+    let (match_state, identity, has_external_conflict) = resolve_identity(
+        &artist,
+        local_decision.as_ref(),
         curated_identity.as_ref(),
         imported_identity.as_ref(),
         cached_identity.as_ref(),
@@ -662,6 +842,22 @@ pub(crate) fn load_artist_intelligence(artist: String) -> Result<ArtistIntellige
                 }
             }
         }
+        if let Some(store) = store {
+            for decision in store.release_decisions(&artist_key, &identity.mbid)? {
+                decisions.insert(
+                    decision.release_mbid,
+                    ReleaseDecision {
+                        decision: if decision.decision == "linked" {
+                            "include".to_owned()
+                        } else {
+                            decision.decision
+                        },
+                        local_album_id: decision.local_album_id,
+                        provenance: "auroraState",
+                    },
+                );
+            }
+        }
     }
     let preferred_releases = if matches!(match_state, "verified" | "conflict") {
         curated_releases
@@ -678,13 +874,163 @@ pub(crate) fn load_artist_intelligence(artist: String) -> Result<ArtistIntellige
 
     Ok(ArtistIntelligence {
         artist,
+        artist_key,
         match_state,
         identity,
+        candidates,
+        decision: local_decision,
+        has_external_conflict,
         profile,
         releases,
         releases_truncated,
         sources: vec![catalog_source, overlay_source, cache_source],
     })
+}
+
+pub(crate) fn load_artist_review_page(
+    request: ArtistReviewPageRequest,
+    store: &StateStore,
+) -> Result<ArtistReviewPage, String> {
+    let page_size = usize::from(request.page_size.unwrap_or(50));
+    if !(1..=100).contains(&page_size) {
+        return Err("Review page size must be between 1 and 100.".to_owned());
+    }
+    let filter = request.filter.as_deref().unwrap_or("needsReview");
+    if !matches!(
+        filter,
+        "needsReview" | "conflict" | "unconfirmed" | "decided" | "all"
+    ) {
+        return Err("The MusicBrainz review filter is invalid.".to_owned());
+    }
+    let search = request
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if search.is_some_and(|value| value.chars().count() > MAX_ARTIST_CHARS) {
+        return Err("The MusicBrainz review search is too long.".to_owned());
+    }
+    let mut cursor = request.cursor.unwrap_or_default();
+    if cursor.chars().count() > MAX_ARTIST_CHARS * 2 {
+        return Err("The MusicBrainz review cursor is invalid.".to_owned());
+    }
+
+    let catalog = open_catalog(&default_catalog_path()?)?;
+    let (cache_path, overlay_path) = default_source_paths()?;
+    let cache = open_source(&cache_path, "the broad MusicBrainz cache").ok();
+    let overlay = open_source(&overlay_path, "the curated MusicBrainz overlay").ok();
+    let local_decisions = store
+        .all_artist_decisions()?
+        .into_iter()
+        .map(|decision| (decision.local_artist_key.clone(), decision))
+        .collect::<HashMap<_, _>>();
+
+    let mut items = Vec::with_capacity(page_size);
+    let mut next_cursor = None;
+    const SCAN_BATCH: usize = 100;
+    const MAX_SCAN_BATCHES: usize = 5;
+
+    for _ in 0..MAX_SCAN_BATCHES {
+        let mut statement = catalog
+            .prepare(
+                r#"
+                SELECT local_artist_key, display_artist, mbid
+                FROM musicbrainz_artist_infos
+                WHERE local_artist_key > ?1
+                  AND (?2 IS NULL OR display_artist LIKE '%' || ?2 || '%' COLLATE NOCASE)
+                ORDER BY local_artist_key
+                LIMIT ?3
+                "#,
+            )
+            .map_err(|error| format!("Could not prepare the MusicBrainz review queue: {error}"))?;
+        let rows = statement
+            .query_map(params![cursor, search, SCAN_BATCH as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|error| format!("Could not read the MusicBrainz review queue: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not decode the MusicBrainz review queue: {error}"))?;
+        if rows.is_empty() {
+            next_cursor = None;
+            break;
+        }
+        let batch_was_full = rows.len() == SCAN_BATCH;
+        for (artist_key, display_artist, imported_mbid) in rows {
+            cursor = artist_key.clone();
+            let cached_identity = cache
+                .as_ref()
+                .and_then(|connection| cache_identity(connection, &artist_key).ok().flatten());
+            let external_curated = overlay.as_ref().and_then(|connection| {
+                overlay_identity(connection, &artist_key, "curatedOverlay")
+                    .ok()
+                    .flatten()
+            });
+            let embedded_curated = if external_curated.is_none() {
+                overlay_identity(&catalog, &artist_key, "catalogOverlay")
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            let curated_identity = external_curated.or(embedded_curated);
+            let imported_identity =
+                imported_mbid
+                    .filter(|mbid| valid_mbid(mbid))
+                    .map(|mbid| CatalogIdentity {
+                        display_artist: display_artist.clone(),
+                        mbid: mbid.to_lowercase(),
+                    });
+            let local_decision = local_decisions.get(&artist_key);
+            let candidates = identity_candidates(
+                &display_artist,
+                curated_identity.as_ref(),
+                imported_identity.as_ref(),
+                cached_identity.as_ref(),
+            );
+            let (match_state, identity, has_external_conflict) = resolve_identity(
+                &display_artist,
+                local_decision,
+                curated_identity.as_ref(),
+                imported_identity.as_ref(),
+                cached_identity.as_ref(),
+            );
+            let include = match filter {
+                "needsReview" => {
+                    local_decision.is_none()
+                        && matches!(match_state, "conflict" | "unconfirmed" | "unmatched")
+                }
+                "conflict" => local_decision.is_none() && match_state == "conflict",
+                "unconfirmed" => local_decision.is_none() && match_state == "unconfirmed",
+                "decided" => local_decision.is_some(),
+                "all" => true,
+                _ => false,
+            };
+            if include {
+                items.push(ArtistReviewItem {
+                    artist_key,
+                    display_artist,
+                    match_state,
+                    identity,
+                    candidates,
+                    decision: local_decision.cloned(),
+                    has_external_conflict,
+                });
+            }
+            if items.len() == page_size {
+                next_cursor = Some(cursor.clone());
+                return Ok(ArtistReviewPage { items, next_cursor });
+            }
+        }
+        next_cursor = batch_was_full.then(|| cursor.clone());
+        if !batch_was_full {
+            break;
+        }
+    }
+    Ok(ArtistReviewPage { items, next_cursor })
 }
 
 #[cfg(test)]
@@ -727,12 +1073,12 @@ mod tests {
     #[test]
     fn curated_identity_wins_and_reports_an_exact_cache_conflict() {
         let cache = CacheIdentity {
-            mbid: "cache-mbid".to_owned(),
+            mbid: "11111111-1111-1111-1111-111111111111".to_owned(),
             name_count: 1,
         };
         let overlay = OverlayIdentity {
             display_artist: "M83".to_owned(),
-            mbid: Some("curated-mbid".to_owned()),
+            mbid: Some("22222222-2222-2222-2222-222222222222".to_owned()),
             canonical_name: Some("M83".to_owned()),
             match_method: "manual-mbid".to_owned(),
             confidence: Some(1.0),
@@ -740,18 +1086,55 @@ mod tests {
             ignored: false,
             provenance: "curatedOverlay",
         };
-        let (state, identity) = resolve_identity("M83", Some(&overlay), None, Some(&cache));
+        let (state, identity, conflict) =
+            resolve_identity("M83", None, Some(&overlay), None, Some(&cache));
         assert_eq!(state, "conflict");
-        assert_eq!(identity.unwrap().mbid, "curated-mbid");
+        assert!(conflict);
+        assert_eq!(
+            identity.unwrap().mbid,
+            "22222222-2222-2222-2222-222222222222"
+        );
+    }
+
+    #[test]
+    fn aurora_decision_wins_without_hiding_external_conflicts() {
+        let local = StoredArtistDecision {
+            local_artist_key: "m83".to_owned(),
+            display_artist: "M83".to_owned(),
+            decision: "confirmed".to_owned(),
+            artist_mbid: Some("11111111-1111-1111-1111-111111111111".to_owned()),
+            canonical_name: Some("M83".to_owned()),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+        let overlay = OverlayIdentity {
+            display_artist: "M83".to_owned(),
+            mbid: Some("22222222-2222-2222-2222-222222222222".to_owned()),
+            canonical_name: Some("M83".to_owned()),
+            match_method: "manual-mbid".to_owned(),
+            confidence: Some(1.0),
+            verification_state: "verified".to_owned(),
+            ignored: false,
+            provenance: "curatedOverlay",
+        };
+
+        let (state, identity, conflict) =
+            resolve_identity("M83", Some(&local), Some(&overlay), None, None);
+
+        assert_eq!(state, "verified");
+        assert!(conflict);
+        let identity = identity.expect("Aurora identity");
+        assert_eq!(identity.provenance, "auroraState");
+        assert_eq!(identity.mbid, "11111111-1111-1111-1111-111111111111");
     }
 
     #[test]
     fn exact_cache_match_is_explicitly_unverified() {
         let cache = CacheIdentity {
-            mbid: "cache-mbid".to_owned(),
+            mbid: "11111111-1111-1111-1111-111111111111".to_owned(),
             name_count: 2,
         };
-        let (state, identity) = resolve_identity("M83", None, None, Some(&cache));
+        let (state, identity, _) = resolve_identity("M83", None, None, None, Some(&cache));
         assert_eq!(state, "unconfirmed");
         assert_eq!(identity.unwrap().match_method, "exact-name-cache");
     }
@@ -769,10 +1152,11 @@ mod tests {
             provenance: "curatedOverlay",
         };
         let cache = CacheIdentity {
-            mbid: "wrong".to_owned(),
+            mbid: "11111111-1111-1111-1111-111111111111".to_owned(),
             name_count: 1,
         };
-        let (state, identity) = resolve_identity("Ambiguous", Some(&overlay), None, Some(&cache));
+        let (state, identity, _) =
+            resolve_identity("Ambiguous", None, Some(&overlay), None, Some(&cache));
         assert_eq!(state, "ignored");
         assert!(identity.is_none());
     }
@@ -789,7 +1173,7 @@ mod tests {
             ignored: false,
             provenance: "curatedOverlay",
         };
-        let (state, identity) = resolve_identity("Broken", Some(&overlay), None, None);
+        let (state, identity, _) = resolve_identity("Broken", None, Some(&overlay), None, None);
         assert_eq!(state, "unmatched");
         assert!(identity.is_none());
     }
@@ -802,6 +1186,7 @@ mod tests {
             ReleaseDecision {
                 decision: "included".to_owned(),
                 local_album_id: Some("album-1".to_owned()),
+                provenance: "curatedOverlay",
             },
         );
         let release = |title: &str, provenance| MusicBrainzRelease {
@@ -814,6 +1199,7 @@ mod tests {
             track_count: None,
             provenance,
             decision: None,
+            decision_provenance: None,
             local_album_id: None,
         };
         let (releases, truncated) =

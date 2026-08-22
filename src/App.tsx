@@ -20,6 +20,7 @@ import {
   Sparkles,
   Star,
   Tags,
+  Telescope,
   UsersRound,
   X,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import {
   type ExplorerView,
 } from "./components/explorer/DeepExplorer";
 import { ArtistWorld, type ArtistWorldState } from "./components/musicbrainz/ArtistWorld";
+import { Observatory, type ObservatoryLoadState } from "./components/curation/Observatory";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { TagEditor } from "./components/TagEditor";
@@ -54,7 +56,19 @@ import {
   type LibrarySnapshot,
   type Track,
 } from "./library";
-import { loadArtistIntelligence, type ArtistIntelligence } from "./musicbrainz";
+import {
+  exportMusicBrainzCuration,
+  loadArtistIntelligence,
+  loadArtistReviewPage,
+  undoMusicBrainzCuration,
+  updateArtistIdentityDecision,
+  updateReleaseGroupDecision,
+  type ArtistDecisionRequest,
+  type ArtistIntelligence,
+  type ArtistReviewFilter,
+  type ArtistReviewItem,
+  type ReleaseDecisionRequest,
+} from "./musicbrainz";
 import { usePlayback } from "./playback";
 import {
   reconcilePendingTags,
@@ -69,6 +83,7 @@ import { useAuroraUpdater } from "./updater";
 
 const navigation = [
   { label: "Universe", icon: Sparkles },
+  { label: "Observatory", icon: Telescope },
   { label: "Library", icon: LibraryBig },
   { label: "Albums", icon: Album },
   { label: "Artists", icon: UsersRound },
@@ -250,6 +265,17 @@ function App() {
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
   const [artistWorldState, setArtistWorldState] = useState<ArtistWorldState>("loading");
   const [artistWorldError, setArtistWorldError] = useState<string | null>(null);
+  const [curationError, setCurationError] = useState<string | null>(null);
+  const [curationActionBusy, setCurationActionBusy] = useState<string | null>(null);
+  const [curationMessage, setCurationMessage] = useState<string | null>(null);
+  const [reviewItems, setReviewItems] = useState<ArtistReviewItem[]>([]);
+  const [reviewCursor, setReviewCursor] = useState<string | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ArtistReviewFilter>("needsReview");
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewLoadState, setReviewLoadState] = useState<ObservatoryLoadState>("loading");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
+  const [reviewReloadToken, setReviewReloadToken] = useState(0);
   const [activeNav, setActiveNav] = useState("Universe");
   const [reloadToken, setReloadToken] = useState(0);
   const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
@@ -275,6 +301,7 @@ function App() {
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
   const artistRequestRef = useRef(0);
+  const reviewRequestRef = useRef(0);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
@@ -308,7 +335,7 @@ function App() {
   const libraryReady = snapshot !== null;
 
   useEffect(() => {
-    if (!libraryReady) return;
+    if (!libraryReady || activeNav === "Observatory") return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -343,7 +370,34 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [libraryReady, explorerView, explorerFilters, explorerReloadToken]);
+  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Observatory") return;
+    const requestId = ++reviewRequestRef.current;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setReviewLoadState("loading");
+      setReviewError(null);
+      setReviewCursor(null);
+      void loadArtistReviewPage({ pageSize: 50, filter: reviewFilter, search: reviewSearch.trim() || undefined })
+        .then((page) => {
+          if (cancelled || requestId !== reviewRequestRef.current) return;
+          setReviewItems(page.items);
+          setReviewCursor(page.nextCursor);
+          setReviewLoadState("ready");
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== reviewRequestRef.current) return;
+          setReviewError(error instanceof Error ? error.message : String(error));
+          setReviewLoadState("error");
+        });
+    }, reviewSearch.trim() ? 160 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, reviewFilter, reviewSearch, reviewReloadToken]);
 
   const applyReconciliationChanges = useCallback((changes: TagReconciliationChange[]) => {
     if (changes.length === 0) return;
@@ -487,6 +541,7 @@ function App() {
 
   function navigate(label: string) {
     setActiveNav(label);
+    if (label === "Observatory") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -513,6 +568,7 @@ function App() {
     setArtistDetail(null);
     setArtistIntelligence(null);
     setArtistWorldError(null);
+    setCurationError(null);
     setArtistWorldState("loading");
     void Promise.allSettled([
       loadArtistDetail(artistName),
@@ -535,6 +591,126 @@ function App() {
           : null);
       setArtistWorldState("ready");
     });
+  }
+
+  async function applyArtistDecision(request: ArtistDecisionRequest) {
+    if (curationActionBusy) return;
+    const requestId = ++artistRequestRef.current;
+    setCurationActionBusy("artist");
+    setCurationError(null);
+    setCurationMessage(null);
+    try {
+      const intelligence = await updateArtistIdentityDecision(request);
+      if (requestId !== artistRequestRef.current || inspectorArtistName !== request.artist) return;
+      setArtistIntelligence(intelligence);
+      setArtistWorldState("ready");
+      setCurationMessage(request.action === "clear"
+        ? `Cleared Aurora's identity override for ${request.artist}.`
+        : request.action === "ignore"
+          ? `Ignored ${request.artist} in Aurora.`
+          : `Confirmed ${request.artist} as ${intelligence.identity?.canonicalName ?? request.artist}.`);
+      setReviewReloadToken((value) => value + 1);
+    } catch (error) {
+      if (requestId === artistRequestRef.current) {
+        setCurationError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setCurationActionBusy((current) => current === "artist" ? null : current);
+    }
+  }
+
+  async function applyReleaseDecision(request: ReleaseDecisionRequest) {
+    if (curationActionBusy) return;
+    const requestId = ++artistRequestRef.current;
+    setCurationActionBusy(`release:${request.releaseMbid}`);
+    setCurationError(null);
+    setCurationMessage(null);
+    try {
+      const intelligence = await updateReleaseGroupDecision(request);
+      if (requestId !== artistRequestRef.current || inspectorArtistName !== request.artist) return;
+      setArtistIntelligence(intelligence);
+      setArtistWorldState("ready");
+      setCurationMessage(request.action === "link"
+        ? "Linked the MusicBrainz release group to the selected local album."
+        : request.action === "notInScope"
+          ? "Marked the release group as not in scope."
+          : request.action === "ignore"
+            ? "Ignored the release group."
+            : "Cleared Aurora's release override.");
+      setReviewReloadToken((value) => value + 1);
+    } catch (error) {
+      if (requestId === artistRequestRef.current) {
+        setCurationError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setCurationActionBusy((current) => current === `release:${request.releaseMbid}` ? null : current);
+    }
+  }
+
+  async function loadMoreReviewItems() {
+    if (!reviewCursor || reviewLoadingMore) return;
+    const requestId = ++reviewRequestRef.current;
+    setReviewLoadingMore(true);
+    try {
+      const page = await loadArtistReviewPage({
+        pageSize: 50,
+        cursor: reviewCursor,
+        filter: reviewFilter,
+        search: reviewSearch.trim() || undefined,
+      });
+      if (requestId !== reviewRequestRef.current) return;
+      setReviewItems((current) => {
+        const existing = new Set(current.map((item) => item.artistKey));
+        return [...current, ...page.items.filter((item) => !existing.has(item.artistKey))];
+      });
+      setReviewCursor(page.nextCursor);
+    } catch (error) {
+      if (requestId === reviewRequestRef.current) {
+        setReviewError(error instanceof Error ? error.message : String(error));
+        setReviewLoadState("error");
+      }
+    } finally {
+      if (requestId === reviewRequestRef.current) setReviewLoadingMore(false);
+    }
+  }
+
+  async function undoCuration() {
+    if (curationActionBusy) return;
+    setCurationActionBusy("undo");
+    setCurationMessage(null);
+    try {
+      const intelligence = await undoMusicBrainzCuration();
+      if (!intelligence) {
+        setCurationMessage("There is no Aurora curation decision to undo.");
+        return;
+      }
+      setInspectorArtistName(intelligence.artist);
+      setInspectorView("artist");
+      setArtistIntelligence(intelligence);
+      setArtistWorldState("ready");
+      setCurationError(null);
+      setCurationMessage(`Undid the latest decision for ${intelligence.artist}.`);
+      void loadArtistDetail(intelligence.artist).then(setArtistDetail).catch(() => setArtistDetail(null));
+      setReviewReloadToken((value) => value + 1);
+    } catch (error) {
+      setCurationMessage(`Could not undo the latest decision: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCurationActionBusy(null);
+    }
+  }
+
+  async function exportCuration() {
+    if (curationActionBusy) return;
+    setCurationActionBusy("export");
+    setCurationMessage(null);
+    try {
+      const result = await exportMusicBrainzCuration();
+      setCurationMessage(`Exported ${formatCount(result.artistDecisions)} artist and ${formatCount(result.releaseDecisions)} release decisions to ${result.path}`);
+    } catch (error) {
+      setCurationMessage(`Could not export the overlay snapshot: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCurationActionBusy(null);
+    }
   }
 
   function selectAlbum(album: ExplorerAlbum | null) {
@@ -645,7 +821,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.5.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.6.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -655,13 +831,15 @@ function App() {
           <Search aria-hidden="true" />
           <input
             ref={searchRef}
-            value={explorerFilters.query}
-            onChange={(event) => setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
-            placeholder="Search your universe…"
-            aria-label="Search your music universe"
+            value={activeNav === "Observatory" ? reviewSearch : explorerFilters.query}
+            onChange={(event) => activeNav === "Observatory"
+              ? setReviewSearch(event.target.value)
+              : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
+            placeholder={activeNav === "Observatory" ? "Search artists to review…" : "Search your universe…"}
+            aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : "Search your music universe"}
           />
-          {explorerFilters.query
-            ? <button type="button" aria-label="Clear search" onClick={() => setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
+          {(activeNav === "Observatory" ? reviewSearch : explorerFilters.query)
+            ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
             : <kbd>Ctrl K</kbd>}
         </form>
         <div className="topbar__actions">
@@ -676,7 +854,25 @@ function App() {
       <main className="main-content">
         <div className="main-scroll">
           {snapshot ? (
-            <>
+            activeNav === "Observatory" ? (
+              <Observatory
+                items={reviewItems}
+                selectedArtistKey={artistIntelligence?.artistKey ?? null}
+                filter={reviewFilter}
+                loadState={reviewLoadState}
+                errorMessage={reviewError}
+                hasMore={reviewCursor !== null}
+                loadingMore={reviewLoadingMore}
+                actionBusy={curationActionBusy === "export" || curationActionBusy === "undo" ? curationActionBusy : null}
+                message={curationMessage}
+                onFilterChange={setReviewFilter}
+                onSelect={(item) => openArtistInspector(item.displayArtist)}
+                onLoadMore={() => void loadMoreReviewItems()}
+                onRefresh={() => setReviewReloadToken((value) => value + 1)}
+                onUndo={() => void undoCuration()}
+                onExport={() => void exportCuration()}
+              />
+            ) : <>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
               <section className="stats" aria-label="Library overview">
@@ -763,13 +959,18 @@ function App() {
         {inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">
             <ArtistWorld
+              key={inspectorArtistName}
               artistName={inspectorArtistName}
               catalogDetail={artistDetail}
               intelligence={artistIntelligence}
               state={artistWorldState}
               errorMessage={artistWorldError}
+              curationError={curationError}
+              actionBusy={curationActionBusy}
               onRetry={() => openArtistInspector(inspectorArtistName)}
               onExploreLibrary={() => exploreArtistInLibrary(inspectorArtistName)}
+              onArtistDecision={(request) => void applyArtistDecision(request)}
+              onReleaseDecision={(request) => void applyReleaseDecision(request)}
             />
           </div>
         ) : selectedTrack ? (

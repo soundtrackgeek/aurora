@@ -45,7 +45,7 @@ LibraryRepository
 ├── catalog: read-only music-library.sqlite3
 ├── musicbrainz_cache: lazy read-only connection
 ├── overlay: lazy curated read-only/sync adapter
-└── aurora_state: app-owned writable SQLite for playback, tag overlays, and recovery journal
+└── aurora_state: app-owned writable SQLite for playback, tag overlays, recovery, and curation
 ```
 
 The overlay's current live rows already match the copies in the main database, so it is not an additional hot-path dependency.
@@ -58,17 +58,28 @@ Artist identity uses the indexed normalized `local_artist_key`: fold Unicode das
 
 Authority is intentionally asymmetric:
 
-1. A verified, non-ignored curated overlay link is the only identity Aurora labels verified.
-2. The imported catalog identity and exact cache-name result are candidates, not authorities.
-3. A curated link wins when candidate MBIDs disagree, while the UI explicitly reports `conflict`.
-4. Without a curated link, agreeing catalog/cache candidates remain `unconfirmed`; disagreeing candidates remain unresolved conflicts.
-5. Release groups come from one source at a time: external overlay for a verified identity, embedded catalog mirror fallback, then broad cache fallback. Aurora never unions refreshed and stale snapshots.
+1. An explicit Aurora confirmation in `aurora-state.sqlite3` is the presentation authority and is labeled `auroraState`.
+2. A verified, non-ignored curated overlay link is the imported authority when Aurora has no local decision.
+3. The imported catalog identity and exact cache-name result are candidates, not authorities.
+4. An authoritative choice wins when candidate MBIDs disagree, while the UI still reports the external conflict.
+5. Without an authority, agreeing catalog/cache candidates remain `unconfirmed`; disagreeing candidates remain unresolved conflicts.
+6. Release groups come from one source at a time: external overlay for a verified identity, embedded catalog mirror fallback, then broad cache fallback. Aurora never unions refreshed and stale snapshots.
 
 This is necessary because 44 of 292 cache identities overlapping verified links disagree with the curated MBID. In addition, 1,656 cache MBIDs map to multiple names, one to 407 names. Aurora reports the cached-name count for the selected MBID and never presents an exact-name cache hit as verified.
 
 Every enrichment command opens sources lazily with SQLite read-only flags, `query_only`, a two-second busy timeout, bound parameters, and a 100-release response cap. Missing, invalid, or busy optional sources become source-state data; they never fail normal catalog browsing. Live warm measurements were below timer resolution for indexed identity lookups and approximately 2–5 ms for sorting and limiting the worst observed 6,017-group cache artist.
 
 The audited sources contain MusicBrainz release groups, not individual release editions. They do not contain label, format, catalog-number, recording, work, alias, or relationship-edge data. Local albums also lack a release-group MBID. Exact-title comparison is incomplete and ambiguous, so Aurora does not assign album identities automatically.
+
+## Aurora curation and export contract
+
+State schema version 5 adds `musicbrainz_artist_decisions`, `musicbrainz_release_decisions`, and `musicbrainz_curation_events`. Artist decisions are `confirmed` or `ignored`; clearing removes the current row while preserving an undo event. Release decisions are `linked`, `not-in-scope`, or `ignored`; `linked` requires a non-empty local album ID and a unique index prevents one album from being mapped to multiple release groups. Every mutation is transactional and records enough before/after state for one-step durable undo.
+
+Confirmation accepts only a valid MusicBrainz UUID exposed by the artist's current local candidates. A release mutation requires an authoritative identity, a release group in the current bounded discography, and—when linked—an album whose normalized album artist equals the selected artist. Aurora blocks identity removal or replacement when doing so would orphan its own dependent release mappings.
+
+The live OneDrive overlay is a read-only input. **Export overlay snapshot** creates a new database under Aurora's app-data `exports` folder, uses SQLite `VACUUM INTO` to preserve a consistent copy of the existing overlay when present, and applies all current Aurora decisions in one immediate transaction. Internal `linked` exports as Music Library's `include`; other decision names remain exact. Timestamps use SQLite UTC `YYYY-MM-DD HH:MM:SS`, compatible tombstones are cleared for exported live rows, and `aurora_export_manifest` records version and counts. The result is a complete overlay candidate, not a patch and not an automatic replacement of the shared file.
+
+Observatory pages are capped at 100 rows. Version 0.6.0 discovers review items from candidate-bearing rows in the imported `musicbrainz_artist_infos` table, scanning at most five 100-row batches per request. This gives a fast useful queue but does not enumerate all catalog artists or perform online lookup.
 
 ## Album-cover mapping
 

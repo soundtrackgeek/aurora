@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.5.0 adds lazy, provenance-aware MusicBrainz artist constellations while keeping the imported Music Library catalog read-only and MP3 tags authoritative.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.6.0 adds an Observatory for deliberate MusicBrainz identity and release-group curation while keeping every imported database read-only.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.5.0 slice
+## Current 0.6.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
@@ -13,11 +13,15 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Exact half-star/unrated, Love/Neutral/Ban, release-year, genre, and artist filters, plus safely quoted FTS5 prefix search across the entire catalog.
 - Validated sorts for newest, title, artist, album, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
 - Clickable artist planets and artist results that open an exact artist focus which can be switched between tracks and albums.
-- A functional Constellations artist inspector opened from universe planets, Artist results, or the selected track.
-- Lazy local MusicBrainz identity resolution with verified, unconfirmed, conflict, ignored, and unmatched states; only curated overlay links are labeled verified.
+- A functional Constellations artist inspector opened from universe planets, Artist results, the selected track, or the Observatory review queue.
+- A bounded, searchable Observatory for candidate-bearing artists, with Needs review, Conflicts, Unconfirmed, Aurora decisions, and All candidates filters.
+- Explicit artist candidate confirmation, ignore, and clear actions. Aurora decisions are durable, undoable, and take presentation precedence without hiding disagreements in the imported sources.
+- Local release-group curation for linking a visible MusicBrainz group to an album from the same artist, marking it not in scope, ignoring it, or clearing the decision.
+- Lazy local MusicBrainz identity resolution with verified, unconfirmed, conflict, ignored, and unmatched states; verified external overlay links and explicit Aurora confirmations are labeled with their exact provenance.
 - MBID-gated artist type, active dates, area, birthplace, and origin-country context from the existing catalog import.
 - Source-precedence release-group discographies capped at 100 rows: curated overlay first for verified identities, catalog mirror fallback, then the broad cache without mixing stale and refreshed sources.
 - Visible local provenance and source availability for the catalog, curated overlay, and broad cache; missing optional databases never block normal library browsing.
+- Explicit overlay export creates a new, complete Music Library-compatible SQLite snapshot in Aurora's app-data `exports` folder. Aurora never mutates the live shared overlay; publishing the exported file remains a deliberate user step.
 - Album cover grids with bounded album track details, playback activation, keyboard row navigation, and inline tag controls.
 - Inspector editor for half-star ratings, Love/Neutral/Ban, and Release Year, plus read-only genre, duration, and optional Last.fm popularity.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
@@ -34,13 +38,13 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic overlay in its own state database until the normal MusicBee TSV export and Music Library import catch up. See [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. See [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
 
 ## Data model
 
 The primary catalog currently contains 1,096,162 MP3 tracks, 72,000 albums, and 20,392 album artists. Aurora opens the active WAL-backed database with SQLite read-only flags and `query_only`; it does not use immutable mode and does not write ratings back into this imported catalog. Live checks measured common bounded explorer paths at approximately 26–84 ms including SQLite process startup. Global title A–Z is the known slower path at approximately 120 ms because the shared catalog has no title-only index.
 
-The broad MusicBrainz cache and curated overlay are deferred from startup and opened independently only when the Artist inspector requests context. The audited cache contains 20,208 artist-name rows and 483,675 release groups; the curated overlay contains 493 verified artist links and 9,658 release groups. Cache-only identities remain unconfirmed because 44 audited exact-name candidates conflict with verified links and many MBIDs are shared by multiple names. See [docs/database-contract.md](docs/database-contract.md) for verified responsibilities, limits, and authority rules.
+The broad MusicBrainz cache and curated overlay are deferred from startup and opened independently only when the Artist inspector or Observatory requests context. The audited cache contains 20,208 artist-name rows and 483,675 release groups; the curated overlay contains 493 verified artist links and 9,658 release groups. Cache-only identities remain unconfirmed because 44 audited exact-name candidates conflict with verified links and many MBIDs are shared by multiple names. Observatory pages are capped at 100 rows and intentionally cover candidate-bearing artists already present in the imported MusicBrainz artist-info table; they are not a claim to enumerate all 20,392 catalog artists. See [docs/database-contract.md](docs/database-contract.md) for verified responsibilities, limits, and authority rules.
 
 The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,329 images and maps to current albums through `album_covers.album_id` with 98.09% coverage. Rust now resolves and decodes those images outside the WebView; missing or invalid art falls back to Aurora's generated artwork.
 
@@ -77,7 +81,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.5.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.6.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 
