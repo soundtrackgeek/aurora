@@ -4,6 +4,24 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-22
+
+### Added
+
+- A wide midnight player with a real purple-to-cyan waveform, generated from 64 evenly spaced MP3 decode windows and cached as 320 bounded peaks in a separate local SQLite database.
+- Instant half-star, clear-to-unrated, and Love controls in the player using the same verified MP3 tag pipeline and optimistic Aurora overlay as Explore.
+- A clickable track-end time that switches between total length and a live remaining-time countdown.
+
+### Changed
+
+- Playback metadata, transport controls, waveform seeking, volume, and queue access now share a denser reference-matched 120 px player surface.
+- Rating and Love changes immediately refresh the active queue item and current-track player state while the native write completes.
+
+### Security
+
+- Waveform extraction resolves catalog ID plus stable track key on the Rust side and never accepts a filesystem path from the WebView.
+- The derived `aurora-waveforms.sqlite3` cache is device-local and excluded from shared state/OneDrive synchronization.
+
 ## [0.8.1] - 2026-08-22
 
 ### Added

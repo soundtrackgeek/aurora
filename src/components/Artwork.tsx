@@ -8,10 +8,10 @@ export function Artwork({
   decorative = true,
 }: {
   track: Track;
-  size?: "small" | "large";
+  size?: "small" | "player" | "large";
   decorative?: boolean;
 }) {
-  const source = albumCoverUrl(track.albumId, size === "large" ? 512 : 64);
+  const source = albumCoverUrl(track.albumId, size === "large" ? 512 : size === "player" ? 128 : 64);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const { initials, seed } = useMemo(() => {
     const nextSeed = [...track.artist].reduce(

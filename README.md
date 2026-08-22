@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.8.1 adds persistent, space-saving sidebar layouts to the private cross-device listening memory introduced in 0.8.0.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.8.2 turns the bottom player into an interactive waveform console with instant rating and Love controls.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.8.1 slice
+## Current 0.8.2 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.
@@ -37,6 +37,9 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Inspector editor for half-star ratings, Love/Neutral/Ban, and Release Year, plus read-only genre, duration, and optional Last.fm popularity.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
+- A real MP3-derived, purple-to-cyan waveform timeline. Native builds sample 64 evenly spaced decoded windows into 320 peaks, cache them in device-local `aurora-waveforms.sqlite3`, and never accept an arbitrary WebView path.
+- Bottom-player half-star rating (including clear-to-unrated) and Love controls that reuse Aurora's verified instant MP3 tag-write and optimistic state-overlay workflow.
+- A clickable end-time readout that toggles between total duration and a live negative remaining-time display.
 - A bounded 200-track queue with play-now, reorder, remove, and clear actions.
 - Durable queue, current track, position, volume, shuffle, and repeat state in Aurora's own SQLite database.
 - Stable queue identity based on the normalized MP3 path, verified alongside every transient track ID so queue items survive Music Library TSV imports without being retargeted.
@@ -94,7 +97,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.8.1`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.8.2`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

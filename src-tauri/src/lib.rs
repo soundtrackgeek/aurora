@@ -12,6 +12,7 @@ mod state_store;
 mod state_sync;
 mod tag_model;
 mod tagging;
+mod waveform;
 
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
 use curation::{ArtistDecisionRequest, CurationExportResult, ReleaseDecisionRequest};
@@ -28,10 +29,12 @@ use std::sync::Mutex;
 use tag_model::TagEditRequest;
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager, State};
+use waveform::{FileSignature, WaveformSnapshot, WaveformStore};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
 type TagState = Mutex<TagService>;
 type LaptopState = Mutex<LaptopModeRuntime>;
+type WaveformState = Mutex<WaveformStore>;
 
 fn with_playback<T>(
     state: State<'_, PlaybackState>,
@@ -269,6 +272,46 @@ fn playback_clear_queue(state: State<'_, PlaybackState>) -> Result<PlaybackSnaps
     with_playback(state, PlaybackRuntime::clear_queue)
 }
 
+#[tauri::command]
+async fn track_waveform(
+    app: AppHandle,
+    track_id: String,
+    track_key: String,
+) -> Result<WaveformSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = {
+            let store = app.state::<StateStore>();
+            catalog::resolve_track(&track_id, &track_key, &store)?
+        };
+        let signature = FileSignature::read(&resolved.audio_path)?;
+        if let Some(cached) = {
+            let cache = app.state::<WaveformState>();
+            let store = cache
+                .lock()
+                .map_err(|_| "Aurora's waveform cache stopped unexpectedly.".to_owned())?;
+            store.load(&resolved.summary.track_key, signature)?
+        } {
+            return Ok(cached);
+        }
+
+        let snapshot = waveform::decode_mp3_waveform(
+            &resolved.audio_path,
+            &resolved.summary.track_key,
+            resolved.summary.duration_seconds,
+        )?;
+        {
+            let cache = app.state::<WaveformState>();
+            let store = cache
+                .lock()
+                .map_err(|_| "Aurora's waveform cache stopped unexpectedly.".to_owned())?;
+            store.save(&snapshot, signature)?;
+        }
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|error| format!("The waveform worker stopped unexpectedly: {error}"))?
+}
+
 fn refresh_playback_track(app: &AppHandle, track: &TrackSummary) {
     let playback = app.state::<PlaybackState>();
     if let Ok(mut runtime) = playback.lock() {
@@ -432,6 +475,9 @@ pub fn run() {
                 state_sync::prepare_state_before_open(&state_path, &remote_state_path);
             let store = StateStore::new(state_path).map_err(std::io::Error::other)?;
             let history_path = state_directory.join("aurora-history.sqlite3");
+            let waveform_store =
+                WaveformStore::new(state_directory.join("aurora-waveforms.sqlite3"))
+                    .map_err(std::io::Error::other)?;
             let mut device_settings =
                 device_mode::DeviceModeStore::load(state_directory.join("aurora-device.json"));
             if let Some(device_id) =
@@ -467,6 +513,7 @@ pub fn run() {
             app.manage(Mutex::new(runtime));
             app.manage(Mutex::new(tag_service));
             app.manage(Mutex::new(laptop_runtime));
+            app.manage(Mutex::new(waveform_store));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -508,6 +555,7 @@ pub fn run() {
             playback_remove_queue_item,
             playback_move_queue_item,
             playback_clear_queue,
+            track_waveform,
             track_tag_state,
             update_track_tags,
             undo_track_tag_edit,

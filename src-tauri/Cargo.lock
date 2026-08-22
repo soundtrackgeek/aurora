@@ -115,7 +115,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "aurora"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "id3",
  "image",
@@ -125,6 +125,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "symphonia",
  "tauri",
  "tauri-build",
  "tauri-plugin-updater",

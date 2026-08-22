@@ -261,6 +261,24 @@ export function usePlayback() {
 
   const visibleError = commandError ?? state.error;
 
+  const refreshTrack = useCallback((updated: Track) => {
+    if (!isTauriRuntime()) {
+      const queue = browserPlayback.queue.map((track) => track.trackKey === updated.trackKey ? updated : track);
+      browserPlayback = {
+        ...browserPlayback,
+        queue,
+        currentTrack: browserPlayback.currentTrack?.trackKey === updated.trackKey
+          ? updated
+          : browserPlayback.currentTrack,
+      };
+    }
+    setState((current) => ({
+      ...current,
+      queue: current.queue.map((track) => track.trackKey === updated.trackKey ? updated : track),
+      currentTrack: current.currentTrack?.trackKey === updated.trackKey ? updated : current.currentTrack,
+    }));
+  }, []);
+
   return {
     state,
     isWorking,
@@ -280,5 +298,6 @@ export function usePlayback() {
     remove: (index: number) => run(() => removeQueueItem(index)),
     move: (from: number, to: number) => run(() => moveQueueItem(from, to)),
     clear: () => run(clearPlaybackQueue),
+    refreshTrack,
   };
 }

@@ -5,7 +5,8 @@ interface InlineRatingControlProps {
   title: string;
   rating: number | null;
   busy: boolean;
-  onRatingChange: (rating: number) => void;
+  allowClear?: boolean;
+  onRatingChange: (rating: number | null) => void;
 }
 
 interface InlineLoveControlProps {
@@ -31,6 +32,7 @@ export function InlineRatingControl({
   title,
   rating,
   busy,
+  allowClear = false,
   onRatingChange,
 }: InlineRatingControlProps) {
   return (
@@ -42,12 +44,14 @@ export function InlineRatingControl({
             <button
               type="button"
               className={value === star ? "inline-rating__full" : "inline-rating__half"}
-              aria-label={`Rate ${title} ${value.toFixed(1)} stars`}
+              aria-label={allowClear && rating === value
+                ? `Clear rating for ${title}`
+                : `Rate ${title} ${value.toFixed(1)} stars`}
               aria-pressed={rating === value}
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
-                onRatingChange(value);
+                onRatingChange(allowClear && rating === value ? null : value);
               }}
               onDoubleClick={(event) => event.stopPropagation()}
               key={value}

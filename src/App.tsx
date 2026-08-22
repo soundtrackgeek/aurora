@@ -646,6 +646,7 @@ function App() {
     }
     setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    playback.refreshTrack(updated);
     setSnapshot((current) => {
       if (!current) return current;
       const lovedDelta = baseline ? Number(updated.loved) - Number(baseline.loved) : 0;
@@ -1057,7 +1058,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.8.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.8.2</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1309,6 +1310,9 @@ function App() {
       <PlayerBar
         playback={playback.state}
         isWorking={playback.isWorking}
+        tagBusy={playback.state.currentTrack
+          ? inlineSavingKeys.has(playback.state.currentTrack.trackKey)
+          : false}
         error={playback.error}
         queueOpen={queueOpen}
         onDismissError={playback.dismissError}
@@ -1319,6 +1323,14 @@ function App() {
         onVolume={(volume) => void playback.setVolume(volume)}
         onShuffle={(enabled) => void playback.setShuffle(enabled)}
         onRepeat={(mode) => void playback.setRepeatMode(mode)}
+        onRatingChange={(track, rating) => void saveInlineTagChange(track, {
+          ...tagValuesForTrack(track),
+          rating,
+        })}
+        onLoveChange={(track, loveState) => void saveInlineTagChange(track, {
+          ...tagValuesForTrack(track),
+          loveState,
+        })}
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />
 

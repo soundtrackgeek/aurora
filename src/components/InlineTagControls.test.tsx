@@ -49,4 +49,20 @@ describe("Explore inline tag controls", () => {
     );
     expect(screen.getByRole("button", { name: "Remove Love from Annabel" })).toBeDisabled();
   });
+
+  it("can clear the current rating when enabled by the player", () => {
+    const onRatingChange = vi.fn();
+    render(
+      <InlineRatingControl
+        title="Midnight City"
+        rating={4}
+        busy={false}
+        allowClear
+        onRatingChange={onRatingChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear rating for Midnight City" }));
+    expect(onRatingChange).toHaveBeenCalledWith(null);
+  });
 });

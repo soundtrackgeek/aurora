@@ -280,7 +280,9 @@ function TrackTable({
                       title={track.title}
                       rating={track.rating}
                       busy={busy}
-                      onRatingChange={(rating) => onRatingChange(track, rating)}
+                      onRatingChange={(rating) => {
+                        if (rating !== null) onRatingChange(track, rating);
+                      }}
                     />
                   ) : (
                     <StaticRating rating={track.rating} />
