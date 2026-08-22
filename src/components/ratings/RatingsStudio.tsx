@@ -92,10 +92,18 @@ function bandLabel(rating: number | null): string {
   return rating === null ? "Unrated" : `${rating} ${rating === 1 ? "star" : "stars"}`;
 }
 
-function coverCount(count: number, maximum: number): number {
-  if (count <= 0) return 1;
-  const scale = Math.log10(count + 1) / Math.log10(maximum + 1);
-  return Math.max(2, Math.min(12, Math.round(2 + scale * 10)));
+const pyramidLevels = [5, 4, 5, 6, 7, 7] as const;
+const constellationPalette = [
+  { accent: "#d7e0e9", glow: "rgba(215, 224, 233, .34)", saturation: ".28" },
+  { accent: "#d5b27b", glow: "rgba(213, 178, 123, .34)", saturation: ".6" },
+  { accent: "#4ddbeb", glow: "rgba(77, 219, 235, .38)", saturation: ".86" },
+  { accent: "#5bbef5", glow: "rgba(91, 190, 245, .4)", saturation: ".92" },
+  { accent: "#8f96ff", glow: "rgba(143, 150, 255, .42)", saturation: "1" },
+  { accent: "#d75df5", glow: "rgba(215, 93, 245, .48)", saturation: "1.08" },
+] as const;
+
+function pyramidRows(levels: number): number[] {
+  return Array.from({ length: levels }, (_, index) => index + 1);
 }
 
 function Constellation({
@@ -113,8 +121,8 @@ function Constellation({
 }) {
   const bands = mode === "tracks" ? overview.trackBands : overview.albumBands;
   const visible = wholeRatings.map((rating) => bandFor(bands, rating));
-  const maximum = Math.max(1, ...visible.map((band) => band.count));
-  const covers = overview.fiveStarAlbums.length ? overview.fiveStarAlbums : overview.initialPage.albums;
+  const covers = [...overview.initialPage.albums, ...overview.fiveStarAlbums]
+    .filter((album, index, albums) => albums.findIndex((candidate) => candidate.id === album.id) === index);
   return <section className="rating-constellation" aria-label={`${mode === "tracks" ? "Track" : "Album"} rating constellation`}>
     <header className="rating-constellation__heading">
       <div><h1>Ratings <span>Taste Constellation</span></h1><p>A cosmic map of your music, from unrated to all-time favorites.</p></div>
@@ -125,22 +133,32 @@ function Constellation({
     </header>
     <div className="constellation-stage">
       {visible.map((band, bandIndex) => {
-        const tiles = coverCount(band.count, maximum);
         const selected = band.rating === selectedRating;
+        const palette = constellationPalette[bandIndex];
+        let coverOffset = 0;
         return <button
           type="button"
           className={`constellation-band${selected ? " is-selected" : ""}`}
-          style={{ "--constellation-height": `${48 + tiles * 5}px` } as CSSProperties}
+          style={{
+            "--constellation-accent": palette.accent,
+            "--constellation-glow": palette.glow,
+            "--constellation-saturation": palette.saturation,
+          } as CSSProperties}
           aria-pressed={selected}
           aria-label={`${bandLabel(band.rating)}, ${formatCount(band.count)}`}
           onClick={() => onSelect(band.rating)}
           key={band.rating ?? "unrated"}
         >
           <span className="constellation-band__covers" aria-hidden="true">
-            {Array.from({ length: tiles }, (_, index) => {
-              const album = covers[(bandIndex * 3 + index) % Math.max(1, covers.length)];
-              return album ? <span className="constellation-cover" key={`${album.id}:${index}`}><Artwork track={albumAsTrack(album)} /></span> : null;
-            })}
+            <span className="constellation-pyramid">
+              {pyramidRows(pyramidLevels[bandIndex]).map((rowSize, rowIndex) => <span className="constellation-pyramid__row" key={rowSize}>
+                {Array.from({ length: rowSize }, (_, tileIndex) => {
+                  const index = coverOffset++;
+                  const album = covers[(bandIndex * 5 + index) % Math.max(1, covers.length)];
+                  return album ? <span className="constellation-cover" key={`${album.id}:${rowIndex}:${tileIndex}`}><Artwork track={albumAsTrack(album)} /></span> : null;
+                })}
+              </span>)}
+            </span>
           </span>
           <span className="constellation-band__axis"><i /></span>
           <strong>{bandLabel(band.rating)}</strong>

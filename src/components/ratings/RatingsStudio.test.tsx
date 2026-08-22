@@ -37,6 +37,9 @@ describe("RatingsStudio", () => {
     const callbacks = props();
     render(<RatingsStudio {...callbacks} />);
     expect(screen.getByText("947,794")).toBeInTheDocument();
+    expect(document.querySelectorAll(".constellation-pyramid")).toHaveLength(6);
+    expect(document.querySelectorAll(".constellation-band:last-child .constellation-pyramid__row")).toHaveLength(7);
+    expect(document.querySelectorAll(".constellation-band:last-child .constellation-cover")).toHaveLength(28);
     fireEvent.click(screen.getByRole("tab", { name: "Album ratings" }));
     expect(screen.getByLabelText("5 stars, 1,120")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /Partially rated/ }));

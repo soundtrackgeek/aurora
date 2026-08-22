@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-22
+
+### Fixed
+
+- Replaced the Ratings constellation's tiny rectangular cover clusters with the intended tall, tapered cover pyramids.
+- Restored the visual progression from silver and amber through cyan, blue, violet, and magenta, with stronger cover-edge glow and a filled constellation stage in both Track and Album Ratings.
+- Expanded the representative artwork pool used by the pyramids while keeping the rating counts and band actions exact.
+
+### Accessibility
+
+- The new pyramids remain decorative inside the existing semantic rating-band buttons; labels, counts, pressed states, keyboard focus, and reduced-motion-safe interaction behavior remain unchanged.
+
 ## [0.14.0] - 2026-08-22
 
 ### Added

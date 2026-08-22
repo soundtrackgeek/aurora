@@ -17,6 +17,14 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.14.1 acceptance checks
+
+- Make the six whole-star stops read as unmistakable, tapered cover pyramids rather than small rectangular mosaics.
+- Match the selected constellation's visual progression from silver and warm amber through cyan, blue, violet, and magenta.
+- Use only real representative album-cover assets inside the pyramids and keep the existing exact counts, band actions, keyboard semantics, and bounded payloads.
+- Preserve both Track Ratings and Album Ratings modes at the 1280 × 720 supported viewport without horizontal overflow.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.14.1` versions.
+
 ## 0.14.0 acceptance checks
 
 - Keep track stars and effective album stars as separate, clickable constellations with exact whole- and half-star counts.

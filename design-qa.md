@@ -1,74 +1,66 @@
-# Ratings Studio 0.14.0 design QA
+# Ratings Studio 0.14.1 design QA
 
 ## Evidence
 
-- Source visual truth: `C:\_code\aurora\docs\design\ratings-0.14.0-combined.png`
-- Rendered implementation: `C:\_code\aurora\docs\design\ratings-0.14.0-implementation-final.png`
-- Full-view comparison: `C:\_code\aurora\docs\design\ratings-0.14.0-comparison.png`
-- Focused Ratings/completion comparison: `C:\_code\aurora\docs\design\ratings-0.14.0-focus-comparison.png`
-- Responsive evidence: `C:\_code\aurora\docs\design\ratings-0.14.0-responsive-1280x720.png`
+- Source visual truth: `C:\Users\jtill\AppData\Local\Temp\codex-clipboard-6e5c570b-ed78-4a57-87b0-3a3fab6d4610.png`
+- User-reported 0.14.0 result: `C:\Users\jtill\AppData\Local\Temp\codex-clipboard-4cf28a25-26aa-49e5-9109-c260e2fe23cb.png`
+- Browser-rendered implementation: `C:\_code\aurora\docs\design\ratings-0.14.1-track-pyramids.png`
+- Full-view comparison: `C:\_code\aurora\docs\design\ratings-0.14.1-full-comparison.png`
+- Source/final focused comparison: `C:\_code\aurora\docs\design\ratings-0.14.1-pyramid-comparison.png`
+- Before/target/after history: `C:\_code\aurora\docs\design\ratings-0.14.1-before-target-after.png`
 - Source pixels: 1487 × 1058.
-- Implementation pixels: 1487 × 1058 at a 1487 × 1058 CSS viewport, `deviceScaleFactor: 1`.
-- Density normalization: none required; source and implementation use equal pixel dimensions.
-- State: Windows dark shell, expanded left rail, open right Album inspector, Track Ratings selected at 5 stars, Almost Complete selected, Viva La Vida selected, and a five-star collection playing in the persistent player.
+- Browser implementation pixels: 1487 × 1058 at a 1487 × 1058 CSS viewport and 1 device pixel ratio.
+- Density normalization: none for the full-view comparison. For the focused constellation comparison, the 952 px implementation region was bicubic-normalized to the source region's 992 px width; both use the same 352 px height.
+- State: Windows dark shell, expanded Library navigation, open right Album inspector, Track Ratings selected, 5 stars selected, Almost Complete selected, and Viva La Vida selected.
 
 ## Findings
 
-- No actionable P0, P1, or P2 differences remain.
-- [P3] The implemented constellation uses restrained, data-driven real-cover piles rather than the mock's taller cinematic particle towers. The hierarchy, six rating stops, selection glow, band counts, and dark violet/cyan direction remain intact. Increasing the decorative aura later would be polish, not a usability or fidelity blocker.
-- [Intentional data correction] The mock says 947,796 unrated tracks. The live catalog has 947,794 after its two raw half-star values are correctly represented in the 3.5 and 4.5 bands. The implementation follows source data rather than preserving a stale mock total.
-- [Intentional product correction] The mock displays Album Score for an 80%-rated album. The accepted product contract requires Album Score to appear only at 100% track-rating completion, so the implementation shows a provisional mean and a numeric-score placeholder until the album is complete.
+- No actionable P0, P1, or P2 differences remain in the requested constellation region.
+- [P3] The implementation uses clean geometric rows of real covers, while the reference adds a denser field of tiny cover fragments and particles between pyramids. The defining taper, height, color sequence, cover imagery, baseline, labels, and selected-band glow now match; the remaining atmospheric density does not obscure the requested composition.
+- [Intentional data correction] The reference says 947,796 unrated tracks. Browser preview uses the verified 947,794 count after two raw half-star values are kept in their exact 3.5 and 4.5 bands.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: Segoe UI Variable/Segoe UI matches Aurora's established Windows 11 shell. Heading, eyebrow, count, metadata, and table weights preserve the mock's hierarchy without clipping at the target viewport.
-- Spacing and layout rhythm: the three-column shell, top constellation, completion tabs/shelf, selected-album workbench, right inspector, and persistent player align with the target composition. The final 1280 × 720 pass has no horizontal overflow.
-- Colors and visual tokens: the implementation retains Aurora's near-black surfaces, cool blue borders, violet selection/glow, cyan accents, restrained elevation, and accessible contrast.
-- Image quality and asset fidelity: Browser preview and native Aurora use real cover imagery. Matching preview albums are served read-only from `C:\_code\music_backup_v5\AlbumCovers`; missing source imagery is not substituted with emoji, inline SVG, or a fake raster mock.
-- Copy and content: Ratings, Taste Constellation, rating scope, completion lanes, provisional mean, Album Score, collection actions, and track controls match the selected design and the verified Music Library semantics.
+- Fonts and typography: Aurora's established Segoe UI hierarchy remains intact. The Ratings heading, Taste Constellation label, band names, and tabular counts are readable and aligned without wrapping.
+- Spacing and layout rhythm: all six bands use a shared baseline and a 164 px artwork stage. The 5/4/5/6/7/7-level progression recreates the reference's rising constellation rhythm without horizontal overflow.
+- Colors and visual tokens: the pyramids progress through silver, warm amber, cyan, blue, violet, and magenta. Each palette uses a matching border and drop-shadow glow; the selected five-star lane retains its violet card and baseline.
+- Image quality and asset fidelity: every visible tile is a real album-cover image resolved through Aurora's existing artwork component. The pyramids do not use placeholder boxes, custom SVG art, emoji, or a cropped mock.
+- Copy and content: Track Ratings, Album Ratings, whole- and half-star labels, counts, collection actions, and completion content remain unchanged and data-backed.
+
+## Full-view comparison
+
+The equal-size 1487 × 1058 comparison confirms that the rebuilt pyramids dominate the top stage without pushing the 5 Star Collection, completion tabs, album shelf, right Album inspector, or persistent player out of the composition.
 
 ## Focused comparison
 
-The focused comparison covers the dense constellation, completion tabs, real cover shelf, selected-album summary, and instant rating/Love table. It was needed because the full-shell comparison makes 7–10 px metadata and track controls too small to judge reliably. The focused evidence confirms readable hierarchy, sharp cover crops, aligned tab states, bounded density, and non-overlapping row controls.
+The source and Browser constellation were placed in one comparison image at a common region height. This exposes the previous failure clearly: 0.14.0 had small rectangular mosaics floating in empty space; 0.14.1 has tall tapered pyramids, broad bases, cover density, and the requested silver-to-magenta palette.
 
 ## Comparison history
 
-1. Initial evidence: `C:\_code\aurora\docs\design\ratings-0.14.0-implementation-1.png` at 1440 × 1024.
-   - Earlier [P2]: Browser preview showed synthetic fallback covers throughout the constellation, shelf, detail, and inspector.
-   - Fix: added a dev-only, allowlisted cover bridge to the existing local archive and made preview album IDs resolve real source images.
-   - Post-fix evidence: `ratings-0.14.0-implementation-2.png` and the final comparison show sharp, correctly cropped real covers.
-2. Interaction review after the artwork fix.
-   - Earlier [P2]: album-band Explore filtered internally but Album Explorer hid the active Rating filter, weakening orientation.
-   - Fix: exposed the exact rounded half-star/unrated filter in Album Explorer and verified a 4.5-star handoff.
-   - Post-fix evidence: Browser accessibility snapshot showed Albums selected, Rating 4.5 selected, and only matching preview albums loaded.
-3. Responsive review at 1280 × 720.
-   - Earlier [P2]: the completion detail's fixed minimum columns caused 8 px of horizontal scroll in the main viewport.
-   - Fix: converted the detail grid to a flexible `minmax(0, …)` track and constrained the album summary's intrinsic width.
-   - Post-fix evidence: `ratings-0.14.0-responsive-1280x720.png`; Browser measurements report `.main-scroll` 744/744 and `.ratings-studio` 712/712 client/scroll widths.
+1. Earlier [P1]: the shipped 0.14.0 constellation reduced its representative covers to at most 12 tiles in a four-column grid. The result was a sparse rectangle, not the design-defining cover pyramid; the prior QA incorrectly classified that mismatch as P3.
+2. Fix: replaced the flat grid with explicit centered pyramid rows, increased the artwork stage, used 5/4/5/6/7/7 levels across the six bands, expanded the deduplicated cover pool, and assigned the reference palette per band.
+3. Post-fix evidence: `ratings-0.14.1-pyramid-comparison.png` shows unmistakable pyramids at all six stops, stronger height and taper, a shared baseline, and the requested color progression.
+4. Album-mode check: Browser interaction switched to Album Ratings and retained the same six pyramids while updating every count and collection label to the album spectrum.
 
 ## Primary interactions tested
 
 - Open Ratings from the Library navigation.
-- Switch Track Ratings and Album Ratings.
-- Select whole-star and half-star bands.
-- Switch Almost Complete, Partially Rated, and Unrated Album tabs.
-- Select an album and inspect its bounded tracks.
-- Save a 5-star rating and toggle Love instantly; both persisted through the Ratings refresh and updated remaining count/provisional mean.
-- Play the five-star collection and keep the Album inspector open.
-- Explore an exact 4.5-star album band in Album Explorer.
-- Resize between 1487 × 1058 and 1280 × 720.
-- Browser console check: 0 errors, 0 warnings in the final test tab.
+- Switch between Track Ratings and Album Ratings.
+- Confirm six pyramid buttons and the selected five-star state in both modes.
+- Confirm the 5 Star Collection and Almost Complete content remain visible below the constellation.
+- Resize to 1280 × 720 with the right inspector open; the Ratings Studio measures 712/712 px and the constellation stage 676/676 px client/scroll width.
+- Browser console check: no errors or warnings in the final test tab.
 
 ## Follow-up polish
 
-- A future visual-only pass may enrich the constellation's cover aura while keeping the real data tiles, hit targets, and reduced-motion behavior intact.
+- A future P3-only pass could add more low-opacity real-cover fragments along the shared baseline if an even denser atmospheric field is desired.
 
 ## Implementation checklist
 
-- [x] Match the selected shell, constellation, completion workbench, inspector, and player composition.
-- [x] Use real cover assets and exact live counts.
-- [x] Preserve the latest Album Score eligibility rule over conflicting mock content.
-- [x] Verify core controls, responsive layout, and console health in Browser.
-- [x] Recompare source and final implementation at equal dimensions.
+- [x] Restore tall, tapered real-cover pyramids.
+- [x] Match the silver-to-magenta palette and band progression.
+- [x] Preserve exact rating data, interactions, and semantics.
+- [x] Compare source and final in one normalized image.
+- [x] Verify Track and Album modes in the in-app Browser.
 
 final result: passed
