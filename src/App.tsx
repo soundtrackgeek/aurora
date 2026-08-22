@@ -50,6 +50,7 @@ import {
 } from "./components/history/ListeningHistory";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { TagEditor } from "./components/TagEditor";
 import {
   exploreAlbums,
@@ -109,6 +110,14 @@ import {
   type TagValues,
 } from "./tags";
 import { useAuroraUpdater } from "./updater";
+import {
+  listenForGlobalShortcutResults,
+  loadGlobalShortcutSettings,
+  updateGlobalShortcutSettings,
+  type GlobalShortcutSettingsRequest,
+  type GlobalShortcutStatus,
+  type GlobalShortcutResult,
+} from "./shortcuts";
 
 const navigation = [
   { label: "Universe", icon: Sparkles },
@@ -353,6 +362,10 @@ function App() {
   const [historySavingThreshold, setHistorySavingThreshold] = useState(false);
   const [historyThresholdMessage, setHistoryThresholdMessage] = useState<string | null>(null);
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
+  const [shortcutSaving, setShortcutSaving] = useState(false);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
@@ -361,6 +374,7 @@ function App() {
   const historyRequestRef = useRef(0);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
+  const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
   const updater = useAuroraUpdater();
   const playback = usePlayback();
 
@@ -388,6 +402,34 @@ function App() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: () => void = () => undefined;
+    void listenForGlobalShortcutResults((result) => shortcutResultHandlerRef.current(result))
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      })
+      .catch((error: unknown) => console.warn("Aurora could not listen for shortcut results", error));
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let cancelled = false;
+    void loadGlobalShortcutSettings()
+      .then((status) => {
+        if (!cancelled) setShortcutStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setShortcutError(error instanceof Error ? error.message : String(error));
+      });
+    return () => { cancelled = true; };
+  }, [settingsOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -661,6 +703,23 @@ function App() {
         tracks: current.tracks.map((track) => track.id === updated.id ? updated : track),
       };
     });
+  }
+
+  shortcutResultHandlerRef.current = (result) => {
+    setSyncMessage(result.success ? result.message : `Shortcut failed: ${result.message}`);
+    if (result.track) applyTrackChange(result.track, result.previousTrack ?? undefined);
+  };
+
+  async function saveGlobalShortcuts(request: GlobalShortcutSettingsRequest) {
+    setShortcutSaving(true);
+    setShortcutError(null);
+    try {
+      setShortcutStatus(await updateGlobalShortcutSettings(request));
+    } catch (error) {
+      setShortcutError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setShortcutSaving(false);
+    }
   }
 
   async function saveInlineTagChange(track: Track, desired: TagValues) {
@@ -1058,7 +1117,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.8.3</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.9.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1120,7 +1179,10 @@ function App() {
           >
             <RightSidebarIcon aria-hidden="true" />
           </button>
-          <button type="button" aria-label="Settings" disabled><Settings aria-hidden="true" /></button>
+          <button type="button" aria-label="Settings" title="Settings" onClick={() => {
+            setShortcutError(null);
+            setSettingsOpen(true);
+          }}><Settings aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -1335,6 +1397,25 @@ function App() {
       />
 
       {updater.state.isPromptOpen && <UpdateDialog version={updater.state.version} phase={updater.state.phase} progress={updater.state.progress} message={updater.state.message} onInstall={() => void updater.install()} onDismiss={updater.dismiss} />}
+      {settingsOpen && shortcutStatus && (
+        <SettingsDialog
+          status={shortcutStatus}
+          saving={shortcutSaving}
+          error={shortcutError}
+          onSave={(request) => void saveGlobalShortcuts(request)}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {settingsOpen && !shortcutStatus && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSettingsOpen(false);
+        }}>
+          <div className="settings-loading" role="status">
+            <span>{shortcutError ?? "Loading settings…"}</span>
+            {shortcutError && <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X aria-hidden="true" /></button>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,30 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-22
+
+### Added
+
+- Configurable Windows global shortcuts for play/pause, next track, clearing or assigning a whole-star rating from 1–5, and toggling Love.
+- Default bindings matching the requested MusicBee workflow: `Ctrl+Alt+P`, `Ctrl+Alt+N`, `Ctrl+Alt+0` through `Ctrl+Alt+5`, and `Ctrl+Alt+L`.
+- An Aurora-styled Settings dialog with shortcut capture, duplicate validation, enable/disable, default restoration, native registration state, and actionable conflict feedback.
+- Device-local, atomic shortcut persistence in `aurora-shortcuts.json` with safe fallback to defaults when the file is missing, malformed, or unsupported.
+
+### Changed
+
+- Rating and Love shortcuts resolve only the now-playing track from the Rust playback engine and save immediately through Aurora's verified MP3 and optimistic state-overlay transaction. Explore selection is never a shortcut target.
+- Shortcut registration is all-or-none. If MusicBee or another application owns a requested binding, Aurora retains the previously registered set instead of applying a partial configuration.
+
+### Security
+
+- The WebView supplies only a validated action-to-accelerator configuration; the native shortcut handler obtains track identity internally and never accepts a selected track ID or filesystem path from React.
+- Custom bindings require exactly one non-modifier key, reject duplicates, and are parsed again by the native global-shortcut library before registration.
+
+### Known limits
+
+- Windows allows only one process to own a particular global binding. MusicBee must release a conflicting default, or that Aurora binding must be changed in Settings.
+- Global shortcuts are per-device settings and intentionally do not synchronize through OneDrive.
+
 ## [0.8.3] - 2026-08-22
 
 ### Fixed

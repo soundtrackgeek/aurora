@@ -17,6 +17,16 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.9.0 acceptance checks
+
+- Register play/pause, next, rating 0–5, and Love as Windows-wide shortcuts with the requested defaults while Aurora is running.
+- Resolve tag actions exclusively from the Rust playback runtime's current track; selecting a different Explore row must never retarget a shortcut.
+- Send rating and Love through the existing verified MP3 transaction and Aurora optimistic overlay, preserving all non-target tags and the read-only catalog boundary.
+- Capture configurable modifier-plus-key bindings in Settings, reject duplicates or incomplete bindings before save, and restore the full default set on request.
+- Replace shortcut registration atomically: if any requested binding is unavailable, keep the previous registered set and show the actionable conflict.
+- Persist enablement and bindings per device outside shared SQLite and OneDrive state, with safe fallback for missing or invalid settings.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.9.0` versions.
+
 ## 0.8.0 acceptance checks
 
 - Record one session per track activation, continue it across an ordinary pause/resume, and finish it as completed, skipped, or interrupted across natural end, transport, queue, shutdown, and crash-recovery transitions.
@@ -110,7 +120,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.8.0
+## Explicit non-goals for 0.9.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
@@ -127,8 +137,9 @@ Live source measurements including SQLite process startup are approximately 26�
 - Importing historical MusicBee plays, Last.fm scrobbles, or treating Last.fm popularity as personal listening history.
 - A shared multi-writer history database, record-level OneDrive merge, live cross-device streaming, or deletion/editing of historical sessions.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
+- Synchronizing Windows shortcut choices between computers or overriding a binding already owned by MusicBee or another process.
 
-## Planned sections after 0.8.0
+## Planned sections after 0.9.0
 
 1. ReplayGain, output-device selection, and gapless playback research.
 2. Smart playlists and saved explorer views after the browsing/filter contract is proven.

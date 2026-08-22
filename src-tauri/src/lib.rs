@@ -8,6 +8,7 @@ mod history;
 mod laptop_mode;
 mod musicbrainz;
 mod playback;
+mod shortcuts;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -35,6 +36,7 @@ type PlaybackState = Mutex<PlaybackRuntime>;
 type TagState = Mutex<TagService>;
 type LaptopState = Mutex<LaptopModeRuntime>;
 type WaveformState = Mutex<WaveformStore>;
+type GlobalShortcutState = Mutex<shortcuts::GlobalShortcutRuntime>;
 
 fn with_playback<T>(
     state: State<'_, PlaybackState>,
@@ -459,10 +461,38 @@ fn set_history_play_threshold(app: AppHandle, play_threshold_seconds: u32) -> Re
     Ok(value)
 }
 
+#[tauri::command]
+fn global_shortcut_settings(app: AppHandle) -> Result<shortcuts::GlobalShortcutStatus, String> {
+    let state = app.state::<GlobalShortcutState>();
+    let runtime = state
+        .lock()
+        .map_err(|_| "Aurora's global shortcut manager stopped unexpectedly.".to_owned())?;
+    Ok(runtime.status())
+}
+
+#[tauri::command]
+fn update_global_shortcut_settings(
+    app: AppHandle,
+    request: shortcuts::GlobalShortcutSettingsRequest,
+) -> Result<shortcuts::GlobalShortcutStatus, String> {
+    let state = app.state::<GlobalShortcutState>();
+    let mut runtime = state
+        .lock()
+        .map_err(|_| "Aurora's global shortcut manager stopped unexpectedly.".to_owned())?;
+    runtime.update(&app, request)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    shortcuts::handle_shortcut(app, shortcut, event.state());
+                })
+                .build(),
+        )
         .register_uri_scheme_protocol("aurora-cover", |context, request| {
             artwork::handle_cover_request(context.app_handle(), &request)
         })
@@ -514,6 +544,12 @@ pub fn run() {
             app.manage(Mutex::new(tag_service));
             app.manage(Mutex::new(laptop_runtime));
             app.manage(Mutex::new(waveform_store));
+            app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
+                state_directory.join("aurora-shortcuts.json"),
+            )));
+            if let Ok(mut shortcut_runtime) = app.state::<GlobalShortcutState>().lock() {
+                shortcut_runtime.initialize(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -565,6 +601,8 @@ pub fn run() {
             listening_history_page,
             track_history_insight,
             set_history_play_threshold,
+            global_shortcut_settings,
+            update_global_shortcut_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");
