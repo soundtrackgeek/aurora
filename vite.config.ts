@@ -17,6 +17,21 @@ const previewCovers: Readonly<Record<string, string>> = {
   "preview-american-idiot": "Green Day - American Idiot (2004).jpg",
   "preview-drive": "Cliff Martinez - Drive (2011).jpg",
   "preview-outrun": "Kavinsky - OutRun (2013).jpg",
+  "preview-chart-crowd": "The Crowd - You'll Never Walk Alone (1985).jpg",
+  "preview-chart-kayleigh": "Marillion - Misplaced Childhood (1985).jpg",
+  "preview-chart-19": "Paul Hardcastle - Paul Hardcastle (1985).jpg",
+  "preview-chart-suddenly": "Billy Ocean - Suddenly (1984).jpg",
+  "preview-chart-obsession": "Animotion - Animotion (1984).jpg",
+  "preview-chart-view": "John Barry - A View To A Kill (1985).jpg",
+  "preview-chart-fields": "Gary Moore - Run For Cover (1985).jpg",
+  "preview-chart-word": "Scritti Politti - Cupid & Psyche 85 (1985).jpg",
+  "preview-chart-crazy": "Madonna - Like a Virgin (1984).jpg",
+  "preview-chart-history": "Mai Tai - Mai Tai (1985).jpg",
+  "preview-score-rocky": "Various Artists - Rocky IV (1985).jpg",
+  "preview-score-miami": "Various Artists - Miami Vice (1985).jpg",
+  "preview-score-back-future": "Various Artists - Back to the Future (1985).jpg",
+  "preview-score-american-flyers": "Various Artists - American Flyers (1985).jpg",
+  "preview-score-magnum": "Magnum - On a Storyteller's Night (1985).jpg",
 };
 
 function previewCoverPlugin(): Plugin {

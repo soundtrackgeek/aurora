@@ -4,6 +4,25 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-23
+
+### Added
+
+- A dedicated Charts page above History with Singles and Albums modes, named presets, exact week selection, custom week ranges, and a direct full-year action.
+- Historical Official UK, VG Lista, Ti i Skuddet, and Norsktoppen weekly sources; annual Billboard singles and album sources; and a first-class Aurora Album Score chart.
+- A polished ranked chart table with movement, last-week, peak, appearances, real cover art, library-match state, rating, Love, source history, chart-queue playback, and library handoff.
+- An Aurora Album Score year shelf using Music Library's exact existing score formula.
+
+### Data and performance
+
+- Period charts compare #1 finish counts first, then #2, #3, and every lower position in order, with position points and appearances as deterministic final tie-breakers.
+- Chart results, detail lookups, and playback queues are bounded at 100 items and keep the shared Music Library database strictly read-only.
+- Billboard is treated as annual-only because the imported catalog contains annual entries rather than weekly Billboard history.
+
+### Verification
+
+- Added frontend coverage for exact weeks, period calculations, full-year charts, custom ranges, and Aurora Score mode, plus Rust tests for source validation and chart ordering against synthetic and live catalog data.
+
 ## [0.14.1] - 2026-08-22
 
 ### Fixed

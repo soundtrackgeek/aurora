@@ -68,4 +68,14 @@ describe("SidebarNavigation", () => {
     expect(screen.getByRole("button", { name: "Ratings" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Library" })).toHaveAttribute("aria-expanded", "true");
   });
+
+  it("places Charts directly above History as its own destination", () => {
+    const value = props({ activeDestination: "Charts" });
+    render(<SidebarNavigation {...value} />);
+    const charts = screen.getByRole("button", { name: "Charts" });
+    const history = screen.getByRole("button", { name: "History" });
+
+    expect(charts).toHaveAttribute("aria-current", "page");
+    expect(charts.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

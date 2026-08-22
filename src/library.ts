@@ -195,6 +195,10 @@ export function isTauriRuntime(): boolean {
 const browserPreviewCoverIds = new Set([
   "preview-viva", "preview-plastic-beach", "preview-discovery", "preview-hurry-up",
   "preview-rainbows", "preview-american-idiot", "preview-drive", "preview-outrun",
+  "preview-chart-crowd", "preview-chart-kayleigh", "preview-chart-19", "preview-chart-suddenly",
+  "preview-chart-obsession", "preview-chart-view", "preview-chart-fields", "preview-chart-word",
+  "preview-chart-crazy", "preview-chart-history", "preview-score-rocky", "preview-score-miami",
+  "preview-score-back-future", "preview-score-american-flyers", "preview-score-magnum",
 ]);
 
 export function albumCoverUrl(albumId: string | null, size: 64 | 128 | 256 | 512): string | null {

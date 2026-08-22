@@ -1,66 +1,47 @@
-# Ratings Studio 0.14.1 design QA
+# Design QA — Charts 0.15.0
 
 ## Evidence
 
-- Source visual truth: `C:\Users\jtill\AppData\Local\Temp\codex-clipboard-6e5c570b-ed78-4a57-87b0-3a3fab6d4610.png`
-- User-reported 0.14.0 result: `C:\Users\jtill\AppData\Local\Temp\codex-clipboard-4cf28a25-26aa-49e5-9109-c260e2fe23cb.png`
-- Browser-rendered implementation: `C:\_code\aurora\docs\design\ratings-0.14.1-track-pyramids.png`
-- Full-view comparison: `C:\_code\aurora\docs\design\ratings-0.14.1-full-comparison.png`
-- Source/final focused comparison: `C:\_code\aurora\docs\design\ratings-0.14.1-pyramid-comparison.png`
-- Before/target/after history: `C:\_code\aurora\docs\design\ratings-0.14.1-before-target-after.png`
-- Source pixels: 1487 × 1058.
-- Browser implementation pixels: 1487 × 1058 at a 1487 × 1058 CSS viewport and 1 device pixel ratio.
-- Density normalization: none for the full-view comparison. For the focused constellation comparison, the 952 px implementation region was bicubic-normalized to the source region's 992 px width; both use the same 352 px height.
-- State: Windows dark shell, expanded Library navigation, open right Album inspector, Track Ratings selected, 5 stars selected, Almost Complete selected, and Viva La Vida selected.
-
-## Findings
-
-- No actionable P0, P1, or P2 differences remain in the requested constellation region.
-- [P3] The implementation uses clean geometric rows of real covers, while the reference adds a denser field of tiny cover fragments and particles between pyramids. The defining taper, height, color sequence, cover imagery, baseline, labels, and selected-band glow now match; the remaining atmospheric density does not obscure the requested composition.
-- [Intentional data correction] The reference says 947,796 unrated tracks. Browser preview uses the verified 947,794 count after two raw half-star values are kept in their exact 3.5 and 4.5 bands.
-
-## Required fidelity surfaces
-
-- Fonts and typography: Aurora's established Segoe UI hierarchy remains intact. The Ratings heading, Taste Constellation label, band names, and tabular counts are readable and aligned without wrapping.
-- Spacing and layout rhythm: all six bands use a shared baseline and a 164 px artwork stage. The 5/4/5/6/7/7-level progression recreates the reference's rising constellation rhythm without horizontal overflow.
-- Colors and visual tokens: the pyramids progress through silver, warm amber, cyan, blue, violet, and magenta. Each palette uses a matching border and drop-shadow glow; the selected five-star lane retains its violet card and baseline.
-- Image quality and asset fidelity: every visible tile is a real album-cover image resolved through Aurora's existing artwork component. The pyramids do not use placeholder boxes, custom SVG art, emoji, or a cropped mock.
-- Copy and content: Track Ratings, Album Ratings, whole- and half-star labels, counts, collection actions, and completion content remain unchanged and data-backed.
-
-## Full-view comparison
-
-The equal-size 1487 × 1058 comparison confirms that the rebuilt pyramids dominate the top stage without pushing the 5 Star Collection, completion tabs, album shelf, right Album inspector, or persistent player out of the composition.
-
-## Focused comparison
-
-The source and Browser constellation were placed in one comparison image at a common region height. This exposes the previous failure clearly: 0.14.0 had small rectangular mosaics floating in empty space; 0.14.1 has tall tapered pyramids, broad bases, cover density, and the requested silver-to-magenta palette.
+- Reference: `C:\Users\jtill\.codex\generated_images\01a025c3-c6d3-73f1-ae98-1e18a3cabd80\exec-36252241-c641-45b3-a990-e559136426ba.png`
+- Implementation: `C:\_code\aurora\docs\design\charts-0.15.0-implementation.png`
+- Full comparison: `C:\_code\aurora\docs\design\charts-0.15.0-comparison.png`
+- Focused chart comparison: `C:\_code\aurora\docs\design\charts-0.15.0-focused-comparison.png`
+- Reference image: 1487 × 1058 physical pixels.
+- Browser capture: 1280 × 720 CSS pixels at device-pixel ratio 1.25. The in-app Browser retained its 1280 × 720 viewport when a larger viewport was requested, so the reference was proportionally contained for the full comparison and the chart workspace was normalized separately for the focused comparison.
+- State: Singles → Summer 1985 → Official UK → selected week 23 → Kayleigh selected.
 
 ## Comparison history
 
-1. Earlier [P1]: the shipped 0.14.0 constellation reduced its representative covers to at most 12 tiles in a four-column grid. The result was a sparse rectangle, not the design-defining cover pyramid; the prior QA incorrectly classified that mismatch as P3.
-2. Fix: replaced the flat grid with explicit centered pyramid rows, increased the artwork stage, used 5/4/5/6/7/7 levels across the six bands, expanded the deduplicated cover pool, and assigned the reference palette per band.
-3. Post-fix evidence: `ratings-0.14.1-pyramid-comparison.png` shows unmistakable pyramids at all six stops, stronger height and taper, a shared baseline, and the requested color progression.
-4. Album-mode check: Browser interaction switched to Album Ratings and retained the same six pyramids while updating every count and collection label to the album spectrum.
+1. Initial implementation showed the selected design's main hierarchy but exposed period presets without an obvious complete-year action.
+2. Added a compact, keyboard-accessible year control labelled “full year”; selecting it builds weeks 1–53 and switches to the calculated period chart.
+3. Re-captured the exact weekly state and compared the reference and implementation side by side at full-shell and focused-workspace scales.
 
-## Primary interactions tested
+## Visible findings
 
-- Open Ratings from the Library navigation.
-- Switch between Track Ratings and Album Ratings.
-- Confirm six pyramid buttons and the selected five-star state in both modes.
-- Confirm the 5 Star Collection and Almost Complete content remain visible below the constellation.
-- Resize to 1280 × 720 with the right inspector open; the Ratings Studio measures 712/712 px and the constellation stage 676/676 px client/scroll width.
-- Browser console check: no errors or warnings in the final test tab.
+- The final page preserves the reference hierarchy: Charts header, Singles/Albums switch, five period actions, calendar rail, chart-source rail, ranked table, right inspector, and fixed player.
+- The selected row, purple emphasis, restrained cyan/green status accents, dark borders, compact type scale, and cover-driven table closely match Aurora's existing design language and the supplied mock.
+- The implementation deliberately uses the album cover resolved from the user's real cover archive for Kayleigh rather than fabricating the standalone-single artwork shown in the concept.
+- At 1280 × 720, the chart workspace scrolls vertically and six rows are visible above the fixed player. The full 1440 × 900 Tauri window exposes more of the source-comparison and Album Score sections without changing their hierarchy.
+- No broken artwork, clipping across fixed shell boundaries, horizontal overflow, misplaced overlays, or low-contrast active states were observed.
 
-## Follow-up polish
+## Required surfaces
 
-- A future P3-only pass could add more low-opacity real-cover fragments along the shared baseline if an even denser atmospheric field is desired.
+- Loading: centered Aurora spinner and loading copy while a bounded chart request is pending.
+- Empty: chart-specific empty explanation when a source/time lens has no entries.
+- Error: retryable error panel using the existing Aurora feedback treatment.
+- Main content: complete ranked chart with source, period, movement, match, playback, and inspector controls.
+- Secondary/detail content: cross-source history, Aurora Album Score shelf, and selected track/album inspector.
 
-## Implementation checklist
+## Primary interactions verified in the in-app Browser
 
-- [x] Restore tall, tapered real-cover pyramids.
-- [x] Match the silver-to-magenta palette and band progression.
-- [x] Preserve exact rating data, interactions, and semantics.
-- [x] Compare source and final in one normalized image.
-- [x] Verify Track and Album modes in the in-app Browser.
+- Navigate to Charts and select Kayleigh from the weekly Official UK chart.
+- Switch Selected week to Period chart for Summer 1985.
+- Click the displayed year to build the 1985 full-year chart.
+- Switch Singles to Albums and load Aurora Album Score.
+- Open Custom, enter August 1990 weeks 31–35, and apply the range.
+- Confirm the page returned to the exact weekly comparison state after reload.
+- Browser console was checked during the weekly, period, album, and custom-range flows; no errors or warnings were emitted.
 
-final result: passed
+## Result
+
+passed

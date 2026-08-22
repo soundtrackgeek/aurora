@@ -1,6 +1,7 @@
 import {
   Album,
   CalendarDays,
+  ChartColumn,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -28,6 +29,7 @@ export type SidebarDestination =
   | "Years"
   | "Ratings"
   | "Tags"
+  | "Charts"
   | "History";
 
 type NavigationItem = {
@@ -240,6 +242,19 @@ export function SidebarNavigation({
           </div>
         )}
       </div>
+
+      <button
+        type="button"
+        className={destinationButtonClass(activeDestination === "Charts")}
+        onClick={() => navigate("Charts")}
+        aria-current={activeDestination === "Charts" ? "page" : undefined}
+        aria-label={sidebarMode === "icons" ? "Charts" : undefined}
+        title={sidebarMode === "icons" ? "Charts" : undefined}
+      >
+        <ChartColumn aria-hidden="true" />
+        <span>Charts</span>
+        {activeDestination === "Charts" && <ChevronRight className="nav-chevron" aria-hidden="true" />}
+      </button>
 
       <button
         type="button"

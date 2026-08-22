@@ -1,6 +1,7 @@
 mod artwork;
 mod audio_settings;
 mod catalog;
+mod charts;
 mod curation;
 mod curation_store;
 mod device_mode;
@@ -22,6 +23,7 @@ mod years;
 
 use audio_settings::{AudioSettingsRequest, AudioSettingsStatus, AudioSettingsStore};
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
+use charts::{ChartItemDetail, ChartItemDetailRequest, ChartPage, ChartPageRequest};
 use curation::{ArtistDecisionRequest, CurationExportResult, ReleaseDecisionRequest};
 use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
@@ -192,6 +194,43 @@ async fn year_queue_tracks(
     })
     .await
     .map_err(|error| format!("The year-playback worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn chart_page(request: ChartPageRequest) -> Result<ChartPage, String> {
+    tauri::async_runtime::spawn_blocking(move || charts::load_chart_page(request))
+        .await
+        .map_err(|error| format!("The chart-page worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn chart_item_detail(request: ChartItemDetailRequest) -> Result<ChartItemDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || charts::load_chart_item_detail(request))
+        .await
+        .map_err(|error| format!("The chart-detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn chart_entry_track(app: AppHandle, track_id: String) -> Result<TrackSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        charts::load_chart_entry_track(track_id, &store)
+    })
+    .await
+    .map_err(|error| format!("The chart-track worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn chart_queue_tracks(
+    app: AppHandle,
+    request: ChartPageRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        charts::load_chart_queue(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The chart-playback worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -725,6 +764,10 @@ pub fn run() {
             year_overview,
             year_detail,
             year_queue_tracks,
+            chart_page,
+            chart_item_detail,
+            chart_entry_track,
+            chart_queue_tracks,
             ratings_overview,
             rating_album_page,
             rating_collection_tracks,

@@ -27,6 +27,11 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
+import {
+  ChartInspector,
+  ChartStudio,
+  type ChartSelectionContext,
+} from "./components/charts/ChartStudio";
 import { LaptopModeButton } from "./components/LaptopModeButton";
 import {
   DeepExplorer,
@@ -157,6 +162,9 @@ import {
   type AudioSettingsRequest,
   type AudioSettingsStatus,
 } from "./audio";
+import {
+  loadChartEntryTrack,
+} from "./charts";
 import {
   loadYearAlbumTracks,
   loadYearDetail,
@@ -446,6 +454,8 @@ function App() {
   const [selectedYearAlbum, setSelectedYearAlbum] = useState<YearAlbum | null>(null);
   const [yearAlbumTracks, setYearAlbumTracks] = useState<Track[]>([]);
   const [yearAlbumBusy, setYearAlbumBusy] = useState(false);
+  const [chartSelection, setChartSelection] = useState<ChartSelectionContext | null>(null);
+  const [chartPlaybackBusy, setChartPlaybackBusy] = useState(false);
   const [ratingsOverview, setRatingsOverview] = useState<RatingsOverview | null>(null);
   const [ratingsPage, setRatingsPage] = useState<RatingAlbumPage | null>(null);
   const [ratingsLoadState, setRatingsLoadState] = useState<RatingsLoadState>("loading");
@@ -617,6 +627,7 @@ function App() {
     if (
       !libraryReady
       || activeNav === "Observatory"
+      || activeNav === "Charts"
       || activeNav === "History"
       || activeNav === "Genres"
       || activeNav === "Years"
@@ -1152,6 +1163,50 @@ function App() {
     } finally {
       setYearAlbumBusy(false);
     }
+  }
+
+  async function playChartQueue(tracks: Track[]): Promise<boolean> {
+    if (!tracks.length) return false;
+    endGenreQueue();
+    const next = await playback.play(tracks, tracks[0].id);
+    if (next) selectTrack(tracks[0]);
+    return Boolean(next);
+  }
+
+  async function playChartSelection() {
+    if (!chartSelection || chartPlaybackBusy) return;
+    setChartPlaybackBusy(true);
+    try {
+      if (chartSelection.kind === "singles" && chartSelection.entry.matchedTrackId) {
+        const track = selectedTrack?.id === chartSelection.entry.matchedTrackId
+          ? selectedTrack
+          : await loadChartEntryTrack(chartSelection.entry.matchedTrackId);
+        await playChartQueue([track]);
+        return;
+      }
+      if (chartSelection.kind === "albums" && chartSelection.entry.matchedAlbumId) {
+        const detail = await loadAlbumDetail(chartSelection.entry.matchedAlbumId);
+        await playChartQueue(detail.tracks);
+      }
+    } catch (error) {
+      console.warn("Aurora could not play this chart selection", error);
+    } finally {
+      setChartPlaybackBusy(false);
+    }
+  }
+
+  function openChartSelectionInLibrary() {
+    if (!chartSelection) return;
+    expandLibraryNavigation();
+    if (chartSelection.kind === "albums") {
+      setActiveNav("Albums");
+      setExplorerView("albums");
+      setExplorerFilters({ ...defaultExplorerFilters, query: chartSelection.entry.title, sort: "releaseYearDesc" });
+      return;
+    }
+    setActiveNav("Songs");
+    setExplorerView("tracks");
+    setExplorerFilters({ ...defaultExplorerFilters, query: chartSelection.entry.title, sort: "artistAsc" });
   }
 
   function openRatingAlbum(album: RatingAlbum) {
@@ -1773,7 +1828,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.14.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1856,6 +1911,15 @@ function App() {
                 onRefresh={() => setReviewReloadToken((value) => value + 1)}
                 onUndo={() => void undoCuration()}
                 onExport={() => void exportCuration()}
+              />
+            ) : activeNav === "Charts" ? (
+              <ChartStudio
+                onSelectionChange={(selection) => {
+                  setChartSelection(selection);
+                  if (selection) setInspectorView(selection.kind === "albums" ? "album" : "track");
+                }}
+                onSelectTrack={selectTrack}
+                onPlayQueue={playChartQueue}
               />
             ) : activeNav === "History" ? (
               <ListeningHistory
@@ -2030,7 +2094,7 @@ function App() {
       {layoutPreferences.rightSidebar === "expanded" && <aside className="inspector">
         <div className="inspector-tabs" role="tablist" aria-label="Library details">
           <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
-          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum && !selectedRatingAlbum} onClick={() => setInspectorView("album")}>Album</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum && !selectedRatingAlbum && !(activeNav === "Charts" && chartSelection?.kind === "albums")} onClick={() => setInspectorView("album")}>Album</button>
           <button
             type="button"
             role="tab"
@@ -2043,7 +2107,19 @@ function App() {
           >Artist</button>
           <button type="button" role="tab" aria-selected="false" disabled>Lyrics</button>
         </div>
-        {inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
+        {activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
+          <div className="inspector-scroll">
+            <ChartInspector
+              selection={chartSelection}
+              track={chartSelection.kind === "singles" && selectedTrack?.id === chartSelection.entry.matchedTrackId ? selectedTrack : null}
+              busy={chartPlaybackBusy || Boolean(selectedTrack && inlineSavingKeys.has(selectedTrack.trackKey))}
+              onPlay={() => void playChartSelection()}
+              onOpenLibrary={openChartSelectionInLibrary}
+              onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+              onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+            />
+          </div>
+        ) : inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
           <div className="inspector-scroll">
             <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} />
           </div>
