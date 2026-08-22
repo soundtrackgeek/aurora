@@ -4,10 +4,12 @@ export type RightSidebarMode = "expanded" | "collapsed";
 export type LayoutPreferences = {
   leftSidebar: LeftSidebarMode;
   rightSidebar: RightSidebarMode;
+  libraryExpanded: boolean;
+  playlistsExpanded: boolean;
 };
 
-type StoredLayoutPreferences = LayoutPreferences & {
-  schemaVersion: 1;
+type StoredLayoutPreferencesV2 = LayoutPreferences & {
+  schemaVersion: 2;
 };
 
 type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
@@ -17,6 +19,8 @@ const STORAGE_KEY = "aurora:layout-preferences:v1";
 export const defaultLayoutPreferences: LayoutPreferences = {
   leftSidebar: "expanded",
   rightSidebar: "expanded",
+  libraryExpanded: true,
+  playlistsExpanded: true,
 };
 
 const leftSidebarModes = new Set<LeftSidebarMode>(["expanded", "icons", "collapsed"]);
@@ -36,17 +40,39 @@ export function loadLayoutPreferences(storage: LayoutStorage | null = browserSto
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return { ...defaultLayoutPreferences };
-    const parsed = JSON.parse(raw) as Partial<StoredLayoutPreferences>;
+    const parsed = JSON.parse(raw) as {
+      schemaVersion?: unknown;
+      leftSidebar?: unknown;
+      rightSidebar?: unknown;
+      libraryExpanded?: unknown;
+      playlistsExpanded?: unknown;
+    };
     if (
-      parsed.schemaVersion !== 1
-      || !leftSidebarModes.has(parsed.leftSidebar as LeftSidebarMode)
+      !leftSidebarModes.has(parsed.leftSidebar as LeftSidebarMode)
       || !rightSidebarModes.has(parsed.rightSidebar as RightSidebarMode)
+    ) {
+      return { ...defaultLayoutPreferences };
+    }
+    if (parsed.schemaVersion === 1) {
+      return {
+        leftSidebar: parsed.leftSidebar as LeftSidebarMode,
+        rightSidebar: parsed.rightSidebar as RightSidebarMode,
+        libraryExpanded: defaultLayoutPreferences.libraryExpanded,
+        playlistsExpanded: defaultLayoutPreferences.playlistsExpanded,
+      };
+    }
+    if (
+      parsed.schemaVersion !== 2
+      || typeof parsed.libraryExpanded !== "boolean"
+      || typeof parsed.playlistsExpanded !== "boolean"
     ) {
       return { ...defaultLayoutPreferences };
     }
     return {
       leftSidebar: parsed.leftSidebar as LeftSidebarMode,
       rightSidebar: parsed.rightSidebar as RightSidebarMode,
+      libraryExpanded: parsed.libraryExpanded,
+      playlistsExpanded: parsed.playlistsExpanded,
     };
   } catch {
     return { ...defaultLayoutPreferences };
@@ -58,7 +84,7 @@ export function saveLayoutPreferences(
   storage: LayoutStorage | null = browserStorage(),
 ): boolean {
   if (!storage) return false;
-  const stored: StoredLayoutPreferences = { schemaVersion: 1, ...preferences };
+  const stored: StoredLayoutPreferencesV2 = { schemaVersion: 2, ...preferences };
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify(stored));
     return true;

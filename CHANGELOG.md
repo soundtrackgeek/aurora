@@ -4,6 +4,30 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-22
+
+### Added
+
+- A collapsible Library tree containing Songs, Albums, Artists, Genres, Years, Ratings, and Tags, with Songs as the default destination when a closed Library is opened.
+- A collapsible Playlists group with the existing pinned-preview entries kept as an explicit shell for future playlist work.
+- Compact Library and pinned-playlist flyouts for the icon-only rail.
+- A dedicated Years placeholder page that clearly separates future year exploration from the generic song explorer.
+
+### Changed
+
+- Universe, Observatory, and History remain top-level destinations while catalog-shaped views now live under Library.
+- Library and Playlists disclosure choices are stored with the existing device-local layout preferences and restored on the next launch.
+- Version 1 layout preferences migrate safely to the version 2 shape while preserving the user's left- and right-rail choices.
+
+### Accessibility
+
+- Nested destinations expose the current page, disclosure triggers expose their expanded state and controlled region, and icon-only groups retain accessible names.
+
+### Known limits
+
+- Playlist rows are previews only in 0.12.0; creating, pinning, editing, and opening playlists remain future work.
+- Years is intentionally a placeholder. No year or decade query is run until that page receives its focused implementation.
+
 ## [0.11.0] - 2026-08-22
 
 ### Added

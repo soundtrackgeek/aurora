@@ -11,7 +11,6 @@ import {
   FlaskConical,
   Gauge,
   Heart,
-  LibraryBig,
   Music2,
   PanelLeft,
   PanelLeftClose,
@@ -22,10 +21,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Sparkles,
-  Star,
-  Tags,
-  Telescope,
   UsersRound,
   X,
 } from "lucide-react";
@@ -49,6 +44,11 @@ import {
   type HistoryLoadState,
 } from "./components/history/ListeningHistory";
 import { GenreAtlas, type GenreAtlasLoadState } from "./components/genres/GenreAtlas";
+import { YearsPlaceholder } from "./components/library/YearsPlaceholder";
+import {
+  SidebarNavigation,
+  type SidebarDestination,
+} from "./components/navigation/SidebarNavigation";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
@@ -136,25 +136,6 @@ import {
   type AudioSettingsRequest,
   type AudioSettingsStatus,
 } from "./audio";
-
-const navigation = [
-  { label: "Universe", icon: Sparkles },
-  { label: "Observatory", icon: Telescope },
-  { label: "Library", icon: LibraryBig },
-  { label: "Albums", icon: Album },
-  { label: "Artists", icon: UsersRound },
-  { label: "Genres", icon: Disc3 },
-  { label: "Songs", icon: Music2 },
-  { label: "Ratings", icon: Star },
-  { label: "Tags", icon: Tags },
-  { label: "History", icon: Clock3 },
-];
-
-const previewPlaylists = [
-  { label: "5 Star Collection", count: "rating view", icon: Star },
-  { label: "Night Drive", count: "smart playlist", icon: Music2 },
-  { label: "Unplayed", count: "listening queue", icon: Disc3 },
-];
 
 const defaultExplorerFilters: ExplorerFilters = {
   query: "",
@@ -365,7 +346,7 @@ function App() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
-  const [activeNav, setActiveNav] = useState("Universe");
+  const [activeNav, setActiveNav] = useState<SidebarDestination>("Universe");
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [reloadToken, setReloadToken] = useState(0);
   const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
@@ -562,7 +543,13 @@ function App() {
   const libraryReady = snapshot !== null;
 
   useEffect(() => {
-    if (!libraryReady || activeNav === "Observatory" || activeNav === "History" || activeNav === "Genres") return;
+    if (
+      !libraryReady
+      || activeNav === "Observatory"
+      || activeNav === "History"
+      || activeNav === "Genres"
+      || activeNav === "Years"
+    ) return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -1008,9 +995,18 @@ function App() {
     if (view !== "albums") setSelectedAlbumId(null);
   }
 
-  function navigate(label: string) {
+  function expandLibraryNavigation() {
+    setLayoutPreferences((current) => current.libraryExpanded
+      ? current
+      : { ...current, libraryExpanded: true });
+  }
+
+  function navigate(label: SidebarDestination) {
     setActiveNav(label);
-    if (label === "Observatory" || label === "History" || label === "Genres") return;
+    if (label !== "Universe" && label !== "Observatory" && label !== "History") {
+      expandLibraryNavigation();
+    }
+    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Years") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -1019,6 +1015,7 @@ function App() {
   function focusArtist(artist: Artist) {
     setSelectedArtistId(artist.id);
     setActiveNav("Artists");
+    expandLibraryNavigation();
     setExplorerView("tracks");
     setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: "newest" }));
     openArtistInspector(artist.name);
@@ -1026,12 +1023,14 @@ function App() {
 
   function exploreArtistInLibrary(artistName: string) {
     setActiveNav("Artists");
+    expandLibraryNavigation();
     setExplorerView("tracks");
     setExplorerFilters((current) => ({ ...current, artist: artistName, sort: "newest" }));
   }
 
   function exploreGenreInLibrary(genre: string) {
     setActiveNav("Songs");
+    expandLibraryNavigation();
     setExplorerView("tracks");
     setExplorerFilters({ ...defaultExplorerFilters, genre, sort: "newest" });
   }
@@ -1309,6 +1308,8 @@ function App() {
       ? historySearch
       : activeNav === "Genres"
         ? genreSearch
+        : activeNav === "Years"
+          ? ""
         : explorerFilters.query;
   const topbarSearchPlaceholder = activeNav === "Observatory"
     ? "Search artists to review…"
@@ -1316,6 +1317,8 @@ function App() {
       ? "Search listening history…"
       : activeNav === "Genres"
         ? "Search your genre atlas…"
+        : activeNav === "Years"
+          ? "Year search arrives with the timeline…"
         : "Search your universe…";
   const topbarSearchLabel = activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
@@ -1323,12 +1326,15 @@ function App() {
       ? "Search listening history"
       : activeNav === "Genres"
         ? "Search genres"
+        : activeNav === "Years"
+          ? "Year search is not available yet"
         : "Search your music universe";
 
   function updateTopbarSearch(value: string) {
     if (activeNav === "Observatory") setReviewSearch(value);
     else if (activeNav === "History") setHistorySearch(value);
     else if (activeNav === "Genres") setGenreSearch(value);
+    else if (activeNav === "Years") return;
     else setExplorerFilters((current) => ({ ...current, query: value }));
   }
 
@@ -1369,35 +1375,26 @@ function App() {
         </div>
 
         <p className="sidebar__label">Navigation</p>
-        <nav className="primary-nav" aria-label="Primary">
-          {navigation.map(({ label, icon: Icon }) => (
-            <button
-              type="button"
-              key={label}
-              className={activeNav === label ? "is-active" : undefined}
-              onClick={() => navigate(label)}
-              aria-label={layoutPreferences.leftSidebar === "icons" ? label : undefined}
-              title={layoutPreferences.leftSidebar === "icons" ? label : undefined}
-            >
-              <Icon aria-hidden="true" />
-              <span>{label}</span>
-              {activeNav === label && <ChevronRight className="nav-chevron" aria-hidden="true" />}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar__section-heading"><p className="sidebar__label">Playlists</p><button type="button" aria-label="Add playlist" disabled>+</button></div>
-        <div className="playlists">
-          {previewPlaylists.map(({ label, count, icon: Icon }) => (
-            <button type="button" key={label} disabled>
-              <Icon aria-hidden="true" /><span><strong>{label}</strong><small>{count}</small></span>
-            </button>
-          ))}
-        </div>
+        <SidebarNavigation
+          key={layoutPreferences.leftSidebar}
+          activeDestination={activeNav}
+          sidebarMode={layoutPreferences.leftSidebar}
+          libraryExpanded={layoutPreferences.libraryExpanded}
+          playlistsExpanded={layoutPreferences.playlistsExpanded}
+          onLibraryExpandedChange={(libraryExpanded) => setLayoutPreferences((current) => ({
+            ...current,
+            libraryExpanded,
+          }))}
+          onPlaylistsExpandedChange={(playlistsExpanded) => setLayoutPreferences((current) => ({
+            ...current,
+            playlistsExpanded,
+          }))}
+          onNavigate={navigate}
+        />
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.11.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.12.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1417,7 +1414,7 @@ function App() {
           >
             <LeftSidebarIcon aria-hidden="true" />
           </button>
-          <form className="search" role="search" onSubmit={submitSearch}>
+          <form className={`search${activeNav === "Years" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
             <Search aria-hidden="true" />
             <input
               ref={searchRef}
@@ -1425,10 +1422,11 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
+              disabled={activeNav === "Years"}
             />
             {topbarSearchValue
               ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
-              : <kbd>Ctrl K</kbd>}
+              : activeNav !== "Years" ? <kbd>Ctrl K</kbd> : null}
           </form>
         </div>
         <div className="topbar__actions">
@@ -1531,6 +1529,8 @@ function App() {
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
               />
+            ) : activeNav === "Years" ? (
+              <YearsPlaceholder />
             ) : <>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />

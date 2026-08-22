@@ -30,8 +30,29 @@ describe("layout preferences", () => {
 
   it("round-trips icon-only and collapsed rail choices", () => {
     const storage = memoryStorage();
-    expect(saveLayoutPreferences({ leftSidebar: "icons", rightSidebar: "collapsed" }, storage)).toBe(true);
-    expect(loadLayoutPreferences(storage)).toEqual({ leftSidebar: "icons", rightSidebar: "collapsed" });
+    const preferences = {
+      leftSidebar: "icons" as const,
+      rightSidebar: "collapsed" as const,
+      libraryExpanded: false,
+      playlistsExpanded: true,
+    };
+    expect(saveLayoutPreferences(preferences, storage)).toBe(true);
+    expect(loadLayoutPreferences(storage)).toEqual(preferences);
+    expect(JSON.parse(storage.value() ?? "{}").schemaVersion).toBe(2);
+  });
+
+  it("migrates the version 1 rail choices without hiding existing navigation", () => {
+    const storage = memoryStorage(JSON.stringify({
+      schemaVersion: 1,
+      leftSidebar: "icons",
+      rightSidebar: "collapsed",
+    }));
+    expect(loadLayoutPreferences(storage)).toEqual({
+      leftSidebar: "icons",
+      rightSidebar: "collapsed",
+      libraryExpanded: true,
+      playlistsExpanded: true,
+    });
   });
 
   it("cycles the left rail through all three modes", () => {
