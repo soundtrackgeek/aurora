@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-22
+
+### Added
+
+- Direct half-star and full-star hit areas on every Explore row, plus a directly clickable Love control.
+- Per-track saving, pending-import, and conflict feedback for immediate MP3 tag writes.
+
+### Changed
+
+- Explore rating and Love clicks now save and verify through the existing safe MP3 writer immediately, without requiring the inspector's Save to MP3 button.
+- Inline edits update optimistically, prevent overlapping writes to the same track, reconcile the inspector after confirmation, and roll back the row if the native save fails.
+
 ## [0.3.0] - 2026-08-22
 
 ### Added

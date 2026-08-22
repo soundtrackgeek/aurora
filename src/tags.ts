@@ -31,6 +31,18 @@ export function tagValuesForTrack(track: Track): TagValues {
   };
 }
 
+export function trackWithTagValues(track: Track, values: TagValues): Track {
+  return {
+    ...track,
+    rating: values.rating,
+    loveState: values.loveState,
+    loved: values.loveState === "loved",
+    releaseYear: values.releaseYear,
+    tagSyncState: "pendingImport",
+    canUndoTagEdit: true,
+  };
+}
+
 function browserSnapshot(track: Track): TrackTagSnapshot {
   const current = browserTracks.get(track.id) ?? track;
   return {
@@ -59,15 +71,7 @@ export async function updateTrackTags(
       throw new Error("This preview track changed after the editor opened. Reload before saving.");
     }
     browserUndo.set(track.id, current);
-    const updated: Track = {
-      ...current,
-      rating: desired.rating,
-      loveState: desired.loveState,
-      loved: desired.loveState === "loved",
-      releaseYear: desired.releaseYear,
-      tagSyncState: "pendingImport",
-      canUndoTagEdit: true,
-    };
+    const updated = trackWithTagValues(current, desired);
     browserTracks.set(track.id, updated);
     return browserSnapshot(updated);
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Track } from "./library";
-import { readTrackTagState, tagValuesForTrack, undoTrackTagEdit, updateTrackTags } from "./tags";
+import { readTrackTagState, tagValuesForTrack, trackWithTagValues, undoTrackTagEdit, updateTrackTags } from "./tags";
 
 function track(id: string): Track {
   return {
@@ -23,6 +23,24 @@ function track(id: string): Track {
 }
 
 describe("tag editing preview boundary", () => {
+  it("creates the optimistic Explore row without mutating its source", () => {
+    const original = track("inline-optimistic");
+    const optimistic = trackWithTagValues(original, {
+      ...tagValuesForTrack(original),
+      rating: 4.5,
+      loveState: "loved",
+    });
+
+    expect(original.rating).toBe(3.5);
+    expect(optimistic).toMatchObject({
+      rating: 4.5,
+      loved: true,
+      loveState: "loved",
+      tagSyncState: "pendingImport",
+      canUndoTagEdit: true,
+    });
+  });
+
   it("saves half-star, love, and Release Year together and supports undo", async () => {
     const original = track("tag-edit-and-undo");
     const expected = tagValuesForTrack(original);

@@ -2,10 +2,10 @@ import {
   Activity,
   Album,
   AudioLines,
-  Ban,
   BadgeCheck,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   CircleUserRound,
   Clock3,
   Disc3,
@@ -24,7 +24,6 @@ import {
   Settings,
   Sparkles,
   Star,
-  StarHalf,
   Tags,
   UsersRound,
   X,
@@ -32,6 +31,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
+import { InlineLoveControl, InlineRatingControl } from "./components/InlineTagControls";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { TagEditor } from "./components/TagEditor";
@@ -48,6 +48,7 @@ import {
   type Track,
 } from "./library";
 import { usePlayback } from "./playback";
+import { tagValuesForTrack, trackWithTagValues, updateTrackTags, type TagValues } from "./tags";
 import { useAuroraUpdater } from "./updater";
 
 const navigation = [
@@ -67,18 +68,6 @@ const previewPlaylists = [
   { label: "Night Drive", count: "smart playlist", icon: Music2 },
   { label: "Unplayed", count: "listening queue", icon: Disc3 },
 ];
-
-function Rating({ value }: { value: number | null }) {
-  return (
-    <span className="rating" aria-label={value === null ? "Unrated" : `${value} out of 5 stars`}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        value !== null && value === star - 0.5
-          ? <StarHalf key={star} aria-hidden="true" className="is-filled" />
-          : <Star key={star} aria-hidden="true" className={value !== null && value >= star ? "is-filled" : undefined} />
-      ))}
-    </span>
-  );
-}
 
 function EmptyInspector() {
   return (
@@ -171,8 +160,12 @@ function App() {
   const [exploredTracks, setExploredTracks] = useState<Track[] | null>(null);
   const [isExploring, setIsExploring] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
+  const [inlineErrors, setInlineErrors] = useState<Record<string, string>>({});
+  const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
+  const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
   const playback = usePlayback();
 
@@ -244,14 +237,16 @@ function App() {
     void playback.play(queue, track.id);
   }
 
-  function applyTrackChange(updated: Track) {
-    const previous = selectedTrack?.id === updated.id ? selectedTrack : null;
-    setSelectedTrack((current) => current?.id === updated.id ? updated : current);
+  function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
+    const baseline = previous ?? (selectedTrack?.id === updated.id ? selectedTrack : undefined);
+    if (updateSelected) {
+      setSelectedTrack((current) => current?.id === updated.id ? updated : current);
+    }
     setExploredTracks((current) => current?.map((track) => track.id === updated.id ? updated : track) ?? current);
     setSnapshot((current) => {
       if (!current) return current;
-      const lovedDelta = previous ? Number(updated.loved) - Number(previous.loved) : 0;
-      const ratedDelta = previous ? Number(updated.rating !== null) - Number(previous.rating !== null) : 0;
+      const lovedDelta = baseline ? Number(updated.loved) - Number(baseline.loved) : 0;
+      const ratedDelta = baseline ? Number(updated.rating !== null) - Number(baseline.rating !== null) : 0;
       return {
         ...current,
         summary: {
@@ -262,6 +257,44 @@ function App() {
         tracks: current.tracks.map((track) => track.id === updated.id ? updated : track),
       };
     });
+  }
+
+  async function saveInlineTagChange(track: Track, desired: TagValues) {
+    if (inlineSaveRef.current.has(track.trackKey)) return;
+    const expected = tagValuesForTrack(track);
+    if (JSON.stringify(expected) === JSON.stringify(desired)) return;
+
+    inlineSaveRef.current.add(track.trackKey);
+    setInlineSavingKeys((current) => new Set(current).add(track.trackKey));
+    setInlineErrors((current) => {
+      const next = { ...current };
+      delete next[track.trackKey];
+      return next;
+    });
+
+    const optimistic = trackWithTagValues(track, desired);
+    applyTrackChange(optimistic, track, false);
+    try {
+      const snapshot = await updateTrackTags(track, expected, desired);
+      applyTrackChange(snapshot.track, optimistic);
+      setInlineTagRevisions((current) => ({
+        ...current,
+        [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
+      }));
+    } catch (error) {
+      applyTrackChange(track, optimistic, false);
+      setInlineErrors((current) => ({
+        ...current,
+        [track.trackKey]: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      inlineSaveRef.current.delete(track.trackKey);
+      setInlineSavingKeys((current) => {
+        const next = new Set(current);
+        next.delete(track.trackKey);
+        return next;
+      });
+    }
   }
 
   function selectArtist(artist: Artist) {
@@ -320,7 +353,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.3.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.3.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -374,29 +407,57 @@ function App() {
                   <table className="track-table">
                     <thead><tr><th className="track-index">#</th><th>Title</th><th>Artist</th><th>Album</th><th>Year</th><th>Rating</th><th><Clock3 aria-label="Duration" /></th><th>Genre</th><th><Heart aria-label="Loved" /></th><th /></tr></thead>
                     <tbody>
-                      {tracks.map((track, index) => (
-                        <tr
+                      {tracks.map((track, index) => {
+                        const isSavingTags = inlineSavingKeys.has(track.trackKey);
+                        const inlineError = inlineErrors[track.trackKey];
+                        return (
+                          <tr
                           key={track.id}
                           className={[
                             selectedTrack?.id === track.id ? "is-selected" : "",
                             playback.state.currentTrack?.id === track.id ? "is-playing" : "",
                           ].filter(Boolean).join(" ") || undefined}
+                          aria-busy={isSavingTags}
                           onClick={() => setSelectedTrack(track)}
                           onDoubleClick={() => playTrack(track)}
-                        >
-                          <td className="track-index">
-                            <span>{index + 1}</span>
-                            <button type="button" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); playTrack(track); }}>
-                              {playback.state.currentTrack?.id === track.id && playback.state.status === "playing" ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
-                            </button>
-                          </td>
-                          <td><div className="track-title"><Artwork track={track} /><strong>{track.title}</strong></div></td>
-                          <td>{track.artist}</td><td>{track.album}</td><td>{track.releaseYear ?? "—"}</td>
-                          <td><Rating value={track.rating} /></td><td>{formatDuration(track.durationSeconds)}</td><td>{track.genre ?? "—"}</td>
-                          <td>{track.loveState === "loved" ? <Heart className="loved" aria-label="Loved" /> : track.loveState === "banned" ? <Ban className="banned" aria-label="Banned" /> : <Heart aria-label="Neutral" />}</td>
-                          <td>{track.tagSyncState === "pendingImport" ? <span className="sync-dot" aria-label="MP3 change pending Music Library import" /> : <MoreHorizontal aria-label="More actions" />}</td>
-                        </tr>
-                      ))}
+                          >
+                            <td className="track-index">
+                              <span>{index + 1}</span>
+                              <button type="button" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); playTrack(track); }}>
+                                {playback.state.currentTrack?.id === track.id && playback.state.status === "playing" ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+                              </button>
+                            </td>
+                            <td><div className="track-title"><Artwork track={track} /><strong>{track.title}</strong></div></td>
+                            <td>{track.artist}</td><td>{track.album}</td><td>{track.releaseYear ?? "—"}</td>
+                            <td>
+                              <InlineRatingControl
+                                title={track.title}
+                                rating={track.rating}
+                                busy={isSavingTags}
+                                onRatingChange={(rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+                              />
+                            </td>
+                            <td>{formatDuration(track.durationSeconds)}</td><td>{track.genre ?? "—"}</td>
+                            <td>
+                              <InlineLoveControl
+                                title={track.title}
+                                loveState={track.loveState}
+                                busy={isSavingTags}
+                                onLoveChange={(loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+                              />
+                            </td>
+                            <td className="inline-tag-status">
+                              {isSavingTags
+                                ? <RefreshCw className="is-spinning" aria-label="Saving and verifying MP3 tags" />
+                                : inlineError
+                                  ? <CircleAlert className="inline-tag-error" role="img" aria-label={`MP3 tag save failed: ${inlineError}`}><title>{inlineError}</title></CircleAlert>
+                                  : track.tagSyncState === "pendingImport"
+                                    ? <span className="sync-dot" aria-label="MP3 change pending Music Library import" />
+                                    : <MoreHorizontal aria-label="More actions" />}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                   {tracks.length === 0 && <div className="empty-results" aria-live="polite">{isExploring ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Search aria-hidden="true" />}<h3>{isExploring ? "Searching the catalog…" : "No tracks in this view"}</h3><p>{isExploring ? "Aurora is querying the indexed source." : "Clear the search or artist filter to keep exploring."}</p></div>}
@@ -433,7 +494,7 @@ function App() {
               <div><dt>Last.fm plays</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
             </dl>
-            <TagEditor key={selectedTrack.id} track={selectedTrack} onTrackChange={applyTrackChange} />
+            <TagEditor key={`${selectedTrack.id}:${inlineTagRevisions[selectedTrack.trackKey] ?? 0}`} track={selectedTrack} onTrackChange={applyTrackChange} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
           </div>
         ) : <EmptyInspector />}
