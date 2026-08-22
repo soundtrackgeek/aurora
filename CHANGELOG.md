@@ -4,6 +4,37 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-22
+
+### Added
+
+- Constellations artist inspector opened from universe planets, Artist Explorer results, and the Artist tab for a selected track.
+- Lazy read-only access to the broad MusicBrainz cache and curated overlay, with independent connected/unavailable source states.
+- Honest artist identity states for verified overlay links, unconfirmed catalog/cache candidates, source conflicts, ignored links, and unmatched artists.
+- MBID-gated artist type, active dates, area, begin area, end area, and origin country from the existing catalog import.
+- Bounded MusicBrainz release-group discographies with year, primary/secondary type, status provenance, and curated release decisions.
+- Browser-preview and native coverage for populated, unmatched, conflicting, loading, error, source-fallback, and 100-row truncation behavior.
+
+### Changed
+
+- Curated overlay identity wins when local sources disagree, but Aurora surfaces the conflict instead of silently presenting the result as uncontested.
+- Verified release groups use one source at a time: external curated overlay, embedded catalog mirror fallback, then broad cache fallback. Refreshed and stale discographies are never unioned.
+- Selecting a track returns the persistent inspector to Track editing; Artist context stays reachable without entering the MusicBrainz path at startup.
+- Explorer invalidates late album-detail responses and clears stale load-more state when a new bounded page request begins.
+- Sparse Last.fm data is labeled popularity rather than personal plays.
+
+### Performance
+
+- MusicBrainz work remains off the startup and Explorer hot paths and runs only when an artist context is opened.
+- Live indexed identity lookups completed below timer resolution; a worst-case 6,017-group cache artist sorted and returned 101 rows in approximately 2–5 ms warm.
+
+### Security
+
+- All three SQLite sources open read-only with `query_only`, short busy timeouts, bound parameters, and a 100-release response cap.
+- Artist keys use the Music Library normalization contract, including Unicode dash folding, Unicode lowercase, trim, and whitespace collapse.
+- Cache exact-name matches are never marked verified; audited cache ambiguity and curated/cache conflicts remain visible.
+- No online MusicBrainz synchronization, catalog write, MP3 write, fuzzy match acceptance, or arbitrary filesystem path is introduced by Constellations.
+
 ## [0.4.0] - 2026-08-22
 
 ### Added

@@ -15,7 +15,18 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.4.0 acceptance checks
+## 0.5.0 acceptance checks
+
+- Open Constellations from a universe planet, Artist result, or the selected track's Artist tab without adding MusicBrainz work to startup or Explorer queries.
+- Resolve artists through the normalized local artist key and label only verified, non-ignored curated overlay links as verified.
+- Surface unconfirmed exact catalog/cache candidates, curated conflicts, ignored links, unmatched artists, and per-source unavailability without blocking the catalog shell.
+- Show catalog profile and origin fields only when their MBID exactly equals the selected identity.
+- Return at most 100 release groups from one precedence-selected source: curated overlay, embedded catalog mirror fallback, or broad cache fallback.
+- Never union refreshed overlay release groups with stale cache rows and never automatically infer a local album mapping from title similarity.
+- Preserve request ordering when users switch artists rapidly and return to Track editing as soon as they select a track.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.5.0` versions.
+
+## 0.4.0 foundation checks
 
 - Browse Tracks, Albums, and Artists beyond the initial 50-row snapshot through bounded keyset pages; no offset walk or million-row WebView state.
 - Filter tracks by bounded search text, exact half-star or unrated state, Love/Neutral/Ban, release-year range, genre, and artist with stale-request protection.
@@ -54,17 +65,20 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.4.0
+## Explicit non-goals for 0.5.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
 - Editing non-MP3 files or ID3 fields other than MusicBee rating, Love/Ban, and Release Time.
-- Embedded album-art extraction, biographies, lyrics, playlists, or MusicBrainz discovery UI.
+- Embedded album-art extraction, biographies, lyrics, playlists, or online MusicBrainz synchronization.
+- Release editions, labels, formats, catalog numbers, recordings, works, aliases, and relationship edges; the audited local sources do not contain them.
+- Automatic local-album-to-release-group assignment; title comparison is incomplete and can be ambiguous.
+- Accepting cache-only identity candidates as verified or silently resolving a source conflict.
 - A recursive filesystem watcher or full-library MP3 tag scan; synchronization is intentionally bounded to pending overlays and selected tracks.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections after 0.4.0
+## Planned sections after 0.5.0
 
-1. Lazy MusicBrainz discovery and curated overlay workflows.
+1. Review workflows for unconfirmed/conflicting identities and curated local-album release decisions.
 2. Listening history, ReplayGain, device selection, and gapless playback research.
 3. Smart playlists and saved explorer views after the browsing/filter contract is proven.

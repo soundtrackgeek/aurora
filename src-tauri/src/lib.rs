@@ -1,6 +1,7 @@
 mod artwork;
 mod catalog;
 mod explorer;
+mod musicbrainz;
 mod playback;
 mod state_store;
 mod tag_model;
@@ -11,6 +12,7 @@ use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
     TrackPage, TrackPageRequest,
 };
+use musicbrainz::ArtistIntelligence;
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use state_store::StateStore;
 use std::sync::Mutex;
@@ -100,6 +102,13 @@ async fn artist_detail(artist: String) -> Result<ArtistDetail, String> {
     tauri::async_runtime::spawn_blocking(move || explorer::load_artist_detail(artist))
         .await
         .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn artist_intelligence(artist: String) -> Result<ArtistIntelligence, String> {
+    tauri::async_runtime::spawn_blocking(move || musicbrainz::load_artist_intelligence(artist))
+        .await
+        .map_err(|error| format!("The MusicBrainz worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -304,6 +313,7 @@ pub fn run() {
             explore_artists,
             album_detail,
             artist_detail,
+            artist_intelligence,
             playback_state,
             playback_replace_queue,
             playback_toggle,

@@ -34,6 +34,7 @@ import {
   type ExplorerSort,
   type ExplorerView,
 } from "./components/explorer/DeepExplorer";
+import { ArtistWorld, type ArtistWorldState } from "./components/musicbrainz/ArtistWorld";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { TagEditor } from "./components/TagEditor";
@@ -44,13 +45,16 @@ import {
   formatCount,
   formatDuration,
   loadAlbumDetail,
+  loadArtistDetail,
   loadLibrarySnapshot,
   type AlbumSummary,
   type Artist,
+  type ArtistDetail,
   type ExplorerCursor,
   type LibrarySnapshot,
   type Track,
 } from "./library";
+import { loadArtistIntelligence, type ArtistIntelligence } from "./musicbrainz";
 import { usePlayback } from "./playback";
 import {
   reconcilePendingTags,
@@ -240,6 +244,12 @@ function App() {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  const [inspectorView, setInspectorView] = useState<"track" | "artist">("track");
+  const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
+  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
+  const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
+  const [artistWorldState, setArtistWorldState] = useState<ArtistWorldState>("loading");
+  const [artistWorldError, setArtistWorldError] = useState<string | null>(null);
   const [activeNav, setActiveNav] = useState("Universe");
   const [reloadToken, setReloadToken] = useState(0);
   const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
@@ -264,6 +274,7 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
+  const artistRequestRef = useRef(0);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
@@ -300,13 +311,18 @@ function App() {
     if (!libraryReady) return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
+    albumRequestRef.current += 1;
+    const clearDetailTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      setIsLoadingMore(false);
+      setSelectedAlbumId(null);
+      setAlbumTracks([]);
+      setAlbumTracksTruncated(false);
+    }, 0);
     const timer = window.setTimeout(() => {
       setExplorerLoadState("loading");
       setExplorerError(null);
       setExplorerCursor(null);
-      setSelectedAlbumId(null);
-      setAlbumTracks([]);
-      setAlbumTracksTruncated(false);
       void loadExplorerPage(explorerView, explorerFilters)
         .then((page) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
@@ -324,6 +340,7 @@ function App() {
     }, explorerFilters.query.trim() ? 160 : 0);
     return () => {
       cancelled = true;
+      window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
   }, [libraryReady, explorerView, explorerFilters, explorerReloadToken]);
@@ -394,8 +411,14 @@ function App() {
         ? explorerTracks
         : snapshot?.tracks ?? [],
   ) {
-    setSelectedTrack(track);
+    selectTrack(track);
     void playback.play(queue, track.id);
+  }
+
+  function selectTrack(track: Track) {
+    artistRequestRef.current += 1;
+    setSelectedTrack(track);
+    setInspectorView("track");
   }
 
   function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
@@ -474,6 +497,44 @@ function App() {
     setActiveNav("Artists");
     setExplorerView("tracks");
     setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: "newest" }));
+    openArtistInspector(artist.name);
+  }
+
+  function exploreArtistInLibrary(artistName: string) {
+    setActiveNav("Artists");
+    setExplorerView("tracks");
+    setExplorerFilters((current) => ({ ...current, artist: artistName, sort: "newest" }));
+  }
+
+  function openArtistInspector(artistName: string) {
+    const requestId = ++artistRequestRef.current;
+    setInspectorArtistName(artistName);
+    setInspectorView("artist");
+    setArtistDetail(null);
+    setArtistIntelligence(null);
+    setArtistWorldError(null);
+    setArtistWorldState("loading");
+    void Promise.allSettled([
+      loadArtistDetail(artistName),
+      loadArtistIntelligence(artistName),
+    ]).then(([catalogResult, intelligenceResult]) => {
+      if (requestId !== artistRequestRef.current) return;
+      if (catalogResult.status === "fulfilled") setArtistDetail(catalogResult.value);
+      if (intelligenceResult.status === "fulfilled") setArtistIntelligence(intelligenceResult.value);
+      if (catalogResult.status === "rejected" && intelligenceResult.status === "rejected") {
+        const catalogMessage = catalogResult.reason instanceof Error ? catalogResult.reason.message : String(catalogResult.reason);
+        const intelligenceMessage = intelligenceResult.reason instanceof Error ? intelligenceResult.reason.message : String(intelligenceResult.reason);
+        setArtistWorldError(`${catalogMessage} ${intelligenceMessage}`);
+        setArtistWorldState("error");
+        return;
+      }
+      setArtistWorldError(catalogResult.status === "rejected"
+        ? "The local catalog summary is unavailable; MusicBrainz context is still shown."
+        : intelligenceResult.status === "rejected"
+          ? "MusicBrainz context is unavailable; the local catalog remains usable."
+          : null);
+      setArtistWorldState("ready");
+    });
   }
 
   function selectAlbum(album: ExplorerAlbum | null) {
@@ -584,7 +645,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.4.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.5.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -654,7 +715,7 @@ function App() {
                 busyTrackKeys={inlineSavingKeys}
                 onViewChange={changeExplorerView}
                 onFiltersChange={setExplorerFilters}
-                onSelectTrack={setSelectedTrack}
+                onSelectTrack={selectTrack}
                 onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                 onSelectAlbum={selectAlbum}
                 onSelectArtist={(artist) => { if (artist) focusArtist(artist); else setSelectedArtistId(null); }}
@@ -685,12 +746,33 @@ function App() {
 
       <aside className="inspector">
         <div className="inspector-tabs" role="tablist" aria-label="Track details">
-          <button type="button" role="tab" aria-selected="true">Track</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
           <button type="button" role="tab" aria-selected="false" disabled>Album</button>
-          <button type="button" role="tab" aria-selected="false" disabled>Artist</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={inspectorView === "artist"}
+            disabled={!selectedTrack && !inspectorArtistName}
+            onClick={() => {
+              const artistName = selectedTrack?.artist ?? inspectorArtistName;
+              if (artistName) openArtistInspector(artistName);
+            }}
+          >Artist</button>
           <button type="button" role="tab" aria-selected="false" disabled>Lyrics</button>
         </div>
-        {selectedTrack ? (
+        {inspectorView === "artist" && inspectorArtistName ? (
+          <div className="inspector-scroll">
+            <ArtistWorld
+              artistName={inspectorArtistName}
+              catalogDetail={artistDetail}
+              intelligence={artistIntelligence}
+              state={artistWorldState}
+              errorMessage={artistWorldError}
+              onRetry={() => openArtistInspector(inspectorArtistName)}
+              onExploreLibrary={() => exploreArtistInLibrary(inspectorArtistName)}
+            />
+          </div>
+        ) : selectedTrack ? (
           <div className="inspector-scroll">
             <Artwork track={selectedTrack} size="large" />
             <div className="track-hero-copy">
@@ -699,7 +781,7 @@ function App() {
             </div>
             <dl className="metadata-list">
               <div><dt>Genre</dt><dd>{selectedTrack.genre ?? "Unknown"}</dd></div>
-              <div><dt>Last.fm plays</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
+              <div><dt>Last.fm popularity</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
             </dl>
             <TagEditor key={`${selectedTrack.id}:${inlineTagRevisions[selectedTrack.trackKey] ?? 0}`} track={selectedTrack} onTrackChange={applyTrackChange} />

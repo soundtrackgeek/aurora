@@ -50,6 +50,26 @@ LibraryRepository
 
 The overlay's current live rows already match the copies in the main database, so it is not an additional hot-path dependency.
 
+## MusicBrainz identity and release-group contract
+
+The 0.5.0 audit verified 20,208 `artist_cache` rows and 483,675 cache `release_groups`. The external overlay contains 493 verified artist links, 9,658 artist release groups, and one explicit release decision. Across the current catalog, verified links cover 483 artists, 2,052 albums, and 25,542 tracks. Exact-MBID catalog profile data exists for 464 of the 493 curated identities and origin-country data for 437.
+
+Artist identity uses the indexed normalized `local_artist_key`: fold Unicode dash variants to ASCII `-`, Unicode-lowercase, trim, and collapse whitespace. Cache lookup binds that normalized value directly to the `artist_cache.name` primary key; it must not wrap the column in SQL `lower()`. Release groups join by indexed `artist_mbid` and use `(artist_mbid, release_mbid)` as identity.
+
+Authority is intentionally asymmetric:
+
+1. A verified, non-ignored curated overlay link is the only identity Aurora labels verified.
+2. The imported catalog identity and exact cache-name result are candidates, not authorities.
+3. A curated link wins when candidate MBIDs disagree, while the UI explicitly reports `conflict`.
+4. Without a curated link, agreeing catalog/cache candidates remain `unconfirmed`; disagreeing candidates remain unresolved conflicts.
+5. Release groups come from one source at a time: external overlay for a verified identity, embedded catalog mirror fallback, then broad cache fallback. Aurora never unions refreshed and stale snapshots.
+
+This is necessary because 44 of 292 cache identities overlapping verified links disagree with the curated MBID. In addition, 1,656 cache MBIDs map to multiple names, one to 407 names. Aurora reports the cached-name count for the selected MBID and never presents an exact-name cache hit as verified.
+
+Every enrichment command opens sources lazily with SQLite read-only flags, `query_only`, a two-second busy timeout, bound parameters, and a 100-release response cap. Missing, invalid, or busy optional sources become source-state data; they never fail normal catalog browsing. Live warm measurements were below timer resolution for indexed identity lookups and approximately 2–5 ms for sorting and limiting the worst observed 6,017-group cache artist.
+
+The audited sources contain MusicBrainz release groups, not individual release editions. They do not contain label, format, catalog-number, recording, work, alias, or relationship-edge data. Local albums also lack a release-group MBID. Exact-title comparison is incomplete and ambiguous, so Aurora does not assign album identities automatically.
+
 ## Album-cover mapping
 
 The flat cover archive is 75,680 JPG, 635 PNG, 12 GIF, and 2 BMP files. Originals range up to 27.6 MiB, and one JPEG is zero bytes. The source was live during inspection.
