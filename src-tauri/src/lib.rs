@@ -17,6 +17,7 @@ mod state_sync;
 mod tag_model;
 mod tagging;
 mod waveform;
+mod years;
 
 use audio_settings::{AudioSettingsRequest, AudioSettingsStatus, AudioSettingsStore};
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
@@ -36,6 +37,7 @@ use tag_model::TagEditRequest;
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager, State};
 use waveform::{FileSignature, WaveformSnapshot, WaveformStore};
+use years::{YearDetail, YearOverview, YearQueueRequest, YearSelection};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
 type TagState = Mutex<TagService>;
@@ -158,6 +160,33 @@ async fn genre_queue_tracks(
     })
     .await
     .map_err(|error| format!("The genre-queue worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn year_overview() -> Result<YearOverview, String> {
+    tauri::async_runtime::spawn_blocking(years::load_year_overview)
+        .await
+        .map_err(|error| format!("The Years overview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn year_detail(selection: YearSelection) -> Result<YearDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || years::load_year_detail(selection))
+        .await
+        .map_err(|error| format!("The year-detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn year_queue_tracks(
+    app: AppHandle,
+    request: YearQueueRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        years::load_year_queue(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The year-playback worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -639,6 +668,9 @@ pub fn run() {
             genre_index,
             genre_detail,
             genre_queue_tracks,
+            year_overview,
+            year_detail,
+            year_queue_tracks,
             artist_intelligence,
             musicbrainz_review_page,
             update_artist_identity_decision,

@@ -17,6 +17,17 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
+## 0.13.0 acceptance checks
+
+- Preserve `albums.year` as Original Year and `albums.release_year` as Release Year; never substitute one clock for the other.
+- Load album-level Original and Release histograms lazily, aggregate the active year's flows to the counterpart clock, and keep the WebView payload proportional to years rather than library size.
+- Let either clock become the exact lens, including separate Missing Original Year and Missing Release Year selections.
+- Return at most 100 representative albums grouped by counterpart decade and at most 100 tracks for a Play Year request.
+- Open the selected edition in an Album inspector that shows both dates and resolve real art only through the existing album-cover protocol.
+- Hand Explore to Songs with the exact year basis and value, and keep late overview, detail, and Album-inspector responses from replacing newer choices.
+- Preserve keyboard selection and visible focus across modes, years, missing-year controls, edition cards, and actions.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.13.0` versions.
+
 ## 0.12.0 acceptance checks
 
 - Keep Universe, Observatory, and History top-level while grouping Songs, Albums, Artists, Genres, Years, Ratings, and Tags under one collapsible Library disclosure.
@@ -154,7 +165,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.12.0
+## Explicit non-goals for 0.13.0
 
 - Crossfade, equalization, ReplayGain calculation/tag writing, preamp controls, and other DSP.
 - Editing the imported catalog directly.
@@ -175,11 +186,11 @@ Live source measurements including SQLite process startup are approximately 26�
 - Treating shared artists as an authoritative taxonomy, rewriting compound/raw genre tags, or adding automatic genre merging.
 - Loading unbounded genre track sets into React or persisting an infinite radio queue.
 - Creating, importing, pinning, editing, or synchronizing playlists.
-- Implementing the Years timeline, decade aggregation, or year-specific database queries behind the 0.12.0 placeholder.
+- Inferring edition lineage, release identity, label, catalog number, or format from matching titles or years; the paired clocks describe catalog dates, not authoritative release relationships.
+- Loading every album or track for a selected year into React, or expanding Play Year beyond the bounded queue contract.
 
-## Planned sections after 0.12.0
+## Planned sections after 0.13.0
 
-1. A focused Years explorer with bounded decade and release-year drill-down.
-2. Smart playlists, saved explorer views, and real pinning after the navigation shell is proven.
-3. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
-4. Crossfade or an equalizer only after real use proves a need; neither belongs in the lossless handoff path by default.
+1. Smart playlists, saved explorer views, and real pinning after the navigation shell is proven.
+2. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.
+3. Crossfade or an equalizer only after real use proves a need; neither belongs in the lossless handoff path by default.

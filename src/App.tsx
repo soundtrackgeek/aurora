@@ -44,7 +44,11 @@ import {
   type HistoryLoadState,
 } from "./components/history/ListeningHistory";
 import { GenreAtlas, type GenreAtlasLoadState } from "./components/genres/GenreAtlas";
-import { YearsPlaceholder } from "./components/library/YearsPlaceholder";
+import {
+  YearAlbumInspector,
+  YearsExplorer,
+  type YearsLoadState,
+} from "./components/library/YearsExplorer";
 import {
   SidebarNavigation,
   type SidebarDestination,
@@ -136,6 +140,16 @@ import {
   type AudioSettingsRequest,
   type AudioSettingsStatus,
 } from "./audio";
+import {
+  loadYearAlbumTracks,
+  loadYearDetail,
+  loadYearOverview,
+  loadYearQueue,
+  type YearAlbum,
+  type YearDetail,
+  type YearOverview,
+  type YearSelection,
+} from "./years";
 
 const defaultExplorerFilters: ExplorerFilters = {
   query: "",
@@ -143,6 +157,8 @@ const defaultExplorerFilters: ExplorerFilters = {
   love: "all",
   yearFrom: null,
   yearTo: null,
+  yearBasis: "release",
+  yearMissing: false,
   genre: null,
   artist: null,
   sort: "newest",
@@ -207,6 +223,8 @@ async function loadExplorerPage(
       loveState: filters.love === "all" ? undefined : filters.love,
       yearFrom: filters.yearFrom ?? undefined,
       yearTo: filters.yearTo ?? undefined,
+      yearBasis: filters.yearBasis,
+      missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.tracks.includes(filters.sort)
         ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc"
@@ -219,6 +237,8 @@ async function loadExplorerPage(
       ...shared,
       yearFrom: filters.yearFrom ?? undefined,
       yearTo: filters.yearTo ?? undefined,
+      yearBasis: filters.yearBasis,
+      missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.albums.includes(filters.sort)
         ? filters.sort as "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc"
@@ -329,7 +349,7 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight } | null>(null);
-  const [inspectorView, setInspectorView] = useState<"track" | "artist">("track");
+  const [inspectorView, setInspectorView] = useState<"track" | "album" | "artist">("track");
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
@@ -395,6 +415,18 @@ function App() {
   const [genreQueueBusy, setGenreQueueBusy] = useState<GenreQueueMode | null>(null);
   const [genreQueueMessage, setGenreQueueMessage] = useState<string | null>(null);
   const [genreRadioSession, setGenreRadioSession] = useState<GenreRadioSession | null>(null);
+  const [yearOverview, setYearOverview] = useState<YearOverview | null>(null);
+  const [yearDetail, setYearDetail] = useState<YearDetail | null>(null);
+  const [yearLoadState, setYearLoadState] = useState<YearsLoadState>("loading");
+  const [yearDetailState, setYearDetailState] = useState<YearsLoadState>("loading");
+  const [yearError, setYearError] = useState<string | null>(null);
+  const [yearDetailError, setYearDetailError] = useState<string | null>(null);
+  const [yearReloadToken, setYearReloadToken] = useState(0);
+  const [yearQueueBusy, setYearQueueBusy] = useState(false);
+  const [yearQueueMessage, setYearQueueMessage] = useState<string | null>(null);
+  const [selectedYearAlbum, setSelectedYearAlbum] = useState<YearAlbum | null>(null);
+  const [yearAlbumTracks, setYearAlbumTracks] = useState<Track[]>([]);
+  const [yearAlbumBusy, setYearAlbumBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("audio");
   const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
@@ -412,6 +444,10 @@ function App() {
   const genreIndexRequestRef = useRef(0);
   const genreDetailRequestRef = useRef(0);
   const genreQueueRequestRef = useRef(0);
+  const yearOverviewRequestRef = useRef(0);
+  const yearDetailRequestRef = useRef(0);
+  const yearAlbumRequestRef = useRef(0);
+  const yearLoadedTokenRef = useRef(-1);
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
@@ -640,6 +676,54 @@ function App() {
   }, [activeNav, libraryReady, selectedGenre, genreDetailReloadToken]);
 
   useEffect(() => {
+    if (!libraryReady || activeNav !== "Years") return;
+    if (yearOverview && yearLoadedTokenRef.current === yearReloadToken) {
+      setYearLoadState("ready");
+      return;
+    }
+    const requestId = ++yearOverviewRequestRef.current;
+    yearDetailRequestRef.current += 1;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setYearLoadState("loading");
+      setYearDetailState("loading");
+      setYearError(null);
+      setYearDetailError(null);
+      setYearQueueMessage(null);
+      void loadYearOverview()
+        .then((overview) => {
+          if (cancelled || requestId !== yearOverviewRequestRef.current) return;
+          setYearOverview(overview);
+          yearLoadedTokenRef.current = yearReloadToken;
+          setYearDetail(overview.initialDetail);
+          setYearLoadState("ready");
+          setYearDetailState("ready");
+          const initialAlbum = overview.initialDetail.albums[0] ?? null;
+          setSelectedYearAlbum(initialAlbum);
+          setYearAlbumTracks([]);
+          if (!initialAlbum) return;
+          setInspectorView("album");
+          const albumRequestId = ++yearAlbumRequestRef.current;
+          void loadYearAlbumTracks(initialAlbum)
+            .then((tracks) => {
+              if (albumRequestId === yearAlbumRequestRef.current) setYearAlbumTracks(tracks);
+            })
+            .catch(() => undefined);
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== yearOverviewRequestRef.current) return;
+          setYearError(error instanceof Error ? error.message : String(error));
+          setYearLoadState("error");
+          setYearDetailState("error");
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, yearOverview, yearReloadToken]);
+
+  useEffect(() => {
     if (!genreRadioSession) return;
     if (playback.state.queue.length === 0 || playback.state.currentIndex === null) return;
     const remaining = playback.state.queue.length - playback.state.currentIndex - 1;
@@ -864,6 +948,103 @@ function App() {
     }
   }
 
+  function selectYear(selection: YearSelection) {
+    const requestId = ++yearDetailRequestRef.current;
+    setYearDetailState("loading");
+    setYearDetailError(null);
+    setYearQueueMessage(null);
+    void loadYearDetail(selection)
+      .then((detail) => {
+        if (requestId !== yearDetailRequestRef.current) return;
+        setYearDetail(detail);
+        setYearDetailState("ready");
+        const nextAlbum = detail.albums[0] ?? null;
+        setSelectedYearAlbum(nextAlbum);
+        setYearAlbumTracks([]);
+        if (nextAlbum) openYearAlbum(nextAlbum);
+      })
+      .catch((error: unknown) => {
+        if (requestId !== yearDetailRequestRef.current) return;
+        setYearDetailError(error instanceof Error ? error.message : String(error));
+        setYearDetailState("error");
+      });
+  }
+
+  function openYearAlbum(album: YearAlbum) {
+    const requestId = ++yearAlbumRequestRef.current;
+    setSelectedYearAlbum(album);
+    setYearAlbumTracks([]);
+    setInspectorView("album");
+    void loadYearAlbumTracks(album)
+      .then((tracks) => {
+        if (requestId === yearAlbumRequestRef.current) setYearAlbumTracks(tracks);
+      })
+      .catch((error: unknown) => {
+        if (requestId === yearAlbumRequestRef.current) {
+          console.warn("Aurora could not open this year edition", error);
+        }
+      });
+  }
+
+  function exploreYear(selection: YearSelection) {
+    setActiveNav("Songs");
+    expandLibraryNavigation();
+    setExplorerView("tracks");
+    setExplorerFilters({
+      ...defaultExplorerFilters,
+      yearBasis: selection.basis,
+      yearFrom: selection.year,
+      yearTo: selection.year,
+      yearMissing: selection.year === null,
+      sort: selection.basis === "release" ? "releaseYearDesc" : "albumAsc",
+    });
+  }
+
+  async function playYear(selection: YearSelection) {
+    if (yearQueueBusy) return;
+    setYearQueueBusy(true);
+    setYearQueueMessage(null);
+    try {
+      const tracks = await loadYearQueue(selection, 100);
+      if (tracks.length === 0) {
+        setYearQueueMessage("No playable tracks were found for this clock selection.");
+        return;
+      }
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) {
+        selectTrack(tracks[0]);
+        setYearQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from this ${selection.basis} year.`);
+      }
+    } catch (error) {
+      setYearQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setYearQueueBusy(false);
+    }
+  }
+
+  async function playYearAlbum(album: YearAlbum) {
+    if (yearAlbumBusy) return;
+    setYearAlbumBusy(true);
+    try {
+      const tracks = selectedYearAlbum?.id === album.id && yearAlbumTracks.length
+        ? yearAlbumTracks
+        : await loadYearAlbumTracks(album);
+      if (!tracks.length) {
+        setYearQueueMessage(`${album.title} has no playable tracks in the bounded album detail.`);
+        return;
+      }
+      setYearAlbumTracks(tracks);
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) selectTrack(tracks[0]);
+    } catch (error) {
+      setYearQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setYearAlbumBusy(false);
+    }
+  }
+
   async function toggleLaptopMode() {
     if (!laptopModeStatus || laptopModeBusy) return;
     setLaptopModeBusy(true);
@@ -890,6 +1071,7 @@ function App() {
     }
     setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setYearAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setGenreDetail((current) => {
       if (!current) return current;
       return {
@@ -1394,7 +1576,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.12.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.13.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1530,7 +1712,24 @@ function App() {
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
               />
             ) : activeNav === "Years" ? (
-              <YearsPlaceholder />
+              <YearsExplorer
+                overview={yearOverview}
+                detail={yearDetail}
+                loadState={yearLoadState}
+                detailState={yearDetailState}
+                errorMessage={yearError}
+                detailError={yearDetailError}
+                selectedAlbumId={selectedYearAlbum?.id ?? null}
+                queueBusy={yearQueueBusy}
+                queueMessage={yearQueueMessage}
+                onSelect={selectYear}
+                onSelectAlbum={openYearAlbum}
+                onExplore={exploreYear}
+                onPlayYear={(selection) => void playYear(selection)}
+                onPlayAlbum={(album) => void playYearAlbum(album)}
+                onRetry={() => setYearReloadToken((value) => value + 1)}
+                onRetryDetail={() => yearDetail && selectYear(yearDetail.selection)}
+              />
             ) : <>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
@@ -1607,9 +1806,9 @@ function App() {
       </main>
 
       {layoutPreferences.rightSidebar === "expanded" && <aside className="inspector">
-        <div className="inspector-tabs" role="tablist" aria-label="Track details">
+        <div className="inspector-tabs" role="tablist" aria-label="Library details">
           <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
-          <button type="button" role="tab" aria-selected="false" disabled>Album</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum} onClick={() => setInspectorView("album")}>Album</button>
           <button
             type="button"
             role="tab"
@@ -1622,7 +1821,11 @@ function App() {
           >Artist</button>
           <button type="button" role="tab" aria-selected="false" disabled>Lyrics</button>
         </div>
-        {inspectorView === "artist" && inspectorArtistName ? (
+        {inspectorView === "album" && selectedYearAlbum ? (
+          <div className="inspector-scroll">
+            <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} />
+          </div>
+        ) : inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">
             <ArtistWorld
               key={inspectorArtistName}

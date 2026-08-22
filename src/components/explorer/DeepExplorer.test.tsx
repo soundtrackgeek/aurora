@@ -69,6 +69,8 @@ const filters: ExplorerFilters = {
   love: "all",
   yearFrom: null,
   yearTo: null,
+  yearBasis: "release",
+  yearMissing: false,
   genre: null,
   artist: null,
   sort: "newest",

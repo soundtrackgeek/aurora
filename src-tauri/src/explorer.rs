@@ -56,6 +56,10 @@ pub(crate) struct TrackPageRequest {
     pub(crate) love_state: Option<LoveState>,
     pub(crate) year_from: Option<i32>,
     pub(crate) year_to: Option<i32>,
+    #[serde(default)]
+    pub(crate) year_basis: YearBasis,
+    #[serde(default)]
+    pub(crate) missing_year: bool,
     pub(crate) genre: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) sort: Option<TrackSort>,
@@ -86,6 +90,10 @@ pub(crate) struct AlbumPageRequest {
     pub(crate) search: Option<String>,
     pub(crate) year_from: Option<i32>,
     pub(crate) year_to: Option<i32>,
+    #[serde(default)]
+    pub(crate) year_basis: YearBasis,
+    #[serde(default)]
+    pub(crate) missing_year: bool,
     pub(crate) genre: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) sort: Option<AlbumSort>,
@@ -111,6 +119,30 @@ pub(crate) struct AlbumSummary {
 pub(crate) struct AlbumPage {
     pub(crate) items: Vec<AlbumSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum YearBasis {
+    Original,
+    #[default]
+    Release,
+}
+
+impl YearBasis {
+    fn track_column(self) -> &'static str {
+        match self {
+            Self::Original => "t.year",
+            Self::Release => "t.release_year",
+        }
+    }
+
+    fn album_column(self) -> &'static str {
+        match self {
+            Self::Original => "a.year",
+            Self::Release => "a.release_year",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
@@ -197,7 +229,19 @@ fn validate_years(year_from: Option<i32>, year_to: Option<i32>) -> Result<(), St
         || year_to.is_some_and(|year| !(1000..=2999).contains(&year))
         || matches!((year_from, year_to), (Some(from), Some(to)) if from > to)
     {
-        return Err("Release-year range is invalid.".to_owned());
+        return Err("Year range is invalid.".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_year_selection(
+    year_from: Option<i32>,
+    year_to: Option<i32>,
+    missing_year: bool,
+) -> Result<(), String> {
+    validate_years(year_from, year_to)?;
+    if missing_year && (year_from.is_some() || year_to.is_some()) {
+        return Err("Missing year cannot be combined with a year range.".to_owned());
     }
     Ok(())
 }
@@ -272,6 +316,16 @@ fn push_year_filters(
         sql.push_str(column);
         sql.push_str(" <= ?");
         params.push(Value::Integer(i64::from(year)));
+    }
+}
+
+fn push_missing_year_filter(sql: &mut String, column: &str, missing_year: bool) {
+    if missing_year {
+        sql.push_str(" AND (");
+        sql.push_str(column);
+        sql.push_str(" IS NULL OR ");
+        sql.push_str(column);
+        sql.push_str(" NOT BETWEEN 1000 AND 2999)");
     }
 }
 
@@ -401,7 +455,7 @@ fn track_page_from_connection(
     store: Option<&StateStore>,
 ) -> Result<TrackPage, String> {
     let page_size = page_size(request.page_size)?;
-    validate_years(request.year_from, request.year_to)?;
+    validate_year_selection(request.year_from, request.year_to, request.missing_year)?;
     let rating = rating_value(request.rating, request.unrated)?;
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
     let artist = bounded_optional_text(&request.artist, "Artist filter", MAX_FILTER_CHARS)?;
@@ -448,9 +502,14 @@ fn track_page_from_connection(
     push_year_filters(
         &mut sql,
         &mut params,
-        "t.release_year",
+        request.year_basis.track_column(),
         request.year_from,
         request.year_to,
+    );
+    push_missing_year_filter(
+        &mut sql,
+        request.year_basis.track_column(),
+        request.missing_year,
     );
     if let Some(genre) = genre {
         push_exact_filter(&mut sql, &mut params, "t.canonical_genre", genre);
@@ -564,7 +623,7 @@ fn album_page_from_connection(
     request: AlbumPageRequest,
 ) -> Result<AlbumPage, String> {
     let page_size = page_size(request.page_size)?;
-    validate_years(request.year_from, request.year_to)?;
+    validate_year_selection(request.year_from, request.year_to, request.missing_year)?;
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
     let artist = bounded_optional_text(&request.artist, "Artist filter", MAX_FILTER_CHARS)?;
     let search = bounded_optional_text(&request.search, "Search text", MAX_SEARCH_CHARS)?;
@@ -593,9 +652,14 @@ fn album_page_from_connection(
     push_year_filters(
         &mut sql,
         &mut params,
-        "a.release_year",
+        request.year_basis.album_column(),
         request.year_from,
         request.year_to,
+    );
+    push_missing_year_filter(
+        &mut sql,
+        request.year_basis.album_column(),
+        request.missing_year,
     );
     if let Some(genre) = genre {
         push_exact_filter(&mut sql, &mut params, "a.canonical_genre", genre);
@@ -879,13 +943,13 @@ mod tests {
                   title TEXT, display_artist TEXT, album_artist_display TEXT, album TEXT,
                   canonical_genre TEXT, love TEXT, rating_raw TEXT, normalized_rating INTEGER,
                   release_year INTEGER, time_seconds INTEGER, file_path TEXT, filename TEXT,
-                  disc_number INTEGER, track_number INTEGER
+                  disc_number INTEGER, track_number INTEGER, year INTEGER
                 );
                 CREATE TABLE albums (
                   id TEXT PRIMARY KEY, album TEXT, album_artist_display TEXT, canonical_genre TEXT,
                   release_year INTEGER, total_tracks INTEGER NOT NULL, rated_tracks INTEGER NOT NULL,
                   loved_tracks INTEGER NOT NULL, total_seconds INTEGER NOT NULL,
-                  album_score REAL, effective_album_rating INTEGER
+                  album_score REAL, effective_album_rating INTEGER, year INTEGER
                 );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER,
@@ -899,14 +963,14 @@ mod tests {
                   album_id UNINDEXED, album, album_artist_display, canonical_genre, publisher
                 );
                 INSERT INTO albums VALUES
-                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90),
-                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL),
-                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80);
+                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999),
+                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999),
+                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80, 2001);
                 INSERT INTO tracks VALUES
-                  (7, 1, 'a1', 'Sæglópur', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', 'L', '5', 100, 2005, 473, 'H:\Music\Sigur Rós', '01.mp3', 1, 1),
-                  (8, 1, 'a1', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', NULL, '', NULL, 2005, 268, 'H:\Music\Sigur Rós', '02.mp3', 1, 2),
-                  (9, 1, 'a2', 'Svefn-g-englar', 'Sigur Rós', 'Sigur Rós', 'Ágætis byrjun', 'Post-rock', 'B', '4.5', NULL, 1999, 426, 'H:\Music\Sigur Rós', '03.mp3', 1, 1),
-                  (10, 1, 'a3', 'Digital Love', 'Daft Punk', 'Daft Punk', 'Discovery', 'House', 'L', '4', 80, 2001, 301, 'H:\Music\Daft Punk', '01.mp3', 1, 1);
+                  (7, 1, 'a1', 'Sæglópur', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', 'L', '5', 100, 2005, 473, 'H:\Music\Sigur Rós', '01.mp3', 1, 1, 1999),
+                  (8, 1, 'a1', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', NULL, '', NULL, 2005, 268, 'H:\Music\Sigur Rós', '02.mp3', 1, 2, 1999),
+                  (9, 1, 'a2', 'Svefn-g-englar', 'Sigur Rós', 'Sigur Rós', 'Ágætis byrjun', 'Post-rock', 'B', '4.5', NULL, 1999, 426, 'H:\Music\Sigur Rós', '03.mp3', 1, 1, 1999),
+                  (10, 1, 'a3', 'Digital Love', 'Daft Punk', 'Daft Punk', 'Discovery', 'House', 'L', '4', 80, 2001, 301, 'H:\Music\Daft Punk', '01.mp3', 1, 1, 2001);
                 INSERT INTO track_search_fts
                   SELECT id, album_id, title, display_artist, album, album_artist_display,
                          canonical_genre, '', file_path, filename FROM tracks;
@@ -991,6 +1055,20 @@ mod tests {
         .expect("filtered tracks");
         assert_eq!(loved_five_star.items.len(), 1);
         assert_eq!(loved_five_star.items[0].title, "Sæglópur");
+
+        let original_year = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                year_from: Some(1999),
+                year_to: Some(1999),
+                year_basis: YearBasis::Original,
+                artist: Some("Sigur Rós".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("original-year tracks");
+        assert_eq!(original_year.items.len(), 3);
     }
 
     #[test]

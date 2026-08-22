@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, useMemo, useRef, useState } from "react";
-import { albumCoverUrl, formatCount, formatDuration, type Artist, type Track } from "../../library";
+import { albumCoverUrl, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import "./DeepExplorer.css";
@@ -33,6 +33,8 @@ export interface ExplorerFilters {
   love: ExplorerLoveFilter;
   yearFrom: number | null;
   yearTo: number | null;
+  yearBasis: YearBasis;
+  yearMissing: boolean;
   genre: string | null;
   artist: string | null;
   sort: ExplorerSort;
@@ -599,14 +601,21 @@ export function DeepExplorer(props: DeepExplorerProps) {
           </label>
         </> : null}
         {view !== "artists" ? <fieldset className="deep-explorer-year">
-            <legend>Release year</legend>
+            <legend>
+              <span className="sr-only">Year basis</span>
+              <select aria-label="Year basis" value={filters.yearBasis} onChange={(event) => updateFilters({ yearBasis: event.currentTarget.value as YearBasis })}>
+                <option value="release">Release year</option>
+                <option value="original">Original year</option>
+              </select>
+            </legend>
             <input
               type="number"
               inputMode="numeric"
               min="1000"
               max="9999"
-              aria-label="Release year from"
+              aria-label={`${filters.yearBasis === "original" ? "Original" : "Release"} year from`}
               placeholder="From"
+              disabled={filters.yearMissing}
               value={numericInputValue(filters.yearFrom)}
               onChange={(event) => updateFilters({ yearFrom: numericFilterValue(event.currentTarget.value) })}
             />
@@ -616,11 +625,13 @@ export function DeepExplorer(props: DeepExplorerProps) {
               inputMode="numeric"
               min="1000"
               max="9999"
-              aria-label="Release year to"
+              aria-label={`${filters.yearBasis === "original" ? "Original" : "Release"} year to`}
               placeholder="To"
+              disabled={filters.yearMissing}
               value={numericInputValue(filters.yearTo)}
               onChange={(event) => updateFilters({ yearTo: numericFilterValue(event.currentTarget.value) })}
             />
+            <label className="deep-explorer-year__missing"><input type="checkbox" checked={filters.yearMissing} onChange={(event) => updateFilters({ yearMissing: event.currentTarget.checked, yearFrom: null, yearTo: null })} /> Missing</label>
           </fieldset> : null}
         <label>
           <span>Genre</span>

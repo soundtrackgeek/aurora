@@ -4,6 +4,30 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-22
+
+### Added
+
+- A cinematic paired-clock Years explorer over Music Library's separate Original Year and Release Year album fields.
+- Clickable album-level histograms, aggregated flows between the two clocks, and dedicated Release, Original, and Two Clocks modes.
+- Bounded edition shelves grouped by the counterpart decade, separate Missing Original Year and Missing Release Year lenses, and an Album inspector that shows both dates without substitution.
+- Exact handoff from a selected year into Songs and bounded Play Year and Play Album actions.
+
+### Changed
+
+- Track and album Explorer requests now accept an explicit Original or Release Year basis plus a separate missing-year filter.
+- The Years route loads lazily and protects overview, detail, and Album-inspector requests against stale responses.
+- The live catalog remains read-only; Years overview payloads contain roughly one row per year, details return at most 100 representative albums, and playback returns at most 100 tracks.
+
+### Accessibility
+
+- Every year mark is keyboard-selectable and exposes its year, album count, track count, and selected state. Mode tabs, missing-year lenses, year stepping, edition cards, and actions retain semantic controls and visible focus.
+
+### Known limits
+
+- Edition grouping is derived from the two catalog year fields. Music Library does not currently provide edition lineage, label, catalog number, or release-format relationships for this view.
+- Browser preview uses labeled synthetic covers; packaged Aurora resolves the user's real cover archive through the existing contained artwork protocol.
+
 ## [0.12.0] - 2026-08-22
 
 ### Added

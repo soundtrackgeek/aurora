@@ -1,6 +1,6 @@
 # Sidebar navigation contract
 
-Aurora 0.12.0 gives the left rail a stable information architecture without changing catalog or playback ownership.
+Aurora 0.13.0 keeps the left rail's stable information architecture without changing catalog or playback ownership.
 
 ## Hierarchy
 
@@ -22,9 +22,9 @@ Library and Playlists disclosure states live in the same device-local browser st
 
 The stored layout schema is version 2. A valid version 1 record retains its rail choices and receives expanded Library and Playlists defaults so upgrading does not hide existing navigation. Missing, malformed, or partially invalid records fall back to safe defaults.
 
-## Years and playlists in 0.12.0
+## Years and playlists in 0.13.0
 
-Years has a dedicated placeholder route. Activating it does not run the generic Explorer request or show song rows under a misleading title. Playlist buttons remain disabled previews until Aurora has a deliberate playlist data and identity contract.
+Years has a dedicated paired-clock route and loads its bounded album-level overview only when activated. Its Explore action deliberately hands an exact Original or Release Year lens to Songs. Playlist buttons remain disabled previews until Aurora has a deliberate playlist data and identity contract.
 
 ## Accessibility
 

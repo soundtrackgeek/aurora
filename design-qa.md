@@ -1,35 +1,35 @@
-# Aurora 0.8.2 player design QA
+# Aurora 0.13.0 Years design QA
 
 ## Inputs
 
-- Reference: `C:\Users\jtill\OneDrive\Pictures\Screenshots\Screenshot 2026-08-22 150117.png`
-- Reference viewport and pixels: 1490 × 120 px focused player surface.
-- Implementation full view: `C:\Users\jtill\.codex\visualizations\2026\08\21\01a025c3-c6d3-73f1-ae98-1e18a3cabd80\aurora-player-0.8.2-refined-full.png`
-- Implementation viewport and pixels: 1490 × 720 px; focused player crop is the bottom 1490 × 120 px.
-- Combined focused comparison: `C:\Users\jtill\.codex\visualizations\2026\08\21\01a025c3-c6d3-73f1-ae98-1e18a3cabd80\aurora-player-reference-comparison-final.png` (reference above, Aurora below).
-- Compact implementation check: `C:\Users\jtill\.codex\visualizations\2026\08\21\01a025c3-c6d3-73f1-ae98-1e18a3cabd80\aurora-player-0.8.2-960.png`, 960 × 720 px.
-- State: browser-preview Midnight City playback with artwork, loved state, four-star rating, loaded 320-peak waveform, populated queue, and total-duration display.
+- Release-lens reference: `docs/design/years-0.13.0-release-lens.png`.
+- Original-lens reference: `docs/design/years-0.13.0-original-lens.png`.
+- Implementation: live Aurora Browser preview at the matching 1536 × 1024 desktop viewport, with the left Library rail, Album inspector, and persistent player visible.
+- States: Release Year 2025 and Original Year 1982, both in Two Clocks mode with Blade Runner selected.
+- Comparison method: each full-resolution reference and its matching live Browser screenshot were inspected together in the same comparison input.
 
 ## Comparison history
 
-1. Initial 1490 px comparison found a P1 control-layout defect: the five player stars occupied the same x-coordinate because a broad metadata selector overrode the inline rating layout. The selector was narrowed and all five stars were remeasured at distinct 16 px intervals.
-2. Second comparison found P2 balance differences: transport controls sat too far right and unplayed cyan peaks were quieter than the reference. The utility column was widened to center transport near the reference and unplayed waveform opacity was raised.
-3. Final combined comparison preserves the reference's 120 px midnight surface, approximately 72 px artwork, centered glowing transport, thin purple-to-cyan waveform, elapsed/end-time framing, and right-aligned volume/queue controls. Aurora deliberately adds the requested five-star rating row while keeping Love beside the title.
+1. The initial paired implementation established the reference's midnight shell, cyan Original Year clock, violet Release Year clock, flowing edition relationships, grouped cover shelf, inspector, and persistent player.
+2. The first live comparison found a P2 label collision near the selected Release Year marker. The duplicate floating label was removed, its accessible live announcement was retained, and the selected-year labels were repositioned beside their clock markers.
+3. The final comparisons preserve the two distinct date authorities, selected-year glow, directional aggregated flows, compact edition groupings, purple primary actions, and right-side Album context. Packaged Aurora replaces the Browser preview's labeled generated covers with the user's real cover archive through the existing album-art protocol.
 
 ## Responsive and interaction checks
 
-- At 960 px, the player reports `clientWidth = scrollWidth = 958` and remains 120 px tall; no horizontal player overflow was observed.
-- Rating was cleared and reset from the player; Love was removed and restored. Both states updated in the player immediately.
-- Clicking total duration changed it to a negative remaining time, which advanced from `−2:30` to `−2:29` after one second.
-- Playback, previous/next, shuffle, repeat, volume, queue, rating, Love, duration toggle, and waveform seek controls remain accessible by name.
-- Browser console check after the interaction sequence: no warnings or errors.
-- Native live MP3 extraction check: a real file under `D:\MUSIC` produced all 320 bounded peaks with sample-rate and channel metadata in approximately 0.8 seconds before caching.
+- At the normal 1280 × 720 Browser viewport, `body.clientWidth` and `body.scrollWidth` both measured 1280 px; no page-level horizontal overflow was observed.
+- Release landscape, Original landscape, and Two Clocks all switch to their correct semantic chart.
+- Selecting Release Year 2025 and Original Year 1982 redraws the flows, shelf, summary, and selected Album context.
+- Missing Original Year opens its separate lens; Explore hands Songs `yearBasis = original` with the missing filter enabled.
+- Explore Original 1982 hands Songs exact `1982` lower and upper bounds with `yearBasis = original`.
+- Play Release 2025 populated a bounded 64-track preview queue and started the matching representative track.
+- Browser console check after the complete interaction sequence: no warnings or errors.
+- The live read-only 72,012-album catalog overview test completed its paired query in approximately 0.34 seconds and returned bounded timelines and at most 100 albums.
 
 ## Final findings
 
 - P0: none.
 - P1: none.
 - P2: none.
-- P3: the reference includes a decorative right-side starburst that is not a playback function; Aurora retains its queue count in that space instead of introducing a non-functional decorative asset.
+- P3: Browser preview uses labeled generated album covers because the contained native artwork protocol is available only in packaged Tauri; this does not affect the packaged release.
 
 Final result: passed

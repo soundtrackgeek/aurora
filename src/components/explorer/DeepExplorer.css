@@ -81,8 +81,12 @@
 .deep-explorer-search input { width: 100%; padding-left: 30px; }
 .deep-explorer-year { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .deep-explorer-year legend { grid-column: 1 / 4; margin-bottom: 4px; padding: 0; color: var(--explorer-muted); font-size: 8px; text-transform: uppercase; }
+.deep-explorer-year legend select { width: auto; height: 16px; margin: -3px 0 -2px -4px; padding: 0 15px 0 4px; border: 0; color: var(--explorer-muted); background: transparent; font-size: 8px; text-transform: uppercase; }
 .deep-explorer-year input { width: 100%; padding-inline: 6px; }
 .deep-explorer-year > span { color: var(--explorer-dim); font-size: 9px; }
+.deep-explorer-year .deep-explorer-year__missing { grid-column: 1 / 4; display: flex; align-items: center; gap: 5px; min-height: 20px; color: #687786; font-size: 7px; cursor: pointer; }
+.deep-explorer-year .deep-explorer-year__missing input { width: 11px; height: 11px; margin: 0; accent-color: #a855c8; }
+.deep-explorer-year input:disabled { opacity: .4; }
 .deep-explorer-clear { display: flex; align-items: center; justify-content: center; gap: 5px; height: 31px; padding: 0 9px; border: 1px solid var(--explorer-border); border-radius: 6px; color: #adb8c4; background: #101924; font-size: 9px; cursor: pointer; }
 .deep-explorer-clear:hover { color: #eadcf5; border-color: var(--explorer-border-strong); }
 .deep-explorer-clear svg { width: 12px; height: 12px; }

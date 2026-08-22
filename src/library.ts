@@ -27,6 +27,7 @@ export interface Track {
   artist: string;
   album: string;
   releaseYear: number | null;
+  originalYear?: number | null;
   rating: number | null;
   loved: boolean;
   loveState: "neutral" | "loved" | "banned";
@@ -74,6 +75,8 @@ export interface TrackPageRequest {
   loveState?: Track["loveState"];
   yearFrom?: number;
   yearTo?: number;
+  yearBasis?: YearBasis;
+  missingYear?: boolean;
   genre?: string;
   artist?: string;
   sort?: TrackSort;
@@ -89,6 +92,7 @@ export interface AlbumSummary {
   title: string;
   artist: string;
   releaseYear: number | null;
+  originalYear?: number | null;
   genre: string | null;
   totalTracks: number;
   ratedTracks: number;
@@ -105,6 +109,8 @@ export interface AlbumPageRequest {
   search?: string;
   yearFrom?: number;
   yearTo?: number;
+  yearBasis?: YearBasis;
+  missingYear?: boolean;
   genre?: string;
   artist?: string;
   sort?: AlbumSort;
@@ -114,6 +120,8 @@ export interface AlbumPage {
   items: AlbumSummary[];
   nextCursor: ExplorerCursor | null;
 }
+
+export type YearBasis = "original" | "release";
 
 export type ArtistSort = "nameAsc" | "trackCountDesc";
 
@@ -243,13 +251,17 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
 }
 
 function previewTrackPage(request: TrackPageRequest): TrackPage {
+  const yearFor = (track: Track) => request.yearBasis === "original"
+    ? (track.originalYear === undefined ? track.releaseYear : track.originalYear)
+    : track.releaseYear;
   const items = browserPreview.tracks
     .filter((track) => includesExplorerText([track.title, track.artist, track.album, track.genre], request.search))
     .filter((track) => request.rating === undefined || track.rating === request.rating)
     .filter((track) => !request.unrated || track.rating === null)
     .filter((track) => request.loveState === undefined || track.loveState === request.loveState)
-    .filter((track) => request.yearFrom === undefined || (track.releaseYear !== null && track.releaseYear >= request.yearFrom))
-    .filter((track) => request.yearTo === undefined || (track.releaseYear !== null && track.releaseYear <= request.yearTo))
+    .filter((track) => request.yearFrom === undefined || (yearFor(track) !== null && yearFor(track)! >= request.yearFrom))
+    .filter((track) => request.yearTo === undefined || (yearFor(track) !== null && yearFor(track)! <= request.yearTo))
+    .filter((track) => !request.missingYear || yearFor(track) === null)
     .filter((track) => !request.genre || track.genre === request.genre)
     .filter((track) => !request.artist || track.artist === request.artist)
     .sort((left, right) => {
@@ -266,10 +278,14 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
 }
 
 function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
+  const yearFor = (album: AlbumSummary) => request.yearBasis === "original"
+    ? (album.originalYear === undefined ? album.releaseYear : album.originalYear)
+    : album.releaseYear;
   const items = browserAlbumSummaries()
     .filter((album) => includesExplorerText([album.title, album.artist, album.genre], request.search))
-    .filter((album) => request.yearFrom === undefined || (album.releaseYear !== null && album.releaseYear >= request.yearFrom))
-    .filter((album) => request.yearTo === undefined || (album.releaseYear !== null && album.releaseYear <= request.yearTo))
+    .filter((album) => request.yearFrom === undefined || (yearFor(album) !== null && yearFor(album)! >= request.yearFrom))
+    .filter((album) => request.yearTo === undefined || (yearFor(album) !== null && yearFor(album)! <= request.yearTo))
+    .filter((album) => !request.missingYear || yearFor(album) === null)
     .filter((album) => !request.genre || album.genre === request.genre)
     .filter((album) => !request.artist || album.artist === request.artist)
     .sort((left, right) => {
