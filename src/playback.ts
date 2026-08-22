@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauriRuntime, type Track } from "./library";
 
 export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
@@ -112,8 +112,14 @@ export async function togglePlayback(): Promise<PlaybackSnapshot> {
   if (browserPlayback.status === "playing") {
     browserPlayback = { ...browserPlayback, status: "paused" };
   } else {
-    browserStartedAt = performance.now() - browserPlayback.positionSeconds * 1000;
-    browserPlayback = { ...browserPlayback, status: "playing", error: null };
+    const duration = browserPlayback.currentTrack.durationSeconds ?? 0;
+    const resumeAt = browserPlayback.status === "stopped"
+      && duration > 0
+      && browserPlayback.positionSeconds >= duration - 0.25
+      ? 0
+      : browserPlayback.positionSeconds;
+    browserStartedAt = performance.now() - resumeAt * 1000;
+    browserPlayback = { ...browserPlayback, status: "playing", positionSeconds: resumeAt, error: null };
   }
   return cloneBrowserPlayback();
 }
@@ -224,8 +230,11 @@ export function usePlayback() {
   const [isWorking, setIsWorking] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const activeCommandCountRef = useRef(0);
+  const commandSequenceRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    if (activeCommandCountRef.current > 0) return;
     try {
       setState(await getPlaybackSnapshot());
     } catch (error) {
@@ -243,19 +252,22 @@ export function usePlayback() {
   }, [refresh]);
 
   const run = useCallback(async (action: () => Promise<PlaybackSnapshot>) => {
+    const sequence = ++commandSequenceRef.current;
+    activeCommandCountRef.current += 1;
     setIsWorking(true);
     setCommandError(null);
     setDismissedError(null);
     try {
       const next = await action();
-      setState(next);
+      if (commandSequenceRef.current === sequence) setState(next);
       return next;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setCommandError(message);
+      if (commandSequenceRef.current === sequence) setCommandError(message);
       return null;
     } finally {
-      setIsWorking(false);
+      activeCommandCountRef.current = Math.max(0, activeCommandCountRef.current - 1);
+      if (activeCommandCountRef.current === 0) setIsWorking(false);
     }
   }, []);
 

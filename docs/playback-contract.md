@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction.
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction, and version 0.8.3 makes seek command ordering explicit.
 
 ## Trust boundary
 
@@ -15,6 +15,8 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 - Play/pause, seek, previous/next, volume, shuffle, repeat-all, and repeat-one are native operations.
 - Starting a visible track replaces the current bounded queue with the current result set and begins at that track.
 - Natural completion advances according to repeat and shuffle state while the frontend polls playback state.
+- A stopped track positioned at its natural end restarts from zero when Play is pressed; an explicitly paused track resumes from its paused position.
+- Range input displays a local draft only while its exact seek command is pending. The most recently issued command owns the resulting snapshot, older overlapping responses are ignored, and polling resumes after all active commands finish.
 - Native playback—not React polling—is responsible for beginning, observing, seeking, and finalizing listening-history sessions.
 - The player waveform samples 64 evenly spaced windows from the decoded MP3 stream and reduces them to 320 normalized peaks. It does not fully decode a song just to draw the timeline.
 - Waveform requests contain only catalog ID plus stable track key. Rust performs the same identity and path validation as playback before opening the MP3.
@@ -37,4 +39,4 @@ Decoded peaks are derived data in device-local `aurora-waveforms.sqlite3`. A cac
 
 ## Deliberate limits
 
-Version 0.8.2 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).
+Version 0.8.3 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Waveforms are overview peaks rather than forensic sample-accurate audio analysis. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).

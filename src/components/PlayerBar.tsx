@@ -9,7 +9,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDuration, type Track } from "../library";
 import type { PlaybackSnapshot, RepeatMode } from "../playback";
 import type { LoveState } from "../tags";
@@ -61,16 +61,18 @@ export function PlayerBar({
   onToggle: () => void;
   onPrevious: () => void;
   onNext: () => void;
-  onSeek: (position: number) => void;
-  onVolume: (volume: number) => void;
+  onSeek: (position: number) => Promise<unknown> | void;
+  onVolume: (volume: number) => Promise<unknown> | void;
   onShuffle: (enabled: boolean) => void;
   onRepeat: (mode: RepeatMode) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, loveState: LoveState) => void;
   onToggleQueue: () => void;
 }) {
-  const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  const [seekDraft, setSeekDraft] = useState<{ trackKey: string; value: number } | null>(null);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
+  const seekCommitIdRef = useRef(0);
+  const volumeCommitIdRef = useRef(0);
   const [showRemaining, setShowRemaining] = useState(false);
   const [waveformResult, setWaveformResult] = useState<{
     trackKey: string;
@@ -83,7 +85,10 @@ export function PlayerBar({
   const waveform = waveformResult?.trackKey === trackKey ? waveformResult.waveform : null;
   const waveformFailed = waveformResult?.trackKey === trackKey && waveformResult.failed;
   const duration = Math.max(track?.durationSeconds ?? 0, 0);
-  const position = Math.min(seekDraft ?? playback.positionSeconds, duration);
+  const position = Math.min(
+    seekDraft?.trackKey === trackKey ? seekDraft.value : playback.positionSeconds,
+    duration,
+  );
   const volume = volumeDraft ?? playback.volume;
 
   useEffect(() => {
@@ -99,14 +104,27 @@ export function PlayerBar({
     return () => { cancelled = true; };
   }, [trackId, trackKey]);
 
-  function commitSeek() {
-    if (seekDraft !== null) onSeek(seekDraft);
-    setSeekDraft(null);
+  function changeSeekDraft(value: number) {
+    if (trackKey) setSeekDraft({ trackKey, value });
   }
 
-  function commitVolume() {
-    if (volumeDraft !== null) onVolume(volumeDraft);
-    setVolumeDraft(null);
+  function commitSeek(value: number) {
+    if (!trackKey) return;
+    const commitId = ++seekCommitIdRef.current;
+    setSeekDraft({ trackKey, value });
+    void Promise.resolve(onSeek(value)).finally(() => {
+      if (seekCommitIdRef.current === commitId) {
+        setSeekDraft((current) => current?.trackKey === trackKey ? null : current);
+      }
+    });
+  }
+
+  function commitVolume(value: number) {
+    const commitId = ++volumeCommitIdRef.current;
+    setVolumeDraft(value);
+    void Promise.resolve(onVolume(value)).finally(() => {
+      if (volumeCommitIdRef.current === commitId) setVolumeDraft(null);
+    });
   }
 
   const endTime = showRemaining
@@ -171,7 +189,7 @@ export function PlayerBar({
               position={position}
               duration={duration}
               disabled={!track}
-              onChange={setSeekDraft}
+              onChange={changeSeekDraft}
               onCommit={commitSeek}
             />
             <button
@@ -197,8 +215,8 @@ export function PlayerBar({
             step={0.01}
             value={volume}
             onChange={(event) => setVolumeDraft(Number(event.target.value))}
-            onPointerUp={commitVolume}
-            onKeyUp={commitVolume}
+            onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
+            onKeyUp={(event) => commitVolume(Number(event.currentTarget.value))}
           />
           <small>{Math.round(volume * 100)}</small>
           <button type="button" className={queueOpen ? "is-active" : undefined} aria-label={queueOpen ? "Close queue" : "Open queue"} aria-expanded={queueOpen} onClick={onToggleQueue}>

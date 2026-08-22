@@ -4,6 +4,7 @@ import {
   changeRepeatMode,
   changeShuffle,
   clearPlaybackQueue,
+  getPlaybackSnapshot,
   moveQueueItem,
   playTrackQueue,
   seekPlayback,
@@ -33,5 +34,18 @@ describe("browser playback adapter", () => {
     state = await clearPlaybackQueue();
     expect(state.queue).toEqual([]);
     expect(state.status).toBe("stopped");
+  });
+
+  it("restarts a completed track instead of resuming at its end", async () => {
+    const track = browserPreview.tracks[0];
+    await playTrackQueue([track], track.id);
+    await changeRepeatMode("off");
+    await seekPlayback(track.durationSeconds ?? 0);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    let state = await getPlaybackSnapshot();
+    expect(state.status).toBe("stopped");
+    state = await togglePlayback();
+    expect(state.status).toBe("playing");
+    expect(state.positionSeconds).toBe(0);
   });
 });

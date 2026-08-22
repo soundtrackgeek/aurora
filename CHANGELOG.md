@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-22
+
+### Fixed
+
+- Rapid waveform seeks no longer leave a stale draft position covering the live playback clock; the final released value stays visible only until its seek completes.
+- Overlapping playback commands now ignore older responses, and polling waits for active commands instead of racing them.
+- Pressing Play after a track has naturally stopped at its end restarts it from the beginning in both native and browser-preview playback.
+
 ## [0.8.2] - 2026-08-22
 
 ### Added

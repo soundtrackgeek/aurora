@@ -14,7 +14,7 @@ export function WaveformTimeline({
   duration: number;
   disabled: boolean;
   onChange: (position: number) => void;
-  onCommit: () => void;
+  onCommit: (position: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -86,8 +86,8 @@ export function WaveformTimeline({
         value={position}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        onPointerUp={onCommit}
-        onKeyUp={onCommit}
+        onPointerUp={(event) => onCommit(Number(event.currentTarget.value))}
+        onKeyUp={(event) => onCommit(Number(event.currentTarget.value))}
       />
     </div>
   );

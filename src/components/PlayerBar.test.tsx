@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Track } from "../library";
 import type { PlaybackSnapshot } from "../playback";
@@ -90,5 +90,52 @@ describe("PlayerBar", () => {
     fireEvent.click(player.getByRole("button", { name: "Love Midnight City" }));
     expect(playerProps.onRatingChange).toHaveBeenCalledWith(track, null);
     expect(playerProps.onLoveChange).toHaveBeenCalledWith(track, "loved");
+  });
+
+  it("releases the seek draft after the committed seek finishes", async () => {
+    let finishSeek: (() => void) | undefined;
+    const pendingSeek = new Promise<void>((resolve) => { finishSeek = resolve; });
+    const playerProps = { ...props(), onSeek: vi.fn(() => pendingSeek) };
+    const player = render(<PlayerBar {...playerProps} />);
+    const timeline = player.getByRole("slider", { name: "Playback position" });
+
+    fireEvent.change(timeline, { target: { value: "180" } });
+    fireEvent.pointerUp(timeline, { target: { value: "180" } });
+    expect(playerProps.onSeek).toHaveBeenCalledWith(180);
+    expect(timeline).toHaveValue("180");
+
+    player.rerender(<PlayerBar {...playerProps} playback={snapshot(181)} />);
+    expect(timeline).toHaveValue("180");
+
+    await act(async () => { finishSeek?.(); });
+    expect(timeline).toHaveValue("181");
+  });
+
+  it("keeps the newest seek draft when rapid seeks finish out of order", async () => {
+    let finishFirst: (() => void) | undefined;
+    let finishSecond: (() => void) | undefined;
+    const firstSeek = new Promise<void>((resolve) => { finishFirst = resolve; });
+    const secondSeek = new Promise<void>((resolve) => { finishSecond = resolve; });
+    const playerProps = {
+      ...props(),
+      onSeek: vi.fn()
+        .mockReturnValueOnce(firstSeek)
+        .mockReturnValueOnce(secondSeek),
+    };
+    const player = render(<PlayerBar {...playerProps} />);
+    const timeline = player.getByRole("slider", { name: "Playback position" });
+
+    fireEvent.pointerUp(timeline, { target: { value: "180" } });
+    fireEvent.pointerUp(timeline, { target: { value: "30" } });
+    expect(playerProps.onSeek).toHaveBeenNthCalledWith(1, 180);
+    expect(playerProps.onSeek).toHaveBeenNthCalledWith(2, 30);
+    expect(timeline).toHaveValue("30");
+
+    await act(async () => { finishFirst?.(); });
+    expect(timeline).toHaveValue("30");
+
+    player.rerender(<PlayerBar {...playerProps} playback={snapshot(31)} />);
+    await act(async () => { finishSecond?.(); });
+    expect(timeline).toHaveValue("31");
   });
 });

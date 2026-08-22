@@ -1058,7 +1058,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.8.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.8.3</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1319,8 +1319,8 @@ function App() {
         onToggle={() => void playback.toggle()}
         onPrevious={() => void playback.previous()}
         onNext={() => void playback.next()}
-        onSeek={(position) => void playback.seek(position)}
-        onVolume={(volume) => void playback.setVolume(volume)}
+        onSeek={(position) => playback.seek(position)}
+        onVolume={(volume) => playback.setVolume(volume)}
         onShuffle={(enabled) => void playback.setShuffle(enabled)}
         onRepeat={(mode) => void playback.setRepeatMode(mode)}
         onRatingChange={(track, rating) => void saveInlineTagChange(track, {

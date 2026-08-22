@@ -421,7 +421,15 @@ impl PlaybackRuntime {
             } else {
                 self.reset_history_position();
             }
-        } else if let Err(error) = self.load_current(true, self.position_seconds) {
+        } else if let Err(error) = self.load_current(
+            true,
+            resume_position(
+                self.status,
+                self.position_seconds,
+                self.current_track()
+                    .and_then(|track| track.duration_seconds),
+            ),
+        ) {
             let error = self.set_error(error);
             let _ = self.persist();
             return Err(error);
@@ -611,6 +619,19 @@ impl PlaybackRuntime {
     }
 }
 
+fn resume_position(
+    status: PlaybackStatus,
+    position_seconds: f64,
+    duration_seconds: Option<i64>,
+) -> f64 {
+    let duration = duration_seconds.unwrap_or_default().max(0) as f64;
+    if status == PlaybackStatus::Stopped && duration > 0.0 && position_seconds >= duration - 0.25 {
+        0.0
+    } else {
+        position_seconds.max(0.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,5 +641,21 @@ mod tests {
         for mode in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
             assert_eq!(RepeatMode::from_stored(mode.as_stored()), mode);
         }
+    }
+
+    #[test]
+    fn completed_tracks_restart_from_the_beginning() {
+        assert_eq!(
+            resume_position(PlaybackStatus::Stopped, 243.0, Some(243)),
+            0.0
+        );
+        assert_eq!(
+            resume_position(PlaybackStatus::Paused, 243.0, Some(243)),
+            243.0
+        );
+        assert_eq!(
+            resume_position(PlaybackStatus::Stopped, 120.0, Some(243)),
+            120.0
+        );
     }
 }
