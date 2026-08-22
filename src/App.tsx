@@ -13,6 +13,11 @@ import {
   Heart,
   LibraryBig,
   Music2,
+  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   RefreshCw,
   Search,
@@ -89,6 +94,11 @@ import {
   updateLaptopMode,
   type LaptopModeStatus,
 } from "./laptopMode";
+import {
+  loadLayoutPreferences,
+  nextLeftSidebarMode,
+  saveLayoutPreferences,
+} from "./layoutPreferences";
 import {
   reconcilePendingTags,
   tagValuesForTrack,
@@ -308,6 +318,7 @@ function App() {
   const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
   const [activeNav, setActiveNav] = useState("Universe");
+  const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [reloadToken, setReloadToken] = useState(0);
   const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
   const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(defaultExplorerFilters);
@@ -352,6 +363,10 @@ function App() {
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
   const playback = usePlayback();
+
+  useEffect(() => {
+    saveLayoutPreferences(layoutPreferences);
+  }, [layoutPreferences]);
 
   useEffect(() => {
     let cancelled = false;
@@ -984,10 +999,30 @@ function App() {
     { label: "Artists", value: summary?.artists, detail: "worlds", icon: UsersRound, tone: "amber" },
     { label: "Loved", value: summary?.loved, detail: "favorites", icon: Heart, tone: "rose" },
   ];
+  const leftSidebarAction = layoutPreferences.leftSidebar === "expanded"
+    ? "Switch left sidebar to icon-only mode"
+    : layoutPreferences.leftSidebar === "icons"
+      ? "Collapse left sidebar"
+      : "Expand left sidebar";
+  const LeftSidebarIcon = layoutPreferences.leftSidebar === "expanded"
+    ? PanelLeft
+    : layoutPreferences.leftSidebar === "icons"
+      ? PanelLeftClose
+      : PanelLeftOpen;
+  const rightSidebarAction = layoutPreferences.rightSidebar === "expanded"
+    ? "Collapse right sidebar"
+    : "Expand right sidebar";
+  const RightSidebarIcon = layoutPreferences.rightSidebar === "expanded"
+    ? PanelRightClose
+    : PanelRightOpen;
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div
+      className="app-shell"
+      data-left-sidebar={layoutPreferences.leftSidebar}
+      data-right-sidebar={layoutPreferences.rightSidebar}
+    >
+      {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
           <div className="brand__mark"><AudioLines aria-hidden="true" /></div>
           <div><strong>Aurora</strong><span>your music, your universe</span></div>
@@ -1001,6 +1036,8 @@ function App() {
               key={label}
               className={activeNav === label ? "is-active" : undefined}
               onClick={() => navigate(label)}
+              aria-label={layoutPreferences.leftSidebar === "icons" ? label : undefined}
+              title={layoutPreferences.leftSidebar === "icons" ? label : undefined}
             >
               <Icon aria-hidden="true" />
               <span>{label}</span>
@@ -1020,29 +1057,44 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.8.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.8.1</small></span>
           <Settings aria-hidden="true" />
         </div>
-      </aside>
+      </aside>}
 
       <header className="topbar">
-        <form className="search" role="search" onSubmit={submitSearch}>
-          <Search aria-hidden="true" />
-          <input
-            ref={searchRef}
-            value={activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query}
-            onChange={(event) => activeNav === "Observatory"
-              ? setReviewSearch(event.target.value)
-              : activeNav === "History"
-                ? setHistorySearch(event.target.value)
-                : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
-            placeholder={activeNav === "Observatory" ? "Search artists to review…" : activeNav === "History" ? "Search listening history…" : "Search your universe…"}
-            aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : activeNav === "History" ? "Search listening history" : "Search your music universe"}
-          />
-          {(activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query)
-            ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : activeNav === "History" ? setHistorySearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
-            : <kbd>Ctrl K</kbd>}
-        </form>
+        <div className="topbar__primary">
+          <button
+            type="button"
+            className="layout-toggle"
+            data-mode={layoutPreferences.leftSidebar}
+            aria-label={leftSidebarAction}
+            title={`${leftSidebarAction}. Current mode: ${layoutPreferences.leftSidebar}.`}
+            onClick={() => setLayoutPreferences((current) => ({
+              ...current,
+              leftSidebar: nextLeftSidebarMode(current.leftSidebar),
+            }))}
+          >
+            <LeftSidebarIcon aria-hidden="true" />
+          </button>
+          <form className="search" role="search" onSubmit={submitSearch}>
+            <Search aria-hidden="true" />
+            <input
+              ref={searchRef}
+              value={activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query}
+              onChange={(event) => activeNav === "Observatory"
+                ? setReviewSearch(event.target.value)
+                : activeNav === "History"
+                  ? setHistorySearch(event.target.value)
+                  : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
+              placeholder={activeNav === "Observatory" ? "Search artists to review…" : activeNav === "History" ? "Search listening history…" : "Search your universe…"}
+              aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : activeNav === "History" ? "Search listening history" : "Search your music universe"}
+            />
+            {(activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query)
+              ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : activeNav === "History" ? setHistorySearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
+              : <kbd>Ctrl K</kbd>}
+          </form>
+        </div>
         <div className="topbar__actions">
           {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
           <LaptopModeButton
@@ -1054,6 +1106,19 @@ function App() {
           <button type="button" aria-label="Audio tools" disabled><AudioLines aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
+          <button
+            type="button"
+            className="layout-toggle"
+            data-mode={layoutPreferences.rightSidebar}
+            aria-label={rightSidebarAction}
+            title={`${rightSidebarAction}. Current mode: ${layoutPreferences.rightSidebar}.`}
+            onClick={() => setLayoutPreferences((current) => ({
+              ...current,
+              rightSidebar: current.rightSidebar === "expanded" ? "collapsed" : "expanded",
+            }))}
+          >
+            <RightSidebarIcon aria-hidden="true" />
+          </button>
           <button type="button" aria-label="Settings" disabled><Settings aria-hidden="true" /></button>
         </div>
       </header>
@@ -1176,7 +1241,7 @@ function App() {
         </div>
       </main>
 
-      <aside className="inspector">
+      {layoutPreferences.rightSidebar === "expanded" && <aside className="inspector">
         <div className="inspector-tabs" role="tablist" aria-label="Track details">
           <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
           <button type="button" role="tab" aria-selected="false" disabled>Album</button>
@@ -1228,7 +1293,7 @@ function App() {
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
           </div>
         ) : <EmptyInspector />}
-      </aside>
+      </aside>}
 
       {queueOpen && (
         <QueuePanel

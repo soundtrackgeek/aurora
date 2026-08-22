@@ -4,6 +4,19 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-22
+
+### Added
+
+- A three-state left sidebar that cycles between expanded, icon-only, and collapsed layouts from an accessible top-bar control.
+- An independent right-inspector collapse control that returns its width to the library workspace.
+- Device-local, versioned layout preferences that restore both sidebar choices on the next launch and fall back safely if browser storage is unavailable or malformed.
+
+### Changed
+
+- Narrow windows now respect the chosen sidebar layout instead of forcing the left navigation into icon-only mode.
+- Icon-only navigation keeps accessible names and hover labels while removing visible navigation, playlist, profile, and brand text.
+
 ## [0.8.0] - 2026-08-22
 
 ### Added

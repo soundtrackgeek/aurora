@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.8.0 adds private, cross-device listening memory with a configurable definition of a registered play.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.8.1 adds persistent, space-saving sidebar layouts to the private cross-device listening memory introduced in 0.8.0.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.8.0 slice
+## Current 0.8.1 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.
 - Persistent icon-only device mode: a monitor identifies Desktop Mode, a laptop identifies Laptop Mode, and each computer remembers its own choice in `aurora-device.json` outside the shared state database.
 - Exact runtime-only drive translation from `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`; the catalog and stable track identities remain unchanged.
 - Verified SQLite state snapshots at `%USERPROFILE%\OneDrive\_musicbackup\aurora-state.sqlite3`, published at most once per minute and once more on clean shutdown.
@@ -93,7 +94,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.8.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.8.1`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 
