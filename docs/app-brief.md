@@ -16,7 +16,19 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.6.0 acceptance checks
+## 0.7.0 acceptance checks
+
+- Toggle Laptop Mode from an accessible icon-only top-bar control and restore that per-device choice after a full process restart.
+- Translate only complete `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` roots to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave` at filesystem boundaries; never rewrite the shared catalog or its stable identities.
+- Apply the same translation to playback, direct MP3 editing, pending-overlay reconciliation, crash recovery, and undo journal paths.
+- Restore a missing local `aurora-state.sqlite3` from a validated OneDrive snapshot before opening SQLite.
+- Publish only consistent, validated snapshots no more than once per minute and on clean shutdown, while retaining the previous remote snapshot.
+- Adopt a newer remote snapshot only during startup when local state is clean, retaining a pre-OneDrive local copy.
+- Detect unrelated or independently changed histories and preserve both instead of selecting a winner from timestamps.
+- Keep catalog browsing usable when OneDrive or a laptop drive is unavailable and expose the exact status in the Laptop Mode popover.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.7.0` versions.
+
+## 0.6.0 foundation checks
 
 - Open Observatory from the persistent navigation and page candidate-bearing artists without adding MusicBrainz work to startup or ordinary Explorer queries.
 - Filter review items by needs-review, conflict, unconfirmed, Aurora decision, or all-candidate state and search by artist without exceeding 100 returned rows.
@@ -77,7 +89,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.6.0
+## Explicit non-goals for 0.7.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
@@ -89,9 +101,11 @@ Live source measurements including SQLite process startup are approximately 26�
 - Enumerating every catalog artist in Observatory; 0.6.0 covers candidate-bearing imported artist-info rows.
 - Silently replacing or continuously syncing the shared OneDrive MusicBrainz overlay; export is deliberate and produces a new complete snapshot.
 - A recursive filesystem watcher or full-library MP3 tag scan; synchronization is intentionally bounded to pending overlays and selected tracks.
+- Editable or auto-discovered drive mappings, LAN transfer, arbitrary cloud providers, and a record-level two-way merge of diverged Aurora state.
+- Silently resolving simultaneous two-computer edits; preserving both states is safer than guessing from file timestamps.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections after 0.6.0
+## Planned sections after 0.7.0
 
 1. Listening history, ReplayGain, device selection, and gapless playback research.
 2. Smart playlists and saved explorer views after the browsing/filter contract is proven.

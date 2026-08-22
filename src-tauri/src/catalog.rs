@@ -1,4 +1,5 @@
 use crate::{
+    device_mode,
     state_store::{StateStore, StoredQueueEntry},
     tag_model::{LoveState, TagSyncState, TagValues},
 };
@@ -764,7 +765,7 @@ fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, Stri
     {
         return Err("The catalog contains an unsafe audio filename.".to_owned());
     }
-    let audio_path = PathBuf::from(directory).join(filename_path);
+    let audio_path = device_mode::resolve_device_path(Path::new(directory)).join(filename_path);
     let is_mp3 = audio_path
         .extension()
         .and_then(|extension| extension.to_str())

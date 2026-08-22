@@ -2,10 +2,13 @@ mod artwork;
 mod catalog;
 mod curation;
 mod curation_store;
+mod device_mode;
 mod explorer;
+mod laptop_mode;
 mod musicbrainz;
 mod playback;
 mod state_store;
+mod state_sync;
 mod tag_model;
 mod tagging;
 
@@ -15,6 +18,7 @@ use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
     TrackPage, TrackPageRequest,
 };
+use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use state_store::StateStore;
@@ -25,6 +29,7 @@ use tauri::{AppHandle, Manager, State};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
 type TagState = Mutex<TagService>;
+type LaptopState = Mutex<LaptopModeRuntime>;
 
 fn with_playback<T>(
     state: State<'_, PlaybackState>,
@@ -344,6 +349,32 @@ async fn refresh_external_tag_changes(app: AppHandle) -> Result<TagReconciliatio
     .map_err(|error| format!("The external-tag refresh stopped unexpectedly: {error}"))?
 }
 
+#[tauri::command]
+async fn laptop_mode_status(app: AppHandle) -> Result<LaptopModeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<LaptopState>();
+        let mut runtime = state
+            .lock()
+            .map_err(|_| "Aurora's Laptop Mode monitor stopped unexpectedly.".to_owned())?;
+        Ok(runtime.status(false))
+    })
+    .await
+    .map_err(|error| format!("The Laptop Mode monitor stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn set_laptop_mode(app: AppHandle, enabled: bool) -> Result<LaptopModeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<LaptopState>();
+        let mut runtime = state
+            .lock()
+            .map_err(|_| "Aurora's Laptop Mode setting stopped unexpectedly.".to_owned())?;
+        runtime.set_enabled(enabled)
+    })
+    .await
+    .map_err(|error| format!("The Laptop Mode setting stopped unexpectedly: {error}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -353,13 +384,26 @@ pub fn run() {
         })
         .setup(|app| {
             let state_directory = app.path().app_data_dir()?;
-            let store = StateStore::new(state_directory.join("aurora-state.sqlite3"))
-                .map_err(std::io::Error::other)?;
+            let state_path = state_directory.join("aurora-state.sqlite3");
+            let remote_state_path =
+                state_sync::default_remote_state_path().map_err(std::io::Error::other)?;
+            let startup_sync =
+                state_sync::prepare_state_before_open(&state_path, &remote_state_path);
+            let store = StateStore::new(state_path).map_err(std::io::Error::other)?;
+            let mut laptop_runtime = LaptopModeRuntime::new(
+                &state_directory,
+                store.clone(),
+                remote_state_path,
+                startup_sync,
+            )
+            .map_err(std::io::Error::other)?;
             let runtime = PlaybackRuntime::new(store.clone()).map_err(std::io::Error::other)?;
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
+            let _ = laptop_runtime.status(true);
             app.manage(store);
             app.manage(Mutex::new(runtime));
             app.manage(Mutex::new(tag_service));
+            app.manage(Mutex::new(laptop_runtime));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -367,6 +411,10 @@ pub fn run() {
                 let state = window.state::<PlaybackState>();
                 if let Ok(mut runtime) = state.lock() {
                     let _ = runtime.persist_for_shutdown();
+                }
+                let laptop = window.state::<LaptopState>();
+                if let Ok(mut runtime) = laptop.lock() {
+                    let _ = runtime.status(true);
                 }
             }
         })
@@ -401,6 +449,8 @@ pub fn run() {
             update_track_tags,
             undo_track_tag_edit,
             refresh_external_tag_changes,
+            laptop_mode_status,
+            set_laptop_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

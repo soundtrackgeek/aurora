@@ -1,12 +1,17 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.6.0 adds an Observatory for deliberate MusicBrainz identity and release-group curation while keeping every imported database read-only.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.7.0 adds a persistent per-computer Laptop Mode, exact drive-root translation, and conflict-aware OneDrive snapshots for Aurora-owned state.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.6.0 slice
+## Current 0.7.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Persistent icon-only Laptop Mode: each computer remembers its own mode in `aurora-device.json`, outside the shared state database.
+- Exact runtime-only drive translation from `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`; the catalog and stable track identities remain unchanged.
+- Verified SQLite state snapshots at `%USERPROFILE%\OneDrive\_musicbackup\aurora-state.sqlite3`, published at most once per minute and once more on clean shutdown.
+- First-run laptop recovery copies a valid OneDrive snapshot into Aurora app data before SQLite opens. Newer clean snapshots are also applied only before open, with a retained local safety copy.
+- Sync lineage, generations, and logical revisions detect two-computer divergence. Aurora reports a conflict and preserves both files instead of using unsafe newest-file-wins behavior.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
@@ -38,7 +43,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. See [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. The app-owned database is mirrored as a consistent SQLite snapshot rather than copied while live. See [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
 
 ## Data model
 
@@ -55,6 +60,8 @@ The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,32
 - Rust stable with the MSVC target and Windows C++ build tools
 - The music catalog at the default `%APPDATA%` path above
 - The referenced MP3 files and album-cover archive mounted at their cataloged paths for playback and real artwork
+- For Laptop Mode, the equivalent library roots mounted at `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`
+- A locally available `%USERPROFILE%\OneDrive\_musicbackup` directory for Aurora state mirroring; catalog browsing still works and reports a sync warning when it is unavailable
 - Optional local MusicBrainz sources under `%USERPROFILE%\OneDrive\_musicbackup` for Constellations enrichment; Aurora remains usable when either source is missing
 
 ## Develop and verify
@@ -81,7 +88,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.6.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.7.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

@@ -27,6 +27,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
+import { LaptopModeButton } from "./components/LaptopModeButton";
 import {
   DeepExplorer,
   type ExplorerAlbum,
@@ -70,6 +71,11 @@ import {
   type ReleaseDecisionRequest,
 } from "./musicbrainz";
 import { usePlayback } from "./playback";
+import {
+  loadLaptopModeStatus,
+  updateLaptopMode,
+  type LaptopModeStatus,
+} from "./laptopMode";
 import {
   reconcilePendingTags,
   tagValuesForTrack,
@@ -297,6 +303,9 @@ function App() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
+  const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
+  const [laptopModeBusy, setLaptopModeBusy] = useState(false);
+  const [laptopModeError, setLaptopModeError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
@@ -306,6 +315,27 @@ function App() {
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
   const playback = usePlayback();
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void loadLaptopModeStatus()
+        .then((status) => {
+          if (cancelled) return;
+          setLaptopModeStatus(status);
+          setLaptopModeError(null);
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) setLaptopModeError(error instanceof Error ? error.message : String(error));
+        });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,6 +497,19 @@ function App() {
   ) {
     selectTrack(track);
     void playback.play(queue, track.id);
+  }
+
+  async function toggleLaptopMode() {
+    if (!laptopModeStatus || laptopModeBusy) return;
+    setLaptopModeBusy(true);
+    setLaptopModeError(null);
+    try {
+      setLaptopModeStatus(await updateLaptopMode(!laptopModeStatus.laptopMode));
+    } catch (error) {
+      setLaptopModeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLaptopModeBusy(false);
+    }
   }
 
   function selectTrack(track: Track) {
@@ -821,7 +864,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.6.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.7.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -844,6 +887,12 @@ function App() {
         </form>
         <div className="topbar__actions">
           {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+          <LaptopModeButton
+            status={laptopModeStatus}
+            busy={laptopModeBusy}
+            error={laptopModeError}
+            onToggle={() => void toggleLaptopMode()}
+          />
           <button type="button" aria-label="Audio tools" disabled><AudioLines aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}

@@ -1,8 +1,16 @@
-use crate::tag_model::{LoveState, TagValues};
+use crate::{
+    device_mode,
+    tag_model::{LoveState, TagValues},
+};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use std::{collections::HashSet, fs, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-const SCHEMA_VERSION: i64 = 5;
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -89,6 +97,10 @@ impl StateStore {
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| format!("Could not enable durable state journaling: {error}"))?;
         Ok(connection)
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
     }
 
     fn migrate(&self) -> Result<(), String> {
@@ -293,6 +305,55 @@ impl StateStore {
                 "#,
             )
             .map_err(|error| format!("Could not ensure Aurora's MusicBrainz curation schema: {error}"))?;
+        transaction
+            .execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS state_sync_meta (
+                  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                  lineage_id TEXT NOT NULL,
+                  snapshot_id TEXT NOT NULL,
+                  generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+                  content_revision INTEGER NOT NULL DEFAULT 0 CHECK (content_revision >= 0),
+                  mirrored_revision INTEGER NOT NULL DEFAULT 0 CHECK (mirrored_revision >= 0),
+                  last_synced_at_ms INTEGER
+                );
+                INSERT OR IGNORE INTO state_sync_meta(
+                  singleton, lineage_id, snapshot_id, generation,
+                  content_revision, mirrored_revision, last_synced_at_ms
+                ) VALUES (1, '', '', 0, 0, 0, NULL);
+                "#,
+            )
+            .map_err(|error| format!("Could not ensure Aurora's state-sync metadata: {error}"))?;
+        for table in [
+            "playback_queue",
+            "playback_state",
+            "tag_overlays",
+            "tag_edit_operations",
+            "musicbrainz_artist_decisions",
+            "musicbrainz_release_decisions",
+            "musicbrainz_curation_events",
+        ] {
+            for (operation, timing) in [
+                ("insert", "INSERT"),
+                ("update", "UPDATE"),
+                ("delete", "DELETE"),
+            ] {
+                transaction
+                    .execute_batch(&format!(
+                        r#"
+                        CREATE TRIGGER IF NOT EXISTS state_sync_{table}_{operation}
+                        AFTER {timing} ON {table} BEGIN
+                          UPDATE state_sync_meta
+                          SET content_revision = content_revision + 1
+                          WHERE singleton = 1;
+                        END;
+                        "#
+                    ))
+                    .map_err(|error| {
+                        format!("Could not ensure Aurora's {table} state-sync trigger: {error}")
+                    })?;
+            }
+        }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|error| {
@@ -908,7 +969,9 @@ impl StateStore {
                 .query_row(params![track_key], |row| row.get::<_, String>(0))
                 .optional()
                 .map_err(|error| format!("Could not read Aurora's undo lookup: {error}"))?;
-            if backup.is_some_and(|path| PathBuf::from(path).is_file()) {
+            if backup
+                .is_some_and(|path| device_mode::resolve_device_path(Path::new(&path)).is_file())
+            {
                 undoable.insert(track_key.clone());
             }
         }
@@ -930,7 +993,7 @@ impl StateStore {
             .query_map(params![keep as i64], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
-                    PathBuf::from(row.get::<_, String>(1)?),
+                    device_mode::resolve_device_path(Path::new(&row.get::<_, String>(1)?)),
                 ))
             })
             .map_err(|error| format!("Could not read Aurora's backup retention list: {error}"))?
@@ -989,9 +1052,13 @@ fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TagOperation>
     Ok(TagOperation {
         id: row.get(0)?,
         track_key: row.get(1)?,
-        target_path: PathBuf::from(row.get::<_, String>(2)?),
-        temp_path: row.get::<_, Option<String>>(3)?.map(PathBuf::from),
-        backup_path: row.get::<_, Option<String>>(4)?.map(PathBuf::from),
+        target_path: device_mode::resolve_device_path(Path::new(&row.get::<_, String>(2)?)),
+        temp_path: row
+            .get::<_, Option<String>>(3)?
+            .map(|path| device_mode::resolve_device_path(Path::new(&path))),
+        backup_path: row
+            .get::<_, Option<String>>(4)?
+            .map(|path| device_mode::resolve_device_path(Path::new(&path))),
         before: TagValues {
             rating: row.get(5)?,
             love_state: love_state_from_row(&before_love_state, 6)?,
@@ -1207,6 +1274,81 @@ mod tests {
                 .expect("count migrated operations"),
             1
         );
+        drop(connection);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_v5_curation_rows_and_installs_sync_revision_triggers() {
+        let path = temporary_state_path();
+        {
+            let connection = Connection::open(&path).expect("create v5 state");
+            connection
+                .execute_batch(
+                    r#"
+                    CREATE TABLE playback_queue(position INTEGER PRIMARY KEY, track_id TEXT NOT NULL);
+                    CREATE TABLE playback_state(
+                      singleton INTEGER PRIMARY KEY, current_index INTEGER,
+                      position_seconds REAL NOT NULL DEFAULT 0, volume REAL NOT NULL DEFAULT 0.7,
+                      shuffle INTEGER NOT NULL DEFAULT 0, repeat_mode TEXT NOT NULL DEFAULT 'off'
+                    );
+                    INSERT INTO playback_state(singleton) VALUES (1);
+                    CREATE TABLE musicbrainz_artist_decisions(
+                      local_artist_key TEXT PRIMARY KEY, display_artist TEXT NOT NULL,
+                      decision TEXT NOT NULL, artist_mbid TEXT, canonical_name TEXT,
+                      created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+                    );
+                    INSERT INTO musicbrainz_artist_decisions VALUES(
+                      'm83', 'M83', 'confirmed',
+                      '6d7b7cd4-254b-4c25-83f6-dd20f98ceacd', 'M83', 1, 1
+                    );
+                    PRAGMA user_version = 5;
+                    "#,
+                )
+                .expect("seed v5 state");
+        }
+
+        let store = StateStore::new(path.clone()).expect("migrate v5 state");
+        let connection = store.open().expect("open migrated state");
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .expect("schema version"),
+            6
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM musicbrainz_artist_decisions",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .expect("curation row count"),
+            1
+        );
+        let before: i64 = connection
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision before change");
+        connection
+            .execute(
+                "UPDATE musicbrainz_artist_decisions SET canonical_name = 'M83 updated' WHERE local_artist_key = 'm83'",
+                [],
+            )
+            .expect("update curated row");
+        let after: i64 = connection
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision after change");
+        assert_eq!(after, before + 1);
+
         drop(connection);
         drop(store);
         let _ = fs::remove_file(path);

@@ -4,6 +4,34 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-22
+
+### Added
+
+- Persistent per-device Laptop Mode behind an accessible icon-only top-bar control with active-root and state-sync status.
+- Exact, case-insensitive runtime path translation from the desktop `D:`, `G:`, and `H:` catalog roots to the laptop `Y:`, `V:`, and `U:` roots without changing imported catalog rows or stable track keys.
+- State schema version 6 with sync lineage, snapshot generations, logical content revisions, and mutation triggers for playback, tag journal/overlays, and MusicBrainz curation.
+- Verified OneDrive state snapshots, previous-remote retention, first-laptop restore, pre-OneDrive local backups, and startup-only adoption of newer clean snapshots.
+- Rust and React coverage for path boundaries, per-device restart persistence, v5 migration, publishing, first-run restore, clean startup update, two-device divergence, and accessible control behavior.
+
+### Changed
+
+- Stored queue and tag-journal paths are translated only at filesystem boundaries; Aurora continues to query the shared Music Library database using its original desktop paths.
+- Aurora publishes app-state changes no more than once per minute and forces one final consistent snapshot on normal shutdown.
+- Laptop Mode is stored in device-local `aurora-device.json`, so enabling it on the laptop does not switch the desktop installation.
+
+### Security
+
+- Aurora uses SQLite `VACUUM INTO`, `quick_check`, schema validation, staged writes, and Windows atomic replacement instead of copying a live WAL-backed database.
+- Diverged or unrelated state histories are never silently merged or overwritten. Aurora retains both files and reports the conflict for manual resolution.
+- A newer OneDrive database never replaces an open local SQLite database; a clean update is adopted only before Aurora opens local state.
+
+### Known limits
+
+- Laptop Mode has fixed roots for Jørn's current two-machine layout; there is no editable mapping UI in 0.7.0.
+- Automatic synchronization assumes Aurora is not actively edited on both computers at once. Detected divergence requires choosing which retained state to keep and restarting Aurora.
+- OneDrive availability and propagation remain external dependencies; Aurora continues to browse the local catalog when the mirror folder is unavailable.
+
 ## [0.6.0] - 2026-08-22
 
 ### Added

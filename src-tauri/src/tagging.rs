@@ -715,14 +715,14 @@ impl TagService {
             _ => false,
         };
         if target_values_match && target_frames_match && audio_matches {
-            let directory = operation
-                .target_path
+            let catalog_target =
+                crate::device_mode::catalog_path_for_device_path(&operation.target_path);
+            let directory = catalog_target
                 .parent()
                 .ok_or_else(|| "The recovered undo path has no parent directory.".to_owned())?
                 .to_string_lossy()
                 .into_owned();
-            let filename = operation
-                .target_path
+            let filename = catalog_target
                 .file_name()
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| "The recovered undo filename is invalid.".to_owned())?;
@@ -830,14 +830,14 @@ impl TagService {
             if let Some(temp_path) = &operation.temp_path {
                 cleanup_owned_working_file(temp_path);
             }
-            let directory = operation
-                .target_path
+            let catalog_target =
+                crate::device_mode::catalog_path_for_device_path(&operation.target_path);
+            let directory = catalog_target
                 .parent()
                 .ok_or_else(|| "The recovered MP3 path has no parent directory.".to_owned())?
                 .to_string_lossy()
                 .into_owned();
-            let filename = operation
-                .target_path
+            let filename = catalog_target
                 .file_name()
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| "The recovered MP3 filename is invalid.".to_owned())?;
@@ -896,7 +896,7 @@ fn validated_pending_overlay_path(
             message: "The catalog contains an unsafe pending-track location.".to_owned(),
         });
     }
-    let audio_path = directory_path.join(filename_path);
+    let audio_path = crate::device_mode::resolve_device_path(directory_path).join(filename_path);
     let is_mp3 = audio_path
         .extension()
         .and_then(|extension| extension.to_str())
