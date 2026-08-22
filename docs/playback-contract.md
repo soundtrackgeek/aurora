@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora 0.3.0 owns playback and queue state without claiming write ownership of the imported catalog.
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md).
 
 ## Trust boundary
 
@@ -15,6 +15,7 @@ Aurora 0.3.0 owns playback and queue state without claiming write ownership of t
 - Play/pause, seek, previous/next, volume, shuffle, repeat-all, and repeat-one are native operations.
 - Starting a visible track replaces the current bounded queue with the current result set and begins at that track.
 - Natural completion advances according to repeat and shuffle state while the frontend polls playback state.
+- Native playback—not React polling—is responsible for beginning, observing, seeking, and finalizing listening-history sessions.
 
 ## Persistence
 
@@ -31,4 +32,4 @@ Position is checkpointed in roughly ten-second buckets and once more during wind
 
 ## Deliberate limits
 
-Version 0.3.0 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).
+Version 0.8.0 does not edit the source catalog, select an output device, apply ReplayGain/DSP, crossfade, or promise gapless transitions. Tag writes are isolated behind the separate [tag-editing contract](tag-editing-contract.md).

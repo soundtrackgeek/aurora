@@ -11,12 +11,24 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - The existing music-library database is authoritative for catalog display, but Aurora opens it read-only.
 - Audio files are authoritative for rating, Love/Ban, and Release Year after an Aurora edit.
 - Aurora-owned playback state, optimistic tag overlays, and the tag-operation journal live in a separate writable Aurora database.
+- Each Aurora installation owns a separate writable listening-history database and publishes only its device-named, read-only snapshot for cross-device aggregation.
 - Integer track IDs are transient because Music Library's full TSV import replaces rows. Aurora persists queue and overlay identity with the normalized directory plus filename; album IDs remain opaque strings.
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.
 
-## 0.7.1 acceptance checks
+## 0.8.0 acceptance checks
+
+- Record one session per track activation, continue it across an ordinary pause/resume, and finish it as completed, skipped, or interrupted across natural end, transport, queue, shutdown, and crash-recovery transitions.
+- Register a play after 30 seconds by default, allow a validated 1–3600 second setting, count only observed forward progress, exclude seek distance, and let shorter tracks qualify at natural completion.
+- Keep registered play monotonic within a session and update an active unregistered session when the configured threshold changes.
+- Preserve durable history independently of `aurora-state.sqlite3`; use stable device identity and one writable local history per installation.
+- Publish only this device's consistent, validated, atomically replaced OneDrive snapshot, restore only a matching device snapshot, and read peer snapshots query-only.
+- Page at most 100 sessions with validated filters and cursor, preserve unavailable historical tracks, and bound catalog resolution to the visible page plus top tracks.
+- Show all-time listening summary, most-played tracks, a cross-device timeline, replay/inspection actions, and selected-track personal insights distinct from Last.fm popularity.
+- Produce a Windows GUI executable and signed NSIS updater artifact with aligned `0.8.0` versions.
+
+## 0.7.1 foundation checks
 
 - Show a monitor in Desktop Mode and a laptop in Laptop Mode while preserving the accessible toggle label and pressed state.
 - Do not publish a new OneDrive generation for playback-position polling, a catalog import changing transient track IDs, or reconciliation-only overlay timestamps/import-run IDs.
@@ -98,7 +110,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 
 Live source measurements including SQLite process startup are approximately 26–84 ms for common bounded queries. Global title A–Z is the known borderline path at approximately 120 ms because the shared catalog has no title-only index. The UI requests 50 rows at a time, native commands cap pages and details at 100 records, and playback accepts no more than 200 IDs. Expensive MusicBrainz enrichment and cover decoding never sit on the startup query path.
 
-## Explicit non-goals for 0.7.1
+## Explicit non-goals for 0.8.0
 
 - Gapless output, ReplayGain, crossfade, DSP, and output-device selection.
 - Editing the imported catalog directly.
@@ -112,10 +124,12 @@ Live source measurements including SQLite process startup are approximately 26�
 - A recursive filesystem watcher or full-library MP3 tag scan; synchronization is intentionally bounded to pending overlays and selected tracks.
 - Editable or auto-discovered drive mappings, LAN transfer, arbitrary cloud providers, and a record-level two-way merge of diverged Aurora state.
 - Silently resolving simultaneous two-computer edits; preserving both states is safer than guessing from file timestamps.
+- Importing historical MusicBee plays, Last.fm scrobbles, or treating Last.fm popularity as personal listening history.
+- A shared multi-writer history database, record-level OneDrive merge, live cross-device streaming, or deletion/editing of historical sessions.
 - Authenticode publisher signing; updater cryptographic signing is configured separately.
 
-## Planned sections after 0.7.1
+## Planned sections after 0.8.0
 
-1. Listening history, ReplayGain, device selection, and gapless playback research.
+1. ReplayGain, output-device selection, and gapless playback research.
 2. Smart playlists and saved explorer views after the browsing/filter contract is proven.
 3. Broader MusicBrainz queue coverage or a deliberate two-way overlay sync after the export workflow is proven.

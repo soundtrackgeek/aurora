@@ -1,5 +1,6 @@
 use crate::{
     catalog::{self, TrackReference, TrackSummary},
+    history::{ActiveHistorySession, HistoryStore},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
@@ -70,11 +71,13 @@ pub(crate) struct PlaybackRuntime {
     repeat_mode: RepeatMode,
     error: Option<String>,
     store: StateStore,
+    history: HistoryStore,
+    history_session: Option<ActiveHistorySession>,
     last_saved_position_bucket: u64,
 }
 
 impl PlaybackRuntime {
-    pub(crate) fn new(store: StateStore) -> Result<Self, String> {
+    pub(crate) fn new(store: StateStore, history: HistoryStore) -> Result<Self, String> {
         let stored = store.load()?;
         let queue_result = if stored.queue.is_empty() {
             Ok((Vec::new(), 0))
@@ -131,6 +134,8 @@ impl PlaybackRuntime {
             repeat_mode: RepeatMode::from_stored(&stored.repeat_mode),
             error,
             store,
+            history,
+            history_session: None,
             last_saved_position_bucket: (position_seconds / 10.0).floor() as u64,
         })
     }
@@ -228,7 +233,11 @@ impl PlaybackRuntime {
 
     pub(crate) fn persist_for_shutdown(&mut self) -> Result<(), String> {
         self.capture_position();
-        self.persist()
+        self.observe_history();
+        self.finish_history("interrupted");
+        let history_result = self.history.publish_if_due(true).map(|_| ());
+        self.persist()?;
+        history_result
     }
 
     fn capture_position(&mut self) {
@@ -239,6 +248,49 @@ impl PlaybackRuntime {
             && !player.empty()
         {
             self.position_seconds = player.get_pos().as_secs_f64();
+        }
+    }
+
+    fn begin_history(&mut self) {
+        let Some(track) = self.current_track().cloned() else {
+            return;
+        };
+        match self.history.begin_session(&track, self.position_seconds) {
+            Ok(session) => self.history_session = Some(session),
+            Err(error) => self.history.record_error(error),
+        }
+    }
+
+    fn observe_history(&mut self) {
+        let Some(active) = self.history_session.as_mut() else {
+            return;
+        };
+        if let Err(error) = self.history.observe_position(active, self.position_seconds) {
+            self.history.record_error(error);
+        }
+    }
+
+    fn reset_history_position(&mut self) {
+        if let Some(active) = self.history_session.as_mut() {
+            self.history
+                .reset_position(active, self.position_seconds.max(0.0));
+        }
+    }
+
+    fn finish_history(&mut self, outcome: &'static str) {
+        let Some(active) = self.history_session.take() else {
+            return;
+        };
+        if let Err(error) = self.history.finish_session(&active, outcome) {
+            self.history.record_error(error);
+        }
+    }
+
+    pub(crate) fn set_play_threshold_seconds(&mut self, value: u32) {
+        if let Some(active) = self.history_session.as_mut()
+            && let Err(error) = self.history.refresh_active_threshold(active, value)
+        {
+            self.history.record_error(error);
         }
     }
 
@@ -267,6 +319,12 @@ impl PlaybackRuntime {
     }
 
     fn finish_current(&mut self) {
+        self.position_seconds = self
+            .current_track()
+            .and_then(|track| track.duration_seconds)
+            .unwrap_or_default() as f64;
+        self.observe_history();
+        self.finish_history("completed");
         let next = if self.repeat_mode == RepeatMode::One {
             self.current_index
         } else {
@@ -276,6 +334,8 @@ impl PlaybackRuntime {
             self.current_index = Some(next);
             if let Err(error) = self.load_current(true, 0.0) {
                 self.set_error(error);
+            } else {
+                self.begin_history();
             }
         } else {
             self.status = PlaybackStatus::Stopped;
@@ -294,6 +354,7 @@ impl PlaybackRuntime {
                 self.finish_current();
             } else {
                 self.capture_position();
+                self.observe_history();
             }
         }
         let bucket = (self.position_seconds / 10.0).floor() as u64;
@@ -324,6 +385,9 @@ impl PlaybackRuntime {
             .position(|reference| reference.track_key == start_track_key)
             .ok_or_else(|| "The selected track is not part of this queue.".to_owned())?;
         let queue = catalog::load_tracks_by_ids(&track_references, &self.store)?;
+        self.capture_position();
+        self.observe_history();
+        self.finish_history("skipped");
         self.queue = queue;
         self.current_index = Some(start_index);
         self.position_seconds = 0.0;
@@ -332,6 +396,7 @@ impl PlaybackRuntime {
             let _ = self.persist();
             return Err(error);
         }
+        self.begin_history();
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -342,6 +407,7 @@ impl PlaybackRuntime {
         }
         if self.status == PlaybackStatus::Playing {
             self.capture_position();
+            self.observe_history();
             if let Some(player) = &self.player {
                 player.pause();
             }
@@ -350,10 +416,17 @@ impl PlaybackRuntime {
             self.player.as_ref().expect("player exists").play();
             self.status = PlaybackStatus::Playing;
             self.error = None;
+            if self.history_session.is_none() {
+                self.begin_history();
+            } else {
+                self.reset_history_position();
+            }
         } else if let Err(error) = self.load_current(true, self.position_seconds) {
             let error = self.set_error(error);
             let _ = self.persist();
             return Err(error);
+        } else {
+            self.begin_history();
         }
         self.persist()?;
         Ok(self.snapshot())
@@ -363,17 +436,22 @@ impl PlaybackRuntime {
         let next = self
             .choose_next_index(self.repeat_mode == RepeatMode::All)
             .ok_or_else(|| "There is no next track in the queue.".to_owned())?;
+        self.capture_position();
+        self.observe_history();
+        self.finish_history("skipped");
         self.current_index = Some(next);
         if let Err(error) = self.load_current(true, 0.0) {
             let error = self.set_error(error);
             return Err(error);
         }
+        self.begin_history();
         self.persist()?;
         Ok(self.snapshot())
     }
 
     pub(crate) fn previous(&mut self) -> Result<PlaybackSnapshot, String> {
         self.capture_position();
+        self.observe_history();
         if self.position_seconds > 3.0 {
             return self.seek(0.0);
         }
@@ -387,11 +465,13 @@ impl PlaybackRuntime {
         } else {
             0
         };
+        self.finish_history("skipped");
         self.current_index = Some(previous);
         if let Err(error) = self.load_current(true, 0.0) {
             let error = self.set_error(error);
             return Err(error);
         }
+        self.begin_history();
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -403,6 +483,10 @@ impl PlaybackRuntime {
             .unwrap_or_default() as f64;
         let target = position_seconds.clamp(0.0, duration.max(0.0));
         let was_playing = self.status == PlaybackStatus::Playing;
+        if was_playing {
+            self.capture_position();
+            self.observe_history();
+        }
         if self.player.as_ref().is_none_or(Player::empty) {
             self.load_current(was_playing, target)
                 .map_err(|error| self.set_error(error))?;
@@ -416,6 +500,8 @@ impl PlaybackRuntime {
                 })?;
             self.position_seconds = target;
         }
+        self.position_seconds = target;
+        self.reset_history_position();
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -452,8 +538,12 @@ impl PlaybackRuntime {
             return Err("This queue item no longer exists.".to_owned());
         }
         self.capture_position();
+        self.observe_history();
         let was_playing = self.status == PlaybackStatus::Playing;
         let current = self.current_index;
+        if current == Some(index) {
+            self.finish_history("skipped");
+        }
         self.queue.remove(index);
         if self.queue.is_empty() {
             if let Some(player) = &self.player {
@@ -466,6 +556,9 @@ impl PlaybackRuntime {
             self.current_index = Some(index.min(self.queue.len() - 1));
             self.load_current(was_playing, 0.0)
                 .map_err(|error| self.set_error(error))?;
+            if was_playing {
+                self.begin_history();
+            }
         } else if current.is_some_and(|current| index < current) {
             self.current_index = current.map(|current| current - 1);
         }
@@ -494,6 +587,9 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn clear_queue(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.capture_position();
+        self.observe_history();
+        self.finish_history("skipped");
         if let Some(player) = &self.player {
             player.stop();
         }

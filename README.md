@@ -1,15 +1,19 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.7.1 makes Desktop and Laptop Mode visually distinct and repairs harmless OneDrive split branches without weakening protection for real conflicts.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.8.0 adds private, cross-device listening memory with a configurable definition of a registered play.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.7.1 slice
+## Current 0.8.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Persistent icon-only device mode: a monitor identifies Desktop Mode, a laptop identifies Laptop Mode, and each computer remembers its own choice in `aurora-device.json` outside the shared state database.
 - Exact runtime-only drive translation from `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`; the catalog and stable track identities remain unchanged.
 - Verified SQLite state snapshots at `%USERPROFILE%\OneDrive\_musicbackup\aurora-state.sqlite3`, published at most once per minute and once more on clean shutdown.
+- Per-device listening journals in local `aurora-history.sqlite3` databases, mirrored as separately named, validated OneDrive snapshots so Desktop and Laptop sessions can be combined without creating shared-state conflicts.
+- A configurable 1–3600 second played threshold, defaulting to 30 seconds. Only observed forward playback counts; seeking does not inflate listening time, and a shorter track counts when it naturally finishes.
+- A bounded History timeline with outcome, device, date, and text filters; registered-play, listening-time, unique-track, skip, and most-played summaries; and direct replay/inspection actions.
+- Personal registered plays, listening time, and last-listened time in the selected-track inspector, kept distinct from imported Last.fm popularity.
 - First-run laptop recovery copies a valid OneDrive snapshot into Aurora app data before SQLite opens. Newer clean snapshots are also applied only before open, with a retained local safety copy.
 - Sync lineage, generations, and logical revisions detect two-computer divergence. Aurora reports a conflict and preserves both files instead of using unsafe newest-file-wins behavior.
 - Equivalent OneDrive branches reconcile automatically when only transient catalog IDs, playback position, import-run markers, or retry timestamps differ. Stable queue identity and user-authored tag, journal, playback-setting, and curation differences still block automatic replacement.
@@ -44,7 +48,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. The app-owned database is mirrored as a consistent SQLite snapshot rather than copied while live. See [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. Listening events deliberately use a separate per-device database instead of the single shared state snapshot. All OneDrive copies are consistent SQLite snapshots rather than copies of live WAL-backed files. See [docs/listening-history-contract.md](docs/listening-history-contract.md), [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), and [docs/playback-contract.md](docs/playback-contract.md).
 
 ## Data model
 
@@ -62,7 +66,7 @@ The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,32
 - The music catalog at the default `%APPDATA%` path above
 - The referenced MP3 files and album-cover archive mounted at their cataloged paths for playback and real artwork
 - For Laptop Mode, the equivalent library roots mounted at `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`
-- A locally available `%USERPROFILE%\OneDrive\_musicbackup` directory for Aurora state mirroring; catalog browsing still works and reports a sync warning when it is unavailable
+- A locally available `%USERPROFILE%\OneDrive\_musicbackup` directory for Aurora state and per-device history mirroring; catalog browsing and local history still work and report a sync warning when it is unavailable
 - Optional local MusicBrainz sources under `%USERPROFILE%\OneDrive\_musicbackup` for Constellations enrichment; Aurora remains usable when either source is missing
 
 ## Develop and verify
@@ -89,7 +93,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.7.1`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Push a SemVer tag matching all three manifests, for example `v0.8.0`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
 
 Before tagging a new version:
 

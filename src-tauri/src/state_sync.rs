@@ -630,7 +630,7 @@ fn checkpoint_and_remove_sidecars(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn consistent_copy(source: &Path, destination: &Path) -> Result<(), String> {
+pub(crate) fn consistent_copy(source: &Path, destination: &Path) -> Result<(), String> {
     if destination.exists() {
         return Err("Aurora's state snapshot destination already exists.".to_owned());
     }
@@ -738,7 +738,7 @@ fn new_token(label: &str) -> String {
     )
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -747,7 +747,7 @@ fn now_ms() -> i64 {
 }
 
 #[cfg(windows)]
-fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> {
+pub(crate) fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
 
     #[link(name = "Kernel32")]
@@ -791,7 +791,7 @@ fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> 
 }
 
 #[cfg(not(windows))]
-fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> {
+pub(crate) fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(), String> {
     fs::rename(replacement, target)
         .map_err(|error| format!("Could not replace Aurora's state snapshot: {error}"))
 }

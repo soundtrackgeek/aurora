@@ -38,6 +38,11 @@ import {
 } from "./components/explorer/DeepExplorer";
 import { ArtistWorld, type ArtistWorldState } from "./components/musicbrainz/ArtistWorld";
 import { Observatory, type ObservatoryLoadState } from "./components/curation/Observatory";
+import {
+  ListeningHistory,
+  type HistoryDateRange,
+  type HistoryLoadState,
+} from "./components/history/ListeningHistory";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { TagEditor } from "./components/TagEditor";
@@ -71,6 +76,14 @@ import {
   type ReleaseDecisionRequest,
 } from "./musicbrainz";
 import { usePlayback } from "./playback";
+import {
+  loadHistoryPage,
+  loadTrackHistoryInsight,
+  saveHistoryPlayThreshold,
+  type HistoryOutcomeFilter,
+  type HistoryPage,
+  type TrackHistoryInsight,
+} from "./history";
 import {
   loadLaptopModeStatus,
   updateLaptopMode,
@@ -181,6 +194,17 @@ async function loadExplorerPage(
   return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor };
 }
 
+function historyDateLabel(timestamp: number | null): string {
+  if (timestamp === null) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
 function EmptyInspector() {
   return (
     <div className="inspector-empty">
@@ -265,6 +289,7 @@ function App() {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight } | null>(null);
   const [inspectorView, setInspectorView] = useState<"track" | "artist">("track");
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
@@ -306,11 +331,23 @@ function App() {
   const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
   const [laptopModeBusy, setLaptopModeBusy] = useState(false);
   const [laptopModeError, setLaptopModeError] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState<HistoryPage | null>(null);
+  const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyOutcome, setHistoryOutcome] = useState<HistoryOutcomeFilter>("all");
+  const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
+  const [historyDateRange, setHistoryDateRange] = useState<HistoryDateRange>("all");
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historySavingThreshold, setHistorySavingThreshold] = useState(false);
+  const [historyThresholdMessage, setHistoryThresholdMessage] = useState<string | null>(null);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
   const albumRequestRef = useRef(0);
   const artistRequestRef = useRef(0);
   const reviewRequestRef = useRef(0);
+  const historyRequestRef = useRef(0);
   const reconciliationRunningRef = useRef(false);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const updater = useAuroraUpdater();
@@ -362,10 +399,29 @@ function App() {
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
 
+  useEffect(() => {
+    const trackKey = selectedTrack?.trackKey;
+    if (!trackKey) return;
+    let cancelled = false;
+    const refresh = () => {
+      void loadTrackHistoryInsight(trackKey)
+        .then((value) => {
+          if (!cancelled) setTrackHistory({ trackKey, value });
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedTrack?.trackKey]);
+
   const libraryReady = snapshot !== null;
 
   useEffect(() => {
-    if (!libraryReady || activeNav === "Observatory") return;
+    if (!libraryReady || activeNav === "Observatory" || activeNav === "History") return;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -428,6 +484,56 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [activeNav, libraryReady, reviewFilter, reviewSearch, reviewReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || (activeNav !== "History" && activeNav !== "Universe")) return;
+    const requestId = ++historyRequestRef.current;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (activeNav === "History") setHistoryLoadState("loading");
+      setHistoryError(null);
+      const startedAfterMs = activeNav === "History" && historyDateRange !== "all"
+        ? Date.now() - Number(historyDateRange) * 86_400_000
+        : undefined;
+      void loadHistoryPage({
+        pageSize: activeNav === "History" ? 50 : 5,
+        search: activeNav === "History" ? historySearch.trim() || undefined : undefined,
+        outcome: activeNav === "History" ? historyOutcome : "all",
+        deviceId: activeNav === "History" ? historyDeviceId ?? undefined : undefined,
+        startedAfterMs,
+      })
+        .then((page) => {
+          if (cancelled || requestId !== historyRequestRef.current) return;
+          setHistoryPage(page);
+          setHistoryLoadState("ready");
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== historyRequestRef.current) return;
+          setHistoryError(error instanceof Error ? error.message : String(error));
+          setHistoryLoadState("error");
+        });
+    }, activeNav === "History" && historySearch.trim() ? 160 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeNav,
+    libraryReady,
+    historySearch,
+    historyOutcome,
+    historyDeviceId,
+    historyDateRange,
+    historyReloadToken,
+  ]);
+
+  useEffect(() => {
+    if (activeNav !== "History") return;
+    const interval = window.setInterval(() => {
+      setHistoryReloadToken((value) => value + 1);
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [activeNav]);
 
   const applyReconciliationChanges = useCallback((changes: TagReconciliationChange[]) => {
     if (changes.length === 0) return;
@@ -584,7 +690,7 @@ function App() {
 
   function navigate(label: string) {
     setActiveNav(label);
-    if (label === "Observatory") return;
+    if (label === "Observatory" || label === "History") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -801,6 +907,56 @@ function App() {
     }
   }
 
+  async function loadMoreHistory() {
+    if (!historyPage?.nextCursor || historyLoadingMore) return;
+    const requestId = ++historyRequestRef.current;
+    setHistoryLoadingMore(true);
+    try {
+      const startedAfterMs = historyDateRange === "all"
+        ? undefined
+        : Date.now() - Number(historyDateRange) * 86_400_000;
+      const next = await loadHistoryPage({
+        pageSize: 50,
+        cursor: historyPage.nextCursor,
+        search: historySearch.trim() || undefined,
+        outcome: historyOutcome,
+        deviceId: historyDeviceId ?? undefined,
+        startedAfterMs,
+      });
+      if (requestId !== historyRequestRef.current) return;
+      setHistoryPage((current) => current ? {
+        ...next,
+        items: [...current.items, ...next.items],
+      } : next);
+    } catch (error) {
+      if (requestId === historyRequestRef.current) {
+        setHistoryError(error instanceof Error ? error.message : String(error));
+        setHistoryLoadState("error");
+      }
+    } finally {
+      if (requestId === historyRequestRef.current) setHistoryLoadingMore(false);
+    }
+  }
+
+  async function savePlayedThreshold(value: number) {
+    setHistorySavingThreshold(true);
+    setHistoryThresholdMessage(null);
+    try {
+      const saved = await saveHistoryPlayThreshold(value);
+      setHistoryPage((current) => current ? { ...current, playThresholdSeconds: saved } : current);
+      setHistoryThresholdMessage(`A play now registers after ${saved} ${saved === 1 ? "second" : "seconds"}.`);
+    } catch (error) {
+      setHistoryThresholdMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistorySavingThreshold(false);
+    }
+  }
+
+  function playHistoryTrack(track: Track) {
+    selectTrack(track);
+    void playback.play([track], track.id);
+  }
+
   function submitSearch(event: FormEvent) {
     event.preventDefault();
   }
@@ -864,7 +1020,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.7.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.8.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>
@@ -874,15 +1030,17 @@ function App() {
           <Search aria-hidden="true" />
           <input
             ref={searchRef}
-            value={activeNav === "Observatory" ? reviewSearch : explorerFilters.query}
+            value={activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query}
             onChange={(event) => activeNav === "Observatory"
               ? setReviewSearch(event.target.value)
-              : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
-            placeholder={activeNav === "Observatory" ? "Search artists to review…" : "Search your universe…"}
-            aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : "Search your music universe"}
+              : activeNav === "History"
+                ? setHistorySearch(event.target.value)
+                : setExplorerFilters((current) => ({ ...current, query: event.target.value }))}
+            placeholder={activeNav === "Observatory" ? "Search artists to review…" : activeNav === "History" ? "Search listening history…" : "Search your universe…"}
+            aria-label={activeNav === "Observatory" ? "Search MusicBrainz review artists" : activeNav === "History" ? "Search listening history" : "Search your music universe"}
           />
-          {(activeNav === "Observatory" ? reviewSearch : explorerFilters.query)
-            ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
+          {(activeNav === "Observatory" ? reviewSearch : activeNav === "History" ? historySearch : explorerFilters.query)
+            ? <button type="button" aria-label="Clear search" onClick={() => activeNav === "Observatory" ? setReviewSearch("") : activeNav === "History" ? setHistorySearch("") : setExplorerFilters((current) => ({ ...current, query: "" }))}><X aria-hidden="true" /></button>
             : <kbd>Ctrl K</kbd>}
         </form>
         <div className="topbar__actions">
@@ -921,6 +1079,28 @@ function App() {
                 onUndo={() => void undoCuration()}
                 onExport={() => void exportCuration()}
               />
+            ) : activeNav === "History" ? (
+              <ListeningHistory
+                page={historyPage}
+                loadState={historyLoadState}
+                errorMessage={historyError}
+                search={historySearch}
+                outcome={historyOutcome}
+                deviceId={historyDeviceId}
+                dateRange={historyDateRange}
+                isLoadingMore={historyLoadingMore}
+                isSavingThreshold={historySavingThreshold}
+                thresholdMessage={historyThresholdMessage}
+                onSearchChange={setHistorySearch}
+                onOutcomeChange={setHistoryOutcome}
+                onDeviceChange={setHistoryDeviceId}
+                onDateRangeChange={setHistoryDateRange}
+                onSaveThreshold={(value) => void savePlayedThreshold(value)}
+                onSelectTrack={selectTrack}
+                onPlayTrack={playHistoryTrack}
+                onLoadMore={() => void loadMoreHistory()}
+                onRefresh={() => setHistoryReloadToken((value) => value + 1)}
+              />
             ) : <>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
@@ -938,6 +1118,13 @@ function App() {
                   {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
                 </article>
               </section>
+              {historyPage && (
+                <section className="memory-strip" aria-label="Listening memory">
+                  <div className="memory-strip__heading"><Clock3 aria-hidden="true" /><span><strong>Listening Memory</strong><small>{formatCount(historyPage.summary.plays)} registered plays across {historyPage.devices.length || 1} {historyPage.devices.length === 1 ? "device" : "devices"}</small></span></div>
+                  {historyPage.items[0] ? <div className="memory-strip__recent"><span>Last heard</span><strong>{historyPage.items[0].title}</strong><small>{historyPage.items[0].artist}</small></div> : <div className="memory-strip__recent"><span>Ready to remember</span><strong>Play something you love</strong><small>It counts after {historyPage.playThresholdSeconds} seconds</small></div>}
+                  <button type="button" onClick={() => navigate("History")}>Open History <ChevronRight aria-hidden="true" /></button>
+                </section>
+              )}
               </> : null}
 
               <DeepExplorer
@@ -1033,6 +1220,9 @@ function App() {
               <div><dt>Genre</dt><dd>{selectedTrack.genre ?? "Unknown"}</dd></div>
               <div><dt>Last.fm popularity</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
+              <div><dt>Your registered plays</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? formatCount(trackHistory.value.plays) : "—"}</dd></div>
+              <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
+              <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
             <TagEditor key={`${selectedTrack.id}:${inlineTagRevisions[selectedTrack.trackKey] ?? 0}`} track={selectedTrack} onTrackChange={applyTrackChange} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>

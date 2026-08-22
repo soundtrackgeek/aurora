@@ -4,6 +4,33 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-22
+
+### Added
+
+- Native per-device listening journals with stable installation identity, crash recovery, and separately named OneDrive snapshots for Desktop and Laptop histories.
+- A configurable 1–3600 second registered-play threshold, defaulting to 30 seconds, with active-session updates and natural-completion handling for shorter tracks.
+- A bounded Listening Memory screen with all-time summary, most-played tracks, grouped timeline, text/outcome/device/date filters, keyset pagination, replay, and catalog inspection.
+- Personal registered plays, listening time, and last-listened time in the track inspector, explicitly separated from imported Last.fm popularity.
+- A compact listening-memory summary on Universe plus browser-preview and native regression coverage for history behavior.
+
+### Changed
+
+- Playback now records only observed positive forward progress; seeking resets the timing baseline instead of adding the seek distance.
+- Next/previous, queue replacement/removal/clear, natural completion, clean shutdown, and abnormal-startup recovery give sessions explicit completed, skipped, or interrupted outcomes.
+- Existing device settings migrate in place to include a stable device ID and computer label without changing the persistent Desktop/Laptop choice.
+
+### Security
+
+- High-frequency listening events do not enter the shared `aurora-state.sqlite3` conflict lineage. Each installation is the sole writer of its local history and its own device-named OneDrive snapshot.
+- History snapshots use consistent SQLite copies, ownership/schema checks, `quick_check`, and atomic replacement; peer databases are query-only and corrupt or unsupported peers are skipped without risking local history.
+- History and track-insight requests are validated and bounded. Old sessions retain metadata but cannot replay unless their stable identity resolves through the read-only catalog.
+
+### Known limits
+
+- Listening memory starts with Aurora 0.8.0; it does not infer historical personal plays from Last.fm popularity or import MusicBee playback history.
+- Peer history depends on OneDrive propagation and is eventually visible rather than a live two-computer stream.
+
 ## [0.7.1] - 2026-08-22
 
 ### Added

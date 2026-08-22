@@ -198,6 +198,18 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .source-card > svg:first-child { color: #68a7ff; }
 .source-card > svg:last-child { width: 15px; margin-left: auto; color: #56db98; }
 
+.memory-strip { display: grid; grid-template-columns: minmax(230px, 1.3fr) minmax(180px, 1fr) auto; align-items: center; gap: 12px; min-height: 60px; margin: -1px 0 10px; padding: 9px 12px; border: 1px solid rgba(126, 203, 216, .16); border-radius: 10px; background: linear-gradient(115deg, rgba(18, 76, 88, .15), rgba(28, 15, 42, .17)); }
+.memory-strip__heading { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.memory-strip__heading > svg { flex: 0 0 auto; width: 17px; height: 17px; color: #72d3df; }
+.memory-strip__heading span, .memory-strip__recent { display: block; min-width: 0; }
+.memory-strip strong, .memory-strip small, .memory-strip__recent > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-strip strong { color: #e3e8ed; font-size: 10px; font-weight: 500; }
+.memory-strip small, .memory-strip__recent > span { margin-top: 3px; color: var(--subtle); font-size: 8px; }
+.memory-strip__recent { padding-left: 12px; border-left: 1px solid var(--border); }
+.memory-strip__recent > span { margin: 0 0 3px; color: #8b67a2; text-transform: uppercase; letter-spacing: .08em; }
+.memory-strip > button { display: flex; align-items: center; gap: 5px; height: 31px; padding: 0 10px; border: 1px solid rgba(176, 101, 224, .26); border-radius: 7px; color: #dfb8f7; background: rgba(106, 44, 147, .18); font-size: 9px; cursor: pointer; }
+.memory-strip > button svg { width: 11px; height: 11px; }
+
 .library-panel { min-height: 330px; border: 1px solid var(--border-bright); border-radius: 13px; background: rgba(7,13,20,.9); overflow: hidden; }
 .library-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 15px; min-height: 58px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .library-toolbar h2 { margin: 0; font-size: 15px; font-weight: 500; }

@@ -1,9 +1,12 @@
+use crate::state_sync;
 use serde::{Deserialize, Serialize};
 use std::{
+    env,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 static LAPTOP_MODE: AtomicBool = AtomicBool::new(false);
@@ -18,6 +21,10 @@ const PATH_MAPPINGS: [(&str, &str); 3] = [
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeviceSettingsFile {
     laptop_mode: bool,
+    #[serde(default)]
+    device_id: Option<String>,
+    #[serde(default)]
+    device_name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -32,36 +39,66 @@ pub(crate) struct PathMappingStatus {
 pub(crate) struct DeviceModeStore {
     path: PathBuf,
     laptop_mode: bool,
+    device_id: String,
+    device_name: String,
     warning: Option<String>,
 }
 
 impl DeviceModeStore {
     pub(crate) fn load(path: PathBuf) -> Self {
         let mut warning = None;
-        let laptop_mode = if path.is_file() {
+        let loaded = if path.is_file() {
             match fs::read_to_string(&path)
                 .map_err(|error| error.to_string())
                 .and_then(|json| {
                     serde_json::from_str::<DeviceSettingsFile>(&json)
                         .map_err(|error| error.to_string())
                 }) {
-                Ok(settings) => settings.laptop_mode,
+                Ok(settings) => Some(settings),
                 Err(error) => {
                     warning = Some(format!(
                         "Aurora could not read this device's Laptop Mode setting and used Desktop Mode: {error}"
                     ));
-                    false
+                    None
                 }
             }
         } else {
-            false
+            None
         };
+        let laptop_mode = loaded.as_ref().is_some_and(|settings| settings.laptop_mode);
+        let device_name = loaded
+            .as_ref()
+            .and_then(|settings| settings.device_name.as_deref())
+            .filter(|name| valid_device_name(name))
+            .map(str::to_owned)
+            .unwrap_or_else(default_device_name);
+        let device_id = loaded
+            .as_ref()
+            .and_then(|settings| settings.device_id.as_deref())
+            .filter(|id| valid_device_id(id))
+            .map(str::to_owned)
+            .unwrap_or_else(|| new_device_id(&device_name));
+        let needs_identity_save = loaded.as_ref().is_none_or(|settings| {
+            settings.device_id.as_deref() != Some(device_id.as_str())
+                || settings.device_name.as_deref() != Some(device_name.as_str())
+        });
         set_laptop_mode_runtime(laptop_mode);
-        Self {
+        let mut store = Self {
             path,
             laptop_mode,
+            device_id,
+            device_name,
             warning,
+        };
+        if needs_identity_save && let Err(error) = store.persist() {
+            store.warning = Some(match store.warning.take() {
+                Some(existing) => {
+                    format!("{existing} Aurora could not save this device's identity: {error}")
+                }
+                None => format!("Aurora could not save this device's identity: {error}"),
+            });
         }
+        store
     }
 
     pub(crate) fn laptop_mode(&self) -> bool {
@@ -72,7 +109,42 @@ impl DeviceModeStore {
         self.warning.as_deref()
     }
 
+    pub(crate) fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
+    pub(crate) fn device_name(&self) -> &str {
+        &self.device_name
+    }
+
     pub(crate) fn set_laptop_mode(&mut self, enabled: bool) -> Result<(), String> {
+        let previous = self.laptop_mode;
+        self.laptop_mode = enabled;
+        if let Err(error) = self.persist() {
+            self.laptop_mode = previous;
+            return Err(error);
+        }
+        self.warning = None;
+        set_laptop_mode_runtime(enabled);
+        Ok(())
+    }
+
+    pub(crate) fn adopt_device_id(&mut self, device_id: &str) -> Result<(), String> {
+        if !valid_device_id(device_id) {
+            return Err("Aurora's recovered device identity is invalid.".to_owned());
+        }
+        if self.device_id == device_id {
+            return Ok(());
+        }
+        let previous = std::mem::replace(&mut self.device_id, device_id.to_owned());
+        if let Err(error) = self.persist() {
+            self.device_id = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn persist(&self) -> Result<(), String> {
         let parent = self
             .path
             .parent()
@@ -81,19 +153,84 @@ impl DeviceModeStore {
             format!("Could not create Aurora's device settings folder: {error}")
         })?;
         let json = serde_json::to_vec_pretty(&DeviceSettingsFile {
-            laptop_mode: enabled,
+            laptop_mode: self.laptop_mode,
+            device_id: Some(self.device_id.clone()),
+            device_name: Some(self.device_name.clone()),
         })
         .map_err(|error| format!("Could not encode Aurora's device setting: {error}"))?;
-        let mut file = File::create(&self.path)
+        let temporary = parent.join(format!(
+            ".aurora-device-{}-{}.tmp",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut file = File::options()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
             .map_err(|error| format!("Could not save Aurora's device setting: {error}"))?;
-        file.write_all(&json)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| format!("Could not flush Aurora's device setting: {error}"))?;
-        self.laptop_mode = enabled;
-        self.warning = None;
-        set_laptop_mode_runtime(enabled);
-        Ok(())
+        if let Err(error) = file.write_all(&json).and_then(|_| file.sync_all()) {
+            drop(file);
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Could not flush Aurora's device setting: {error}"));
+        }
+        drop(file);
+        let result = if self.path.is_file() {
+            state_sync::replace_file_atomic(&self.path, &temporary)
+        } else {
+            fs::rename(&temporary, &self.path)
+                .map_err(|error| format!("Could not install Aurora's device setting: {error}"))
+        };
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
     }
+}
+
+fn valid_device_id(value: &str) -> bool {
+    (8..=96).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn valid_device_name(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 80 && !value.chars().any(char::is_control)
+}
+
+fn default_device_name() -> String {
+    env::var("COMPUTERNAME")
+        .ok()
+        .filter(|name| valid_device_name(name))
+        .unwrap_or_else(|| "This computer".to_owned())
+}
+
+fn new_device_id(device_name: &str) -> String {
+    let slug = device_name
+        .chars()
+        .filter_map(|character| {
+            if character.is_ascii_alphanumeric() {
+                Some(character.to_ascii_lowercase())
+            } else if character == '-' || character == '_' {
+                Some(character)
+            } else {
+                None
+            }
+        })
+        .take(32)
+        .collect::<String>();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "device-{}-{}-{nanos}",
+        if slug.is_empty() { "computer" } else { &slug },
+        std::process::id()
+    )
 }
 
 pub(crate) fn laptop_mode_enabled() -> bool {
@@ -219,8 +356,23 @@ mod tests {
         let mut settings = DeviceModeStore::load(path.clone());
         assert!(!settings.laptop_mode());
         settings.set_laptop_mode(true).expect("enable laptop mode");
+        let device_id = settings.device_id().to_owned();
         let restored = DeviceModeStore::load(path.clone());
         assert!(restored.laptop_mode());
+        assert_eq!(restored.device_id(), device_id);
+        let _ = fs::remove_file(path);
+        set_laptop_mode_runtime(false);
+    }
+
+    #[test]
+    fn legacy_device_setting_gains_a_stable_identity() {
+        let path = temporary_settings_path();
+        fs::write(&path, r#"{ "laptopMode": true }"#).expect("legacy setting");
+        let migrated = DeviceModeStore::load(path.clone());
+        let device_id = migrated.device_id().to_owned();
+        assert!(migrated.laptop_mode());
+        assert!(valid_device_id(&device_id));
+        assert_eq!(DeviceModeStore::load(path.clone()).device_id(), device_id);
         let _ = fs::remove_file(path);
         set_laptop_mode_runtime(false);
     }

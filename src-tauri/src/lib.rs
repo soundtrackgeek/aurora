@@ -4,6 +4,7 @@ mod curation;
 mod curation_store;
 mod device_mode;
 mod explorer;
+mod history;
 mod laptop_mode;
 mod musicbrainz;
 mod playback;
@@ -18,6 +19,7 @@ use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
     TrackPage, TrackPageRequest,
 };
+use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
@@ -375,6 +377,45 @@ async fn set_laptop_mode(app: AppHandle, enabled: bool) -> Result<LaptopModeStat
     .map_err(|error| format!("The Laptop Mode setting stopped unexpectedly: {error}"))?
 }
 
+#[tauri::command]
+async fn listening_history_page(
+    app: AppHandle,
+    request: HistoryPageRequest,
+) -> Result<HistoryPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        let store = app.state::<StateStore>();
+        history.page(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The listening-history worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn track_history_insight(
+    app: AppHandle,
+    track_key: String,
+) -> Result<TrackHistoryInsight, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        history.track_insight(&track_key)
+    })
+    .await
+    .map_err(|error| format!("The track-history worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+fn set_history_play_threshold(app: AppHandle, play_threshold_seconds: u32) -> Result<u32, String> {
+    let history = app.state::<HistoryStore>();
+    let value = history.set_play_threshold_seconds(play_threshold_seconds)?;
+    let playback = app.state::<PlaybackState>();
+    let mut runtime = playback
+        .lock()
+        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+    runtime.set_play_threshold_seconds(value);
+    Ok(value)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -390,17 +431,39 @@ pub fn run() {
             let startup_sync =
                 state_sync::prepare_state_before_open(&state_path, &remote_state_path);
             let store = StateStore::new(state_path).map_err(std::io::Error::other)?;
+            let history_path = state_directory.join("aurora-history.sqlite3");
+            let mut device_settings =
+                device_mode::DeviceModeStore::load(state_directory.join("aurora-device.json"));
+            if let Some(device_id) =
+                HistoryStore::local_device_id(&history_path).map_err(std::io::Error::other)?
+            {
+                device_settings
+                    .adopt_device_id(&device_id)
+                    .map_err(std::io::Error::other)?;
+            }
+            let history_directory = remote_state_path.parent().ok_or_else(|| {
+                std::io::Error::other("Aurora's OneDrive state path has no parent directory.")
+            })?;
+            let history = HistoryStore::new(
+                history_path,
+                history_directory.to_path_buf(),
+                device_settings.device_id().to_owned(),
+                device_settings.device_name().to_owned(),
+            )
+            .map_err(std::io::Error::other)?;
             let mut laptop_runtime = LaptopModeRuntime::new(
-                &state_directory,
+                device_settings,
                 store.clone(),
                 remote_state_path,
                 startup_sync,
             )
             .map_err(std::io::Error::other)?;
-            let runtime = PlaybackRuntime::new(store.clone()).map_err(std::io::Error::other)?;
+            let runtime = PlaybackRuntime::new(store.clone(), history.clone())
+                .map_err(std::io::Error::other)?;
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
             let _ = laptop_runtime.status(true);
             app.manage(store);
+            app.manage(history);
             app.manage(Mutex::new(runtime));
             app.manage(Mutex::new(tag_service));
             app.manage(Mutex::new(laptop_runtime));
@@ -451,6 +514,9 @@ pub fn run() {
             refresh_external_tag_changes,
             laptop_mode_status,
             set_laptop_mode,
+            listening_history_page,
+            track_history_insight,
+            set_history_play_threshold,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aurora");

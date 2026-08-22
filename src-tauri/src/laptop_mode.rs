@@ -4,7 +4,7 @@ use crate::{
     state_sync::{StartupSyncOutcome, StateMirrorStatus, StateSyncService},
 };
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,12 +26,11 @@ pub(crate) struct LaptopModeRuntime {
 
 impl LaptopModeRuntime {
     pub(crate) fn new(
-        state_directory: &Path,
+        settings: DeviceModeStore,
         store: StateStore,
         remote_path: PathBuf,
         startup_outcome: StartupSyncOutcome,
     ) -> Result<Self, String> {
-        let settings = DeviceModeStore::load(state_directory.join("aurora-device.json"));
         let sync = StateSyncService::new(store, remote_path, startup_outcome)?;
         Ok(Self { settings, sync })
     }
