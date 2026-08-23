@@ -9,6 +9,7 @@ import {
   Disc3,
   Download,
   FlaskConical,
+  FolderPlus,
   Gauge,
   Heart,
   Music2,
@@ -24,7 +25,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
 import {
@@ -201,6 +202,11 @@ import {
   type PublisherOverview,
   type PublisherSummary,
 } from "./publishers";
+
+const AddFolderDialog = lazy(async () => {
+  const module = await import("./components/AddFolderDialog");
+  return { default: module.AddFolderDialog };
+});
 
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
@@ -480,6 +486,7 @@ function App() {
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [addFolderOpen, setAddFolderOpen] = useState(false);
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
   const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
@@ -587,7 +594,9 @@ function App() {
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
   const catalogRevisionRef = useRef<number | null>(null);
-  const catalogRefreshRunningRef = useRef(false);
+  const catalogRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const catalogRefreshRequestedRef = useRef(false);
+  const appMountedRef = useRef(true);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
   const inspectorViewRef = useRef(inspectorView);
   const inspectorArtistNameRef = useRef(inspectorArtistName);
@@ -608,6 +617,13 @@ function App() {
   yearDetailRef.current = yearDetail;
   selectedYearAlbumRef.current = selectedYearAlbum;
   selectedRatingAlbumRef.current = selectedRatingAlbum;
+
+  useEffect(() => {
+    appMountedRef.current = true;
+    return () => {
+      appMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
@@ -738,75 +754,102 @@ function App() {
 
   const libraryReady = snapshot !== null;
 
+  const refreshCatalogIfChanged = useCallback((
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> => {
+    const shouldContinue = () => appMountedRef.current && isCurrent();
+    if (!shouldContinue()) return Promise.resolve(false);
+    const runningRefresh = catalogRefreshPromiseRef.current;
+    if (runningRefresh) {
+      catalogRefreshRequestedRef.current = true;
+      return runningRefresh;
+    }
+
+    const refreshOnce = async (): Promise<boolean> => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const revision = await loadCatalogRevision();
+        if (!shouldContinue()) return false;
+        const previousRevision = catalogRevisionRef.current;
+        if (previousRevision === null) {
+          catalogRevisionRef.current = revision;
+          return false;
+        }
+        if (revision === previousRevision) return false;
+
+        const reboundResult = await rebindPlaybackCatalog();
+        if (!shouldContinue() || reboundResult === null) return false;
+
+        const nextSnapshot = await loadLibrarySnapshot();
+        if (!shouldContinue()) return false;
+        if (!catalogRefreshIsConsistent(
+          revision,
+          reboundResult.catalogRevision,
+          nextSnapshot.catalogRevision,
+        )) {
+          if (attempt === 0) continue;
+          throw new Error("The Music Library catalog changed again during Aurora's refresh.");
+        }
+
+        const rebound = reboundResult.playback;
+        setLoadError(null);
+        setSnapshot(nextSnapshot);
+        const selectedKey = selectedTrackRef.current?.trackKey;
+        if (selectedKey) {
+          const reboundSelection = rebound.queue.find((track) => track.trackKey === selectedKey)
+            ?? nextSnapshot.tracks.find((track) => track.trackKey === selectedKey);
+          if (reboundSelection) setSelectedTrack(reboundSelection);
+        }
+        catalogRevisionRef.current = revision;
+
+        setExplorerReloadToken((value) => value + 1);
+        setReviewReloadToken((value) => value + 1);
+        setHistoryReloadToken((value) => value + 1);
+        setGenreIndexReloadToken((value) => value + 1);
+        setGenreDetailReloadToken((value) => value + 1);
+        setPublisherReloadToken((value) => value + 1);
+        setYearReloadToken((value) => value + 1);
+        setRatingsReloadToken((value) => value + 1);
+        setChartReloadToken((value) => value + 1);
+        setSyncMessage("Music Library import detected · refreshed Aurora");
+        const artistName = inspectorArtistNameRef.current;
+        if (inspectorViewRef.current === "artist" && artistName) {
+          openArtistInspectorRef.current(artistName);
+        }
+        return true;
+      }
+      return false;
+    };
+
+    const runRefresh = async (): Promise<boolean> => {
+      let refreshed = false;
+      do {
+        catalogRefreshRequestedRef.current = false;
+        refreshed = await refreshOnce() || refreshed;
+      } while (catalogRefreshRequestedRef.current && shouldContinue());
+      return refreshed;
+    };
+
+    const refreshTask = runRefresh().finally(() => {
+      if (catalogRefreshPromiseRef.current === refreshTask) {
+        catalogRefreshPromiseRef.current = null;
+      }
+    });
+    catalogRefreshPromiseRef.current = refreshTask;
+    return refreshTask;
+  }, [rebindPlaybackCatalog]);
+
   useEffect(() => {
     if (!libraryReady) return;
     let cancelled = false;
-
-    const refreshCatalogIfChanged = async () => {
-      if (catalogRefreshRunningRef.current) return;
-      catalogRefreshRunningRef.current = true;
-      try {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          const revision = await loadCatalogRevision();
-          if (cancelled) return;
-          const previousRevision = catalogRevisionRef.current;
-          if (previousRevision === null) {
-            catalogRevisionRef.current = revision;
-            return;
-          }
-          if (revision === previousRevision) return;
-
-          const reboundResult = await rebindPlaybackCatalog();
-          if (cancelled || reboundResult === null) return;
-
-          const nextSnapshot = await loadLibrarySnapshot();
-          if (cancelled) return;
-          if (!catalogRefreshIsConsistent(
-            revision,
-            reboundResult.catalogRevision,
-            nextSnapshot.catalogRevision,
-          )) {
-            if (attempt === 0) continue;
-            throw new Error("The Music Library catalog changed again during Aurora's refresh.");
-          }
-
-          const rebound = reboundResult.playback;
-          setLoadError(null);
-          setSnapshot(nextSnapshot);
-          const selectedKey = selectedTrackRef.current?.trackKey;
-          if (selectedKey) {
-            const reboundSelection = rebound.queue.find((track) => track.trackKey === selectedKey)
-              ?? nextSnapshot.tracks.find((track) => track.trackKey === selectedKey);
-            if (reboundSelection) setSelectedTrack(reboundSelection);
-          }
-          catalogRevisionRef.current = revision;
-
-          setExplorerReloadToken((value) => value + 1);
-          setReviewReloadToken((value) => value + 1);
-          setHistoryReloadToken((value) => value + 1);
-          setGenreIndexReloadToken((value) => value + 1);
-          setGenreDetailReloadToken((value) => value + 1);
-          setPublisherReloadToken((value) => value + 1);
-          setYearReloadToken((value) => value + 1);
-          setRatingsReloadToken((value) => value + 1);
-          setChartReloadToken((value) => value + 1);
-          setSyncMessage("Music Library import detected · refreshed Aurora");
-          const artistName = inspectorArtistNameRef.current;
-          if (inspectorViewRef.current === "artist" && artistName) {
-            openArtistInspectorRef.current(artistName);
-          }
-          return;
-        }
-      } catch (error) {
+    const isCurrent = () => !cancelled;
+    const refreshQuietly = () => {
+      void refreshCatalogIfChanged(isCurrent).catch((error: unknown) => {
         console.warn("Aurora could not check the Music Library catalog revision", error);
-      } finally {
-        catalogRefreshRunningRef.current = false;
-      }
+      });
     };
-
-    const initialRefresh = window.setTimeout(() => void refreshCatalogIfChanged(), 0);
-    const interval = window.setInterval(() => void refreshCatalogIfChanged(), 5_000);
-    const refreshOnFocus = () => void refreshCatalogIfChanged();
+    const initialRefresh = window.setTimeout(refreshQuietly, 0);
+    const interval = window.setInterval(refreshQuietly, 5_000);
+    const refreshOnFocus = refreshQuietly;
     window.addEventListener("focus", refreshOnFocus);
     return () => {
       cancelled = true;
@@ -814,7 +857,7 @@ function App() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [libraryReady, rebindPlaybackCatalog]);
+  }, [libraryReady, refreshCatalogIfChanged]);
 
   useEffect(() => {
     const candidates = [
@@ -2284,7 +2327,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.20</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.16.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2330,6 +2373,7 @@ function App() {
           ) : null}
         </div>
         <div className="topbar__actions">
+          <button type="button" className="add-music-action" onClick={() => setAddFolderOpen(true)}><FolderPlus aria-hidden="true" /><span>Add music</span></button>
           {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
           <LaptopModeButton
             status={laptopModeStatus}
@@ -2719,6 +2763,14 @@ function App() {
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />
 
+      {addFolderOpen && (
+        <Suspense fallback={<div className="modal-backdrop"><div className="settings-loading" role="status">Opening album intake…</div></div>}>
+          <AddFolderDialog
+            onClose={() => setAddFolderOpen(false)}
+            onCatalogChanged={refreshCatalogIfChanged}
+          />
+        </Suspense>
+      )}
       {updater.state.isPromptOpen && <UpdateDialog version={updater.state.version} phase={updater.state.phase} progress={updater.state.progress} message={updater.state.message} onInstall={() => void updater.install()} onDismiss={updater.dismiss} />}
       {settingsOpen && shortcutStatus && audioStatus && (
         <SettingsDialog

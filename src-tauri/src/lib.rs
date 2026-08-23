@@ -9,6 +9,7 @@ mod explorer;
 mod genres;
 mod history;
 mod laptop_mode;
+mod library_bridge;
 mod musicbrainz;
 mod playback;
 mod publishers;
@@ -33,6 +34,10 @@ use explorer::{
 use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
 use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
+use library_bridge::{
+    apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
+    select_library_intake_folder,
+};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackCatalogRebind, PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use publishers::{PublisherDetail, PublisherOverview, PublisherQueueRequest};
@@ -720,6 +725,7 @@ fn release_global_shortcuts(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -861,6 +867,10 @@ pub fn run() {
             update_global_shortcut_settings,
             audio_settings,
             update_audio_settings,
+            library_bridge_capabilities,
+            select_library_intake_folder,
+            preview_library_intake_batch,
+            apply_library_intake_batch,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Aurora")

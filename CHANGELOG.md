@@ -4,6 +4,21 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-24
+
+### Added
+
+- A top-bar **Add music** workflow for a single already-tagged album folder or a parent containing many album folders, with General music, Movie / TV / game music, and Synthwave destinations supplied by Music Library.
+- A review step showing every source-to-destination mapping, album/track totals, and the exact combined catalog delta before one explicit Move and catalog confirmation.
+- A versioned, file-based native bridge to Music Library `0.143.0` or newer. Aurora discovers and launches the exact installed executable without a shell, validates capability and apply receipts, bounds response size and execution time, and removes its private request/response exchange files.
+
+### Changed
+
+- Completed album intake now requests Aurora's existing consistent catalog refresh immediately. Concurrent polling and focus refreshes share the same queued operation so playback rebind and views cannot race each other.
+- A stale or changed intake plan can be previewed again without closing the dialog, while the same locked plan remains available for a safe retry after an uncertain helper timeout.
+- Intake completion distinguishes folders whose verified source was removed from folders retained for manual cleanup; Aurora never reports a partial cleanup as a complete move.
+- The Music Library catalog remains strictly read-only inside Aurora. All folder transfer, database backup, staging, normalization, and atomic catalog writes remain owned by the Music Library companion.
+
 ## [0.15.20] - 2026-08-23
 
 ### Added

@@ -1,12 +1,16 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.20 notices completed Music Library imports while it is running and safely refreshes its catalog-backed playback and views.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.16.0 adds already-tagged single albums or multi-album folders through a safe Music Library companion workflow, then refreshes playback and catalog views in place.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.20 slice
+## Current 0.16.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
+- Aurora invokes Music Library `0.143.0` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
+- Native folder selection, strict bridge/category/receipt validation, bounded helper timeouts, and clear update guidance when the installed Music Library does not yet support album intake. Source paths are passed in private request files rather than command-line arguments.
+- Truthful batch completion distinguishes fully moved albums from verified catalog copies whose source cleanup needs attention. A successful import triggers Aurora's existing revision check, stable queue rebind, and bounded view refresh immediately.
 - A lightweight completed-import revision check every five seconds and whenever Aurora regains focus. Queue rebinding and the base view each use one consistent SQLite read snapshot, and Aurora refreshes only after their reported revisions match the detected completed import. Stable normalized path keys keep replaced catalog row IDs from becoming playback identity.
 - Catalog refreshes preserve the playing source, current track, and preloaded successor when stable queue order is unchanged. Removed queue entries are dropped; a removed current track stops safely and selects the next surviving entry in a paused state.
 - Import-time rating/tag completions update only tag fields on the freshly rebound queue row, selected tracks follow their stable file key, and an unsaved inspector draft remains mounted across transient catalog-ID changes.
