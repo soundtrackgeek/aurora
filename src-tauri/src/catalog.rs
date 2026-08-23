@@ -505,7 +505,7 @@ enum CatalogSearchMatch {
     Prefix(String),
     Exact(String),
     ScoreGenreGroup,
-    Year(i32),
+    YearRange { from: Option<i32>, to: Option<i32> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -543,7 +543,7 @@ impl CatalogSearch {
             CatalogSearchMatch::Prefix(query) => Some(query),
             CatalogSearchMatch::Exact(_)
             | CatalogSearchMatch::ScoreGenreGroup
-            | CatalogSearchMatch::Year(_) => None,
+            | CatalogSearchMatch::YearRange { .. } => None,
         }
     }
 
@@ -697,6 +697,34 @@ fn parse_search_year(value: &str, field: &str) -> Result<i32, String> {
     Ok(year)
 }
 
+fn parse_search_year_range(value: &str, field: &str) -> Result<(Option<i32>, Option<i32>), String> {
+    let value = value.trim();
+    let Some((raw_from, raw_to)) = value.split_once("..") else {
+        let year = parse_search_year(value, field)?;
+        return Ok((Some(year), Some(year)));
+    };
+    if raw_to.contains("..") {
+        return Err(format!(
+            "{field} range must use one '..', for example {field}:1985..1987."
+        ));
+    }
+    let from = (!raw_from.trim().is_empty())
+        .then(|| parse_search_year(raw_from, field))
+        .transpose()?;
+    let to = (!raw_to.trim().is_empty())
+        .then(|| parse_search_year(raw_to, field))
+        .transpose()?;
+    if from.is_none() && to.is_none() {
+        return Err(format!("{field} range needs a starting or ending year."));
+    }
+    if from.zip(to).is_some_and(|(from, to)| from > to) {
+        return Err(format!(
+            "{field} range must start at or before its ending year."
+        ));
+    }
+    Ok((from, to))
+}
+
 fn exact_search_value(value: &str) -> Result<Option<String>, String> {
     let value = value.trim();
     let starts = value.starts_with('"');
@@ -766,14 +794,16 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                 }
                 let exact = exact_search_value(value)?;
                 let matcher = match field {
-                    CatalogSearchField::Year => CatalogSearchMatch::Year(parse_search_year(
-                        exact.as_deref().unwrap_or(value),
-                        "year",
-                    )?),
-                    CatalogSearchField::ReleaseYear => CatalogSearchMatch::Year(parse_search_year(
-                        exact.as_deref().unwrap_or(value),
-                        "ryear",
-                    )?),
+                    CatalogSearchField::Year | CatalogSearchField::ReleaseYear => {
+                        let field_name = if field == CatalogSearchField::Year {
+                            "year"
+                        } else {
+                            "ryear"
+                        };
+                        let (from, to) =
+                            parse_search_year_range(exact.as_deref().unwrap_or(value), field_name)?;
+                        CatalogSearchMatch::YearRange { from, to }
+                    }
                     CatalogSearchField::Genre
                         if exact.is_none()
                             && matches!(
@@ -927,14 +957,27 @@ fn non_prefix_predicate(
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
-        CatalogSearchMatch::Year(year) => {
+        CatalogSearchMatch::YearRange { from, to } => {
             let column = match alternative.field {
                 CatalogSearchField::Year => "year",
                 CatalogSearchField::ReleaseYear => "release_year",
                 _ => unreachable!("numeric search uses a year field"),
             };
-            params.push(Value::Integer(i64::from(*year)));
-            Some(format!("{alias}.{column} = ?"))
+            if from == to {
+                let year = from.expect("an equal bounded range contains one year");
+                params.push(Value::Integer(i64::from(year)));
+                return Some(format!("{alias}.{column} = ?"));
+            }
+            let mut predicates = Vec::new();
+            if let Some(from) = from {
+                params.push(Value::Integer(i64::from(*from)));
+                predicates.push(format!("{alias}.{column} >= ?"));
+            }
+            if let Some(to) = to {
+                params.push(Value::Integer(i64::from(*to)));
+                predicates.push(format!("{alias}.{column} <= ?"));
+            }
+            Some(format!("({})", predicates.join(" AND ")))
         }
     }
 }
@@ -947,7 +990,7 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             CatalogSearchMatch::Prefix(query) => Some(format!("({query})")),
             CatalogSearchMatch::Exact(_)
             | CatalogSearchMatch::ScoreGenreGroup
-            | CatalogSearchMatch::Year(_) => None,
+            | CatalogSearchMatch::YearRange { .. } => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -1448,14 +1491,60 @@ mod tests {
         );
         assert_eq!(
             search.groups[4].alternatives[0].matcher,
-            CatalogSearchMatch::Year(1985)
+            CatalogSearchMatch::YearRange {
+                from: Some(1985),
+                to: Some(1985)
+            }
         );
         assert_eq!(
             search.groups[5].alternatives[0].matcher,
-            CatalogSearchMatch::Year(2025)
+            CatalogSearchMatch::YearRange {
+                from: Some(2025),
+                to: Some(2025)
+            }
         );
         assert!(parse_catalog_search("year:not-a-year").is_err());
         assert!(parse_catalog_search("artist:").is_err());
+    }
+
+    #[test]
+    fn catalog_search_parses_closed_open_and_inherited_year_ranges() {
+        let search = parse_catalog_search("year:1985..1987 OR 1990..1992,ryear:..1987 OR 1995..")
+            .expect("year range search");
+
+        assert_eq!(search.groups.len(), 2);
+        assert_eq!(
+            search.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::YearRange {
+                from: Some(1985),
+                to: Some(1987)
+            }
+        );
+        assert_eq!(
+            search.groups[0].alternatives[1].matcher,
+            CatalogSearchMatch::YearRange {
+                from: Some(1990),
+                to: Some(1992)
+            }
+        );
+        assert_eq!(
+            search.groups[1].alternatives[0].matcher,
+            CatalogSearchMatch::YearRange {
+                from: None,
+                to: Some(1987)
+            }
+        );
+        assert_eq!(
+            search.groups[1].alternatives[1].matcher,
+            CatalogSearchMatch::YearRange {
+                from: Some(1995),
+                to: None
+            }
+        );
+
+        assert!(parse_catalog_search("year:1987..1985").is_err());
+        assert!(parse_catalog_search("ryear:..").is_err());
+        assert!(parse_catalog_search("year:1985..1987..1989").is_err());
     }
 
     #[test]

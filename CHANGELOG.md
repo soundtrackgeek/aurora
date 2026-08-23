@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.10] - 2026-08-23
+
+### Added
+
+- `year:` and `ryear:` searches now accept inclusive closed ranges such as `year:1985..1987`, open-ended ranges such as `year:1985..` and `ryear:..1987`, inherited range alternatives after `OR`, and the existing `NOT` or leading `-` exclusions.
+
 ## [0.15.9] - 2026-08-23
 
 ### Fixed

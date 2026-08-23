@@ -1172,6 +1172,39 @@ mod tests {
                 .all(|track| track.original_year == Some(1999))
         );
 
+        let year_range = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("year:1999..2000".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("Year range search");
+        assert_eq!(year_range.items.len(), 3);
+        assert!(
+            year_range
+                .items
+                .iter()
+                .all(|track| track.original_year == Some(1999))
+        );
+
+        let release_year_range = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("ryear:1999..2001".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("Release Year range search");
+        assert_eq!(release_year_range.items.len(), 2);
+        assert!(release_year_range.items.iter().all(|track| {
+            track
+                .release_year
+                .is_some_and(|year| (1999..=2001).contains(&year))
+        }));
+
         let wrong_artist = track_page_from_connection(
             &connection,
             TrackPageRequest {
@@ -1198,6 +1231,23 @@ mod tests {
                 .map(|album| album.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["a1"]
+        );
+
+        let range_albums = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("year:1999..2000".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("album Year range search");
+        assert_eq!(
+            range_albums
+                .items
+                .iter()
+                .map(|album| album.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a2", "a1"]
         );
 
         let artists = artist_page_from_connection(

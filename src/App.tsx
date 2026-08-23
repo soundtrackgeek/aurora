@@ -210,7 +210,7 @@ const defaultExplorerFilters: ExplorerFilters = {
   sort: "newest",
 };
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
   tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "yearDesc", "releaseYearDesc", "ratingDesc"],
@@ -1782,7 +1782,7 @@ function App() {
         : activeNav === "Years"
           ? "Year search arrives with the timeline…"
         : explorerView === "tracks"
-          ? "Search fields with OR, NOT, or \"exact\"…"
+          ? "Search year:1985..1987, OR, NOT…"
           : "Search your universe…";
   const topbarSearchLabel = activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
@@ -1862,7 +1862,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.9</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.10</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

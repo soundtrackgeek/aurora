@@ -416,7 +416,8 @@ interface LibrarySearchAlternative {
   field: LibrarySearchField;
   value: string;
   exact: boolean;
-  year: number | null;
+  yearFrom: number | null;
+  yearTo: number | null;
 }
 
 interface LibrarySearchGroup {
@@ -498,6 +499,38 @@ function exactLibrarySearchValue(value: string): string | null {
   return exact;
 }
 
+function parseLibrarySearchYearRange(
+  value: string,
+  field: "year" | "ryear",
+): { yearFrom: number | null; yearTo: number | null } {
+  const parts = value.trim().split("..");
+  if (parts.length > 2) {
+    throw new Error(`${field} range must use one '..', for example ${field}:1985..1987.`);
+  }
+  const parseBound = (bound: string): number | null => {
+    const trimmed = bound.trim();
+    if (!trimmed) return null;
+    if (!/^\d{4}$/u.test(trimmed) || Number(trimmed) < 1000 || Number(trimmed) > 2999) {
+      throw new Error(`${field} must be a year between 1000 and 2999.`);
+    }
+    return Number(trimmed);
+  };
+  if (parts.length === 1) {
+    const year = parseBound(parts[0]);
+    if (year === null) throw new Error(`${field} must be a year between 1000 and 2999.`);
+    return { yearFrom: year, yearTo: year };
+  }
+  const yearFrom = parseBound(parts[0]);
+  const yearTo = parseBound(parts[1]);
+  if (yearFrom === null && yearTo === null) {
+    throw new Error(`${field} range needs a starting or ending year.`);
+  }
+  if (yearFrom !== null && yearTo !== null && yearFrom > yearTo) {
+    throw new Error(`${field} range must start at or before its ending year.`);
+  }
+  return { yearFrom, yearTo };
+}
+
 function parseLibrarySearch(query: string): LibrarySearchGroup[] {
   const groups: LibrarySearchGroup[] = [];
   let current: LibrarySearchGroup | null = null;
@@ -530,13 +563,10 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       if (explicitField) inheritedField = field;
       if (!value) throw new Error("Search field needs a value.");
       const exact = exactLibrarySearchValue(value);
-      let year: number | null = null;
+      let yearFrom: number | null = null;
+      let yearTo: number | null = null;
       if (field === "year" || field === "ryear") {
-        const yearText = exact ?? value;
-        if (!/^\d{4}$/u.test(yearText) || Number(yearText) < 1000 || Number(yearText) > 2999) {
-          throw new Error(`${field} must be a year between 1000 and 2999.`);
-        }
-        year = Number(yearText);
+        ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
       } else if (exact === null) {
         termCount += searchTerms(value).length;
         if (termCount > 32) throw new Error("Search can contain at most 32 words.");
@@ -544,7 +574,13 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       }
       alternativeCount += 1;
       if (alternativeCount > 32) throw new Error("Search can contain at most 32 alternatives.");
-      current.alternatives.push({ field, value: exact ?? value, exact: exact !== null, year });
+      current.alternatives.push({
+        field,
+        value: exact ?? value,
+        exact: exact !== null,
+        yearFrom,
+        yearTo,
+      });
       afterOr = false;
       continue;
     }
@@ -594,10 +630,12 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
 }
 
 function matchesLibrarySearchAlternative(track: Track, alternative: LibrarySearchAlternative): boolean {
-  if (alternative.field === "year") {
-    return track.originalYear === alternative.year;
+  if (alternative.field === "year" || alternative.field === "ryear") {
+    const year = alternative.field === "year" ? track.originalYear : track.releaseYear;
+    if (year === null || year === undefined) return false;
+    return (alternative.yearFrom === null || year >= alternative.yearFrom)
+      && (alternative.yearTo === null || year <= alternative.yearTo);
   }
-  if (alternative.field === "ryear") return track.releaseYear === alternative.year;
   const values = librarySearchValues(track, alternative.field);
   if (
     alternative.field === "genre"

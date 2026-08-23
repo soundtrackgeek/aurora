@@ -25,6 +25,12 @@ const scoreTracks: Track[] = [
   { ...tracks[1], id: "6", trackKey: "c:/music/singer/pop-song.mp3", albumId: "album-6", title: "Pop Song", artist: "Singer", album: "Compilation", genre: "Soundtrack" },
 ];
 
+const yearRangeTracks: Track[] = [
+  { ...tracks[0], id: "7", trackKey: "c:/music/ranges/1985.mp3", albumId: "album-7", title: "Start", originalYear: 1985, releaseYear: 1989 },
+  { ...tracks[0], id: "8", trackKey: "c:/music/ranges/1987.mp3", albumId: "album-8", title: "End", originalYear: 1987, releaseYear: 1986 },
+  { ...tracks[0], id: "9", trackKey: "c:/music/ranges/1988.mp3", albumId: "album-9", title: "Outside", originalYear: 1988, releaseYear: 1987 },
+];
+
 describe("library presentation", () => {
   it("formats durations and counts for dense rows", () => {
     expect(formatDuration(243)).toBe("4:03");
@@ -46,6 +52,17 @@ describe("library presentation", () => {
     expect(filterTracks(tracks, "publisher:emi,title:sæglópur", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "year:2011", null)).toEqual([]);
     expect(filterTracks(tracks, "ryear:2011", null)).toEqual([tracks[1]]);
+  });
+
+  it("supports inclusive closed and open Year and Release Year ranges", () => {
+    expect(filterTracks(yearRangeTracks, "year:1985..1987", null)).toEqual(yearRangeTracks.slice(0, 2));
+    expect(filterTracks(yearRangeTracks, "ryear:1985..1987", null)).toEqual(yearRangeTracks.slice(1));
+    expect(filterTracks(yearRangeTracks, "year:..1985", null)).toEqual([yearRangeTracks[0]]);
+    expect(filterTracks(yearRangeTracks, "year:1987..", null)).toEqual(yearRangeTracks.slice(1));
+    expect(filterTracks(yearRangeTracks, "year:1985..1987 OR 1988", null)).toEqual(yearRangeTracks);
+    expect(filterTracks(yearRangeTracks, "NOT year:1985..1987", null)).toEqual([yearRangeTracks[2]]);
+    expect(() => filterTracks(yearRangeTracks, "year:1987..1985", null)).toThrow(/start at or before/u);
+    expect(() => filterTracks(yearRangeTracks, "ryear:..", null)).toThrow(/starting or ending/u);
   });
 
   it("supports OR inheritance, NOT, negative fields, and exact quoted values", () => {
@@ -83,6 +100,11 @@ describe("library presentation", () => {
 
     const booleanTracks = await exploreTracks({ search: "genre:house OR electronic NOT aartist:m83" });
     expect(booleanTracks.items.map((track) => track.title)).toEqual(["Digital Love"]);
+
+    const yearRange = await exploreTracks({ search: "year:2008..2010", sort: "titleAsc" });
+    expect(yearRange.items.map((track) => track.title)).toEqual(["Intro", "On Melancholy Hill", "Strawberry Swing"]);
+    const releaseYearRange = await exploreTracks({ search: "ryear:2011..", sort: "titleAsc" });
+    expect(releaseYearRange.items.map((track) => track.title)).toEqual(["A Real Hero", "Nightcall"]);
   });
 
   it("loads browser-preview album details by stable album identity", async () => {

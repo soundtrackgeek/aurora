@@ -28,7 +28,7 @@ export type ExplorerLoveFilter = "all" | Track["loveState"];
 export type ExplorerSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc" | "trackCountDesc";
 export type ExplorerLoadState = "loading" | "ready" | "error";
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 export interface ExplorerFilters {
   query: string;
@@ -588,7 +588,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
           <input
             type="search"
             value={filters.query}
-            placeholder={view === "tracks" ? "Search fields with OR, NOT, or \"exact\"…" : "Search title, album, artist…"}
+            placeholder={view === "tracks" ? "Search year:1985..1987, OR, NOT…" : "Search title, album, artist…"}
             title={view === "tracks" ? trackSearchHelp : undefined}
             onChange={(event) => updateFilters({ query: event.currentTarget.value })}
           />

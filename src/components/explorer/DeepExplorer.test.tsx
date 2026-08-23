@@ -111,11 +111,13 @@ describe("DeepExplorer", () => {
     render(<DeepExplorer {...explorerProps()} />);
 
     const search = screen.getByRole("searchbox");
-    expect(search).toHaveAttribute("placeholder", "Search fields with OR, NOT, or \"exact\"…");
+    expect(search).toHaveAttribute("placeholder", "Search year:1985..1987, OR, NOT…");
     expect(search.getAttribute("title")).toContain("aartist (Album Artist display)");
     expect(search.getAttribute("title")).toContain("ryear (Release Year)");
     expect(search.getAttribute("title")).toContain("uppercase OR inherits");
     expect(search.getAttribute("title")).toContain("genre:scores");
+    expect(search.getAttribute("title")).toContain("year:1985..1987");
+    expect(search.getAttribute("title")).toContain("same syntax works for ryear");
   });
 
   it("renders Year without substituting Release Year", () => {
