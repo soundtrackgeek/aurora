@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.2 keeps AltGr typing available while global shortcuts are active and explicitly releases every binding on shutdown.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.3 automatically publishes a signed Windows release after every successful `master` CI run.
 
 ![Aurora design reference](Aurora.png)
 
@@ -129,14 +129,14 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Push a SemVer tag matching all three manifests, for example `v0.15.2`. The release workflow builds a Windows NSIS setup executable, signs the updater artifact, publishes the GitHub release, and uploads `latest.json`.
+Every successful push to `master` runs verification first, then builds a Windows NSIS setup executable, signs the updater artifact, creates the matching SemVer tag and GitHub Release, and uploads `latest.json`. The workflow can also be started manually to retry publication of the current version.
 
-Before tagging a new version:
+Before pushing a new version:
 
-1. Update `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` to the same version.
+1. Update every manifest, lockfile, and user-facing version label to the same version.
 2. Move the relevant changelog notes from `Unreleased` into a dated version section.
 3. Run `npm run check:version` and the full verification commands above.
-4. Commit and push, then push the matching `vX.Y.Z` tag.
+4. Commit and push to `master`, then verify the CI run's `release-windows` job published the `.exe`, updater bundle and signature, and `latest.json`.
 
 The repository already has `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. The local encrypted key material is under `%USERPROFILE%\.tauri`:
 

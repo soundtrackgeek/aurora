@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-08-23
+
+### Fixed
+
+- Successful `master` CI runs now publish the matching Windows GitHub Release instead of stopping after verification while waiting for a manually pushed version tag.
+
+### Changed
+
+- Windows release publication now runs only after the same CI workflow's verification job succeeds, then creates the SemVer tag and uploads the NSIS installer, updater bundle and signature, and `latest.json`.
+- Version validation now covers both lockfiles and Aurora's user-facing version label in addition to the manifests.
+- Developer instructions now require waiting for and verifying the published GitHub Release assets after every `master` push.
+
 ## [0.15.2] - 2026-08-23
 
 ### Fixed
