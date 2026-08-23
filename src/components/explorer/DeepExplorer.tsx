@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   Music2,
   RefreshCw,
-  Search,
   SlidersHorizontal,
   Star,
   UsersRound,
@@ -25,10 +24,24 @@ import "./DeepExplorer.css";
 export type ExplorerView = "tracks" | "albums" | "artists";
 export type ExplorerRatingFilter = "all" | "unrated" | 0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 3.5 | 4 | 4.5 | 5;
 export type ExplorerLoveFilter = "all" | Track["loveState"];
-export type ExplorerSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc" | "trackCountDesc";
+export type ExplorerSort =
+  | "newest"
+  | "oldest"
+  | "titleAsc"
+  | "titleDesc"
+  | "artistAsc"
+  | "artistDesc"
+  | "albumAsc"
+  | "albumDesc"
+  | "yearAsc"
+  | "yearDesc"
+  | "releaseYearAsc"
+  | "releaseYearDesc"
+  | "ratingAsc"
+  | "ratingDesc"
+  | "trackCountAsc"
+  | "trackCountDesc";
 export type ExplorerLoadState = "loading" | "ready" | "error";
-
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 export interface ExplorerFilters {
   query: string;
@@ -70,8 +83,6 @@ export interface DeepExplorerProps {
   tracks: readonly Track[];
   albums: readonly ExplorerAlbum[];
   artists: readonly Artist[];
-  genres: readonly string[];
-  artistOptions?: readonly string[];
   selectedTrackId: string | null;
   selectedAlbumId: string | null;
   selectedArtistId: string | null;
@@ -103,46 +114,51 @@ const viewTabs: ReadonlyArray<{ id: ExplorerView; label: string; icon: typeof Mu
   { id: "artists", label: "Artists", icon: UsersRound },
 ];
 
-const sortOptions: Record<ExplorerView, ReadonlyArray<{ value: ExplorerSort; label: string }>> = {
+type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "releaseYear" | "rating" | "trackCount";
+
+interface ExplorerSortOption {
+  value: ExplorerSortCriterion;
+  label: string;
+  primary: ExplorerSort;
+  primaryLabel: string;
+  reverse: ExplorerSort;
+  reverseLabel: string;
+}
+
+const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
   tracks: [
-    { value: "newest", label: "Newest in library" },
-    { value: "titleAsc", label: "Title · A–Z" },
-    { value: "artistAsc", label: "Artist · A–Z" },
-    { value: "albumAsc", label: "Album · A–Z" },
-    { value: "yearDesc", label: "Year · newest" },
-    { value: "releaseYearDesc", label: "Release year · newest" },
-    { value: "ratingDesc", label: "Rating · high first" },
+    { value: "added", label: "Added to library", primary: "newest", primaryLabel: "Added · newest", reverse: "oldest", reverseLabel: "Added · oldest" },
+    { value: "title", label: "Title", primary: "titleAsc", primaryLabel: "Title · A–Z", reverse: "titleDesc", reverseLabel: "Title · Z–A" },
+    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "album", label: "Album", primary: "albumAsc", primaryLabel: "Album · A–Z", reverse: "albumDesc", reverseLabel: "Album · Z–A" },
+    { value: "year", label: "Year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
+    { value: "releaseYear", label: "Release year", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
+    { value: "rating", label: "Rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
   ],
   albums: [
-    { value: "yearDesc", label: "Year · newest" },
-    { value: "releaseYearDesc", label: "Release year · newest" },
-    { value: "titleAsc", label: "Album · A–Z" },
-    { value: "artistAsc", label: "Artist · A–Z" },
-    { value: "ratingDesc", label: "Rating · high first" },
+    { value: "year", label: "Year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
+    { value: "releaseYear", label: "Release year", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
+    { value: "title", label: "Album", primary: "titleAsc", primaryLabel: "Album · A–Z", reverse: "titleDesc", reverseLabel: "Album · Z–A" },
+    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "rating", label: "Rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
   ],
   artists: [
-    { value: "artistAsc", label: "Artist · A–Z" },
-    { value: "trackCountDesc", label: "Most tracks" },
+    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "trackCount", label: "Track count", primary: "trackCountDesc", primaryLabel: "Most tracks", reverse: "trackCountAsc", reverseLabel: "Fewest tracks" },
   ],
 };
 
-const ratingOptions: ReadonlyArray<Exclude<ExplorerRatingFilter, "all" | "unrated">> = [
-  5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5,
-];
-
-function numericInputValue(value: number | null): string {
-  return value === null ? "" : String(value);
+function activeSortOption(view: ExplorerView, sort: ExplorerSort): ExplorerSortOption {
+  return sortOptions[view].find((option) => option.primary === sort || option.reverse === sort)
+    ?? sortOptions[view][0];
 }
 
-function numericFilterValue(value: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function ratingFilterValue(value: string): ExplorerRatingFilter {
-  if (value === "all" || value === "unrated") return value;
-  return Number.parseFloat(value) as Exclude<ExplorerRatingFilter, "all" | "unrated">;
+function nextSort(view: ExplorerView, current: ExplorerSort, criterion: ExplorerSortCriterion): ExplorerSort {
+  const option = sortOptions[view].find((candidate) => candidate.value === criterion)
+    ?? sortOptions[view][0];
+  if (current === option.primary) return option.reverse;
+  if (current === option.reverse) return option.primary;
+  return option.primary;
 }
 
 function AlbumArtwork({ album, detail = false }: { album: ExplorerAlbum; detail?: boolean }) {
@@ -513,7 +529,6 @@ export function DeepExplorer(props: DeepExplorerProps) {
     tracks,
     albums,
     artists,
-    genres,
     selectedTrackId,
     selectedAlbumId,
     selectedArtistId,
@@ -537,11 +552,11 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onLoveChange,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
-  const boundedArtistOptions = useMemo(
-    () => props.artistOptions ?? artists.slice(0, 200).map((artist) => artist.name),
-    [artists, props.artistOptions],
-  );
   const resultCount = resultCountForView(view, props);
+  const selectedSortOption = activeSortOption(view, filters.sort);
+  const selectedSortLabel = filters.sort === selectedSortOption.reverse
+    ? selectedSortOption.reverseLabel
+    : selectedSortOption.primaryLabel;
 
   function updateFilters(patch: Partial<ExplorerFilters>) {
     onFiltersChange({ ...filters, ...patch });
@@ -582,87 +597,16 @@ export function DeepExplorer(props: DeepExplorerProps) {
       </div>
 
       <div className="deep-explorer-filters" aria-label="Explorer filters">
-        <label className="deep-explorer-search">
-          <span className="sr-only">Search within explorer</span>
-          <Search aria-hidden="true" />
-          <input
-            type="search"
-            value={filters.query}
-            placeholder={view === "tracks" ? "Search year:1985..1987, OR, NOT…" : "Search title, album, artist…"}
-            title={view === "tracks" ? trackSearchHelp : undefined}
-            onChange={(event) => updateFilters({ query: event.currentTarget.value })}
-          />
-        </label>
-        {view !== "artists" ? <label>
-          <span>Rating</span>
-          <select value={String(filters.rating)} onChange={(event) => updateFilters({ rating: ratingFilterValue(event.currentTarget.value) })}>
-            <option value="all">All ratings</option>
-            <option value="unrated">Unrated</option>
-            {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
-          </select>
-        </label> : null}
-        {view === "tracks" ? <>
-          <label>
-            <span>Love</span>
-            <select value={filters.love} onChange={(event) => updateFilters({ love: event.currentTarget.value as ExplorerLoveFilter })}>
-              <option value="all">Any state</option>
-              <option value="loved">Loved</option>
-              <option value="neutral">Neutral</option>
-              <option value="banned">Banned</option>
-            </select>
-          </label>
-        </> : null}
-        {view !== "artists" ? <fieldset className="deep-explorer-year">
-            <legend>
-              <span className="sr-only">Year basis</span>
-              <select aria-label="Year basis" value={filters.yearBasis} onChange={(event) => updateFilters({ yearBasis: event.currentTarget.value as YearBasis })}>
-                <option value="original">Year</option>
-                <option value="release">Release year</option>
-              </select>
-            </legend>
-            <input
-              type="number"
-              inputMode="numeric"
-              min="1000"
-              max="9999"
-              aria-label={`${filters.yearBasis === "original" ? "Year" : "Release year"} from`}
-              placeholder="From"
-              disabled={filters.yearMissing}
-              value={numericInputValue(filters.yearFrom)}
-              onChange={(event) => updateFilters({ yearFrom: numericFilterValue(event.currentTarget.value) })}
-            />
-            <span aria-hidden="true">–</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min="1000"
-              max="9999"
-              aria-label={`${filters.yearBasis === "original" ? "Year" : "Release year"} to`}
-              placeholder="To"
-              disabled={filters.yearMissing}
-              value={numericInputValue(filters.yearTo)}
-              onChange={(event) => updateFilters({ yearTo: numericFilterValue(event.currentTarget.value) })}
-            />
-            <label className="deep-explorer-year__missing"><input type="checkbox" checked={filters.yearMissing} onChange={(event) => updateFilters({ yearMissing: event.currentTarget.checked, yearFrom: null, yearTo: null })} /> Missing</label>
-          </fieldset> : null}
-        <label>
-          <span>Genre</span>
-          <select value={filters.genre ?? ""} onChange={(event) => updateFilters({ genre: event.currentTarget.value || null })}>
-            <option value="">All genres</option>
-            {genres.map((genre) => <option value={genre} key={genre}>{genre}</option>)}
-          </select>
-        </label>
-        {view !== "artists" ? <label>
-          <span>Artist</span>
-          <select value={filters.artist ?? ""} onChange={(event) => updateFilters({ artist: event.currentTarget.value || null })}>
-            <option value="">All artists</option>
-            {filters.artist && !boundedArtistOptions.includes(filters.artist) ? <option value={filters.artist}>{filters.artist}</option> : null}
-            {boundedArtistOptions.map((artist) => <option value={artist} key={artist}>{artist}</option>)}
-          </select>
-        </label> : null}
         <label>
           <span>Sort</span>
-          <select value={filters.sort} onChange={(event) => updateFilters({ sort: event.currentTarget.value as ExplorerSort })}>
+          <select
+            value=""
+            title="Select the active sort again to reverse it."
+            onChange={(event) => updateFilters({
+              sort: nextSort(view, filters.sort, event.currentTarget.value as ExplorerSortCriterion),
+            })}
+          >
+            <option value="" disabled>{selectedSortLabel}</option>
             {sortOptions[view].map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
           </select>
         </label>

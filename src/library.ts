@@ -66,7 +66,21 @@ export interface ExplorerCursor {
   id: string;
 }
 
-export type TrackSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc";
+export type TrackSort =
+  | "newest"
+  | "oldest"
+  | "titleAsc"
+  | "titleDesc"
+  | "artistAsc"
+  | "artistDesc"
+  | "albumAsc"
+  | "albumDesc"
+  | "yearAsc"
+  | "yearDesc"
+  | "releaseYearAsc"
+  | "releaseYearDesc"
+  | "ratingAsc"
+  | "ratingDesc";
 
 export interface TrackPageRequest {
   pageSize?: number;
@@ -105,7 +119,17 @@ export interface AlbumSummary {
   albumScore: number | null;
 }
 
-export type AlbumSort = "titleAsc" | "artistAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc";
+export type AlbumSort =
+  | "titleAsc"
+  | "titleDesc"
+  | "artistAsc"
+  | "artistDesc"
+  | "yearAsc"
+  | "yearDesc"
+  | "releaseYearAsc"
+  | "releaseYearDesc"
+  | "ratingAsc"
+  | "ratingDesc";
 
 export interface AlbumPageRequest {
   pageSize?: number;
@@ -130,7 +154,7 @@ export interface AlbumPage {
 
 export type YearBasis = "original" | "release";
 
-export type ArtistSort = "nameAsc" | "trackCountDesc";
+export type ArtistSort = "nameAsc" | "nameDesc" | "trackCountAsc" | "trackCountDesc";
 
 export interface ArtistPageRequest {
   pageSize?: number;
@@ -293,6 +317,16 @@ function usesAdvancedLibrarySearch(search?: string): boolean {
   return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|title)\s*:|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
+function compareText(left: string, right: string, descending = false): number {
+  return descending ? right.localeCompare(left) : left.localeCompare(right);
+}
+
+function compareNullableNumber(left: number | null | undefined, right: number | null | undefined, descending = false): number {
+  if (left == null) return right == null ? 0 : 1;
+  if (right == null) return -1;
+  return descending ? right - left : left - right;
+}
+
 function previewTrackPage(request: TrackPageRequest): TrackPage {
   const yearFor = (track: Track) => request.yearBasis === "release"
     ? track.releaseYear
@@ -309,13 +343,20 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
     .filter((track) => !request.artist || track.artist === request.artist)
     .sort((left, right) => {
       switch (request.sort) {
-        case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
-        case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
-        case "albumAsc": return left.album.localeCompare(right.album) || left.title.localeCompare(right.title);
-        case "yearDesc": return (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title);
-        case "releaseYearDesc": return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
-        case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
-        default: return right.id.localeCompare(left.id);
+        case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "titleDesc": return compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "artistAsc": return compareText(left.artist, right.artist) || compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "artistDesc": return compareText(left.artist, right.artist, true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "albumAsc": return compareText(left.album, right.album) || compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "albumDesc": return compareText(left.album, right.album, true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "yearAsc": return compareNullableNumber(left.originalYear, right.originalYear) || compareText(left.id, right.id);
+        case "yearDesc": return compareNullableNumber(left.originalYear, right.originalYear, true) || compareText(left.id, right.id, true);
+        case "releaseYearAsc": return compareNullableNumber(left.releaseYear, right.releaseYear) || compareText(left.id, right.id);
+        case "releaseYearDesc": return compareNullableNumber(left.releaseYear, right.releaseYear, true) || compareText(left.id, right.id, true);
+        case "ratingAsc": return compareNullableNumber(left.rating, right.rating) || compareText(left.id, right.id);
+        case "ratingDesc": return compareNullableNumber(left.rating, right.rating, true) || compareText(left.id, right.id, true);
+        case "oldest": return compareText(left.id, right.id);
+        default: return compareText(left.id, right.id, true);
       }
     });
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
@@ -341,11 +382,16 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
     .filter((album) => !request.artist || album.artist === request.artist)
     .sort((left, right) => {
       switch (request.sort) {
-        case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
-        case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
-        case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
-        case "releaseYearDesc": return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
-        default: return (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title);
+        case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "titleDesc": return compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "artistAsc": return compareText(left.artist, right.artist) || compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "artistDesc": return compareText(left.artist, right.artist, true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "yearAsc": return compareNullableNumber(left.originalYear, right.originalYear) || compareText(left.id, right.id);
+        case "releaseYearAsc": return compareNullableNumber(left.releaseYear, right.releaseYear) || compareText(left.id, right.id);
+        case "releaseYearDesc": return compareNullableNumber(left.releaseYear, right.releaseYear, true) || compareText(left.id, right.id, true);
+        case "ratingAsc": return compareNullableNumber(left.rating, right.rating) || compareText(left.id, right.id);
+        case "ratingDesc": return compareNullableNumber(left.rating, right.rating, true) || compareText(left.id, right.id, true);
+        default: return compareNullableNumber(left.originalYear, right.originalYear, true) || compareText(left.id, right.id, true);
       }
     });
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
@@ -363,9 +409,14 @@ function previewArtistPage(request: ArtistPageRequest): ArtistPage {
       ? fieldedArtists.has(artist.name)
       : includesExplorerText([artist.name], request.search))
     .filter((artist) => !genreArtists || genreArtists.has(artist.name))
-    .sort((left, right) => request.sort === "trackCountDesc"
-      ? right.trackCount - left.trackCount || left.name.localeCompare(right.name)
-      : left.name.localeCompare(right.name));
+    .sort((left, right) => {
+      switch (request.sort) {
+        case "nameDesc": return compareText(left.name, right.name, true);
+        case "trackCountAsc": return left.trackCount - right.trackCount || compareText(left.name, right.name);
+        case "trackCountDesc": return right.trackCount - left.trackCount || compareText(left.name, right.name, true);
+        default: return compareText(left.name, right.name);
+      }
+    });
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
 }
 

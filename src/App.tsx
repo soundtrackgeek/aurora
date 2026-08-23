@@ -24,7 +24,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { Artwork } from "./components/Artwork";
 import {
@@ -213,9 +213,9 @@ const defaultExplorerFilters: ExplorerFilters = {
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
-  tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "yearDesc", "releaseYearDesc", "ratingDesc"],
-  albums: ["yearDesc", "releaseYearDesc", "titleAsc", "artistAsc", "ratingDesc"],
-  artists: ["artistAsc", "trackCountDesc"],
+  tracks: ["newest", "oldest", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "albumAsc", "albumDesc", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "ratingAsc", "ratingDesc"],
+  albums: ["yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
+  artists: ["artistAsc", "artistDesc", "trackCountAsc", "trackCountDesc"],
 };
 
 const defaultSort: Record<ExplorerView, ExplorerSort> = {
@@ -276,7 +276,7 @@ async function loadExplorerPage(
       missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.tracks.includes(filters.sort)
-        ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
+        ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "albumAsc" | "albumDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
         : "newest",
     });
     return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
@@ -292,14 +292,20 @@ async function loadExplorerPage(
       missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.albums.includes(filters.sort)
-        ? filters.sort as "titleAsc" | "artistAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
+        ? filters.sort as "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
         : "yearDesc",
     });
     return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   const page = await exploreArtists({
     ...shared,
-    sort: filters.sort === "trackCountDesc" ? "trackCountDesc" : "nameAsc",
+    sort: filters.sort === "trackCountDesc"
+      ? "trackCountDesc"
+      : filters.sort === "trackCountAsc"
+        ? "trackCountAsc"
+        : filters.sort === "artistDesc"
+          ? "nameDesc"
+          : "nameAsc",
   });
   return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor, totalCount: page.totalCount };
 }
@@ -1768,16 +1774,6 @@ function App() {
     event.preventDefault();
   }
 
-  const genres = useMemo(() => Array.from(new Set([
-    ...(snapshot?.tracks.map((track) => track.genre).filter((genre): genre is string => Boolean(genre)) ?? []),
-    ...explorerTracks.map((track) => track.genre).filter((genre): genre is string => Boolean(genre)),
-    ...explorerAlbums.map((album) => album.genre).filter((genre): genre is string => Boolean(genre)),
-  ])).sort((left, right) => left.localeCompare(right)).slice(0, 200), [snapshot?.tracks, explorerTracks, explorerAlbums]);
-  const artistOptions = useMemo(() => Array.from(new Set([
-    ...(snapshot?.artists.map((artist) => artist.name) ?? []),
-    ...explorerArtists.map((artist) => artist.name),
-    ...explorerTracks.map((track) => track.artist),
-  ])).sort((left, right) => left.localeCompare(right)).slice(0, 200), [snapshot?.artists, explorerArtists, explorerTracks]);
   const explorerLoaded = explorerView === "tracks"
     ? explorerTracks.length
     : explorerView === "albums"
@@ -1891,7 +1887,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.11</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.12</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2125,8 +2121,6 @@ function App() {
                 tracks={explorerTracks}
                 albums={explorerAlbums}
                 artists={explorerArtists}
-                genres={genres}
-                artistOptions={artistOptions}
                 selectedTrackId={selectedTrack?.id ?? null}
                 selectedAlbumId={selectedAlbumId}
                 selectedArtistId={selectedArtistId}

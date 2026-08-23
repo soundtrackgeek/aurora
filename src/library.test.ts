@@ -114,6 +114,24 @@ describe("library presentation", () => {
     expect(releaseYearRange.items.map((track) => track.title)).toEqual(["A Real Hero", "Nightcall"]);
   });
 
+  it("reverses chronological and alphabetical browser-preview sorts", async () => {
+    const yearAsc = await exploreTracks({ sort: "yearAsc" });
+    const yearDesc = await exploreTracks({ sort: "yearDesc" });
+    expect(yearAsc.items.map((track) => track.id)).toEqual(yearDesc.items.map((track) => track.id).reverse());
+
+    const titleAsc = await exploreTracks({ sort: "titleAsc" });
+    const titleDesc = await exploreTracks({ sort: "titleDesc" });
+    expect(titleAsc.items.map((track) => track.id)).toEqual(titleDesc.items.map((track) => track.id).reverse());
+
+    const albumYearAsc = await exploreAlbums({ sort: "yearAsc" });
+    const albumYearDesc = await exploreAlbums({ sort: "yearDesc" });
+    expect(albumYearAsc.items.map((album) => album.id)).toEqual(albumYearDesc.items.map((album) => album.id).reverse());
+
+    const artistAsc = await exploreArtists({ sort: "nameAsc" });
+    const artistDesc = await exploreArtists({ sort: "nameDesc" });
+    expect(artistAsc.items.map((artist) => artist.id)).toEqual(artistDesc.items.map((artist) => artist.id).reverse());
+  });
+
   it("loads browser-preview album details by stable album identity", async () => {
     const detail = await loadAlbumDetail("preview-drive");
     expect(detail.album.title).toBe("Drive");

@@ -27,6 +27,13 @@ const TRACK_COLUMNS: &str = r#"t.id, t.title, t.album_artist_display, t.album, t
     t.love, t.time_seconds, t.canonical_genre, l.play_count,
     t.album_id, t.file_path, t.filename, t.import_run_id, t.year AS original_year"#;
 
+const TRACK_RATING_EXPRESSION: &str = r#"COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
+      WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
+      WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
+      WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
+      WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
+      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END)"#;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ExploreCursor {
@@ -39,11 +46,18 @@ pub(crate) struct ExploreCursor {
 pub(crate) enum TrackSort {
     #[default]
     Newest,
+    Oldest,
     TitleAsc,
+    TitleDesc,
     ArtistAsc,
+    ArtistDesc,
     AlbumAsc,
+    AlbumDesc,
+    YearAsc,
     YearDesc,
+    ReleaseYearAsc,
     ReleaseYearDesc,
+    RatingAsc,
     RatingDesc,
 }
 
@@ -80,10 +94,15 @@ pub(crate) struct TrackPage {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AlbumSort {
     TitleAsc,
+    TitleDesc,
     ArtistAsc,
+    ArtistDesc,
+    YearAsc,
     #[default]
     YearDesc,
+    ReleaseYearAsc,
     ReleaseYearDesc,
+    RatingAsc,
     RatingDesc,
 }
 
@@ -161,6 +180,8 @@ impl YearBasis {
 pub(crate) enum ArtistSort {
     #[default]
     NameAsc,
+    NameDesc,
+    TrackCountAsc,
     TrackCountDesc,
 }
 
@@ -420,47 +441,107 @@ fn push_keyset(
     Ok(())
 }
 
+fn push_order_by(sql: &mut String, sort: SortDefinition, id_expression: &str) {
+    let direction = if sort.descending { "DESC" } else { "ASC" };
+    sql.push_str(" ORDER BY ");
+    if matches!(sort.cursor_kind, CursorKind::NullableInteger) {
+        sql.push('(');
+        sql.push_str(sort.expression);
+        sql.push_str(") IS NULL ASC, ");
+    }
+    sql.push('(');
+    sql.push_str(sort.expression);
+    sql.push_str(") ");
+    sql.push_str(direction);
+    sql.push_str(", ");
+    sql.push_str(id_expression);
+    sql.push(' ');
+    sql.push_str(direction);
+}
+
 fn track_sort(sort: TrackSort) -> SortDefinition {
     match sort {
         TrackSort::Newest => SortDefinition {
-            cursor_tag: "track-newest",
+            cursor_tag: "track-added-desc",
             expression: "t.id",
             descending: true,
             cursor_kind: CursorKind::Integer,
         },
+        TrackSort::Oldest => SortDefinition {
+            cursor_tag: "track-added-asc",
+            expression: "t.id",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
         TrackSort::TitleAsc => SortDefinition {
-            cursor_tag: "track-title",
+            cursor_tag: "track-title-asc",
             expression: "COALESCE(t.title, '') COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
+        TrackSort::TitleDesc => SortDefinition {
+            cursor_tag: "track-title-desc",
+            expression: "COALESCE(t.title, '') COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
         TrackSort::ArtistAsc => SortDefinition {
-            cursor_tag: "track-artist",
+            cursor_tag: "track-artist-asc",
             expression: "(COALESCE(t.album_artist_display, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
+        TrackSort::ArtistDesc => SortDefinition {
+            cursor_tag: "track-artist-desc",
+            expression: "(COALESCE(t.album_artist_display, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
         TrackSort::AlbumAsc => SortDefinition {
-            cursor_tag: "track-album",
+            cursor_tag: "track-album-asc",
             expression: "(COALESCE(t.album, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
-        TrackSort::YearDesc => SortDefinition {
-            cursor_tag: "track-year",
-            expression: "COALESCE(t.year, -1)",
+        TrackSort::AlbumDesc => SortDefinition {
+            cursor_tag: "track-album-desc",
+            expression: "(COALESCE(t.album, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
             descending: true,
-            cursor_kind: CursorKind::Integer,
+            cursor_kind: CursorKind::Text,
+        },
+        TrackSort::YearAsc => SortDefinition {
+            cursor_tag: "track-year-asc",
+            expression: "CASE WHEN t.year BETWEEN 1000 AND 2999 THEN t.year END",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::YearDesc => SortDefinition {
+            cursor_tag: "track-year-desc",
+            expression: "CASE WHEN t.year BETWEEN 1000 AND 2999 THEN t.year END",
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::ReleaseYearAsc => SortDefinition {
+            cursor_tag: "track-release-year-asc",
+            expression: "CASE WHEN t.release_year BETWEEN 1000 AND 2999 THEN t.release_year END",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
         },
         TrackSort::ReleaseYearDesc => SortDefinition {
-            cursor_tag: "track-release-year",
-            expression: "COALESCE(t.release_year, -1)",
+            cursor_tag: "track-release-year-desc",
+            expression: "CASE WHEN t.release_year BETWEEN 1000 AND 2999 THEN t.release_year END",
             descending: true,
-            cursor_kind: CursorKind::Integer,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::RatingAsc => SortDefinition {
+            cursor_tag: "track-rating-asc",
+            expression: TRACK_RATING_EXPRESSION,
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
         },
         TrackSort::RatingDesc => SortDefinition {
-            cursor_tag: "track-rating",
-            expression: "t.normalized_rating",
+            cursor_tag: "track-rating-desc",
+            expression: TRACK_RATING_EXPRESSION,
             descending: true,
             cursor_kind: CursorKind::NullableInteger,
         },
@@ -506,7 +587,6 @@ fn track_page_from_connection(
         });
     }
     let sort = track_sort(request.sort.unwrap_or_default());
-    let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
     let mut predicates = String::from(" WHERE 1 = 1");
     if let Some(search) = &parsed_search {
@@ -568,12 +648,7 @@ fn track_page_from_connection(
         "t.id",
         true,
     )?;
-    sql.push_str(" ORDER BY (");
-    sql.push_str(sort.expression);
-    sql.push_str(") ");
-    sql.push_str(direction);
-    sql.push_str(", t.id ");
-    sql.push_str(direction);
+    push_order_by(&mut sql, sort, "t.id");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
 
@@ -641,34 +716,64 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
 fn album_sort(sort: AlbumSort) -> SortDefinition {
     match sort {
         AlbumSort::TitleAsc => SortDefinition {
-            cursor_tag: "album-title",
+            cursor_tag: "album-title-asc",
             expression: "COALESCE(a.album, '') COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
+        AlbumSort::TitleDesc => SortDefinition {
+            cursor_tag: "album-title-desc",
+            expression: "COALESCE(a.album, '') COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
         AlbumSort::ArtistAsc => SortDefinition {
-            cursor_tag: "album-artist",
+            cursor_tag: "album-artist-asc",
             expression: "(COALESCE(a.album_artist_display, '') || char(31) || COALESCE(a.album, '')) COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
-        AlbumSort::YearDesc => SortDefinition {
-            cursor_tag: "album-year",
-            expression: "COALESCE(a.year, -1)",
+        AlbumSort::ArtistDesc => SortDefinition {
+            cursor_tag: "album-artist-desc",
+            expression: "(COALESCE(a.album_artist_display, '') || char(31) || COALESCE(a.album, '')) COLLATE NOCASE",
             descending: true,
-            cursor_kind: CursorKind::Integer,
+            cursor_kind: CursorKind::Text,
+        },
+        AlbumSort::YearAsc => SortDefinition {
+            cursor_tag: "album-year-asc",
+            expression: "CASE WHEN a.year BETWEEN 1000 AND 2999 THEN a.year END",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::YearDesc => SortDefinition {
+            cursor_tag: "album-year-desc",
+            expression: "CASE WHEN a.year BETWEEN 1000 AND 2999 THEN a.year END",
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::ReleaseYearAsc => SortDefinition {
+            cursor_tag: "album-release-year-asc",
+            expression: "CASE WHEN a.release_year BETWEEN 1000 AND 2999 THEN a.release_year END",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
         },
         AlbumSort::ReleaseYearDesc => SortDefinition {
-            cursor_tag: "album-release-year",
-            expression: "COALESCE(a.release_year, -1)",
+            cursor_tag: "album-release-year-desc",
+            expression: "CASE WHEN a.release_year BETWEEN 1000 AND 2999 THEN a.release_year END",
             descending: true,
-            cursor_kind: CursorKind::Integer,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::RatingAsc => SortDefinition {
+            cursor_tag: "album-rating-asc",
+            expression: "a.effective_album_rating",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
         },
         AlbumSort::RatingDesc => SortDefinition {
-            cursor_tag: "album-rating",
-            expression: "COALESCE(a.effective_album_rating, -1)",
+            cursor_tag: "album-rating-desc",
+            expression: "a.effective_album_rating",
             descending: true,
-            cursor_kind: CursorKind::Integer,
+            cursor_kind: CursorKind::NullableInteger,
         },
     }
 }
@@ -698,10 +803,9 @@ fn album_page_from_connection(
         .as_ref()
         .and_then(|search| search.plain_fts_query().map(str::to_owned));
     let sort = album_sort(request.sort.unwrap_or_default());
-    let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, CAST(({}) AS TEXT) AS cursor_value FROM albums AS a",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -748,12 +852,7 @@ fn album_page_from_connection(
         "a.id",
         false,
     )?;
-    sql.push_str(" ORDER BY (");
-    sql.push_str(sort.expression);
-    sql.push_str(") ");
-    sql.push_str(direction);
-    sql.push_str(", a.id ");
-    sql.push_str(direction);
+    push_order_by(&mut sql, sort, "a.id");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
 
@@ -801,19 +900,30 @@ fn artist_page_from_connection(
     let sort = request.sort.unwrap_or_default();
     let definition = match sort {
         ArtistSort::NameAsc => SortDefinition {
-            cursor_tag: "artist-name",
+            cursor_tag: "artist-name-asc",
             expression: "r.name COLLATE NOCASE",
             descending: false,
             cursor_kind: CursorKind::Text,
         },
+        ArtistSort::NameDesc => SortDefinition {
+            cursor_tag: "artist-name-desc",
+            expression: "r.name COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
+        ArtistSort::TrackCountAsc => SortDefinition {
+            cursor_tag: "artist-count-asc",
+            expression: "r.track_count",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
         ArtistSort::TrackCountDesc => SortDefinition {
-            cursor_tag: "artist-count",
+            cursor_tag: "artist-count-desc",
             expression: "r.track_count",
             descending: true,
             cursor_kind: CursorKind::Integer,
         },
     };
-    let direction = if definition.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
     let mut rollup_where =
         String::from(" WHERE NULLIF(trim(a.album_artist_display), '') IS NOT NULL");
@@ -853,12 +963,7 @@ fn artist_page_from_connection(
         "r.name COLLATE NOCASE",
         false,
     )?;
-    sql.push_str(" ORDER BY (");
-    sql.push_str(definition.expression);
-    sql.push_str(") ");
-    sql.push_str(direction);
-    sql.push_str(", r.name COLLATE NOCASE ");
-    sql.push_str(direction);
+    push_order_by(&mut sql, definition, "r.name COLLATE NOCASE");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
     let mut statement = connection
@@ -1095,6 +1200,135 @@ mod tests {
                 id: "1 OR 1=1".to_owned(),
             })
             .is_err()
+        );
+    }
+
+    #[test]
+    fn explorer_sorts_reverse_chronological_and_alphabetical_order() {
+        let connection = fixture();
+
+        let track_year_asc = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                sort: Some(TrackSort::YearAsc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("ascending track years");
+        let track_year_desc = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                sort: Some(TrackSort::YearDesc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("descending track years");
+        let mut reversed_track_ids = track_year_desc
+            .items
+            .iter()
+            .map(|track| track.id.as_str())
+            .collect::<Vec<_>>();
+        reversed_track_ids.reverse();
+        assert_eq!(
+            track_year_asc
+                .items
+                .iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            reversed_track_ids
+        );
+
+        let track_title_asc = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                sort: Some(TrackSort::TitleAsc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("ascending track titles");
+        let track_title_desc = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                sort: Some(TrackSort::TitleDesc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("descending track titles");
+        assert_eq!(
+            track_title_asc
+                .items
+                .first()
+                .map(|track| track.title.as_str()),
+            track_title_desc
+                .items
+                .last()
+                .map(|track| track.title.as_str())
+        );
+
+        let album_year_asc = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                sort: Some(AlbumSort::YearAsc),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("ascending album years");
+        let album_year_desc = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                sort: Some(AlbumSort::YearDesc),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("descending album years");
+        let mut reversed_album_ids = album_year_desc
+            .items
+            .iter()
+            .map(|album| album.id.as_str())
+            .collect::<Vec<_>>();
+        reversed_album_ids.reverse();
+        assert_eq!(
+            album_year_asc
+                .items
+                .iter()
+                .map(|album| album.id.as_str())
+                .collect::<Vec<_>>(),
+            reversed_album_ids
+        );
+
+        let artist_name_asc = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                sort: Some(ArtistSort::NameAsc),
+                ..ArtistPageRequest::default()
+            },
+        )
+        .expect("ascending artist names");
+        let artist_name_desc = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                sort: Some(ArtistSort::NameDesc),
+                ..ArtistPageRequest::default()
+            },
+        )
+        .expect("descending artist names");
+        let mut reversed_artist_ids = artist_name_desc
+            .items
+            .iter()
+            .map(|artist| artist.id.as_str())
+            .collect::<Vec<_>>();
+        reversed_artist_ids.reverse();
+        assert_eq!(
+            artist_name_asc
+                .items
+                .iter()
+                .map(|artist| artist.id.as_str())
+                .collect::<Vec<_>>(),
+            reversed_artist_ids
         );
     }
 
@@ -1491,7 +1725,7 @@ mod tests {
                 .iter()
                 .map(|track| track.rating)
                 .collect::<Vec<_>>(),
-            vec![Some(5.0), Some(4.0)]
+            vec![Some(5.0), Some(4.5)]
         );
 
         let second = track_page_from_connection(
@@ -1508,5 +1742,44 @@ mod tests {
         assert_eq!(second.items.len(), 2);
         assert!(second.next_cursor.is_none());
         assert!(second.items.iter().any(|track| track.rating.is_none()));
+
+        let ascending_first = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                page_size: Some(2),
+                sort: Some(TrackSort::RatingAsc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("low ratings page");
+        assert_eq!(
+            ascending_first
+                .items
+                .iter()
+                .map(|track| track.rating)
+                .collect::<Vec<_>>(),
+            vec![Some(4.0), Some(4.5)]
+        );
+        let ascending_second = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                page_size: Some(2),
+                cursor: ascending_first.next_cursor,
+                sort: Some(TrackSort::RatingAsc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("ascending unrated page");
+        assert_eq!(ascending_second.items.len(), 2);
+        assert_eq!(
+            ascending_second
+                .items
+                .iter()
+                .map(|track| track.rating)
+                .collect::<Vec<_>>(),
+            vec![Some(5.0), None]
+        );
     }
 }

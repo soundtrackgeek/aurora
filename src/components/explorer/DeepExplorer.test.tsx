@@ -90,7 +90,6 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
     tracks,
     albums,
     artists,
-    genres: ["Synthwave", "Electronic"],
     selectedTrackId: null,
     selectedAlbumId: null,
     selectedArtistId: null,
@@ -107,40 +106,46 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
-  it("advertises the fielded track-search grammar", () => {
-    render(<DeepExplorer {...explorerProps()} />);
+  it.each(["tracks", "albums", "artists"] as const)("keeps only Sort and Reset in the %s filter bar", (view) => {
+    const onClearFilters = vi.fn();
+    render(<DeepExplorer {...explorerProps({ view, onClearFilters })} />);
 
-    const search = screen.getByRole("searchbox");
-    expect(search).toHaveAttribute("placeholder", "Search year:1985..1987, OR, NOT…");
-    expect(search.getAttribute("title")).toContain("aartist (Album Artist display)");
-    expect(search.getAttribute("title")).toContain("ryear (Release Year)");
-    expect(search.getAttribute("title")).toContain("uppercase OR inherits");
-    expect(search.getAttribute("title")).toContain("genre:scores");
-    expect(search.getAttribute("title")).toContain("year:1985..1987");
-    expect(search.getAttribute("title")).toContain("same syntax works for ryear");
+    const filterBar = screen.getByLabelText("Explorer filters");
+    expect(filterBar).toHaveTextContent("Sort");
+    expect(filterBar).toHaveTextContent("Reset");
+    expect(filterBar.querySelectorAll("select")).toHaveLength(1);
+    expect(filterBar.querySelectorAll("input")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(onClearFilters).toHaveBeenCalledOnce();
   });
 
   it("renders Year without substituting Release Year", () => {
     render(<DeepExplorer {...explorerProps()} />);
 
-    expect(screen.getByLabelText("Year basis")).toHaveValue("original");
     expect(screen.getByRole("row", { name: /Signal One/ })).toHaveTextContent("1985");
     expect(screen.getByRole("row", { name: /Second Light/ })).toHaveTextContent("2023");
   });
 
-  it("emits backend-native view, rating, and sort changes", () => {
+  it("toggles chronological and alphabetical directions when a sort is selected again", () => {
     const onViewChange = vi.fn();
     const onFiltersChange = vi.fn();
-    render(<DeepExplorer {...explorerProps({ onViewChange, onFiltersChange })} />);
+    const { rerender } = render(<DeepExplorer {...explorerProps({ onViewChange, onFiltersChange })} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
     expect(onViewChange).toHaveBeenCalledWith("albums");
 
-    fireEvent.change(screen.getByLabelText("Rating"), { target: { value: "4.5" } });
-    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, rating: 4.5 });
+    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "year" } });
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "yearDesc" });
 
-    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "ratingDesc" } });
-    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, sort: "ratingDesc" });
+    rerender(<DeepExplorer {...explorerProps({ filters: { ...filters, sort: "yearDesc" }, onViewChange, onFiltersChange })} />);
+    expect(screen.getByRole("option", { name: "Year · newest" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "year" } });
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "yearAsc" });
+
+    rerender(<DeepExplorer {...explorerProps({ filters: { ...filters, sort: "titleAsc" }, onViewChange, onFiltersChange })} />);
+    expect(screen.getByRole("option", { name: "Title · A–Z" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "title" } });
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "titleDesc" });
   });
 
   it("supports arrow-key selection and Enter activation in track rows", () => {
@@ -181,8 +186,7 @@ describe("DeepExplorer", () => {
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });
 
-  it("keeps album rating filters visible and only shows Album Score at full completion", () => {
-    const onFiltersChange = vi.fn();
+  it("only shows Album Score at full completion", () => {
     const completeAlbum = { ...albums[0], ratedTracks: albums[0].totalTracks };
     render(
       <DeepExplorer
@@ -191,16 +195,12 @@ describe("DeepExplorer", () => {
           filters: { ...filters, rating: 4.5, sort: "ratingDesc" },
           albums: [completeAlbum],
           selectedAlbumId: completeAlbum.id,
-          onFiltersChange,
           pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
         })}
       />,
     );
 
-    expect(screen.getByLabelText("Rating")).toHaveValue("4.5");
     expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Rating"), { target: { value: "unrated" } });
-    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, rating: "unrated", sort: "ratingDesc" });
   });
 
   it("exposes bounded loading, error, empty, and load-more states", () => {

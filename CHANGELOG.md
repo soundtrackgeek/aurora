@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.12] - 2026-08-23
+
+### Changed
+
+- Songs, Albums, and Artists now keep only Sort and Reset in the Explorer filter row. The persistent top search remains the primary catalog-filtering surface, while Reset also clears filters applied by collection handoffs.
+- Re-selecting the active Explorer sort reverses its direction across Songs, Albums, and Artists, including newest/oldest, A–Z/Z–A, year, release year, rating, and track-count ordering.
+
 ## [0.15.11] - 2026-08-23
 
 ### Added
