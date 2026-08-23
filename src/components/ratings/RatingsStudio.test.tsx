@@ -46,5 +46,6 @@ describe("RatingsStudio", () => {
     expect(callbacks.onCompletionChange).toHaveBeenCalledWith("partiallyRated");
     expect(screen.getByText("4.25 ★ provisional")).toBeInTheDocument();
     expect(screen.getByText("Available when the effective album rating is valid")).toBeInTheDocument();
+    expect(screen.getByText(/2000 · Rock · 10 tracks/)).toBeInTheDocument();
   });
 });

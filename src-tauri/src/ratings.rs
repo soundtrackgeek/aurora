@@ -509,7 +509,7 @@ fn query_candidate_ids(
         CompletionKind::PartiallyRated => {
             "a.rating_completeness DESC, a.loved_tracks DESC, COALESCE(a.album_score, -1) DESC, a.id"
         }
-        CompletionKind::Unrated => "COALESCE(a.release_year, -1) DESC, a.total_tracks, a.id",
+        CompletionKind::Unrated => "COALESCE(a.year, -1) DESC, a.total_tracks, a.id",
     };
     let sql = format!(
         "SELECT a.id FROM albums AS a WHERE {} ORDER BY {order} LIMIT ?1",
@@ -549,8 +549,8 @@ fn sort_albums(kind: CompletionKind, albums: &mut [RatingAlbum]) {
                     .then_with(|| left.id.cmp(&right.id))
             }
             CompletionKind::Unrated => right
-                .release_year
-                .cmp(&left.release_year)
+                .original_year
+                .cmp(&left.original_year)
                 .then_with(|| left.total_tracks.cmp(&right.total_tracks))
                 .then_with(|| left.id.cmp(&right.id)),
         }
@@ -857,6 +857,28 @@ mod tests {
         assert_eq!(completion_kind(10, 4), Some(CompletionKind::PartiallyRated));
         assert_eq!(completion_kind(10, 0), Some(CompletionKind::Unrated));
         assert_eq!(completion_kind(10, 10), None);
+    }
+
+    #[test]
+    fn unrated_candidates_use_year_instead_of_release_year() {
+        let connection = Connection::open_in_memory().expect("unrated ordering fixture");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE albums (
+                  id TEXT PRIMARY KEY, total_tracks INTEGER NOT NULL, rated_tracks INTEGER NOT NULL,
+                  year INTEGER, release_year INTEGER
+                );
+                INSERT INTO albums VALUES
+                  ('new-release', 10, 0, 1985, 2025),
+                  ('new-year', 10, 0, 2000, 1990);
+                "#,
+            )
+            .expect("seed unrated ordering fixture");
+
+        let ids = query_candidate_ids(&connection, CompletionKind::Unrated, 10)
+            .expect("unrated candidates");
+        assert_eq!(ids, vec!["new-year", "new-release"]);
     }
 
     #[test]

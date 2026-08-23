@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.8 keeps the 0.15.7 boolean, negative, exact, inherited-field, and `scores` search release while restoring warnings-as-errors Rust CI compatibility.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.9 makes Music Library's `Year` field the default across songs, albums, genres, and publisher-filtered results while retaining explicit `Release Year` choices.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.8 slice
+## Current 0.15.9 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -48,13 +48,13 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Equivalent OneDrive branches reconcile automatically when only transient catalog IDs, playback position, import-run markers, or retry timestamps differ. Stable queue identity and user-authored tag, journal, playback-setting, and curation differences still block automatic replacement.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - A dedicated Genre Atlas over all canonical catalog genres, with search and sorts for scale, rating, Love, recent listening, unexplored worlds, and name.
-- Bounded genre details with representative album covers, release decades, personal listening memory, top albums and artists, shared-artist connections, and editable track highlights.
+- Bounded genre details with representative album covers, `Year` decades, personal listening memory, top albums and artists, shared-artist connections, and editable track highlights.
 - Genre Radio, Shuffle, Loved, Highest Rated, Rediscover, and Unrated Expedition actions that load at most 100 tracks per batch, auto-refill below 20 remaining tracks, and never exceed the 200-track queue.
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
-- Exact half-star/unrated, Love/Neutral/Ban, release-year, genre, and artist filters, plus safely quoted FTS5 prefix search across the entire catalog.
+- Exact half-star/unrated, Love/Neutral/Ban, year, genre, and artist filters, plus safely quoted FTS5 prefix search across the entire catalog. Year filters default to `Year` and expose `Release Year` only as an explicit alternative.
 - Field-aware search supports `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, and `title:`. Commas or uppercase `AND` combine groups; uppercase `OR` adds alternatives and inherits the preceding field; `NOT` or a leading `-` excludes a group. A complete quoted value is exact, while unquoted text remains prefix-based. `genre:scores` expands to the Music Library film, TV, animation, anime, and game-score genres.
-- Validated sorts for newest, title, artist, album, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
+- Validated sorts for newest, title, artist, album, year, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
 - Clickable artist planets and artist results that open an exact artist focus which can be switched between tracks and albums.
 - A functional Constellations artist inspector opened from universe planets, Artist results, the selected track, or the Observatory review queue.
 - A bounded, searchable Observatory for candidate-bearing artists, with Needs review, Conflicts, Unconfirmed, Aurora decisions, and All candidates filters.

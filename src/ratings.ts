@@ -117,6 +117,9 @@ function previewPage(kind: CompletionKind): RatingAlbumPage {
         return { ...album, id: `${album.id}:partial`, ratedTracks, remainingTracks: album.totalTracks - ratedTracks, provisionalRating: 3.5 + index * 0.15 };
       })()
       : { ...album, id: `${album.id}:unrated`, ratedTracks: 0, lovedTracks: 0, remainingTracks: album.totalTracks, provisionalRating: null });
+  if (kind === "unrated") {
+    albums.sort((left, right) => (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title));
+  }
   return { kind, total: PREVIEW_COMPLETION[kind], albums: albums.map(syncPreviewAlbum) };
 }
 

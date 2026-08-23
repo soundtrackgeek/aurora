@@ -25,7 +25,7 @@ const TRACK_COLUMNS: &str = r#"t.id, t.title, t.album_artist_display, t.album, t
       WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
       WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
     t.love, t.time_seconds, t.canonical_genre, l.play_count,
-    t.album_id, t.file_path, t.filename, t.import_run_id"#;
+    t.album_id, t.file_path, t.filename, t.import_run_id, t.year AS original_year"#;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -42,6 +42,7 @@ pub(crate) enum TrackSort {
     TitleAsc,
     ArtistAsc,
     AlbumAsc,
+    YearDesc,
     ReleaseYearDesc,
     RatingDesc,
 }
@@ -80,6 +81,7 @@ pub(crate) enum AlbumSort {
     TitleAsc,
     ArtistAsc,
     #[default]
+    YearDesc,
     ReleaseYearDesc,
     RatingDesc,
 }
@@ -111,6 +113,7 @@ pub(crate) struct AlbumSummary {
     pub(crate) title: String,
     pub(crate) artist: String,
     pub(crate) release_year: Option<i64>,
+    pub(crate) original_year: Option<i64>,
     pub(crate) genre: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
@@ -130,8 +133,8 @@ pub(crate) struct AlbumPage {
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum YearBasis {
-    Original,
     #[default]
+    Original,
     Release,
 }
 
@@ -440,8 +443,14 @@ fn track_sort(sort: TrackSort) -> SortDefinition {
             descending: false,
             cursor_kind: CursorKind::Text,
         },
-        TrackSort::ReleaseYearDesc => SortDefinition {
+        TrackSort::YearDesc => SortDefinition {
             cursor_tag: "track-year",
+            expression: "COALESCE(t.year, -1)",
+            descending: true,
+            cursor_kind: CursorKind::Integer,
+        },
+        TrackSort::ReleaseYearDesc => SortDefinition {
+            cursor_tag: "track-release-year",
             expression: "COALESCE(t.release_year, -1)",
             descending: true,
             cursor_kind: CursorKind::Integer,
@@ -553,7 +562,7 @@ fn track_page_from_connection(
         mapped.push((
             map_track_row(row)
                 .map_err(|error| format!("Could not decode the track explorer: {error}"))?,
-            row.get(14)
+            row.get(15)
                 .map_err(|error| format!("Could not decode the track cursor: {error}"))?,
         ));
     }
@@ -585,6 +594,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
             .get::<_, Option<String>>(2)?
             .unwrap_or_else(|| "Unknown Artist".to_owned()),
         release_year: row.get(3)?,
+        original_year: row.get(11)?,
         genre: row.get(4)?,
         total_tracks: row.get(5)?,
         rated_tracks: row.get(6)?,
@@ -609,8 +619,14 @@ fn album_sort(sort: AlbumSort) -> SortDefinition {
             descending: false,
             cursor_kind: CursorKind::Text,
         },
-        AlbumSort::ReleaseYearDesc => SortDefinition {
+        AlbumSort::YearDesc => SortDefinition {
             cursor_tag: "album-year",
+            expression: "COALESCE(a.year, -1)",
+            descending: true,
+            cursor_kind: CursorKind::Integer,
+        },
+        AlbumSort::ReleaseYearDesc => SortDefinition {
+            cursor_tag: "album-release-year",
             expression: "COALESCE(a.release_year, -1)",
             descending: true,
             cursor_kind: CursorKind::Integer,
@@ -651,7 +667,7 @@ fn album_page_from_connection(
     let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, CAST(({}) AS TEXT) AS cursor_value FROM albums AS a",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, CAST(({}) AS TEXT) AS cursor_value FROM albums AS a",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -720,7 +736,7 @@ fn album_page_from_connection(
         mapped.push((
             map_album_row(row)
                 .map_err(|error| format!("Could not decode the album explorer: {error}"))?,
-            row.get(11)
+            row.get(12)
                 .map_err(|error| format!("Could not decode the album cursor: {error}"))?,
         ));
     }
@@ -894,7 +910,7 @@ fn album_detail_from_connection(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating FROM albums AS a WHERE a.id = ?",
+            "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year FROM albums AS a WHERE a.id = ?",
             [album_id],
             map_album_row,
         )
@@ -959,7 +975,7 @@ fn artist_detail_from_connection(
         AlbumPageRequest {
             page_size: Some(MAX_PAGE_SIZE),
             artist: Some(artist.to_owned()),
-            sort: Some(AlbumSort::ReleaseYearDesc),
+            sort: Some(AlbumSort::YearDesc),
             ..AlbumPageRequest::default()
         },
     )?;
@@ -1028,6 +1044,8 @@ mod tests {
         assert!(page_size(Some(0)).is_err());
         assert!(page_size(Some(101)).is_err());
         assert_eq!(page_size(None).expect("default page"), 50);
+        assert_eq!(YearBasis::default(), YearBasis::Original);
+        assert_eq!(AlbumSort::default(), AlbumSort::YearDesc);
         assert!(rating_value(Some(3.25), false).is_err());
         assert!(rating_value(Some(4.5), false).is_ok());
         assert!(rating_value(Some(4.5), true).is_err());
@@ -1088,6 +1106,7 @@ mod tests {
                 love_state: Some(LoveState::Loved),
                 year_from: Some(2005),
                 year_to: Some(2005),
+                year_basis: YearBasis::Release,
                 genre: Some("Post-rock".to_owned()),
                 ..TrackPageRequest::default()
             },
@@ -1110,6 +1129,12 @@ mod tests {
         )
         .expect("original-year tracks");
         assert_eq!(original_year.items.len(), 3);
+        assert!(
+            original_year
+                .items
+                .iter()
+                .all(|track| track.original_year == Some(1999))
+        );
     }
 
     #[test]
@@ -1127,6 +1152,25 @@ mod tests {
 
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].title, "Sæglópur");
+        assert_eq!(page.items[0].original_year, Some(1999));
+        assert_eq!(page.items[0].release_year, Some(2005));
+
+        let publisher_year = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("publisher:emi,year:1999".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("publisher search using Year");
+        assert_eq!(publisher_year.items.len(), 2);
+        assert!(
+            publisher_year
+                .items
+                .iter()
+                .all(|track| track.original_year == Some(1999))
+        );
 
         let wrong_artist = track_page_from_connection(
             &connection,

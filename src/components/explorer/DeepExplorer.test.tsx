@@ -16,7 +16,8 @@ const tracks: Track[] = [
     title: "Signal One",
     artist: "Aurora Lines",
     album: "Night Geometry",
-    releaseYear: 2024,
+    originalYear: 1985,
+    releaseYear: null,
     rating: 5,
     loved: true,
     loveState: "loved",
@@ -33,6 +34,7 @@ const tracks: Track[] = [
     title: "Second Light",
     artist: "Aurora Lines",
     album: "Night Geometry",
+    originalYear: 2023,
     releaseYear: 2024,
     rating: null,
     loved: false,
@@ -54,6 +56,7 @@ const albums: ExplorerAlbum[] = [
     id: "album-1",
     title: "Night Geometry",
     artist: "Aurora Lines",
+    originalYear: 1985,
     releaseYear: 2024,
     rating: 4.5,
     totalTracks: 12,
@@ -71,7 +74,7 @@ const filters: ExplorerFilters = {
   love: "all",
   yearFrom: null,
   yearTo: null,
-  yearBasis: "release",
+  yearBasis: "original",
   yearMissing: false,
   genre: null,
   artist: null,
@@ -113,6 +116,14 @@ describe("DeepExplorer", () => {
     expect(search.getAttribute("title")).toContain("ryear (Release Year)");
     expect(search.getAttribute("title")).toContain("uppercase OR inherits");
     expect(search.getAttribute("title")).toContain("genre:scores");
+  });
+
+  it("renders Year without substituting Release Year", () => {
+    render(<DeepExplorer {...explorerProps()} />);
+
+    expect(screen.getByLabelText("Year basis")).toHaveValue("original");
+    expect(screen.getByRole("row", { name: /Signal One/ })).toHaveTextContent("1985");
+    expect(screen.getByRole("row", { name: /Second Light/ })).toHaveTextContent("2023");
   });
 
   it("emits backend-native view, rating, and sort changes", () => {

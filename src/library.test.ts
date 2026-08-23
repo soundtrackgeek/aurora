@@ -44,6 +44,8 @@ describe("library presentation", () => {
     expect(filterTracks(tracks, "aartist:sigur rós,genre:post rock", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "album:takk,year:1999,ryear:2005", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "publisher:emi,title:sæglópur", null)).toEqual([tracks[0]]);
+    expect(filterTracks(tracks, "year:2011", null)).toEqual([]);
+    expect(filterTracks(tracks, "ryear:2011", null)).toEqual([tracks[1]]);
   });
 
   it("supports OR inheritance, NOT, negative fields, and exact quoted values", () => {

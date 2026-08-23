@@ -670,6 +670,7 @@ mod tests {
             artist: "Artist".to_owned(),
             album: "Album".to_owned(),
             release_year: Some(2026),
+            original_year: Some(2026),
             rating,
             loved: love_state == LoveState::Loved,
             love_state,

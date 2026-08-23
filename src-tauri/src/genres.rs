@@ -46,7 +46,7 @@ pub(crate) struct GenreAlbum {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) artist: String,
-    pub(crate) release_year: Option<i64>,
+    pub(crate) year: Option<i64>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
     pub(crate) loved_tracks: i64,
@@ -153,13 +153,13 @@ fn query_genre_index(
             r#"
             WITH ranked AS MATERIALIZED (
               SELECT id, canonical_genre, album_artist_display, total_tracks,
-                     rated_tracks, loved_tracks, total_seconds, release_year,
+                     rated_tracks, loved_tracks, total_seconds, year,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating) AS rating_value,
                      ROW_NUMBER() OVER (
                        PARTITION BY canonical_genre
                        ORDER BY (loved_tracks > 0) DESC, loved_tracks DESC,
                                 COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
-                                COALESCE(album_score, -1) DESC, COALESCE(release_year, 0) DESC, id
+                                COALESCE(album_score, -1) DESC, COALESCE(year, 0) DESC, id
                      ) AS cover_rank
               FROM albums
               WHERE NULLIF(TRIM(canonical_genre), '') IS NOT NULL
@@ -173,7 +173,7 @@ fn query_genre_index(
                      THEN SUM(CASE WHEN rating_value IS NOT NULL THEN rating_value * rated_tracks ELSE 0 END)
                           / SUM(CASE WHEN rating_value IS NOT NULL THEN rated_tracks ELSE 0 END) / 20.0
                    END,
-                   MIN(NULLIF(release_year, 0)), MAX(NULLIF(release_year, 0)),
+                   MIN(NULLIF(year, 0)), MAX(NULLIF(year, 0)),
                    MAX(CASE WHEN cover_rank = 1 THEN id END)
             FROM ranked
             GROUP BY canonical_genre
@@ -204,12 +204,12 @@ fn query_genre_summary(
             r#"
             WITH ranked AS MATERIALIZED (
               SELECT id, canonical_genre, album_artist_display, total_tracks,
-                     rated_tracks, loved_tracks, total_seconds, release_year,
+                     rated_tracks, loved_tracks, total_seconds, year,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating) AS rating_value,
                      ROW_NUMBER() OVER (
                        ORDER BY (loved_tracks > 0) DESC, loved_tracks DESC,
                                 COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
-                                COALESCE(album_score, -1) DESC, COALESCE(release_year, 0) DESC, id
+                                COALESCE(album_score, -1) DESC, COALESCE(year, 0) DESC, id
                      ) AS cover_rank
               FROM albums
               WHERE canonical_genre = ?1
@@ -223,7 +223,7 @@ fn query_genre_summary(
                      THEN SUM(CASE WHEN rating_value IS NOT NULL THEN rating_value * rated_tracks ELSE 0 END)
                           / SUM(CASE WHEN rating_value IS NOT NULL THEN rated_tracks ELSE 0 END) / 20.0
                    END,
-                   MIN(NULLIF(release_year, 0)), MAX(NULLIF(release_year, 0)),
+                   MIN(NULLIF(year, 0)), MAX(NULLIF(year, 0)),
                    MAX(CASE WHEN cover_rank = 1 THEN id END)
             FROM ranked
             GROUP BY canonical_genre
@@ -313,11 +313,11 @@ fn query_decades(connection: &Connection, genre: &str) -> Result<Vec<GenreDecade
     let mut statement = connection
         .prepare(
             r#"
-            SELECT (release_year / 10) * 10 AS decade,
+            SELECT (year / 10) * 10 AS decade,
                    CAST(SUM(total_tracks) AS INTEGER), COUNT(*)
             FROM albums
             WHERE canonical_genre = ?1
-              AND release_year BETWEEN 1000 AND 9999
+              AND year BETWEEN 1000 AND 9999
             GROUP BY decade
             ORDER BY decade
             "#,
@@ -342,13 +342,13 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
             r#"
             SELECT id, COALESCE(NULLIF(TRIM(album), ''), 'Unknown Album'),
                    COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
-                   release_year, total_tracks, rated_tracks, loved_tracks, total_seconds,
+                   year, total_tracks, rated_tracks, loved_tracks, total_seconds,
                    COALESCE(effective_album_rating, calculated_album_rating, album_rating) / 20.0
             FROM albums
             WHERE canonical_genre = ?1
             ORDER BY (loved_tracks > 0) DESC, loved_tracks DESC,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
-                     COALESCE(album_score, -1) DESC, COALESCE(release_year, 0) DESC, album COLLATE NOCASE
+                     COALESCE(album_score, -1) DESC, COALESCE(year, 0) DESC, album COLLATE NOCASE
             LIMIT 12
             "#,
         )
@@ -359,7 +359,7 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
                 id: row.get(0)?,
                 title: row.get(1)?,
                 artist: row.get(2)?,
-                release_year: row.get(3)?,
+                year: row.get(3)?,
                 total_tracks: row.get(4)?,
                 rated_tracks: row.get(5)?,
                 loved_tracks: row.get(6)?,
@@ -737,7 +737,7 @@ mod tests {
                 CREATE TABLE albums (
                   id TEXT PRIMARY KEY, album TEXT, album_artist_display TEXT,
                   canonical_genre TEXT, total_tracks INTEGER, rated_tracks INTEGER,
-                  loved_tracks INTEGER, total_seconds INTEGER, release_year INTEGER,
+                  loved_tracks INTEGER, total_seconds INTEGER, release_year INTEGER, year INTEGER,
                   effective_album_rating INTEGER, calculated_album_rating INTEGER,
                   album_rating INTEGER, album_score REAL
                 );
@@ -751,9 +751,9 @@ mod tests {
                   artist_key TEXT, track_key TEXT, play_count INTEGER
                 );
                 INSERT INTO albums VALUES
-                  ('s1', 'Neon Nights', 'College', 'Synthwave', 2, 2, 1, 480, 2012, 90, 90, 90, 95),
-                  ('s2', 'After Dark', 'M83', 'Synthwave', 1, 1, 0, 240, 2015, 80, 80, 80, 85),
-                  ('e1', 'Electric Sky', 'M83', 'Electronic', 1, 1, 0, 200, 2011, 100, 100, 100, 99);
+                  ('s1', 'Neon Nights', 'College', 'Synthwave', 2, 2, 1, 480, 2012, 1985, 90, 90, 90, 95),
+                  ('s2', 'After Dark', 'M83', 'Synthwave', 1, 1, 0, 240, 2015, 1999, 80, 80, 80, 85),
+                  ('e1', 'Electric Sky', 'M83', 'Electronic', 1, 1, 0, 200, 2011, 2011, 100, 100, 100, 99);
                 INSERT INTO tracks VALUES
                   (1, 'A Real Hero', 'College', 'Neon Nights', 2012, 100, '5', 'L', 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'hero.mp3', 1, 1, 1),
                   (2, 'Night Drive', 'College', 'Neon Nights', 2012, 80, '4', NULL, 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'drive.mp3', 1, 1, 2),
@@ -785,6 +785,8 @@ mod tests {
         assert_eq!(genres[0].artist_count, 2);
         assert_eq!(genres[0].plays, 3);
         assert_eq!(genres[0].average_rating, Some(4.3));
+        assert_eq!(genres[0].first_year, Some(1985));
+        assert_eq!(genres[0].last_year, Some(1999));
     }
 
     #[test]
@@ -793,8 +795,16 @@ mod tests {
         let detail = query_genre_detail(&connection, "Synthwave", &HashMap::new(), None)
             .expect("query genre detail");
         assert_eq!(detail.summary.track_count, 3);
-        assert_eq!(detail.decades[0].decade, 2010);
+        assert_eq!(
+            detail
+                .decades
+                .iter()
+                .map(|bucket| bucket.decade)
+                .collect::<Vec<_>>(),
+            vec![1980, 1990]
+        );
         assert_eq!(detail.albums.len(), 2);
+        assert!(detail.albums.iter().any(|album| album.year == Some(1985)));
         assert_eq!(detail.artists[0].name, "College");
         assert_eq!(detail.related_genres[0].name, "Electronic");
         assert_eq!(detail.related_genres[0].shared_artists, 1);

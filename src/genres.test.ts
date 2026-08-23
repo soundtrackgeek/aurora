@@ -20,6 +20,7 @@ describe("genre atlas browser contract", () => {
     const detail = await loadGenreDetail("Synthwave");
     expect(detail.summary.name).toBe("Synthwave");
     expect(detail.albums[0].title).toBe("OutRun");
+    expect(detail.albums[0].year).toBe(2013);
     expect(detail.highlights[0].title).toBe("Nightcall");
   });
 

@@ -49,6 +49,7 @@ pub(crate) struct TrackSummary {
     pub(crate) artist: String,
     pub(crate) album: String,
     pub(crate) release_year: Option<i64>,
+    pub(crate) original_year: Option<i64>,
     pub(crate) rating: Option<f64>,
     pub(crate) loved: bool,
     pub(crate) love_state: LoveState,
@@ -154,6 +155,10 @@ pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
             .get::<_, Option<String>>(3)?
             .unwrap_or_else(|| "Unknown Album".to_owned()),
         release_year: row.get(4)?,
+        original_year: match row.as_ref().column_index("original_year") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
         rating: rating.map(|value| value as f64 / 20.0),
         loved: love_state == LoveState::Loved,
         love_state,

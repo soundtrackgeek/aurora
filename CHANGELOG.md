@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.9] - 2026-08-23
+
+### Fixed
+
+- Song rows labelled `Year` now return and display Music Library's `Year` value instead of incorrectly displaying `Release Year`, including publisher-filtered and other field-aware search results.
+- Album cards, album ordering, Genre Atlas ranges/decades/cards, and the unrated-album shelf now use `Year` without falling back to `Release Year`.
+
+### Changed
+
+- Song and Album year filters now default to `Year`; `Release Year` remains available only through the explicit year-basis choice, `ryear:` search field, and release-year sort.
+
 ## [0.15.8] - 2026-08-23
 
 ### Fixed

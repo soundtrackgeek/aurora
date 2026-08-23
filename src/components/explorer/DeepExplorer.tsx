@@ -25,7 +25,7 @@ import "./DeepExplorer.css";
 export type ExplorerView = "tracks" | "albums" | "artists";
 export type ExplorerRatingFilter = "all" | "unrated" | 0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 3.5 | 4 | 4.5 | 5;
 export type ExplorerLoveFilter = "all" | Track["loveState"];
-export type ExplorerSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc" | "trackCountDesc";
+export type ExplorerSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc" | "trackCountDesc";
 export type ExplorerLoadState = "loading" | "ready" | "error";
 
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
@@ -47,6 +47,7 @@ export interface ExplorerAlbum {
   id: string;
   title: string;
   artist: string;
+  originalYear?: number | null;
   releaseYear: number | null;
   rating: number | null;
   totalTracks: number;
@@ -108,10 +109,12 @@ const sortOptions: Record<ExplorerView, ReadonlyArray<{ value: ExplorerSort; lab
     { value: "titleAsc", label: "Title · A–Z" },
     { value: "artistAsc", label: "Artist · A–Z" },
     { value: "albumAsc", label: "Album · A–Z" },
+    { value: "yearDesc", label: "Year · newest" },
     { value: "releaseYearDesc", label: "Release year · newest" },
     { value: "ratingDesc", label: "Rating · high first" },
   ],
   albums: [
+    { value: "yearDesc", label: "Year · newest" },
     { value: "releaseYearDesc", label: "Release year · newest" },
     { value: "titleAsc", label: "Album · A–Z" },
     { value: "artistAsc", label: "Artist · A–Z" },
@@ -277,7 +280,7 @@ function TrackTable({
                 </td>
                 <td>{track.artist}</td>
                 <td>{track.album}</td>
-                <td className="is-numeric">{track.releaseYear ?? "—"}</td>
+                <td className="is-numeric">{track.originalYear ?? "—"}</td>
                 <td>{track.genre ?? "—"}</td>
                 <td className="is-numeric">{formatDuration(track.durationSeconds)}</td>
                 <td className="is-numeric">{track.playCount === null ? "—" : formatCount(track.playCount)}</td>
@@ -379,7 +382,7 @@ function AlbumGrid({
           <span className="deep-explorer-album__copy">
             <strong>{album.title}</strong>
             <span>{album.artist}</span>
-            <small>{album.releaseYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks</small>
+            <small>{album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks</small>
           </span>
           <ChevronRight aria-hidden="true" />
         </button>
@@ -424,7 +427,7 @@ function AlbumDetail({
           <h3>{album.title}</h3>
           <p>{album.artist}</p>
           <small>
-            {album.releaseYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
+            {album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}
           </small>
           {album.ratedTracks === album.totalTracks && album.albumScore !== null
@@ -613,8 +616,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
             <legend>
               <span className="sr-only">Year basis</span>
               <select aria-label="Year basis" value={filters.yearBasis} onChange={(event) => updateFilters({ yearBasis: event.currentTarget.value as YearBasis })}>
+                <option value="original">Year</option>
                 <option value="release">Release year</option>
-                <option value="original">Original year</option>
               </select>
             </legend>
             <input
@@ -622,7 +625,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
               inputMode="numeric"
               min="1000"
               max="9999"
-              aria-label={`${filters.yearBasis === "original" ? "Original" : "Release"} year from`}
+              aria-label={`${filters.yearBasis === "original" ? "Year" : "Release year"} from`}
               placeholder="From"
               disabled={filters.yearMissing}
               value={numericInputValue(filters.yearFrom)}
@@ -634,7 +637,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
               inputMode="numeric"
               min="1000"
               max="9999"
-              aria-label={`${filters.yearBasis === "original" ? "Original" : "Release"} year to`}
+              aria-label={`${filters.yearBasis === "original" ? "Year" : "Release year"} to`}
               placeholder="To"
               disabled={filters.yearMissing}
               value={numericInputValue(filters.yearTo)}

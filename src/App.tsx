@@ -203,7 +203,7 @@ const defaultExplorerFilters: ExplorerFilters = {
   love: "all",
   yearFrom: null,
   yearTo: null,
-  yearBasis: "release",
+  yearBasis: "original",
   yearMissing: false,
   genre: null,
   artist: null,
@@ -213,14 +213,14 @@ const defaultExplorerFilters: ExplorerFilters = {
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
-  tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "releaseYearDesc", "ratingDesc"],
-  albums: ["releaseYearDesc", "titleAsc", "artistAsc", "ratingDesc"],
+  tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "yearDesc", "releaseYearDesc", "ratingDesc"],
+  albums: ["yearDesc", "releaseYearDesc", "titleAsc", "artistAsc", "ratingDesc"],
   artists: ["artistAsc", "trackCountDesc"],
 };
 
 const defaultSort: Record<ExplorerView, ExplorerSort> = {
   tracks: "newest",
-  albums: "releaseYearDesc",
+  albums: "yearDesc",
   artists: "artistAsc",
 };
 
@@ -275,7 +275,7 @@ async function loadExplorerPage(
       missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.tracks.includes(filters.sort)
-        ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc"
+        ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
         : "newest",
     });
     return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor };
@@ -291,8 +291,8 @@ async function loadExplorerPage(
       missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.albums.includes(filters.sort)
-        ? filters.sort as "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc"
-        : "releaseYearDesc",
+        ? filters.sort as "titleAsc" | "artistAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
+        : "yearDesc",
     });
     return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor };
   }
@@ -1229,7 +1229,7 @@ function App() {
     if (chartSelection.kind === "albums") {
       setActiveNav("Albums");
       setExplorerView("albums");
-      setExplorerFilters({ ...defaultExplorerFilters, query: chartSelection.entry.title, sort: "releaseYearDesc" });
+      setExplorerFilters({ ...defaultExplorerFilters, query: chartSelection.entry.title, sort: "yearDesc" });
       return;
     }
     setActiveNav("Songs");
@@ -1316,7 +1316,7 @@ function App() {
     setExplorerFilters({
       ...defaultExplorerFilters,
       rating: (rating ?? "unrated") as ExplorerFilters["rating"],
-      sort: rating === null ? "releaseYearDesc" : "ratingDesc",
+      sort: rating === null ? "yearDesc" : "ratingDesc",
     });
   }
 
@@ -1862,7 +1862,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.8</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.9</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

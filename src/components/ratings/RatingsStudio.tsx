@@ -216,7 +216,7 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
       {selectedAlbum ? <div className="completion-detail">
         <div className="completion-detail__album">
           <Artwork track={albumAsTrack(selectedAlbum)} size="large" decorative={false} />
-          <div><h3>{selectedAlbum.title}</h3><p>{selectedAlbum.artist}</p><span>{selectedAlbum.releaseYear ?? "Year unknown"} · {selectedAlbum.genre ?? "Unknown genre"} · {selectedAlbum.totalTracks} tracks</span>
+          <div><h3>{selectedAlbum.title}</h3><p>{selectedAlbum.artist}</p><span>{selectedAlbum.originalYear ?? "Year unknown"} · {selectedAlbum.genre ?? "Unknown genre"} · {selectedAlbum.totalTracks} tracks</span>
             <div className="completion-progress"><i style={{ width: `${Math.round(selectedAlbum.ratedTracks / Math.max(1, selectedAlbum.totalTracks) * 100)}%` }} /><span>{selectedAlbum.ratedTracks} of {selectedAlbum.totalTracks} rated</span></div>
             <dl><div><dt>Current mean</dt><dd>{selectedAlbum.provisionalRating === null ? "—" : `${selectedAlbum.provisionalRating.toFixed(2)} ★ provisional`}</dd></div><div><dt>Album Score</dt><dd>{selectedAlbum.albumScore === null ? "Available when the effective album rating is valid" : selectedAlbum.albumScore.toFixed(1)}</dd></div></dl>
             <button type="button" className="button button--primary" disabled={props.queueBusy || selectedAlbum.remainingTracks === 0} onClick={() => props.onPlayUnrated(selectedAlbum)}>{props.queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play unrated tracks</button>

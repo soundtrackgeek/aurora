@@ -66,7 +66,7 @@ export interface ExplorerCursor {
   id: string;
 }
 
-export type TrackSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc";
+export type TrackSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc";
 
 export interface TrackPageRequest {
   pageSize?: number;
@@ -104,7 +104,7 @@ export interface AlbumSummary {
   albumScore: number | null;
 }
 
-export type AlbumSort = "titleAsc" | "artistAsc" | "releaseYearDesc" | "ratingDesc";
+export type AlbumSort = "titleAsc" | "artistAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc";
 
 export interface AlbumPageRequest {
   pageSize?: number;
@@ -178,13 +178,13 @@ export const browserPreview: LibrarySnapshot = {
     { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755 },
   ],
   tracks: [
-    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
-    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", releaseYear: 2011, rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
-    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", releaseYear: 2013, rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
-    previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", releaseYear: 2009, rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
-    previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", releaseYear: 2001, rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
-    previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", releaseYear: 2010, rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
-    previewTrack({ id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", releaseYear: 2008, rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 }),
+    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
+    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", originalYear: 2011, releaseYear: 2011, rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
+    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
+    previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", originalYear: 2009, releaseYear: 2009, rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
+    previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", originalYear: 2001, releaseYear: 2001, rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
+    previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", originalYear: 2010, releaseYear: 2010, rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
+    previewTrack({ id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", originalYear: 2008, releaseYear: 2008, rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 }),
   ],
 };
 
@@ -268,6 +268,7 @@ function browserAlbumSummaries(): AlbumSummary[] {
       id,
       title: tracks[0].album,
       artist: tracks[0].artist,
+      originalYear: tracks[0].originalYear ?? null,
       releaseYear: tracks[0].releaseYear,
       genre: tracks[0].genre,
       totalTracks: tracks.length,
@@ -290,9 +291,9 @@ function usesAdvancedLibrarySearch(search?: string): boolean {
 }
 
 function previewTrackPage(request: TrackPageRequest): TrackPage {
-  const yearFor = (track: Track) => request.yearBasis === "original"
-    ? (track.originalYear === undefined ? track.releaseYear : track.originalYear)
-    : track.releaseYear;
+  const yearFor = (track: Track) => request.yearBasis === "release"
+    ? track.releaseYear
+    : (track.originalYear ?? null);
   const items = browserPreview.tracks
     .filter((track) => filterTracks([track], request.search ?? "", null).length > 0)
     .filter((track) => request.rating === undefined || track.rating === request.rating)
@@ -308,6 +309,7 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
         case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
         case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
         case "albumAsc": return left.album.localeCompare(right.album) || left.title.localeCompare(right.title);
+        case "yearDesc": return (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title);
         case "releaseYearDesc": return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
         case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
         default: return right.id.localeCompare(left.id);
@@ -317,9 +319,9 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
 }
 
 function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
-  const yearFor = (album: AlbumSummary) => request.yearBasis === "original"
-    ? (album.originalYear === undefined ? album.releaseYear : album.originalYear)
-    : album.releaseYear;
+  const yearFor = (album: AlbumSummary) => request.yearBasis === "release"
+    ? album.releaseYear
+    : (album.originalYear ?? null);
   const fieldedAlbumIds = usesAdvancedLibrarySearch(request.search)
     ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.albumId))
     : null;
@@ -339,7 +341,8 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
         case "titleAsc": return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
         case "artistAsc": return left.artist.localeCompare(right.artist) || left.title.localeCompare(right.title);
         case "ratingDesc": return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
-        default: return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
+        case "releaseYearDesc": return (right.releaseYear ?? -1) - (left.releaseYear ?? -1) || left.title.localeCompare(right.title);
+        default: return (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title);
       }
     });
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
@@ -592,7 +595,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
 
 function matchesLibrarySearchAlternative(track: Track, alternative: LibrarySearchAlternative): boolean {
   if (alternative.field === "year") {
-    return (track.originalYear === undefined ? track.releaseYear : track.originalYear) === alternative.year;
+    return track.originalYear === alternative.year;
   }
   if (alternative.field === "ryear") return track.releaseYear === alternative.year;
   const values = librarySearchValues(track, alternative.field);

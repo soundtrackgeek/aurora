@@ -96,7 +96,8 @@ function albumAsTrack(album: GenreAlbum): Track {
     title: album.title,
     artist: album.artist,
     album: album.title,
-    releaseYear: album.releaseYear,
+    originalYear: album.year,
+    releaseYear: null,
     rating: album.rating,
     loved: album.lovedTracks > 0,
     loveState: album.lovedTracks > 0 ? "loved" : "neutral",
@@ -221,10 +222,10 @@ function GenreTimeline({ detail }: { detail: GenreDetail }) {
   const largest = Math.max(1, ...detail.decades.map((decade) => decade.trackCount));
   return (
     <section className="genre-panel genre-timeline" aria-labelledby="genre-timeline-title">
-      <header><div><span>Release gravity</span><h3 id="genre-timeline-title">Through the decades</h3></div><Clock3 aria-hidden="true" /></header>
-      {detail.decades.length ? <div className="genre-timeline__bars" role="img" aria-label={`${detail.summary.name} releases from ${detail.summary.firstYear ?? "unknown"} to ${detail.summary.lastYear ?? "unknown"}`}>
+      <header><div><span>Year gravity</span><h3 id="genre-timeline-title">Through the decades</h3></div><Clock3 aria-hidden="true" /></header>
+      {detail.decades.length ? <div className="genre-timeline__bars" role="img" aria-label={`${detail.summary.name} years from ${detail.summary.firstYear ?? "unknown"} to ${detail.summary.lastYear ?? "unknown"}`}>
         {detail.decades.map((decade) => <div key={decade.decade}><span aria-hidden="true"><i style={{ height: `${Math.max(7, (decade.trackCount / largest) * 100)}%` }} /></span><strong>{decade.decade}s</strong><small>{formatCount(decade.trackCount)}</small></div>)}
-      </div> : <p className="genre-panel__empty">No reliable release years are available for this genre.</p>}
+      </div> : <p className="genre-panel__empty">No reliable years are available for this genre.</p>}
     </section>
   );
 }
@@ -249,7 +250,7 @@ function GenreHero({
         <div className="genre-hero__content">
           <span className="genre-hero__kicker"><Sparkles aria-hidden="true" /> Canonical genre</span>
           <h2 id="genre-detail-title">{summary.name}</h2>
-          <p>{summary.firstYear && summary.lastYear ? `${summary.firstYear}–${summary.lastYear}` : "Release years still forming"} · {countLabel(summary.artistCount, "artist")} · {compactHours(summary.durationSeconds)}</p>
+          <p>{summary.firstYear && summary.lastYear ? `${summary.firstYear}–${summary.lastYear}` : "Years still forming"} · {countLabel(summary.artistCount, "artist")} · {compactHours(summary.durationSeconds)}</p>
           <div className="genre-hero__actions">
             <button type="button" className="genre-play" disabled={queueBusy !== null} onClick={() => onQueue("radio")}>
               {queueBusy === "radio" ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play Genre Radio
@@ -301,7 +302,7 @@ function GenreAlbums({ detail }: { detail: GenreDetail }) {
   return (
     <section className="genre-panel genre-albums" aria-labelledby="genre-albums-title">
       <header><div><span>Representative releases</span><h3 id="genre-albums-title">Albums in orbit</h3></div><Album aria-hidden="true" /></header>
-      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><small>{album.releaseYear ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
+      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><small>{album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
     </section>
   );
 }

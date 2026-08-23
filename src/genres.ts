@@ -29,7 +29,7 @@ export interface GenreAlbum {
   id: string;
   title: string;
   artist: string;
-  releaseYear: number | null;
+  year: number | null;
   totalTracks: number;
   ratedTracks: number;
   lovedTracks: number;
@@ -94,7 +94,7 @@ function previewAlbumGroups(tracks: readonly Track[]): GenreAlbum[] {
       id,
       title: albumTracks[0].album,
       artist: albumTracks[0].artist,
-      releaseYear: albumTracks[0].releaseYear,
+      year: albumTracks[0].originalYear ?? null,
       totalTracks: albumTracks.length,
       ratedTracks: rated.length,
       lovedTracks: albumTracks.filter((track) => track.loved).length,
@@ -109,7 +109,7 @@ function previewAlbumGroups(tracks: readonly Track[]): GenreAlbum[] {
 function previewSummary(name: string): GenreSummary {
   const tracks = genreTracks(name);
   const albums = previewAlbumGroups(tracks);
-  const years = tracks.flatMap((track) => track.releaseYear === null ? [] : [track.releaseYear]);
+  const years = tracks.flatMap((track) => track.originalYear == null ? [] : [track.originalYear]);
   const ratings = tracks.flatMap((track) => track.rating === null ? [] : [track.rating]);
   return {
     name,
@@ -167,8 +167,8 @@ function previewGenreDetail(name: string): GenreDetail {
     .sort((left, right) => right.trackCount - left.trackCount || left.name.localeCompare(right.name));
   const decadeMap = new Map<number, { tracks: number; albums: Set<string> }>();
   for (const track of tracks) {
-    if (track.releaseYear === null) continue;
-    const decade = Math.floor(track.releaseYear / 10) * 10;
+    if (track.originalYear == null) continue;
+    const decade = Math.floor(track.originalYear / 10) * 10;
     const current = decadeMap.get(decade) ?? { tracks: 0, albums: new Set<string>() };
     current.tracks += 1;
     if (track.albumId) current.albums.add(track.albumId);
