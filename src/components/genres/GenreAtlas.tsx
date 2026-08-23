@@ -98,6 +98,7 @@ function albumAsTrack(album: GenreAlbum): Track {
     album: album.title,
     originalYear: album.year,
     releaseYear: null,
+    publisher: album.publisher ?? null,
     rating: album.rating,
     loved: album.lovedTracks > 0,
     loveState: album.lovedTracks > 0 ? "loved" : "neutral",
@@ -302,7 +303,7 @@ function GenreAlbums({ detail }: { detail: GenreDetail }) {
   return (
     <section className="genre-panel genre-albums" aria-labelledby="genre-albums-title">
       <header><div><span>Representative releases</span><h3 id="genre-albums-title">Albums in orbit</h3></div><Album aria-hidden="true" /></header>
-      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><small>{album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
+      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><small>{album.publisher ?? "Publisher unknown"} · {album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
     </section>
   );
 }

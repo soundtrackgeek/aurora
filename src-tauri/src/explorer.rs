@@ -25,7 +25,8 @@ const TRACK_COLUMNS: &str = r#"t.id, t.title, t.album_artist_display, t.album, t
       WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
       WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
     t.love, t.time_seconds, t.canonical_genre, l.play_count,
-    t.album_id, t.file_path, t.filename, t.import_run_id, t.year AS original_year"#;
+    t.album_id, t.file_path, t.filename, t.import_run_id, t.year AS original_year,
+    t.publisher AS publisher"#;
 
 const TRACK_RATING_EXPRESSION: &str = r#"COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
       WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -134,6 +135,7 @@ pub(crate) struct AlbumSummary {
     pub(crate) artist: String,
     pub(crate) release_year: Option<i64>,
     pub(crate) original_year: Option<i64>,
+    pub(crate) publisher: Option<String>,
     pub(crate) genre: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
@@ -666,7 +668,7 @@ fn track_page_from_connection(
         mapped.push((
             map_track_row(row)
                 .map_err(|error| format!("Could not decode the track explorer: {error}"))?,
-            row.get(15)
+            row.get(16)
                 .map_err(|error| format!("Could not decode the track cursor: {error}"))?,
         ));
     }
@@ -703,6 +705,10 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
             .unwrap_or_else(|| "Unknown Artist".to_owned()),
         release_year: row.get(3)?,
         original_year: row.get(11)?,
+        publisher: match row.as_ref().column_index("publisher") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
         genre: row.get(4)?,
         total_tracks: row.get(5)?,
         rated_tracks: row.get(6)?,
@@ -805,7 +811,7 @@ fn album_page_from_connection(
     let sort = album_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -870,7 +876,7 @@ fn album_page_from_connection(
         mapped.push((
             map_album_row(row)
                 .map_err(|error| format!("Could not decode the album explorer: {error}"))?,
-            row.get(12)
+            row.get(13)
                 .map_err(|error| format!("Could not decode the album cursor: {error}"))?,
         ));
     }
@@ -1054,7 +1060,7 @@ fn album_detail_from_connection(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year FROM albums AS a WHERE a.id = ?",
+            "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher FROM albums AS a WHERE a.id = ?",
             [album_id],
             map_album_row,
         )
@@ -1150,7 +1156,7 @@ mod tests {
                   id TEXT PRIMARY KEY, album TEXT, album_artist_display TEXT, canonical_genre TEXT,
                   release_year INTEGER, total_tracks INTEGER NOT NULL, rated_tracks INTEGER NOT NULL,
                   loved_tracks INTEGER NOT NULL, total_seconds INTEGER NOT NULL,
-                  album_score REAL, effective_album_rating INTEGER, year INTEGER
+                  album_score REAL, effective_album_rating INTEGER, year INTEGER, publisher TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER,
@@ -1164,9 +1170,9 @@ mod tests {
                   album_id UNINDEXED, album, album_artist_display, canonical_genre, publisher
                 );
                 INSERT INTO albums VALUES
-                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999),
-                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999),
-                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80, 2001);
+                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999, 'EMI Records'),
+                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999, 'FatCat'),
+                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80, 2001, 'Virgin');
                 INSERT INTO tracks VALUES
                   (7, 1, 'a1', 'Sæglópur', 'Jónsi', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', 'L', '5', 100, 2005, 473, 'H:\Music\Sigur Rós', '01.mp3', 1, 1, 1999),
                   (8, 1, 'a1', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', NULL, '', NULL, 2005, 268, 'H:\Music\Sigur Rós', '02.mp3', 1, 2, 1999),
@@ -1176,7 +1182,7 @@ mod tests {
                   SELECT id, album_id, title, display_artist, album, album_artist_display,
                          canonical_genre, publisher, file_path, filename FROM tracks;
                 INSERT INTO album_search_fts
-                  SELECT id, album, album_artist_display, canonical_genre, '' FROM albums;
+                  SELECT id, album, album_artist_display, canonical_genre, publisher FROM albums;
                 "#,
             )
             .expect("explorer fixture schema");
@@ -1599,10 +1605,10 @@ mod tests {
             .execute_batch(
                 r#"
                 INSERT INTO albums VALUES
-                  ('a4', 'Kiss', 'Kiss', 'Rock', 1974, 1, 0, 0, 180, NULL, NULL, 1974),
-                  ('a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Synth-pop', 1986, 1, 0, 0, 210, NULL, NULL, 1986),
-                  ('a6', 'Film Music', 'Composer', 'Drama', 2020, 1, 0, 0, 180, NULL, NULL, 2020),
-                  ('a7', 'Compilation', 'Various Artists', 'Soundtrack', 2020, 1, 0, 0, 180, NULL, NULL, 2020);
+                  ('a4', 'Kiss', 'Kiss', 'Rock', 1974, 1, 0, 0, 180, NULL, NULL, 1974, 'Casablanca'),
+                  ('a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Synth-pop', 1986, 1, 0, 0, 210, NULL, NULL, 1986, 'Magnet'),
+                  ('a6', 'Film Music', 'Composer', 'Drama', 2020, 1, 0, 0, 180, NULL, NULL, 2020, 'Label'),
+                  ('a7', 'Compilation', 'Various Artists', 'Soundtrack', 2020, 1, 0, 0, 180, NULL, NULL, 2020, 'Label');
                 INSERT INTO tracks VALUES
                   (11, 1, 'a4', 'Strutter', 'Kiss', 'Kiss', 'Kiss', 'Rock', 'Casablanca', NULL, '', NULL, 1974, 180, 'H:\Music\Kiss', '01.mp3', 1, 1, 1974),
                   (12, 1, 'a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Kissing the Pink', 'Certain Things Are Likely', 'Synth-pop', 'Magnet', NULL, '', NULL, 1986, 210, 'H:\Music\Kissing the Pink', '01.mp3', 1, 1, 1986),

@@ -110,6 +110,7 @@ export interface AlbumSummary {
   artist: string;
   releaseYear: number | null;
   originalYear?: number | null;
+  publisher?: string | null;
   genre: string | null;
   totalTracks: number;
   ratedTracks: number;
@@ -205,13 +206,13 @@ export const browserPreview: LibrarySnapshot = {
     { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755 },
   ],
   tracks: [
-    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
-    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", originalYear: 2011, releaseYear: 2011, rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
-    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
-    previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", originalYear: 2009, releaseYear: 2009, rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
-    previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", originalYear: 2001, releaseYear: 2001, rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
-    previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", originalYear: 2010, releaseYear: 2010, rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
-    previewTrack({ id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", originalYear: 2008, releaseYear: 2008, rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 }),
+    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
+    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", originalYear: 2011, releaseYear: 2011, publisher: "Lakeshore Records", rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
+    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, publisher: "Record Makers", rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
+    previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", originalYear: 2009, releaseYear: 2009, publisher: "Young", rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
+    previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", originalYear: 2001, releaseYear: 2001, publisher: "Virgin Records", rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
+    previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", originalYear: 2010, releaseYear: 2010, publisher: "Parlophone", rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
+    previewTrack({ id: "preview-7", albumId: "preview-viva", title: "Strawberry Swing", artist: "Coldplay", album: "Viva la Vida", originalYear: 2008, releaseYear: 2008, publisher: "Parlophone", rating: 4, loved: false, durationSeconds: 249, genre: "Alternative", playCount: 108 }),
   ],
 };
 
@@ -297,6 +298,7 @@ function browserAlbumSummaries(): AlbumSummary[] {
       artist: tracks[0].artist,
       originalYear: tracks[0].originalYear ?? null,
       releaseYear: tracks[0].releaseYear,
+      publisher: tracks[0].publisher ?? null,
       genre: tracks[0].genre,
       totalTracks: tracks.length,
       ratedTracks: rated.length,

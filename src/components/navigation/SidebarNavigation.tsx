@@ -1,6 +1,7 @@
 import {
   Album,
   CalendarDays,
+  Building2,
   ChartColumn,
   ChevronDown,
   ChevronRight,
@@ -25,6 +26,7 @@ export type SidebarDestination =
   | "Songs"
   | "Albums"
   | "Artists"
+  | "Publishers"
   | "Genres"
   | "Years"
   | "Ratings"
@@ -62,6 +64,7 @@ const libraryItems: readonly NavigationItem[] = [
   { label: "Songs", icon: Music2 },
   { label: "Albums", icon: Album },
   { label: "Artists", icon: UsersRound },
+  { label: "Publishers", icon: Building2 },
   { label: "Genres", icon: Disc3 },
   { label: "Years", icon: CalendarDays },
   { label: "Ratings", icon: Star },

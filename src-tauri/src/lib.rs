@@ -11,6 +11,7 @@ mod history;
 mod laptop_mode;
 mod musicbrainz;
 mod playback;
+mod publishers;
 mod ratings;
 mod replay_gain;
 mod shortcuts;
@@ -34,6 +35,7 @@ use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
+use publishers::{PublisherDetail, PublisherOverview, PublisherQueueRequest};
 use ratings::{
     CompletionKind, RatingAlbumPage, RatingAlbumQueueRequest, RatingCollectionRequest,
     RatingsOverview,
@@ -241,6 +243,33 @@ async fn ratings_overview(app: AppHandle) -> Result<RatingsOverview, String> {
     })
     .await
     .map_err(|error| format!("The Ratings overview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn publisher_overview(search: Option<String>) -> Result<PublisherOverview, String> {
+    tauri::async_runtime::spawn_blocking(move || publishers::load_publisher_overview(search))
+        .await
+        .map_err(|error| format!("The publisher overview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn publisher_detail(publisher: String) -> Result<PublisherDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || publishers::load_publisher_detail(publisher))
+        .await
+        .map_err(|error| format!("The publisher detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn publisher_queue_tracks(
+    app: AppHandle,
+    request: PublisherQueueRequest,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        publishers::load_publisher_queue(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The publisher queue worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -780,6 +809,9 @@ pub fn run() {
             rating_album_page,
             rating_collection_tracks,
             rating_album_queue_tracks,
+            publisher_overview,
+            publisher_detail,
+            publisher_queue_tracks,
             artist_intelligence,
             musicbrainz_review_page,
             update_artist_identity_decision,

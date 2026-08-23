@@ -47,6 +47,7 @@ export interface YearAlbum {
   artist: string;
   originalYear: number | null;
   releaseYear: number | null;
+  publisher?: string | null;
   totalTracks: number;
   ratedTracks: number;
   lovedTracks: number;
@@ -70,7 +71,7 @@ export interface YearOverview {
 }
 
 const PREVIEW_ALBUMS: readonly YearAlbum[] = [
-  { id: "year-blade-runner", title: "Blade Runner (Expanded Edition)", artist: "Vangelis", originalYear: 1982, releaseYear: 2025, totalTracks: 32, ratedTracks: 27, lovedTracks: 5, durationSeconds: 4542, genre: "Stage & Screen", rating: 5 },
+  { id: "year-blade-runner", title: "Blade Runner (Expanded Edition)", artist: "Vangelis", originalYear: 1982, releaseYear: 2025, publisher: "East West Records", totalTracks: 32, ratedTracks: 27, lovedTracks: 5, durationSeconds: 4542, genre: "Stage & Screen", rating: 5 },
   { id: "year-thriller", title: "Thriller", artist: "Michael Jackson", originalYear: 1982, releaseYear: 1982, totalTracks: 9, ratedTracks: 9, lovedTracks: 7, durationSeconds: 2539, genre: "Contemporary R&B", rating: 5 },
   { id: "year-poltergeist", title: "Poltergeist", artist: "Jerry Goldsmith", originalYear: 1982, releaseYear: 2010, totalTracks: 35, ratedTracks: 28, lovedTracks: 9, durationSeconds: 8379, genre: "Horror", rating: 5 },
   { id: "year-conan", title: "Conan the Barbarian", artist: "Basil Poledouris", originalYear: 1982, releaseYear: 2012, totalTracks: 53, ratedTracks: 53, lovedTracks: 5, durationSeconds: 11215, genre: "Fantasy", rating: 4.5 },
@@ -172,6 +173,7 @@ function previewTracksForAlbum(album: YearAlbum): Track[] {
     album: album.title,
     originalYear: album.originalYear,
     releaseYear: album.releaseYear,
+    publisher: album.publisher ?? null,
     rating: index < album.ratedTracks ? album.rating : null,
     loved: index < album.lovedTracks,
     loveState: index < album.lovedTracks ? "loved" : "neutral",

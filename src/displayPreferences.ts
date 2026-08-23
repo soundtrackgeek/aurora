@@ -22,6 +22,7 @@ export const displayViews = [
   { id: "songs", label: "Songs", supportsCovers: true },
   { id: "albums", label: "Albums", supportsCovers: true },
   { id: "artists", label: "Artists", supportsCovers: true },
+  { id: "publishers", label: "Publishers", supportsCovers: true },
   { id: "genres", label: "Genres", supportsCovers: true },
   { id: "years", label: "Years", supportsCovers: true },
   { id: "ratings", label: "Ratings", supportsCovers: true },

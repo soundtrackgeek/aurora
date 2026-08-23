@@ -59,6 +59,7 @@ interface AlbumInspectorAlbum {
   artist: string;
   originalYear?: number | null;
   releaseYear: number | null;
+  publisher?: string | null;
   totalTracks: number;
   lovedTracks: number;
   durationSeconds: number | null;
@@ -76,6 +77,7 @@ function albumAsTrack(album: AlbumInspectorAlbum): Track {
     album: album.title,
     originalYear: album.originalYear,
     releaseYear: album.releaseYear,
+    publisher: album.publisher ?? null,
     rating: album.rating,
     loved: album.lovedTracks > 0,
     loveState: album.lovedTracks > 0 ? "loved" : "neutral",
@@ -266,7 +268,7 @@ function EditionShelf({ detail, selectedAlbumId, onSelectAlbum }: Pick<YearsExpl
             key={album.id}
           >
             <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
-            <span><strong>{album.title}</strong><small>{album.artist}</small><em>Original {album.originalYear ?? "—"} · Release {album.releaseYear ?? "—"}</em></span>
+            <span><strong>{album.title}</strong><small>{album.artist}</small><em>{album.publisher ?? "Publisher unknown"} · Original {album.originalYear ?? "—"} · Release {album.releaseYear ?? "—"}</em></span>
           </button>)}
         </div>
       </section>)}
@@ -362,6 +364,7 @@ export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy,
     <dl className="metadata-list">
       <div><dt>Original Year</dt><dd className="year-original">{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd className="year-release">{album.releaseYear ?? "—"}</dd></div>
+      <div className="publisher-metadata"><dt>Publisher</dt><dd>{album.publisher ?? "Unknown"}</dd></div>
       <div><dt>Format</dt><dd>Album · local edition</dd></div>
       <div><dt>Tracks</dt><dd>{formatCount(album.totalTracks)}</dd></div>
       <div><dt>Duration</dt><dd>{formatDuration(album.durationSeconds)}</dd></div>

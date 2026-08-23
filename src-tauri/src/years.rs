@@ -79,6 +79,7 @@ pub(crate) struct YearAlbum {
     pub(crate) artist: String,
     pub(crate) original_year: Option<i64>,
     pub(crate) release_year: Option<i64>,
+    pub(crate) publisher: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
     pub(crate) loved_tracks: i64,
@@ -277,7 +278,7 @@ fn query_albums(
                  COALESCE(NULLIF(TRIM(a.album), ''), 'Unknown Album') AS title,
                  COALESCE(NULLIF(TRIM(a.album_artist_display), ''), 'Unknown Artist') AS artist,
                  a.year, a.release_year, a.total_tracks, a.rated_tracks, a.loved_tracks,
-                 a.total_seconds, a.canonical_genre,
+                 a.total_seconds, a.canonical_genre, a.publisher,
                  COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) / 20.0 AS rating,
                  CASE
                    WHEN :selected_year IS NOT NULL AND a.{counterpart} = :selected_year THEN -2
@@ -298,7 +299,7 @@ fn query_albums(
           WHERE {predicate}
         )
         SELECT id, title, artist, year, release_year, total_tracks, rated_tracks,
-               loved_tracks, total_seconds, canonical_genre, rating
+               loved_tracks, total_seconds, canonical_genre, publisher, rating
         FROM candidates
         WHERE group_rank <= :per_group
         ORDER BY CASE edition_group WHEN -2 THEN -10000 WHEN -1 THEN 10000 ELSE edition_group END,
@@ -328,7 +329,8 @@ fn query_albums(
                     loved_tracks: row.get(7)?,
                     duration_seconds: row.get(8)?,
                     genre: row.get(9)?,
-                    rating: row.get(10)?,
+                    publisher: row.get(10)?,
+                    rating: row.get(11)?,
                 })
             },
         )
@@ -413,7 +415,7 @@ fn query_year_queue(
     let sql = format!(
         r#"
         WITH chosen_albums AS MATERIALIZED (
-          SELECT a.id
+          SELECT a.id, a.publisher
           FROM albums AS a
           WHERE {predicate}
           ORDER BY (a.loved_tracks > 0) DESC, a.loved_tracks DESC,
@@ -429,7 +431,8 @@ fn query_year_queue(
                    WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                    WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                  t.love, t.time_seconds, t.canonical_genre, t.album_id,
-                 t.file_path, t.filename, t.import_run_id
+                 t.file_path, t.filename, t.import_run_id, t.year AS original_year,
+                 chosen.publisher AS publisher
           FROM tracks AS t
           JOIN chosen_albums AS chosen ON chosen.id = t.album_id
           ORDER BY (t.love = 'L') DESC, rating_value DESC, t.album_id, t.disc_number, t.track_number, t.id
@@ -437,7 +440,8 @@ fn query_year_queue(
         )
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+               p.original_year, p.publisher
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -493,7 +497,7 @@ mod tests {
                   rated_tracks INTEGER NOT NULL, loved_tracks INTEGER NOT NULL,
                   total_seconds INTEGER NOT NULL, canonical_genre TEXT,
                   effective_album_rating INTEGER, calculated_album_rating INTEGER,
-                  album_rating INTEGER, album_score REAL
+                  album_rating INTEGER, album_score REAL, publisher TEXT
                 );
                 CREATE TABLE tracks (
                   id INTEGER PRIMARY KEY, album_id TEXT NOT NULL, title TEXT,
@@ -506,11 +510,11 @@ mod tests {
                   artist_key TEXT, track_key TEXT, play_count INTEGER
                 );
                 INSERT INTO albums VALUES
-                  ('original', 'Original Edition', 'Artist', 1982, 1982, 2, 2, 1, 400, 'Electronic', 100, NULL, NULL, 9),
-                  ('reissue', 'Later Edition', 'Artist', 1982, 2025, 2, 2, 0, 400, 'Electronic', 80, NULL, NULL, 7),
-                  ('archive', 'Archive Edition', 'Artist', 1969, 2025, 1, 0, 0, 200, 'Rock', NULL, NULL, NULL, 2),
-                  ('missing-original', 'Unknown Origin', 'Artist', NULL, 2025, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1),
-                  ('missing-release', 'Unknown Release', 'Artist', 1982, NULL, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1);
+                  ('original', 'Original Edition', 'Artist', 1982, 1982, 2, 2, 1, 400, 'Electronic', 100, NULL, NULL, 9, 'Aurora Records'),
+                  ('reissue', 'Later Edition', 'Artist', 1982, 2025, 2, 2, 0, 400, 'Electronic', 80, NULL, NULL, 7, 'Aurora Records'),
+                  ('archive', 'Archive Edition', 'Artist', 1969, 2025, 1, 0, 0, 200, 'Rock', NULL, NULL, NULL, 2, 'Archive Editions'),
+                  ('missing-original', 'Unknown Origin', 'Artist', NULL, 2025, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1, NULL),
+                  ('missing-release', 'Unknown Release', 'Artist', 1982, NULL, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1, NULL);
                 INSERT INTO tracks VALUES
                   (1, 'original', 'One', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, 'L', 200, 'Electronic', 'D:\\Music', 'one.mp3', 1, 1, 1),
                   (2, 'original', 'Two', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'two.mp3', 1, 1, 2),

@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.15 keeps the right inspector synchronized with the album selected in Albums.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.16 adds a dedicated Publisher Signal Timeline and carries Publisher metadata through Aurora's track and album views.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.15 slice
+## Current 0.15.16 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -20,7 +20,10 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Device-local shortcut persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-shortcuts.json`; these Windows bindings are intentionally excluded from Laptop Mode and OneDrive state synchronization.
 - Aurora unregisters all active shortcuts during both window close and application exit. Another running app must still retry or restart if its own registration previously failed while Aurora owned the same binding.
 - A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.
-- A collapsible Library tree containing Songs, Albums, Artists, Genres, Years, Ratings, and Tags. Opening a closed Library enters Songs by default; Library and Playlists disclosure choices persist per computer.
+- A collapsible Library tree containing Songs, Albums, Artists, Publishers, Genres, Years, Ratings, and Tags. Opening a closed Library enters Songs by default; Library and Playlists disclosure choices persist per computer.
+- A dedicated Publisher Signal Timeline with bounded case-insensitive catalog rollups, Release activity, Original-year activity, and Catalog share lenses, publisher search, selected-publisher metrics, decade highlights, publisher playback, and exact handoff into `publisher:` search.
+- Publisher metadata in Songs, Albums, Genre, Years, Ratings, Publishers, and the right-side track or album inspector. Album-level views read `albums.publisher`; track views retain `tracks.publisher` without schema mutation.
+- Offline-safe publisher identity slots use Aurora's fallback icon. Optional future logos have a documented MusicBrainz → Wikidata → Wikimedia Commons provenance and licensing route; no third-party marks are shipped or scraped.
 - Compact Library and pinned-playlist flyouts in icon-only mode, with active nested destinations still visible on the parent Library icon.
 - A paired-clock Years explorer that preserves Music Library's distinct Original Year and Release Year fields, with clickable album-level histograms and aggregated edition flows between them.
 - Release, Original, and Two Clocks modes; exact missing-year lenses; previous/next year movement; and bounded edition shelves grouped by the counterpart decade.
@@ -86,7 +89,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. Listening events deliberately use a separate per-device database instead of the single shared state snapshot. All OneDrive copies are consistent SQLite snapshots rather than copies of live WAL-backed files. See [docs/audio-output-contract.md](docs/audio-output-contract.md), [docs/charts-contract.md](docs/charts-contract.md), [docs/genre-atlas-contract.md](docs/genre-atlas-contract.md), [docs/global-shortcuts-contract.md](docs/global-shortcuts-contract.md), [docs/listening-history-contract.md](docs/listening-history-contract.md), [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/ratings-studio-contract.md](docs/ratings-studio-contract.md), [docs/sidebar-navigation-contract.md](docs/sidebar-navigation-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), [docs/playback-contract.md](docs/playback-contract.md), and [docs/years-explorer-contract.md](docs/years-explorer-contract.md).
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until the normal MusicBee TSV export and Music Library import catch up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. Listening events deliberately use a separate per-device database instead of the single shared state snapshot. All OneDrive copies are consistent SQLite snapshots rather than copies of live WAL-backed files. See [docs/audio-output-contract.md](docs/audio-output-contract.md), [docs/charts-contract.md](docs/charts-contract.md), [docs/genre-atlas-contract.md](docs/genre-atlas-contract.md), [docs/global-shortcuts-contract.md](docs/global-shortcuts-contract.md), [docs/listening-history-contract.md](docs/listening-history-contract.md), [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/publisher-logos.md](docs/publisher-logos.md), [docs/ratings-studio-contract.md](docs/ratings-studio-contract.md), [docs/sidebar-navigation-contract.md](docs/sidebar-navigation-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), [docs/playback-contract.md](docs/playback-contract.md), and [docs/years-explorer-contract.md](docs/years-explorer-contract.md).
 
 ## Data model
 

@@ -1,46 +1,38 @@
-# Design QA — Charts 0.15.0
+# Design QA — Publishers 0.15.16
 
 ## Evidence
 
-- Reference: `C:\Users\jtill\.codex\generated_images\01a025c3-c6d3-73f1-ae98-1e18a3cabd80\exec-36252241-c641-45b3-a990-e559136426ba.png`
-- Implementation: `C:\_code\aurora\docs\design\charts-0.15.0-implementation.png`
-- Full comparison: `C:\_code\aurora\docs\design\charts-0.15.0-comparison.png`
-- Focused chart comparison: `C:\_code\aurora\docs\design\charts-0.15.0-focused-comparison.png`
-- Reference image: 1487 × 1058 physical pixels.
-- Browser capture: 1280 × 720 CSS pixels at device-pixel ratio 1.25. The in-app Browser retained its 1280 × 720 viewport when a larger viewport was requested, so the reference was proportionally contained for the full comparison and the chart workspace was normalized separately for the focused comparison.
-- State: Singles → Summer 1985 → Official UK → selected week 23 → Kayleigh selected.
+- Reference: `C:\Users\jtill\.codex\generated_images\01a02f7b-8e99-7623-9d3c-ed7dc563d8ea\exec-6dad8c97-922a-4848-92e2-8ecef4279fef.png`
+- Implementation: `C:\_code\aurora\docs\design\publishers-0.15.16-implementation.png`
+- Side-by-side comparison: `C:\_code\aurora\docs\design\publishers-0.15.16-comparison.png`
+- Both captures: 1487 × 1058 CSS pixels.
+- State: Publishers → Parlophone → Release activity → selected Plastic Beach album.
 
-## Comparison history
+## Comparison
 
-1. Initial implementation showed the selected design's main hierarchy but exposed period presets without an obvious complete-year action.
-2. Added a compact, keyboard-accessible year control labelled “full year”; selecting it builds weeks 1–53 and switches to the calculated period chart.
-3. Re-captured the exact weekly state and compared the reference and implementation side by side at full-shell and focused-workspace scales.
+- The implementation preserves the reference hierarchy: Library destination, publisher search, three timeline lenses, six publisher signal rows, selected-publisher summary, decade highlights, album inspector, and fixed player.
+- The row spacing, compact typography, purple selected signal, cyan secondary signals, quiet grid, dark borders, and inspector metadata follow the supplied design and Aurora's existing palette.
+- Real catalog mode uses bounded album-level publisher rollups and real album covers. Browser preview mode deliberately uses Aurora's existing cover fixtures and the same component boundaries.
+- Publisher logos are not fabricated or bundled. The circular logo slots use an intentional Aurora fallback while the documented MusicBrainz → Wikidata → Wikimedia Commons enrichment path remains optional future work.
+- At the exact reference viewport, the page stays inside the shell with no horizontal overflow, overlapping panels, cropped publisher signals, or player/inspector boundary errors.
 
-## Visible findings
+## Interactions verified in the in-app Browser
 
-- The final page preserves the reference hierarchy: Charts header, Singles/Albums switch, five period actions, calendar rail, chart-source rail, ranked table, right inspector, and fixed player.
-- The selected row, purple emphasis, restrained cyan/green status accents, dark borders, compact type scale, and cover-driven table closely match Aurora's existing design language and the supplied mock.
-- The implementation deliberately uses the album cover resolved from the user's real cover archive for Kayleigh rather than fabricating the standalone-single artwork shown in the concept.
-- At 1280 × 720, the chart workspace scrolls vertically and six rows are visible above the fixed player. The full 1440 × 900 Tauri window exposes more of the source-comparison and Album Score sections without changing their hierarchy.
-- No broken artwork, clipping across fixed shell boundaries, horizontal overflow, misplaced overlays, or low-contrast active states were observed.
+- Navigate to Publishers from the expanded Library group.
+- Switch Release activity to Original-year activity.
+- Filter the publisher list to Warp and clear the filter.
+- Select Warp Records and a decade-highlight album.
+- Confirm the album inspector shows `Publisher: Warp Records`.
+- Use Explore publisher and confirm the Songs handoff applies `publisher:"Warp Records"`.
+- Check browser logs after the complete flow; no errors or warnings were emitted.
 
-## Required surfaces
+## Required states
 
-- Loading: centered Aurora spinner and loading copy while a bounded chart request is pending.
-- Empty: chart-specific empty explanation when a source/time lens has no entries.
-- Error: retryable error panel using the existing Aurora feedback treatment.
-- Main content: complete ranked chart with source, period, movement, match, playback, and inspector controls.
-- Secondary/detail content: cross-source history, Aurora Album Score shelf, and selected track/album inspector.
-
-## Primary interactions verified in the in-app Browser
-
-- Navigate to Charts and select Kayleigh from the weekly Official UK chart.
-- Switch Selected week to Period chart for Summer 1985.
-- Click the displayed year to build the 1985 full-year chart.
-- Switch Singles to Albums and load Aurora Album Score.
-- Open Custom, enter August 1990 weeks 31–35, and apply the range.
-- Confirm the page returned to the exact weekly comparison state after reload.
-- Browser console was checked during the weekly, period, album, and custom-range flows; no errors or warnings were emitted.
+- Loading: bounded publisher-rollup and detail feedback.
+- Empty/error: publisher-specific retryable feedback without falling into the ordinary Explorer.
+- Main: six publisher activity rows with search and three functional timeline modes.
+- Detail: selected publisher metrics, bounded decade shelf, publisher playback, and publisher-scoped Explore handoff.
+- Inspector: selected album artwork and Publisher metadata.
 
 ## Result
 

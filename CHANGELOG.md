@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.16] - 2026-08-23
+
+### Added
+
+- A dedicated Publishers destination under Library with the selected Publisher Signal Timeline design, three activity lenses, search, case-insensitive catalog rollups, bounded release highlights, publisher playback, and exact handoff into the existing `publisher:` search.
+- Publisher metadata across track tables, album cards, Genre Atlas albums, Years editions, Ratings albums, and the right-side track and album inspectors.
+- An offline-safe publisher-logo slot and documented MusicBrainz → Wikidata → Wikimedia Commons enrichment route with per-file licensing and attribution requirements.
+
+### Changed
+
+- Track and album explorer payloads now retain Music Library's Publisher value, while publisher grouping normalizes only case and surrounding whitespace and preserves the most common stored display spelling.
+
 ## [0.15.15] - 2026-08-23
 
 ### Fixed

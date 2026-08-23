@@ -69,6 +69,16 @@ describe("SidebarNavigation", () => {
     expect(screen.getByRole("button", { name: "Library" })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("places Publishers inside the Library group", () => {
+    const value = props({ activeDestination: "Publishers", libraryExpanded: true });
+    render(<SidebarNavigation {...value} />);
+
+    const publishers = screen.getByRole("button", { name: "Publishers" });
+    expect(publishers).toHaveAttribute("aria-current", "page");
+    fireEvent.click(publishers);
+    expect(value.onNavigate).toHaveBeenCalledWith("Publishers");
+  });
+
   it("places Charts directly above History as its own destination", () => {
     const value = props({ activeDestination: "Charts" });
     render(<SidebarNavigation {...value} />);

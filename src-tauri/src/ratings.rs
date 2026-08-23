@@ -56,6 +56,7 @@ pub(crate) struct RatingAlbum {
     pub(crate) artist: String,
     pub(crate) original_year: Option<i64>,
     pub(crate) release_year: Option<i64>,
+    pub(crate) publisher: Option<String>,
     pub(crate) genre: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
@@ -275,7 +276,7 @@ fn query_album_snapshot(
             r#"
             SELECT COALESCE(NULLIF(TRIM(album), ''), 'Unknown Album'),
                    COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
-                   year, release_year, canonical_genre, total_tracks, total_seconds, album_rating
+                   year, release_year, canonical_genre, publisher, total_tracks, total_seconds, album_rating
             FROM albums WHERE id = ?1
             "#,
             [album_id],
@@ -286,9 +287,10 @@ fn query_album_snapshot(
                     row.get::<_, Option<i64>>(2)?,
                     row.get::<_, Option<i64>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(5)?,
                     row.get::<_, i64>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
                 ))
             },
         )
@@ -357,6 +359,7 @@ fn query_album_snapshot(
         original_year,
         release_year,
         genre,
+        publisher,
         total_tracks,
         total_seconds,
         explicit_rating,
@@ -385,6 +388,7 @@ fn query_album_snapshot(
             original_year,
             release_year,
             genre,
+            publisher,
             total_tracks,
             rated_tracks,
             loved_tracks,
@@ -808,7 +812,7 @@ mod tests {
                   rated_tracks INTEGER NOT NULL, rating_completeness REAL NOT NULL,
                   loved_tracks INTEGER NOT NULL, total_seconds INTEGER NOT NULL,
                   album_rating INTEGER, calculated_album_rating INTEGER,
-                  effective_album_rating INTEGER, album_score REAL
+                  effective_album_rating INTEGER, album_score REAL, publisher TEXT
                 );
                 CREATE TABLE tracks (
                   id INTEGER PRIMARY KEY, album_id TEXT, title TEXT, album_artist_display TEXT,
@@ -818,8 +822,8 @@ mod tests {
                 );
                 CREATE TABLE lastfm_track_popularity (artist_key TEXT, track_key TEXT, play_count INTEGER);
                 INSERT INTO albums VALUES
-                  ('almost', 'Almost', 'Artist', 2000, 2000, 'Rock', 4, 3, .75, 1, 400, NULL, NULL, NULL, NULL),
-                  ('complete', 'Complete', 'Artist', 2001, 2001, 'Rock', 2, 2, 1, 1, 240, NULL, 90, 90, 110);
+                  ('almost', 'Almost', 'Artist', 2000, 2000, 'Rock', 4, 3, .75, 1, 400, NULL, NULL, NULL, NULL, 'Aurora Records'),
+                  ('complete', 'Complete', 'Artist', 2001, 2001, 'Rock', 2, 2, 1, 1, 240, NULL, 90, 90, 110, 'Aurora Records');
                 INSERT INTO tracks VALUES
                   (1, 'almost', 'One', 'Artist', 'Almost', 2000, 100, NULL, 'L', 100, 'Rock', 'D:\\Music', 'one.mp3', 1, 1, 1),
                   (2, 'almost', 'Two', 'Artist', 'Almost', 2000, 80, NULL, NULL, 100, 'Rock', 'D:\\Music', 'two.mp3', 1, 1, 2),

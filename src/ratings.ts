@@ -21,6 +21,7 @@ export interface RatingAlbum {
   artist: string;
   originalYear: number | null;
   releaseYear: number | null;
+  publisher?: string | null;
   genre: string | null;
   totalTracks: number;
   ratedTracks: number;
@@ -89,6 +90,7 @@ function previewAlbumTracks(album: RatingAlbum): Track[] {
       album: album.title,
       originalYear: album.originalYear,
       releaseYear: album.releaseYear,
+      publisher: album.publisher ?? null,
       rating: rated ? Math.max(3, 5 - (index % 4) * 0.5) : null,
       loved,
       loveState: loved ? "loved" : "neutral",

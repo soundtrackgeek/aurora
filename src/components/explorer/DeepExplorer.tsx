@@ -63,6 +63,7 @@ export interface ExplorerAlbum {
   artist: string;
   originalYear?: number | null;
   releaseYear: number | null;
+  publisher?: string | null;
   rating: number | null;
   totalTracks: number;
   durationSeconds: number | null;
@@ -373,6 +374,7 @@ function TrackTable({
             <th>Album</th>
             <th>Year</th>
             <th>Genre</th>
+            <th>Publisher</th>
             <th className="is-numeric">Time</th>
             <th className="is-numeric">Plays</th>
             <th>Rating</th>
@@ -413,6 +415,7 @@ function TrackTable({
                 <td>{track.album}</td>
                 <td className="is-numeric">{track.originalYear ?? "—"}</td>
                 <td>{track.genre ?? "—"}</td>
+                <td>{track.publisher ?? "—"}</td>
                 <td className="is-numeric">{formatDuration(track.durationSeconds)}</td>
                 <td className="is-numeric">{track.playCount === null ? "—" : formatCount(track.playCount)}</td>
                 <td className="deep-explorer-table__rating">
@@ -513,7 +516,7 @@ function AlbumGrid({
           <span className="deep-explorer-album__copy">
             <strong>{album.title}</strong>
             <span>{album.artist}</span>
-            <small>{album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks</small>
+            <small>{album.originalYear ?? "Year unknown"} · {album.publisher ?? "Publisher unknown"} · {formatCount(album.totalTracks)} tracks</small>
           </span>
           <ChevronRight aria-hidden="true" />
         </button>
@@ -557,6 +560,7 @@ function AlbumDetail({
           <span className="deep-explorer-kicker">Album detail</span>
           <h3>{album.title}</h3>
           <p>{album.artist}</p>
+          <span className="deep-explorer-album-publisher">{album.publisher ?? "Publisher unknown"}</span>
           <small>
             {album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}

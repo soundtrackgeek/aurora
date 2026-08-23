@@ -61,6 +61,11 @@ import {
   type RatingsLoadState,
 } from "./components/ratings/RatingsStudio";
 import {
+  PublisherAlbumInspector,
+  PublisherSignalTimeline,
+  type PublisherLoadState,
+} from "./components/publishers/PublisherSignalTimeline";
+import {
   SidebarNavigation,
   type SidebarDestination,
 } from "./components/navigation/SidebarNavigation";
@@ -183,6 +188,16 @@ import {
   type YearOverview,
   type YearSelection,
 } from "./years";
+import {
+  loadPublisherAlbumTracks,
+  loadPublisherDetail,
+  loadPublisherOverview,
+  loadPublisherQueue,
+  type PublisherAlbum,
+  type PublisherDetail,
+  type PublisherOverview,
+  type PublisherSummary,
+} from "./publishers";
 
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
@@ -190,6 +205,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Songs: "songs",
   Albums: "albums",
   Artists: "artists",
+  Publishers: "publishers",
   Genres: "genres",
   Years: "years",
   Ratings: "ratings",
@@ -490,6 +506,19 @@ function App() {
   const [genreQueueBusy, setGenreQueueBusy] = useState<GenreQueueMode | null>(null);
   const [genreQueueMessage, setGenreQueueMessage] = useState<string | null>(null);
   const [genreRadioSession, setGenreRadioSession] = useState<GenreRadioSession | null>(null);
+  const [publisherOverview, setPublisherOverview] = useState<PublisherOverview | null>(null);
+  const [publisherDetail, setPublisherDetail] = useState<PublisherDetail | null>(null);
+  const [publisherLoadState, setPublisherLoadState] = useState<PublisherLoadState>("loading");
+  const [publisherDetailState, setPublisherDetailState] = useState<PublisherLoadState>("loading");
+  const [publisherError, setPublisherError] = useState<string | null>(null);
+  const [publisherDetailError, setPublisherDetailError] = useState<string | null>(null);
+  const [publisherSearch, setPublisherSearch] = useState("");
+  const [publisherReloadToken, setPublisherReloadToken] = useState(0);
+  const [publisherQueueBusy, setPublisherQueueBusy] = useState(false);
+  const [publisherQueueMessage, setPublisherQueueMessage] = useState<string | null>(null);
+  const [selectedPublisherAlbum, setSelectedPublisherAlbum] = useState<PublisherAlbum | null>(null);
+  const [publisherAlbumTracks, setPublisherAlbumTracks] = useState<Track[]>([]);
+  const [publisherAlbumBusy, setPublisherAlbumBusy] = useState(false);
   const [yearOverview, setYearOverview] = useState<YearOverview | null>(null);
   const [yearDetail, setYearDetail] = useState<YearDetail | null>(null);
   const [yearLoadState, setYearLoadState] = useState<YearsLoadState>("loading");
@@ -533,6 +562,9 @@ function App() {
   const genreIndexRequestRef = useRef(0);
   const genreDetailRequestRef = useRef(0);
   const genreQueueRequestRef = useRef(0);
+  const publisherOverviewRequestRef = useRef(0);
+  const publisherDetailRequestRef = useRef(0);
+  const publisherAlbumRequestRef = useRef(0);
   const yearOverviewRequestRef = useRef(0);
   const yearDetailRequestRef = useRef(0);
   const yearAlbumRequestRef = useRef(0);
@@ -682,6 +714,7 @@ function App() {
       || activeNav === "Charts"
       || activeNav === "History"
       || activeNav === "Genres"
+      || activeNav === "Publishers"
       || activeNav === "Years"
       || activeNav === "Ratings"
     ) return;
@@ -774,6 +807,52 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [activeNav, libraryReady, selectedGenre, genreDetailReloadToken]);
+
+  useEffect(() => {
+    if (!libraryReady || activeNav !== "Publishers") return;
+    const requestId = ++publisherOverviewRequestRef.current;
+    publisherDetailRequestRef.current += 1;
+    publisherAlbumRequestRef.current += 1;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setPublisherLoadState("loading");
+      setPublisherDetailState("loading");
+      setPublisherError(null);
+      setPublisherDetailError(null);
+      setPublisherQueueMessage(null);
+      void loadPublisherOverview(publisherSearch)
+        .then((overview) => {
+          if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
+          setPublisherOverview(overview);
+          setPublisherDetail(overview.initialDetail);
+          setPublisherLoadState("ready");
+          setPublisherDetailState("ready");
+          const initialAlbum = overview.initialDetail.albums[0] ?? null;
+          setSelectedPublisherAlbum(initialAlbum);
+          setPublisherAlbumTracks([]);
+          if (!initialAlbum) return;
+          setInspectorView("album");
+          const albumRequestId = ++publisherAlbumRequestRef.current;
+          void loadPublisherAlbumTracks(initialAlbum)
+            .then((tracks) => {
+              if (!cancelled && albumRequestId === publisherAlbumRequestRef.current) {
+                setPublisherAlbumTracks(tracks);
+              }
+            })
+            .catch(() => undefined);
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
+          setPublisherError(error instanceof Error ? error.message : String(error));
+          setPublisherLoadState("error");
+          setPublisherDetailState("error");
+        });
+    }, publisherSearch.trim() ? 160 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeNav, libraryReady, publisherReloadToken, publisherSearch]);
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Years") return;
@@ -1121,6 +1200,101 @@ function App() {
     }
   }
 
+  function selectPublisher(publisher: PublisherSummary) {
+    const requestId = ++publisherDetailRequestRef.current;
+    publisherAlbumRequestRef.current += 1;
+    setPublisherDetailState("loading");
+    setPublisherDetailError(null);
+    setPublisherQueueMessage(null);
+    void loadPublisherDetail(publisher.name)
+      .then((detail) => {
+        if (requestId !== publisherDetailRequestRef.current) return;
+        setPublisherDetail(detail);
+        setPublisherDetailState("ready");
+        const initialAlbum = detail.albums[0] ?? null;
+        setSelectedPublisherAlbum(initialAlbum);
+        setPublisherAlbumTracks([]);
+        if (initialAlbum) openPublisherAlbum(initialAlbum);
+      })
+      .catch((error: unknown) => {
+        if (requestId !== publisherDetailRequestRef.current) return;
+        setPublisherDetailError(error instanceof Error ? error.message : String(error));
+        setPublisherDetailState("error");
+      });
+  }
+
+  function openPublisherAlbum(album: PublisherAlbum) {
+    const requestId = ++publisherAlbumRequestRef.current;
+    setSelectedPublisherAlbum(album);
+    setInspectorView("album");
+    setPublisherAlbumTracks([]);
+    void loadPublisherAlbumTracks(album)
+      .then((tracks) => {
+        if (requestId === publisherAlbumRequestRef.current) setPublisherAlbumTracks(tracks);
+      })
+      .catch((error: unknown) => {
+        if (requestId === publisherAlbumRequestRef.current) {
+          setPublisherDetailError(error instanceof Error ? error.message : String(error));
+        }
+      });
+  }
+
+  function explorePublisher(publisher: string) {
+    setActiveNav("Songs");
+    expandLibraryNavigation();
+    setExplorerView("tracks");
+    setExplorerFilters({
+      ...defaultExplorerFilters,
+      query: `publisher:"${publisher.replace(/"/g, '\\"')}"`,
+      sort: "releaseYearDesc",
+    });
+  }
+
+  async function playPublisher(publisher: string) {
+    if (publisherQueueBusy) return;
+    setPublisherQueueBusy(true);
+    setPublisherQueueMessage(null);
+    try {
+      const tracks = await loadPublisherQueue(publisher, 100);
+      if (!tracks.length) {
+        setPublisherQueueMessage("No playable tracks were found for this publisher.");
+        return;
+      }
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) {
+        selectTrack(tracks[0]);
+        setPublisherQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from ${publisher}.`);
+      }
+    } catch (error) {
+      setPublisherQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPublisherQueueBusy(false);
+    }
+  }
+
+  async function playPublisherAlbum(album: PublisherAlbum) {
+    if (publisherAlbumBusy) return;
+    setPublisherAlbumBusy(true);
+    try {
+      const tracks = selectedPublisherAlbum?.id === album.id && publisherAlbumTracks.length
+        ? publisherAlbumTracks
+        : await loadPublisherAlbumTracks(album);
+      if (!tracks.length) {
+        setPublisherQueueMessage(`${album.title} has no playable tracks.`);
+        return;
+      }
+      setPublisherAlbumTracks(tracks);
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) selectTrack(tracks[0]);
+    } catch (error) {
+      setPublisherQueueMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPublisherAlbumBusy(false);
+    }
+  }
+
   function selectYear(selection: YearSelection) {
     const requestId = ++yearDetailRequestRef.current;
     setYearDetailState("loading");
@@ -1373,6 +1547,7 @@ function App() {
     setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setYearAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setRatingAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setPublisherAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
     setGenreDetail((current) => {
       if (!current) return current;
       return {
@@ -1492,7 +1667,7 @@ function App() {
     if (label !== "Universe" && label !== "Observatory" && label !== "History") {
       expandLibraryNavigation();
     }
-    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Years" || label === "Ratings") return;
+    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Publishers" || label === "Years" || label === "Ratings") return;
     if (label === "Albums") changeExplorerView("albums");
     else if (label === "Artists") changeExplorerView("artists");
     else changeExplorerView("tracks");
@@ -1806,6 +1981,7 @@ function App() {
     : selectedTrack;
   const inspectorAlbumAvailable = Boolean(
     explorerAlbumInspectorContext
+    || (activeNav === "Publishers" && selectedPublisherAlbum)
     || (activeNav === "Years" && selectedYearAlbum)
     || (activeNav === "Ratings" && selectedRatingAlbum)
     || (activeNav === "Charts" && chartSelection?.kind === "albums"),
@@ -1828,13 +2004,15 @@ function App() {
       ? ["album", "albums"] as const
       : ["artist", "artists"] as const;
   const showExplorerCount = snapshot !== null
-    && !["Observatory", "Charts", "History", "Genres", "Years", "Ratings"].includes(activeNav);
+    && !["Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
   const topbarSearchValue = activeNav === "Observatory"
     ? reviewSearch
     : activeNav === "History"
       ? historySearch
       : activeNav === "Genres"
         ? genreSearch
+        : activeNav === "Publishers"
+          ? publisherSearch
         : activeNav === "Years"
           ? ""
         : explorerFilters.query;
@@ -1844,6 +2022,8 @@ function App() {
       ? "Search listening history…"
       : activeNav === "Genres"
         ? "Search your genre atlas…"
+        : activeNav === "Publishers"
+          ? "Search publishers…"
         : activeNav === "Years"
           ? "Year search arrives with the timeline…"
         : explorerView === "tracks"
@@ -1855,6 +2035,8 @@ function App() {
       ? "Search listening history"
       : activeNav === "Genres"
         ? "Search genres"
+        : activeNav === "Publishers"
+          ? "Search publishers"
         : activeNav === "Years"
           ? "Year search is not available yet"
         : "Search your music universe";
@@ -1863,6 +2045,7 @@ function App() {
     if (activeNav === "Observatory") setReviewSearch(value);
     else if (activeNav === "History") setHistorySearch(value);
     else if (activeNav === "Genres") setGenreSearch(value);
+    else if (activeNav === "Publishers") setPublisherSearch(value);
     else if (activeNav === "Years") return;
     else setExplorerFilters((current) => ({ ...current, query: value }));
   }
@@ -1927,7 +2110,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.15</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.16</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1955,7 +2138,7 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
-              title={explorerView === "tracks" && !["Observatory", "History", "Genres", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
+              title={explorerView === "tracks" && !["Observatory", "History", "Genres", "Publishers", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
               disabled={activeNav === "Years"}
             />
             {topbarSearchValue
@@ -2084,6 +2267,24 @@ function App() {
                 onPlayTrack={(track) => playTrack(track, genreDetail?.highlights ?? [track])}
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+              />
+            ) : activeNav === "Publishers" ? (
+              <PublisherSignalTimeline
+                overview={publisherOverview}
+                detail={publisherDetail}
+                loadState={publisherLoadState}
+                detailState={publisherDetailState}
+                errorMessage={publisherError}
+                detailError={publisherDetailError}
+                selectedAlbumId={selectedPublisherAlbum?.id ?? null}
+                queueBusy={publisherQueueBusy}
+                queueMessage={publisherQueueMessage}
+                onSelectPublisher={selectPublisher}
+                onSelectAlbum={openPublisherAlbum}
+                onExplore={explorePublisher}
+                onPlayPublisher={(publisher) => void playPublisher(publisher)}
+                onRetry={() => setPublisherReloadToken((value) => value + 1)}
+                onRetryDetail={() => publisherDetail && selectPublisher(publisherDetail.publisher)}
               />
             ) : activeNav === "Years" ? (
               <YearsExplorer
@@ -2242,6 +2443,10 @@ function App() {
               onPlay={(album) => void playExplorerAlbum(album)}
             />
           </div>
+        ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
+          <div className="inspector-scroll">
+            <PublisherAlbumInspector album={selectedPublisherAlbum} busy={publisherAlbumBusy} onPlay={(album) => void playPublisherAlbum(album)} />
+          </div>
         ) : inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
           <div className="inspector-scroll">
             <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} />
@@ -2275,6 +2480,7 @@ function App() {
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
+              <div className="publisher-metadata"><dt>Publisher</dt><dd>{inspectorTrack.publisher ?? "Unknown"}</dd></div>
               <div><dt>Genre</dt><dd>{inspectorTrack.genre ?? "Unknown"}</dd></div>
               <div><dt>Last.fm popularity</dt><dd>{inspectorTrack.playCount === null ? "—" : formatCount(inspectorTrack.playCount)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(inspectorTrack.durationSeconds)}</dd></div>

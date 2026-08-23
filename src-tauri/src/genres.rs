@@ -47,6 +47,7 @@ pub(crate) struct GenreAlbum {
     pub(crate) title: String,
     pub(crate) artist: String,
     pub(crate) year: Option<i64>,
+    pub(crate) publisher: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
     pub(crate) loved_tracks: i64,
@@ -342,7 +343,7 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
             r#"
             SELECT id, COALESCE(NULLIF(TRIM(album), ''), 'Unknown Album'),
                    COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
-                   year, total_tracks, rated_tracks, loved_tracks, total_seconds,
+                   year, publisher, total_tracks, rated_tracks, loved_tracks, total_seconds,
                    COALESCE(effective_album_rating, calculated_album_rating, album_rating) / 20.0
             FROM albums
             WHERE canonical_genre = ?1
@@ -360,11 +361,12 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 year: row.get(3)?,
-                total_tracks: row.get(4)?,
-                rated_tracks: row.get(5)?,
-                loved_tracks: row.get(6)?,
-                duration_seconds: row.get(7)?,
-                rating: row.get(8)?,
+                publisher: row.get(4)?,
+                total_tracks: row.get(5)?,
+                rated_tracks: row.get(6)?,
+                loved_tracks: row.get(7)?,
+                duration_seconds: row.get(8)?,
+                rating: row.get(9)?,
             })
         })
         .map_err(|error| format!("Could not read the genre albums: {error}"))?
@@ -457,7 +459,8 @@ fn query_highlights(
                    WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
                    WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                    WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
-                 love, time_seconds, canonical_genre, album_id, file_path, filename, import_run_id
+                 love, time_seconds, canonical_genre, album_id, file_path, filename, import_run_id,
+                 year AS original_year, publisher
           FROM tracks
           WHERE canonical_genre = :genre
             AND (normalized_rating IS NOT NULL OR NULLIF(TRIM(rating_raw), '') IS NOT NULL OR love = 'L')
@@ -466,7 +469,8 @@ fn query_highlights(
         )
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+               p.original_year, p.publisher
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -494,7 +498,8 @@ fn query_highlights(
                  WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                  WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                t.love, t.time_seconds, t.canonical_genre,
-               l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id
+               l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
+               t.year AS original_year, t.publisher AS publisher
         FROM tracks AS t
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(t.album_artist_display))
@@ -739,26 +744,27 @@ mod tests {
                   canonical_genre TEXT, total_tracks INTEGER, rated_tracks INTEGER,
                   loved_tracks INTEGER, total_seconds INTEGER, release_year INTEGER, year INTEGER,
                   effective_album_rating INTEGER, calculated_album_rating INTEGER,
-                  album_rating INTEGER, album_score REAL
+                  album_rating INTEGER, album_score REAL, publisher TEXT
                 );
                 CREATE TABLE tracks (
                   id INTEGER PRIMARY KEY, title TEXT, album_artist_display TEXT, album TEXT,
                   release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT, love TEXT,
                   time_seconds INTEGER, canonical_genre TEXT, album_id TEXT, file_path TEXT,
-                  filename TEXT, import_run_id INTEGER, disc_number INTEGER, track_number INTEGER
+                  filename TEXT, import_run_id INTEGER, disc_number INTEGER, track_number INTEGER,
+                  year INTEGER, publisher TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER
                 );
                 INSERT INTO albums VALUES
-                  ('s1', 'Neon Nights', 'College', 'Synthwave', 2, 2, 1, 480, 2012, 1985, 90, 90, 90, 95),
-                  ('s2', 'After Dark', 'M83', 'Synthwave', 1, 1, 0, 240, 2015, 1999, 80, 80, 80, 85),
-                  ('e1', 'Electric Sky', 'M83', 'Electronic', 1, 1, 0, 200, 2011, 2011, 100, 100, 100, 99);
+                  ('s1', 'Neon Nights', 'College', 'Synthwave', 2, 2, 1, 480, 2012, 1985, 90, 90, 90, 95, 'Valerie Records'),
+                  ('s2', 'After Dark', 'M83', 'Synthwave', 1, 1, 0, 240, 2015, 1999, 80, 80, 80, 85, 'Mute Records'),
+                  ('e1', 'Electric Sky', 'M83', 'Electronic', 1, 1, 0, 200, 2011, 2011, 100, 100, 100, 99, 'Mute Records');
                 INSERT INTO tracks VALUES
-                  (1, 'A Real Hero', 'College', 'Neon Nights', 2012, 100, '5', 'L', 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'hero.mp3', 1, 1, 1),
-                  (2, 'Night Drive', 'College', 'Neon Nights', 2012, 80, '4', NULL, 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'drive.mp3', 1, 1, 2),
-                  (3, 'Midnight', 'M83', 'After Dark', 2015, 80, '4', NULL, 240, 'Synthwave', 's2', 'D:\MUSIC\M83', 'midnight.mp3', 1, 1, 1),
-                  (4, 'Electric', 'M83', 'Electric Sky', 2011, 100, '5', NULL, 200, 'Electronic', 'e1', 'D:\MUSIC\M83', 'electric.mp3', 1, 1, 1);
+                  (1, 'A Real Hero', 'College', 'Neon Nights', 2012, 100, '5', 'L', 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'hero.mp3', 1, 1, 1, 1985, 'Valerie Records'),
+                  (2, 'Night Drive', 'College', 'Neon Nights', 2012, 80, '4', NULL, 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'drive.mp3', 1, 1, 2, 1985, 'Valerie Records'),
+                  (3, 'Midnight', 'M83', 'After Dark', 2015, 80, '4', NULL, 240, 'Synthwave', 's2', 'D:\MUSIC\M83', 'midnight.mp3', 1, 1, 1, 1999, 'Mute Records'),
+                  (4, 'Electric', 'M83', 'Electric Sky', 2011, 100, '5', NULL, 200, 'Electronic', 'e1', 'D:\MUSIC\M83', 'electric.mp3', 1, 1, 1, 2011, 'Mute Records');
                 "#,
             )
             .expect("seed fixture");

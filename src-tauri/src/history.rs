@@ -1510,6 +1510,7 @@ mod tests {
             album: "Album".to_owned(),
             release_year: Some(2024),
             original_year: Some(2024),
+            publisher: None,
             rating: None,
             loved: false,
             love_state: LoveState::Neutral,

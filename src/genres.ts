@@ -30,6 +30,7 @@ export interface GenreAlbum {
   title: string;
   artist: string;
   year: number | null;
+  publisher?: string | null;
   totalTracks: number;
   ratedTracks: number;
   lovedTracks: number;
@@ -95,6 +96,7 @@ function previewAlbumGroups(tracks: readonly Track[]): GenreAlbum[] {
       title: albumTracks[0].album,
       artist: albumTracks[0].artist,
       year: albumTracks[0].originalYear ?? null,
+      publisher: albumTracks[0].publisher ?? null,
       totalTracks: albumTracks.length,
       ratedTracks: rated.length,
       lovedTracks: albumTracks.filter((track) => track.loved).length,

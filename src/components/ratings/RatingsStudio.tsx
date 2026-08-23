@@ -73,6 +73,7 @@ function albumAsTrack(album: RatingAlbum): Track {
     album: album.title,
     originalYear: album.originalYear,
     releaseYear: album.releaseYear,
+    publisher: album.publisher ?? null,
     rating: album.effectiveRating,
     loved: album.lovedTracks > 0,
     loveState: album.lovedTracks > 0 ? "loved" : "neutral",
@@ -266,6 +267,7 @@ export function RatingAlbumInspector({ album, busy, onPlay }: { album: RatingAlb
     <dl className="metadata-list">
       <div><dt>Original Year</dt><dd>{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd>{album.releaseYear ?? "—"}</dd></div>
+      <div className="publisher-metadata"><dt>Publisher</dt><dd>{album.publisher ?? "Unknown"}</dd></div>
       <div><dt>Track completion</dt><dd>{completion}% · {album.ratedTracks}/{album.totalTracks}</dd></div>
       <div><dt>Album rating</dt><dd>{album.effectiveRating === null ? "—" : `${album.effectiveRating.toFixed(2)} ★`}</dd></div>
       {album.effectiveRating === null && album.provisionalRating !== null ? <div><dt>Current mean</dt><dd>{album.provisionalRating.toFixed(2)} ★ provisional</dd></div> : null}
