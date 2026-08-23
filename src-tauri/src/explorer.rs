@@ -73,6 +73,7 @@ pub(crate) struct TrackPageRequest {
 pub(crate) struct TrackPage {
     pub(crate) items: Vec<TrackSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
+    pub(crate) total_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
@@ -128,6 +129,7 @@ pub(crate) struct AlbumSummary {
 pub(crate) struct AlbumPage {
     pub(crate) items: Vec<AlbumSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
+    pub(crate) total_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
@@ -177,6 +179,7 @@ pub(crate) struct ArtistPageRequest {
 pub(crate) struct ArtistPage {
     pub(crate) items: Vec<ArtistSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
+    pub(crate) total_count: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -464,6 +467,22 @@ fn track_sort(sort: TrackSort) -> SortDefinition {
     }
 }
 
+fn filtered_row_count(
+    connection: &Connection,
+    filtered_sql: &str,
+    params: &[Value],
+    explorer_name: &str,
+) -> Result<u64, String> {
+    let count_sql = format!("SELECT COUNT(*) FROM ({filtered_sql}) AS filtered_rows");
+    let count = connection
+        .query_row(&count_sql, params_from_iter(params.iter()), |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|error| format!("Could not count the {explorer_name} explorer: {error}"))?;
+    u64::try_from(count)
+        .map_err(|_| format!("The {explorer_name} explorer returned an invalid result count."))
+}
+
 fn track_page_from_connection(
     connection: &Connection,
     request: TrackPageRequest,
@@ -483,54 +502,64 @@ fn track_page_from_connection(
         return Ok(TrackPage {
             items: Vec::new(),
             next_cursor: None,
+            total_count: 0,
         });
     }
     let sort = track_sort(request.sort.unwrap_or_default());
     let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
-    let mut sql = format!(
-        "SELECT {TRACK_COLUMNS}, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t",
-        sort.expression
-    );
-    sql.push_str(
-        " LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE 1 = 1",
-    );
+    let mut predicates = String::from(" WHERE 1 = 1");
     if let Some(search) = &parsed_search {
-        push_track_search_predicates(&mut sql, &mut params, search);
+        push_track_search_predicates(&mut predicates, &mut params, search);
     }
     if let Some(rating) = rating {
-        sql.push_str(" AND t.normalized_rating = ?");
+        predicates.push_str(" AND t.normalized_rating = ?");
         params.push(Value::Integer(rating));
     } else if request.unrated {
-        sql.push_str(" AND (t.normalized_rating IS NULL OR t.normalized_rating <= 0)");
+        predicates.push_str(" AND (t.normalized_rating IS NULL OR t.normalized_rating <= 0)");
     }
     if let Some(love_state) = request.love_state {
         match love_state {
-            LoveState::Loved => sql.push_str(" AND t.love = 'L'"),
-            LoveState::Banned => sql.push_str(" AND t.love = 'B'"),
+            LoveState::Loved => predicates.push_str(" AND t.love = 'L'"),
+            LoveState::Banned => predicates.push_str(" AND t.love = 'B'"),
             LoveState::Neutral => {
-                sql.push_str(" AND COALESCE(NULLIF(trim(t.love), ''), '') NOT IN ('L', 'B')")
+                predicates.push_str(" AND COALESCE(NULLIF(trim(t.love), ''), '') NOT IN ('L', 'B')")
             }
         }
     }
     push_year_filters(
-        &mut sql,
+        &mut predicates,
         &mut params,
         request.year_basis.track_column(),
         request.year_from,
         request.year_to,
     );
     push_missing_year_filter(
-        &mut sql,
+        &mut predicates,
         request.year_basis.track_column(),
         request.missing_year,
     );
     if let Some(genre) = genre {
-        push_exact_filter(&mut sql, &mut params, "t.canonical_genre", genre);
+        push_exact_filter(&mut predicates, &mut params, "t.canonical_genre", genre);
     }
     if let Some(artist) = artist {
-        push_exact_filter(&mut sql, &mut params, "t.album_artist_display", artist);
+        push_exact_filter(
+            &mut predicates,
+            &mut params,
+            "t.album_artist_display",
+            artist,
+        );
     }
+    let total_count = filtered_row_count(
+        connection,
+        &format!("SELECT t.id FROM tracks AS t{predicates}"),
+        &params,
+        "track",
+    )?;
+    let mut sql = format!(
+        "SELECT {TRACK_COLUMNS}, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)){predicates}",
+        sort.expression
+    );
     push_keyset(
         &mut sql,
         &mut params,
@@ -580,7 +609,11 @@ fn track_page_from_connection(
         .map(|(track, _)| track)
         .collect::<Vec<_>>();
     apply_overlays(&mut items, store)?;
-    Ok(TrackPage { items, next_cursor })
+    Ok(TrackPage {
+        items,
+        next_cursor,
+        total_count,
+    })
 }
 
 fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
@@ -658,6 +691,7 @@ fn album_page_from_connection(
         return Ok(AlbumPage {
             items: Vec::new(),
             next_cursor: None,
+            total_count: 0,
         });
     }
     let plain_match_query = parsed_search
@@ -705,6 +739,7 @@ fn album_page_from_connection(
         sql.push_str(" AND a.album_artist_display = ?");
         params.push(Value::Text(artist));
     }
+    let total_count = filtered_row_count(connection, &sql, &params, "album")?;
     push_keyset(
         &mut sql,
         &mut params,
@@ -752,6 +787,7 @@ fn album_page_from_connection(
     Ok(AlbumPage {
         items: mapped.into_iter().map(|(album, _)| album).collect(),
         next_cursor,
+        total_count,
     })
 }
 
@@ -787,6 +823,7 @@ fn artist_page_from_connection(
             return Ok(ArtistPage {
                 items: Vec::new(),
                 next_cursor: None,
+                total_count: 0,
             });
         }
         if parsed_search.plain_fts_query().is_some() {
@@ -807,6 +844,7 @@ fn artist_page_from_connection(
         "WITH r AS (SELECT a.album_artist_display AS name, CAST(SUM(a.total_tracks) AS INTEGER) AS track_count, COUNT(*) AS album_count FROM albums AS a {rollup_where} GROUP BY a.album_artist_display COLLATE NOCASE) SELECT r.name, r.track_count, r.album_count, CAST(({}) AS TEXT) AS cursor_value FROM r WHERE 1 = 1",
         definition.expression
     );
+    let total_count = filtered_row_count(connection, &sql, &params, "artist")?;
     push_keyset(
         &mut sql,
         &mut params,
@@ -865,6 +903,7 @@ fn artist_page_from_connection(
     Ok(ArtistPage {
         items: mapped.into_iter().map(|(artist, _)| artist).collect(),
         next_cursor,
+        total_count,
     })
 }
 
@@ -1070,6 +1109,7 @@ mod tests {
         };
         let first = track_page_from_connection(&connection, request, None).expect("first page");
         assert_eq!(first.items.len(), 1);
+        assert_eq!(first.total_count, 3);
         let first_id = first.items[0].id.clone();
         assert!(
             track_page_from_connection(
@@ -1097,6 +1137,7 @@ mod tests {
         )
         .expect("second page");
         assert_eq!(second.items.len(), 1);
+        assert_eq!(second.total_count, 3);
         assert_ne!(second.items[0].id, first_id);
 
         let loved_five_star = track_page_from_connection(
@@ -1423,6 +1464,7 @@ mod tests {
         .expect("artist page");
         assert_eq!(artists.items[0].name, "Sigur Rós");
         assert!(artists.next_cursor.is_some());
+        assert_eq!(artists.total_count, 2);
 
         let detail = album_detail_from_connection(&connection, "a1", None).expect("album detail");
         assert_eq!(detail.tracks.len(), 2);

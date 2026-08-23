@@ -83,13 +83,20 @@ describe("library presentation", () => {
     const trackPage = await exploreTracks({ rating: 4.5, loveState: "loved", sort: "titleAsc" });
     expect(trackPage.items.map((track) => track.title)).toEqual(["Nightcall", "On Melancholy Hill"]);
     expect(trackPage.nextCursor).toBeNull();
+    expect(trackPage.totalCount).toBe(2);
+
+    const boundedTrackPage = await exploreTracks({ pageSize: 1, genre: "Alternative", sort: "titleAsc" });
+    expect(boundedTrackPage.items).toHaveLength(1);
+    expect(boundedTrackPage.totalCount).toBe(2);
 
     const albumPage = await exploreAlbums({ artist: "M83", sort: "releaseYearDesc" });
     expect(albumPage.items).toHaveLength(1);
     expect(albumPage.items[0]).toMatchObject({ title: "Hurry Up, We're Dreaming", totalTracks: 1 });
+    expect(albumPage.totalCount).toBe(1);
 
     const artistPage = await exploreArtists({ genre: "Soundtrack", sort: "nameAsc" });
     expect(artistPage.items.map((artist) => artist.name)).toEqual(["College"]);
+    expect(artistPage.totalCount).toBe(1);
 
     const fieldedTracks = await exploreTracks({ search: "aartist:daft punk,genre:house" });
     expect(fieldedTracks.items.map((track) => track.title)).toEqual(["Digital Love"]);

@@ -250,6 +250,7 @@ type ExplorerResult = {
   albums: AlbumSummary[];
   artists: Artist[];
   nextCursor: ExplorerCursor | null;
+  totalCount: number;
 };
 
 async function loadExplorerPage(
@@ -278,7 +279,7 @@ async function loadExplorerPage(
         ? filters.sort as "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
         : "newest",
     });
-    return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor };
+    return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   if (view === "albums") {
     const page = await exploreAlbums({
@@ -294,13 +295,28 @@ async function loadExplorerPage(
         ? filters.sort as "titleAsc" | "artistAsc" | "yearDesc" | "releaseYearDesc" | "ratingDesc"
         : "yearDesc",
     });
-    return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor };
+    return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   const page = await exploreArtists({
     ...shared,
     sort: filters.sort === "trackCountDesc" ? "trackCountDesc" : "nameAsc",
   });
-  return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor };
+  return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor, totalCount: page.totalCount };
+}
+
+function explorerCountKey(view: ExplorerView, filters: ExplorerFilters): string {
+  return JSON.stringify([
+    view,
+    filters.query.trim(),
+    filters.rating,
+    filters.love,
+    filters.yearFrom,
+    filters.yearTo,
+    filters.yearBasis,
+    filters.yearMissing,
+    filters.genre,
+    filters.artist,
+  ]);
 }
 
 function historyDateLabel(timestamp: number | null): string {
@@ -426,6 +442,7 @@ function App() {
   const [explorerAlbums, setExplorerAlbums] = useState<AlbumSummary[]>([]);
   const [explorerArtists, setExplorerArtists] = useState<Artist[]>([]);
   const [explorerCursor, setExplorerCursor] = useState<ExplorerCursor | null>(null);
+  const [explorerCount, setExplorerCount] = useState<{ key: string; total: number } | null>(null);
   const [explorerLoadState, setExplorerLoadState] = useState<ExplorerLoadState>("loading");
   const [explorerError, setExplorerError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -682,6 +699,7 @@ function App() {
           setExplorerAlbums(page.albums);
           setExplorerArtists(page.artists);
           setExplorerCursor(page.nextCursor);
+          setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
         })
         .catch((error: unknown) => {
@@ -1684,6 +1702,7 @@ function App() {
       setExplorerAlbums((current) => [...current, ...page.albums]);
       setExplorerArtists((current) => [...current, ...page.artists]);
       setExplorerCursor(page.nextCursor);
+      setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
     } catch (error) {
       if (requestId === exploreRequestRef.current) {
         setExplorerError(error instanceof Error ? error.message : String(error));
@@ -1764,6 +1783,16 @@ function App() {
     : explorerView === "albums"
       ? explorerAlbums.length
       : explorerArtists.length;
+  const currentExplorerCount = explorerCount?.key === explorerCountKey(explorerView, explorerFilters)
+    ? explorerCount.total
+    : null;
+  const explorerCountNoun = explorerView === "tracks"
+    ? ["song", "songs"] as const
+    : explorerView === "albums"
+      ? ["album", "albums"] as const
+      : ["artist", "artists"] as const;
+  const showExplorerCount = snapshot !== null
+    && !["Observatory", "Charts", "History", "Genres", "Years", "Ratings"].includes(activeNav);
   const topbarSearchValue = activeNav === "Observatory"
     ? reviewSearch
     : activeNav === "History"
@@ -1862,7 +1891,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.10</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.11</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1897,6 +1926,15 @@ function App() {
               ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
               : activeNav !== "Years" ? <kbd>Ctrl K</kbd> : null}
           </form>
+          {showExplorerCount ? (
+            <output className="search-result-count" aria-live="polite" aria-busy={currentExplorerCount === null}>
+              {currentExplorerCount === null ? (
+                <>Counting {explorerCountNoun[1]}…</>
+              ) : (
+                <><strong>{formatCount(currentExplorerCount)}</strong> {currentExplorerCount === 1 ? explorerCountNoun[0] : explorerCountNoun[1]}</>
+              )}
+            </output>
+          ) : null}
         </div>
         <div className="topbar__actions">
           {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}

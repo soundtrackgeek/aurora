@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.11] - 2026-08-23
+
+### Added
+
+- Catalog search now shows the exact number of matching songs, albums, or artists beside the top search field. The total covers the complete filtered result set rather than only the currently loaded 50-row page.
+
 ## [0.15.10] - 2026-08-23
 
 ### Added

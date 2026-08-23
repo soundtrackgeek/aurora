@@ -255,6 +255,8 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .search kbd { flex: 0 0 auto; padding: 3px 7px; color: #7d8794; border: 1px solid rgba(255,255,255,.05); border-radius: 5px; background: #111a25; font-family: "Segoe UI", sans-serif; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
 .search button { display: grid; place-items: center; padding: 3px; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .search button svg { width: 14px; height: 14px; }
+.search-result-count { flex: 0 0 auto; color: #8f9baa; font-size: max(var(--aurora-font-min), calc(11px + var(--aurora-font-offset))); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.search-result-count strong { color: #dbe4ed; font-weight: 600; }
 .topbar__actions { display: flex; align-items: center; gap: 5px; }
 .topbar__actions > button { display: flex; align-items: center; gap: 6px; min-width: 34px; height: 34px; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: #ccd5df; }
 .topbar__actions > button:not(:disabled) { cursor: pointer; }

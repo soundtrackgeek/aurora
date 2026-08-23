@@ -87,6 +87,7 @@ export interface TrackPageRequest {
 export interface TrackPage {
   items: Track[];
   nextCursor: ExplorerCursor | null;
+  totalCount: number;
 }
 
 export interface AlbumSummary {
@@ -124,6 +125,7 @@ export interface AlbumPageRequest {
 export interface AlbumPage {
   items: AlbumSummary[];
   nextCursor: ExplorerCursor | null;
+  totalCount: number;
 }
 
 export type YearBasis = "original" | "release";
@@ -141,6 +143,7 @@ export interface ArtistPageRequest {
 export interface ArtistPage {
   items: Artist[];
   nextCursor: ExplorerCursor | null;
+  totalCount: number;
 }
 
 export interface AlbumDetail {
@@ -315,7 +318,7 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
         default: return right.id.localeCompare(left.id);
       }
     });
-  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
 }
 
 function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
@@ -345,7 +348,7 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
         default: return (right.originalYear ?? -1) - (left.originalYear ?? -1) || left.title.localeCompare(right.title);
       }
     });
-  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
 }
 
 function previewArtistPage(request: ArtistPageRequest): ArtistPage {
@@ -363,7 +366,7 @@ function previewArtistPage(request: ArtistPageRequest): ArtistPage {
     .sort((left, right) => request.sort === "trackCountDesc"
       ? right.trackCount - left.trackCount || left.name.localeCompare(right.name)
       : left.name.localeCompare(right.name));
-  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null };
+  return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
 }
 
 export async function exploreTracks(request: TrackPageRequest): Promise<TrackPage> {
