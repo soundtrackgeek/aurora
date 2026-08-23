@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.16 adds a dedicated Publisher Signal Timeline and carries Publisher metadata through Aurora's track and album views.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.17 aligns Publisher activity signals to their shared year axis across the full responsive timeline width.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.16 slice
+## Current 0.15.17 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -21,7 +21,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Aurora unregisters all active shortcuts during both window close and application exit. Another running app must still retry or restart if its own registration previously failed while Aurora owned the same binding.
 - A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.
 - A collapsible Library tree containing Songs, Albums, Artists, Publishers, Genres, Years, Ratings, and Tags. Opening a closed Library enters Songs by default; Library and Playlists disclosure choices persist per computer.
-- A dedicated Publisher Signal Timeline with bounded case-insensitive catalog rollups, Release activity, Original-year activity, and Catalog share lenses, publisher search, selected-publisher metrics, decade highlights, publisher playback, and exact handoff into `publisher:` search.
+- A dedicated Publisher Signal Timeline with bounded case-insensitive catalog rollups, Release activity, Original-year activity, and Catalog share lenses, publisher search, selected-publisher metrics, decade highlights, publisher playback, and exact handoff into `publisher:` search. Every signal uses its activity years on the same responsive axis, including the final 2026 interval.
 - Publisher metadata in Songs, Albums, Genre, Years, Ratings, Publishers, and the right-side track or album inspector. Album-level views read `albums.publisher`; track views retain `tracks.publisher` without schema mutation.
 - Offline-safe publisher identity slots use Aurora's fallback icon. Optional future logos have a documented MusicBrainz → Wikidata → Wikimedia Commons provenance and licensing route; no third-party marks are shipped or scraped.
 - Compact Library and pinned-playlist flyouts in icon-only mode, with active nested destinations still visible on the parent Library icon.

@@ -45,6 +45,7 @@ interface PublisherSignalTimelineProps {
 const CHART_WIDTH = 720;
 const CHART_HEIGHT = 72;
 const BASELINE = 66;
+const TIMELINE_PRESENT_YEAR = 2026;
 
 function albumAsTrack(album: PublisherAlbum): Track {
   return {
@@ -72,18 +73,41 @@ function activityFor(publisher: PublisherSummary, mode: PublisherTimelineMode) {
   return mode === "original" ? publisher.originalActivity : publisher.releaseActivity;
 }
 
-function areaPaths(buckets: readonly PublisherActivityBucket[], maximum: number) {
-  if (!buckets.length) return { line: "", area: "" };
-  const span = Math.max(1, buckets.length - 1);
-  const points = buckets.map((bucket, index) => {
-    const x = index / span * CHART_WIDTH;
+function timelineDomain(overview: PublisherOverview) {
+  const years = overview.publishers.flatMap((publisher) => [
+    publisher.firstYear,
+    publisher.lastYear,
+    ...publisher.releaseActivity.map((bucket) => bucket.year),
+    ...publisher.originalActivity.map((bucket) => bucket.year),
+  ]).filter((year): year is number => year !== null);
+  const first = Math.max(1900, Math.floor(Math.min(...years, 1950) / 10) * 10);
+  const last = Math.max(first + 10, Math.max(...years, TIMELINE_PRESENT_YEAR));
+  return { first, last };
+}
+
+function areaPaths(
+  buckets: readonly PublisherActivityBucket[],
+  maximum: number,
+  firstYear: number,
+  lastYear: number,
+) {
+  if (!buckets.length) return { line: "", area: "", endpoint: null };
+  const yearSpan = Math.max(1, lastYear - firstYear);
+  const points = buckets.map((bucket) => {
+    const x = (bucket.year - firstYear) / yearSpan * CHART_WIDTH;
     const height = Math.sqrt(bucket.albumCount / Math.max(1, maximum)) * 54;
     return [x, BASELINE - height] as const;
   });
   const line = points.map(([x, y], index) => `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
+  const [firstX] = points[0];
+  const [lastX, lastY] = points[points.length - 1];
   return {
     line,
-    area: `M0 ${BASELINE} ${line.replace(/^M/, "L")} L${CHART_WIDTH} ${BASELINE} Z`,
+    area: `M${firstX.toFixed(2)} ${BASELINE} ${line.replace(/^M/, "L")} L${lastX.toFixed(2)} ${BASELINE} Z`,
+    endpoint: {
+      left: lastX / CHART_WIDTH * 100,
+      top: lastY / CHART_HEIGHT * 100,
+    },
   };
 }
 
@@ -92,18 +116,22 @@ const PublisherSignal = memo(function PublisherSignal({
   selected,
   mode,
   shareMaximum,
+  firstYear,
+  lastYear,
   onSelect,
 }: {
   publisher: PublisherSummary;
   selected: boolean;
   mode: PublisherTimelineMode;
   shareMaximum: number;
+  firstYear: number;
+  lastYear: number;
   onSelect: () => void;
 }) {
   const buckets = activityFor(publisher, mode);
   const ownMaximum = Math.max(1, ...buckets.map((bucket) => bucket.albumCount));
   const maximum = mode === "share" ? Math.max(1, shareMaximum) : ownMaximum;
-  const paths = areaPaths(buckets, maximum);
+  const paths = areaPaths(buckets, maximum, firstYear, lastYear);
   const gradientId = `publisher-signal-${publisher.name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <button
@@ -122,18 +150,20 @@ const PublisherSignal = memo(function PublisherSignal({
           <small>Tracks <b>{formatCount(publisher.trackCount)}</b></small>
         </span>
       </span>
-      <svg className="publisher-signal__chart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label={`${publisher.name}, ${formatCount(publisher.albumCount)} albums between ${publisher.firstYear ?? "an unknown year"} and ${publisher.lastYear ?? "an unknown year"}`}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={selected ? "#dc5eff" : "#23c8f2"} stopOpacity=".92" />
-            <stop offset="1" stopColor={selected ? "#7c31ad" : "#08729e"} stopOpacity=".08" />
-          </linearGradient>
-        </defs>
-        <path className="publisher-signal__grid" d={`M0 ${BASELINE} H${CHART_WIDTH}`} />
-        <path className="publisher-signal__area" d={paths.area} fill={`url(#${gradientId})`} />
-        <path className="publisher-signal__line" d={paths.line} />
-        <circle className="publisher-signal__endpoint" cx={CHART_WIDTH - 4} cy={BASELINE - 2} r="4" />
-      </svg>
+      <span className="publisher-signal__plot">
+        <svg className="publisher-signal__chart" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${publisher.name}, ${formatCount(publisher.albumCount)} albums between ${publisher.firstYear ?? "an unknown year"} and ${publisher.lastYear ?? "an unknown year"}`}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor={selected ? "#dc5eff" : "#23c8f2"} stopOpacity=".92" />
+              <stop offset="1" stopColor={selected ? "#7c31ad" : "#08729e"} stopOpacity=".08" />
+            </linearGradient>
+          </defs>
+          <path className="publisher-signal__grid" d={`M0 ${BASELINE} H${CHART_WIDTH}`} />
+          <path className="publisher-signal__area" d={paths.area} fill={`url(#${gradientId})`} />
+          <path className="publisher-signal__line" d={paths.line} />
+        </svg>
+        {paths.endpoint ? <span className="publisher-signal__endpoint" style={{ left: `${paths.endpoint.left}%`, top: `${paths.endpoint.top}%` }} /> : null}
+      </span>
     </button>
   );
 });
@@ -159,10 +189,7 @@ function TimelineHeader({ mode, onChange }: { mode: PublisherTimelineMode; onCha
   );
 }
 
-function TimelineTicks({ overview }: { overview: PublisherOverview }) {
-  const allYears = overview.publishers.flatMap((publisher) => [publisher.firstYear, publisher.lastYear]).filter((year): year is number => year !== null);
-  const first = Math.max(1900, Math.floor(Math.min(...allYears, 1950) / 10) * 10);
-  const last = Math.max(first + 10, Math.max(...allYears, 2026));
+function TimelineTicks({ first, last }: { first: number; last: number }) {
   const ticks = [] as number[];
   for (let year = Math.ceil(first / 10) * 10; year <= last; year += 10) ticks.push(year);
   if (ticks[ticks.length - 1] !== last) ticks.push(last);
@@ -247,17 +274,20 @@ export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
   }
   const selectedName = props.detail?.publisher.name ?? null;
   const shareMaximum = Math.max(1, ...props.overview.publishers.flatMap((publisher) => publisher.releaseActivity.map((bucket) => bucket.albumCount)));
+  const domain = timelineDomain(props.overview);
   return (
     <section className="publisher-timeline" aria-label="Publishers">
       <TimelineHeader mode={mode} onChange={setMode} />
       <div className="publisher-signals">
-        <TimelineTicks overview={props.overview} />
+        <TimelineTicks first={domain.first} last={domain.last} />
         {props.overview.publishers.map((publisher) => (
           <PublisherSignal
             publisher={publisher}
             selected={selectedName === publisher.name}
             mode={mode}
             shareMaximum={shareMaximum}
+            firstYear={domain.first}
+            lastYear={domain.last}
             onSelect={() => props.onSelectPublisher(publisher)}
             key={publisher.name}
           />

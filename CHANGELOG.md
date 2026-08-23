@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.17] - 2026-08-23
+
+### Fixed
+
+- Publisher Release activity and Original-year activity signals now use their actual bucket years and the full responsive timeline width, so plots remain aligned with every tick through 2026 instead of visually ending around 2013.
+
 ## [0.15.16] - 2026-08-23
 
 ### Added

@@ -48,7 +48,7 @@ describe("PublisherSignalTimeline", () => {
   it("exposes timeline modes and opens publisher and album selections", () => {
     const onSelectPublisher = vi.fn();
     const onSelectAlbum = vi.fn();
-    render(<PublisherSignalTimeline
+    const { container } = render(<PublisherSignalTimeline
       overview={overview}
       detail={overview.initialDetail}
       loadState="ready"
@@ -65,6 +65,12 @@ describe("PublisherSignalTimeline", () => {
       onRetry={vi.fn()}
       onRetryDetail={vi.fn()}
     />);
+
+    const chart = screen.getByRole("img", { name: /Parlophone, 2 albums/ });
+    expect(chart).toHaveAttribute("preserveAspectRatio", "none");
+    expect(chart.querySelector(".publisher-signal__line")?.getAttribute("d")).toMatch(/^M151\.58 .+ L445\.26 /);
+    expect(Number.parseFloat(container.querySelector<HTMLElement>(".publisher-signal__endpoint")?.style.left ?? "NaN"))
+      .toBeCloseTo((1997 - 1950) / (2026 - 1950) * 100);
 
     fireEvent.click(screen.getByRole("tab", { name: "Original-year activity" }));
     expect(screen.getByRole("tab", { name: "Original-year activity" })).toHaveAttribute("aria-selected", "true");
