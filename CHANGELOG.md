@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.13] - 2026-08-23
+
+### Fixed
+
+- The active Explorer sort is now an enabled menu choice instead of a disabled select placeholder, so it can be clicked again to reverse direction after the pointer moves across other choices.
+
 ## [0.15.12] - 2026-08-23
 
 ### Changed

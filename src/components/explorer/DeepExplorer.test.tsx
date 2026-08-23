@@ -113,8 +113,9 @@ describe("DeepExplorer", () => {
     const filterBar = screen.getByLabelText("Explorer filters");
     expect(filterBar).toHaveTextContent("Sort");
     expect(filterBar).toHaveTextContent("Reset");
-    expect(filterBar.querySelectorAll("select")).toHaveLength(1);
+    expect(filterBar.querySelectorAll("select")).toHaveLength(0);
     expect(filterBar.querySelectorAll("input")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /^Sort:/ })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(onClearFilters).toHaveBeenCalledOnce();
   });
@@ -126,7 +127,7 @@ describe("DeepExplorer", () => {
     expect(screen.getByRole("row", { name: /Second Light/ })).toHaveTextContent("2023");
   });
 
-  it("toggles chronological and alphabetical directions when a sort is selected again", () => {
+  it("keeps the active sort clickable after another choice is hovered, then reverses it", () => {
     const onViewChange = vi.fn();
     const onFiltersChange = vi.fn();
     const { rerender } = render(<DeepExplorer {...explorerProps({ onViewChange, onFiltersChange })} />);
@@ -134,18 +135,22 @@ describe("DeepExplorer", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
     expect(onViewChange).toHaveBeenCalledWith("albums");
 
-    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "year" } });
-    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "yearDesc" });
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Added · newest" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Artist · A–Z" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "artistAsc" });
+
+    rerender(<DeepExplorer {...explorerProps({ filters: { ...filters, sort: "artistAsc" }, onViewChange, onFiltersChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Artist · A–Z" }));
+    fireEvent.mouseEnter(screen.getByRole("menuitemradio", { name: "Title · A–Z" }));
+    const activeArtistSort = screen.getByRole("menuitemradio", { name: "Artist · A–Z" });
+    expect(activeArtistSort).toBeEnabled();
+    fireEvent.click(activeArtistSort);
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "artistDesc" });
 
     rerender(<DeepExplorer {...explorerProps({ filters: { ...filters, sort: "yearDesc" }, onViewChange, onFiltersChange })} />);
-    expect(screen.getByRole("option", { name: "Year · newest" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "year" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Year · newest" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Year · newest" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "yearAsc" });
-
-    rerender(<DeepExplorer {...explorerProps({ filters: { ...filters, sort: "titleAsc" }, onViewChange, onFiltersChange })} />);
-    expect(screen.getByRole("option", { name: "Title · A–Z" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "title" } });
-    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "titleDesc" });
   });
 
   it("supports arrow-key selection and Enter activation in track rows", () => {

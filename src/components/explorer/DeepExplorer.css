@@ -70,9 +70,16 @@
   background: rgba(3, 9, 15, .43);
 }
 
-.deep-explorer-filters > label { display: grid; gap: 4px; min-width: 0; color: var(--explorer-muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); text-transform: uppercase; }
-.deep-explorer-filters select { min-width: 180px; height: 31px; padding: 0 8px; border: 1px solid var(--explorer-border); border-radius: 6px; outline: none; color: #dce3eb; background: #0b141e; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-transform: none; }
-.deep-explorer-filters select:focus-visible { border-color: rgba(201, 112, 238, .65); box-shadow: 0 0 0 2px rgba(181, 82, 221, .13); }
+.deep-explorer-sort-control { position: relative; display: grid; gap: 4px; min-width: 180px; color: var(--explorer-muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); text-transform: uppercase; }
+.deep-explorer-sort-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 180px; height: 31px; padding: 0 8px; border: 1px solid var(--explorer-border); border-radius: 6px; outline: none; color: #dce3eb; background: #0b141e; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-transform: none; cursor: pointer; }
+.deep-explorer-sort-trigger:focus-visible { border-color: rgba(201, 112, 238, .65); box-shadow: 0 0 0 2px rgba(181, 82, 221, .13); }
+.deep-explorer-sort-trigger svg { width: 13px; height: 13px; flex: 0 0 auto; color: #8996a4; transition: transform 140ms ease; }
+.deep-explorer-sort-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.deep-explorer-sort-menu { position: absolute; z-index: 20; top: calc(100% + 5px); right: 0; display: grid; width: max(100%, 210px); max-height: min(360px, 50vh); overflow: auto; padding: 4px; border: 1px solid var(--explorer-border-strong); border-radius: 7px; background: #0b141e; box-shadow: 0 14px 34px rgba(0, 0, 0, .42); text-transform: none; }
+.deep-explorer-sort-menu button { display: flex; align-items: center; width: 100%; min-height: 30px; padding: 0 8px; border: 0; border-radius: 5px; outline: none; color: #aeb8c4; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.deep-explorer-sort-menu button:hover,
+.deep-explorer-sort-menu button:focus-visible { color: #f3eaf8; background: rgba(188, 100, 224, .12); }
+.deep-explorer-sort-menu button[aria-checked="true"] { color: #ebd5f5; background: rgba(188, 100, 224, .18); }
 .deep-explorer-clear { display: flex; align-items: center; justify-content: center; gap: 5px; height: 31px; padding: 0 9px; border: 1px solid var(--explorer-border); border-radius: 6px; color: #adb8c4; background: #101924; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); cursor: pointer; }
 .deep-explorer-clear:hover { color: #eadcf5; border-color: var(--explorer-border-strong); }
 .deep-explorer-clear svg { width: 12px; height: 12px; }

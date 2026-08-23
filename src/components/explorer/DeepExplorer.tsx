@@ -2,6 +2,7 @@ import {
   Album,
   AlertTriangle,
   AudioLines,
+  ChevronDown,
   ChevronRight,
   Disc3,
   Gauge,
@@ -15,7 +16,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { albumCoverUrl, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
@@ -118,7 +119,6 @@ type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "
 
 interface ExplorerSortOption {
   value: ExplorerSortCriterion;
-  label: string;
   primary: ExplorerSort;
   primaryLabel: string;
   reverse: ExplorerSort;
@@ -127,24 +127,24 @@ interface ExplorerSortOption {
 
 const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
   tracks: [
-    { value: "added", label: "Added to library", primary: "newest", primaryLabel: "Added · newest", reverse: "oldest", reverseLabel: "Added · oldest" },
-    { value: "title", label: "Title", primary: "titleAsc", primaryLabel: "Title · A–Z", reverse: "titleDesc", reverseLabel: "Title · Z–A" },
-    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
-    { value: "album", label: "Album", primary: "albumAsc", primaryLabel: "Album · A–Z", reverse: "albumDesc", reverseLabel: "Album · Z–A" },
-    { value: "year", label: "Year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
-    { value: "releaseYear", label: "Release year", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
-    { value: "rating", label: "Rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
+    { value: "added", primary: "newest", primaryLabel: "Added · newest", reverse: "oldest", reverseLabel: "Added · oldest" },
+    { value: "title", primary: "titleAsc", primaryLabel: "Title · A–Z", reverse: "titleDesc", reverseLabel: "Title · Z–A" },
+    { value: "artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "album", primary: "albumAsc", primaryLabel: "Album · A–Z", reverse: "albumDesc", reverseLabel: "Album · Z–A" },
+    { value: "year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
+    { value: "releaseYear", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
+    { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
   ],
   albums: [
-    { value: "year", label: "Year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
-    { value: "releaseYear", label: "Release year", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
-    { value: "title", label: "Album", primary: "titleAsc", primaryLabel: "Album · A–Z", reverse: "titleDesc", reverseLabel: "Album · Z–A" },
-    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
-    { value: "rating", label: "Rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
+    { value: "year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
+    { value: "releaseYear", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
+    { value: "title", primary: "titleAsc", primaryLabel: "Album · A–Z", reverse: "titleDesc", reverseLabel: "Album · Z–A" },
+    { value: "artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
   ],
   artists: [
-    { value: "artist", label: "Artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
-    { value: "trackCount", label: "Track count", primary: "trackCountDesc", primaryLabel: "Most tracks", reverse: "trackCountAsc", reverseLabel: "Fewest tracks" },
+    { value: "artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
+    { value: "trackCount", primary: "trackCountDesc", primaryLabel: "Most tracks", reverse: "trackCountAsc", reverseLabel: "Fewest tracks" },
   ],
 };
 
@@ -159,6 +159,121 @@ function nextSort(view: ExplorerView, current: ExplorerSort, criterion: Explorer
   if (current === option.primary) return option.reverse;
   if (current === option.reverse) return option.primary;
   return option.primary;
+}
+
+interface SortControlProps {
+  view: ExplorerView;
+  current: ExplorerSort;
+  onChange: (sort: ExplorerSort) => void;
+}
+
+function SortControl({ view, current, onChange }: SortControlProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectedOption = activeSortOption(view, current);
+  const selectedLabel = current === selectedOption.reverse
+    ? selectedOption.reverseLabel
+    : selectedOption.primaryLabel;
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    rootRef.current
+      ?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')
+      ?.focus();
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function moveMenuFocus(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    if (items.length === 0) return;
+
+    event.preventDefault();
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    if (event.key === "Home") {
+      items[0].focus();
+      return;
+    }
+    if (event.key === "End") {
+      items[items.length - 1].focus();
+      return;
+    }
+    const offset = event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex = currentIndex < 0
+      ? (offset > 0 ? 0 : items.length - 1)
+      : (currentIndex + offset + items.length) % items.length;
+    items[nextIndex].focus();
+  }
+
+  function chooseSort(criterion: ExplorerSortCriterion) {
+    onChange(nextSort(view, current, criterion));
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  return (
+    <div className="deep-explorer-sort-control" ref={rootRef}>
+      <span>Sort</span>
+      <button
+        type="button"
+        className="deep-explorer-sort-trigger"
+        ref={triggerRef}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls="deep-explorer-sort-menu"
+        aria-label={`Sort: ${selectedLabel}`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{selectedLabel}</span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          className="deep-explorer-sort-menu"
+          id="deep-explorer-sort-menu"
+          role="menu"
+          aria-label="Sort options"
+          onKeyDown={moveMenuFocus}
+        >
+          {sortOptions[view].map((option) => {
+            const isActive = option.primary === current || option.reverse === current;
+            const label = isActive && current === option.reverse
+              ? option.reverseLabel
+              : option.primaryLabel;
+            return (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={isActive}
+                onClick={() => chooseSort(option.value)}
+                key={option.value}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AlbumArtwork({ album, detail = false }: { album: ExplorerAlbum; detail?: boolean }) {
@@ -553,10 +668,6 @@ export function DeepExplorer(props: DeepExplorerProps) {
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
   const resultCount = resultCountForView(view, props);
-  const selectedSortOption = activeSortOption(view, filters.sort);
-  const selectedSortLabel = filters.sort === selectedSortOption.reverse
-    ? selectedSortOption.reverseLabel
-    : selectedSortOption.primaryLabel;
 
   function updateFilters(patch: Partial<ExplorerFilters>) {
     onFiltersChange({ ...filters, ...patch });
@@ -597,19 +708,11 @@ export function DeepExplorer(props: DeepExplorerProps) {
       </div>
 
       <div className="deep-explorer-filters" aria-label="Explorer filters">
-        <label>
-          <span>Sort</span>
-          <select
-            value=""
-            title="Select the active sort again to reverse it."
-            onChange={(event) => updateFilters({
-              sort: nextSort(view, filters.sort, event.currentTarget.value as ExplorerSortCriterion),
-            })}
-          >
-            <option value="" disabled>{selectedSortLabel}</option>
-            {sortOptions[view].map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <SortControl
+          view={view}
+          current={filters.sort}
+          onChange={(sort) => updateFilters({ sort })}
+        />
         {onClearFilters ? (
           <button type="button" className="deep-explorer-clear" onClick={onClearFilters}>
             <SlidersHorizontal aria-hidden="true" />Reset
