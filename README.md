@@ -13,6 +13,9 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - An Audio Settings tab beside Global Shortcuts, atomic per-computer persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-audio.json`, and a compact player readout for the active output and applied gain.
 - Windows global shortcuts for play/pause, next, whole-star ratings 0–5, and Love. The defaults are `Ctrl+Alt+P`, `Ctrl+Alt+N`, `Ctrl+Alt+0` through `Ctrl+Alt+5`, and `Ctrl+Alt+L`.
 - A native Settings editor that captures replacement key combinations, rejects duplicates and modifierless keys, restores defaults, and enables or disables the complete shortcut set.
+- A Display Settings tab with global Compact through Maximum text presets, readable minimum sizes, and Compact through Extra Large library-cover presets.
+- Independent text and cover overrides for Universe, every Library destination, Observatory, Charts, and History. Views inherit the global choices until explicitly overridden; Charts starts at the larger text preset, and cover controls are disabled where a view has no adjustable artwork.
+- Device-local display preferences in versioned browser storage, restored before Aurora renders and kept outside MP3s, the read-only catalog, and shared OneDrive state.
 - Shortcut actions always resolve Aurora's now-playing track from the Rust playback runtime. Explore selection never becomes the rating or Love target, and tag shortcuts use the same immediate verified MP3 plus optimistic Aurora-state pipeline as the player.
 - Device-local shortcut persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-shortcuts.json`; these Windows bindings are intentionally excluded from Laptop Mode and OneDrive state synchronization.
 - A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.

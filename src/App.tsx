@@ -126,6 +126,12 @@ import {
   saveLayoutPreferences,
 } from "./layoutPreferences";
 import {
+  effectiveDisplayPreferences,
+  loadDisplayPreferences,
+  saveDisplayPreferences,
+  type DisplayViewKey,
+} from "./displayPreferences";
+import {
   reconcilePendingTags,
   tagValuesForTrack,
   trackWithReconciledTags,
@@ -147,6 +153,7 @@ import {
   type RatingMode,
   type RatingsOverview,
 } from "./ratings";
+
 import {
   listenForGlobalShortcutResults,
   loadGlobalShortcutSettings,
@@ -175,6 +182,20 @@ import {
   type YearOverview,
   type YearSelection,
 } from "./years";
+
+const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
+  Universe: "universe",
+  Observatory: "observatory",
+  Songs: "songs",
+  Albums: "albums",
+  Artists: "artists",
+  Genres: "genres",
+  Years: "years",
+  Ratings: "ratings",
+  Tags: "tags",
+  Charts: "charts",
+  History: "history",
+};
 
 const defaultExplorerFilters: ExplorerFilters = {
   query: "",
@@ -395,6 +416,7 @@ function App() {
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
   const [activeNav, setActiveNav] = useState<SidebarDestination>("Universe");
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
+  const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const [reloadToken, setReloadToken] = useState(0);
   const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
   const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(defaultExplorerFilters);
@@ -506,6 +528,10 @@ function App() {
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
   }, [layoutPreferences]);
+
+  useEffect(() => {
+    saveDisplayPreferences(displayPreferences);
+  }, [displayPreferences]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1795,12 +1821,16 @@ function App() {
   const RightSidebarIcon = layoutPreferences.rightSidebar === "expanded"
     ? PanelRightClose
     : PanelRightOpen;
+  const activeDisplayView = displayViewByDestination[activeNav];
+  const activeDisplayPreferences = effectiveDisplayPreferences(displayPreferences, activeDisplayView);
 
   return (
     <div
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
       data-right-sidebar={layoutPreferences.rightSidebar}
+      data-text-size={displayPreferences.global.textSize}
+      data-cover-size={displayPreferences.global.coverSize}
     >
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
@@ -1887,12 +1917,16 @@ function App() {
           >
             <RightSidebarIcon aria-hidden="true" />
           </button>
-          <button type="button" aria-label="Settings" title="Settings" onClick={() => openSettings("audio")}><Settings aria-hidden="true" /></button>
+          <button type="button" aria-label="Settings" title="Settings" onClick={() => openSettings("display")}><Settings aria-hidden="true" /></button>
         </div>
       </header>
 
       <main className="main-content">
-        <div className="main-scroll">
+        <div
+          className="main-scroll"
+          data-text-size={activeDisplayPreferences.textSize}
+          data-cover-size={activeDisplayPreferences.coverSize}
+        >
           {snapshot ? (
             activeNav === "Observatory" ? (
               <Observatory
@@ -2091,7 +2125,11 @@ function App() {
         </div>
       </main>
 
-      {layoutPreferences.rightSidebar === "expanded" && <aside className="inspector">
+      {layoutPreferences.rightSidebar === "expanded" && <aside
+        className="inspector"
+        data-text-size={activeDisplayPreferences.textSize}
+        data-cover-size={activeDisplayPreferences.coverSize}
+      >
         <div className="inspector-tabs" role="tablist" aria-label="Library details">
           <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
           <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum && !selectedRatingAlbum && !(activeNav === "Charts" && chartSelection?.kind === "albums")} onClick={() => setInspectorView("album")}>Album</button>
@@ -2216,7 +2254,10 @@ function App() {
           audioSaving={audioSaving}
           shortcutError={shortcutError}
           audioError={audioError}
+          displayPreferences={displayPreferences}
+          activeDisplayView={activeDisplayView}
           initialTab={settingsInitialTab}
+          onSaveDisplay={setDisplayPreferences}
           onSaveShortcuts={(request) => void saveGlobalShortcuts(request)}
           onSaveAudio={(request) => void saveAudioSettings(request)}
           onClose={() => setSettingsOpen(false)}

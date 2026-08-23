@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- A Display Settings tab with configurable global text and cover sizes, a live preview, and a one-click restore to Aurora's readable defaults.
+- Independent text and artwork-size overrides for Universe, each Library destination, Observatory, Charts, and History. Cover controls stay unavailable on views without adjustable artwork.
+- Versioned, device-local persistence for display preferences, including safe validation and fallback when stored data is missing or malformed.
+
+### Changed
+
+- Aurora now uses shared typography tokens across every rendered surface, with a 10 px readable global floor and a larger default for the especially dense Charts view.
+- Library rows, chart entries, album grids, Years shelves, Genre Atlas, Ratings Studio, History, inspectors, settings, and player chrome now respond consistently to the selected text size.
+- Cover-size choices now reflow bounded album grids and resize applicable row, chart, Years, Genre, and Ratings artwork without horizontal overflow.
+
 ## [0.15.0] - 2026-08-23
 
 ### Added

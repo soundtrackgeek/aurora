@@ -2,9 +2,12 @@ import {
   AlertTriangle,
   Check,
   Headphones,
+  Image as ImageIcon,
   Keyboard,
+  MonitorCog,
   RotateCcw,
   ShieldCheck,
+  Type,
   Volume2,
   Waves,
   X,
@@ -21,8 +24,19 @@ import {
   type ShortcutBinding,
 } from "../shortcuts";
 import { acceleratorFromEvent } from "../shortcutCapture";
+import {
+  coverSizeOptions,
+  createDefaultDisplayPreferences,
+  displayViews,
+  effectiveDisplayPreferences,
+  textSizeOptions,
+  type CoverSize,
+  type DisplayPreferences,
+  type DisplayViewKey,
+  type TextSize,
+} from "../displayPreferences";
 
-export type SettingsTab = "audio" | "shortcuts";
+export type SettingsTab = "display" | "audio" | "shortcuts";
 
 interface SettingsDialogProps {
   shortcutStatus: GlobalShortcutStatus;
@@ -31,7 +45,10 @@ interface SettingsDialogProps {
   audioSaving: boolean;
   shortcutError: string | null;
   audioError: string | null;
+  displayPreferences: DisplayPreferences;
+  activeDisplayView: DisplayViewKey;
   initialTab?: SettingsTab;
+  onSaveDisplay: (preferences: DisplayPreferences) => void;
   onSaveShortcuts: (request: GlobalShortcutSettingsRequest) => void;
   onSaveAudio: (request: AudioSettingsRequest) => void;
   onClose: () => void;
@@ -44,7 +61,10 @@ export function SettingsDialog({
   audioSaving,
   shortcutError,
   audioError,
+  displayPreferences,
+  activeDisplayView,
   initialTab = "audio",
+  onSaveDisplay,
   onSaveShortcuts,
   onSaveAudio,
   onClose,
@@ -55,6 +75,8 @@ export function SettingsDialog({
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
   const [outputDeviceId, setOutputDeviceId] = useState(audioStatus.settings.outputDeviceId);
   const [replayGainMode, setReplayGainMode] = useState<ReplayGainMode>(audioStatus.settings.replayGainMode);
+  const [displayDraft, setDisplayDraft] = useState<DisplayPreferences>(() => copyDisplayPreferences(displayPreferences));
+  const [selectedDisplayView, setSelectedDisplayView] = useState<DisplayViewKey>(activeDisplayView);
 
   useEffect(() => {
     if (!recordingAction) return;
@@ -90,13 +112,16 @@ export function SettingsDialog({
   ));
   const audioDirty = outputDeviceId !== audioStatus.settings.outputDeviceId
     || replayGainMode !== audioStatus.settings.replayGainMode;
-  const activeTitle = tab === "audio" ? "Audio" : "Global shortcuts";
-  const activeSaving = tab === "audio" ? audioSaving : shortcutSaving;
-  const activeDirty = tab === "audio" ? audioDirty : shortcutsDirty;
-  const activeError = tab === "audio" ? audioError : shortcutError;
+  const displayDirty = JSON.stringify(displayDraft) !== JSON.stringify(displayPreferences);
+  const activeTitle = tab === "display" ? "Display" : tab === "audio" ? "Audio" : "Global shortcuts";
+  const activeSaving = tab === "display" ? false : tab === "audio" ? audioSaving : shortcutSaving;
+  const activeDirty = tab === "display" ? displayDirty : tab === "audio" ? audioDirty : shortcutsDirty;
+  const activeError = tab === "display" ? null : tab === "audio" ? audioError : shortcutError;
 
   function saveActiveTab() {
-    if (tab === "audio") {
+    if (tab === "display") {
+      onSaveDisplay(displayDraft);
+    } else if (tab === "audio") {
       onSaveAudio({ outputDeviceId, replayGainMode });
     } else {
       onSaveShortcuts({
@@ -112,18 +137,26 @@ export function SettingsDialog({
     }}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
-          <div className="settings-dialog__mark">{tab === "audio" ? <Volume2 aria-hidden="true" /> : <Keyboard aria-hidden="true" />}</div>
+          <div className="settings-dialog__mark">{tab === "display" ? <MonitorCog aria-hidden="true" /> : tab === "audio" ? <Volume2 aria-hidden="true" /> : <Keyboard aria-hidden="true" />}</div>
           <div><p className="eyebrow">Aurora settings</p><h2 id="settings-title">{activeTitle}</h2></div>
           <button type="button" className="settings-dialog__close" aria-label="Close settings" onClick={onClose}><X aria-hidden="true" /></button>
         </header>
 
         <nav className="settings-tabs" aria-label="Settings sections" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === "display"} onClick={() => setTab("display")}><MonitorCog aria-hidden="true" /> Display</button>
           <button type="button" role="tab" aria-selected={tab === "audio"} onClick={() => setTab("audio")}><Volume2 aria-hidden="true" /> Audio</button>
           <button type="button" role="tab" aria-selected={tab === "shortcuts"} onClick={() => setTab("shortcuts")}><Keyboard aria-hidden="true" /> Shortcuts</button>
         </nav>
 
         <div className="settings-dialog__body">
-          {tab === "audio" ? (
+          {tab === "display" ? (
+            <DisplaySettingsPanel
+              preferences={displayDraft}
+              selectedView={selectedDisplayView}
+              onPreferencesChange={setDisplayDraft}
+              onSelectedViewChange={setSelectedDisplayView}
+            />
+          ) : tab === "audio" ? (
             <AudioSettingsPanel
               status={audioStatus}
               outputDeviceId={outputDeviceId}
@@ -159,6 +192,76 @@ export function SettingsDialog({
       </section>
     </div>
   );
+}
+
+function DisplaySettingsPanel({
+  preferences,
+  selectedView,
+  onPreferencesChange,
+  onSelectedViewChange,
+}: {
+  preferences: DisplayPreferences;
+  selectedView: DisplayViewKey;
+  onPreferencesChange: (preferences: DisplayPreferences) => void;
+  onSelectedViewChange: (view: DisplayViewKey) => void;
+}) {
+  const view = displayViews.find(({ id }) => id === selectedView) ?? displayViews[0];
+  const override = preferences.views[selectedView];
+  const effective = effectiveDisplayPreferences(preferences, selectedView);
+  const globalTextLabel = textSizeOptions.find(({ value }) => value === preferences.global.textSize)?.label ?? preferences.global.textSize;
+  const globalCoverLabel = coverSizeOptions.find(({ value }) => value === preferences.global.coverSize)?.label ?? preferences.global.coverSize;
+
+  function updateGlobal(next: Partial<DisplayPreferences["global"]>) {
+    onPreferencesChange({ ...preferences, global: { ...preferences.global, ...next } });
+  }
+
+  function updateOverride(next: Partial<DisplayPreferences["views"][DisplayViewKey]>) {
+    onPreferencesChange({
+      ...preferences,
+      views: {
+        ...preferences.views,
+        [selectedView]: { ...override, ...next },
+      },
+    });
+  }
+
+  return (
+    <div className="display-settings">
+      <section className="display-settings__section" aria-labelledby="global-display-heading">
+        <header><span><MonitorCog aria-hidden="true" /><span><strong id="global-display-heading">Global defaults</strong><small>Applied to Aurora chrome and every view without an override.</small></span></span></header>
+        <div className="display-settings__fields">
+          <label><span><Type aria-hidden="true" /> Text size</span><select aria-label="Global text size" value={preferences.global.textSize} onChange={(event) => updateGlobal({ textSize: event.target.value as TextSize })}>{textSizeOptions.map((option) => <option value={option.value} key={option.value}>{option.label} · {option.detail}</option>)}</select></label>
+          <label><span><ImageIcon aria-hidden="true" /> Cover size</span><select aria-label="Global cover size" value={preferences.global.coverSize} onChange={(event) => updateGlobal({ coverSize: event.target.value as CoverSize })}>{coverSizeOptions.map((option) => <option value={option.value} key={option.value}>{option.label} · {option.detail}</option>)}</select></label>
+        </div>
+      </section>
+
+      <section className="display-settings__section" aria-labelledby="view-display-heading">
+        <header>
+          <span><RotateCcw aria-hidden="true" /><span><strong id="view-display-heading">Per-view override</strong><small>Tune dense surfaces independently. Charts starts larger for readability.</small></span></span>
+          <button type="button" disabled={override.textSize === null && override.coverSize === null} onClick={() => updateOverride({ textSize: null, coverSize: null })}><RotateCcw aria-hidden="true" /> Use globals</button>
+        </header>
+        <label className="display-settings__view"><span>View</span><select aria-label="View to customize" value={selectedView} onChange={(event) => onSelectedViewChange(event.target.value as DisplayViewKey)}>{displayViews.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
+        <div className="display-settings__fields">
+          <label><span><Type aria-hidden="true" /> Text size</span><select aria-label={`${view.label} text size`} value={override.textSize ?? ""} onChange={(event) => updateOverride({ textSize: event.target.value ? event.target.value as TextSize : null })}><option value="">Use global · {globalTextLabel}</option>{textSizeOptions.map((option) => <option value={option.value} key={option.value}>{option.label} · {option.detail}</option>)}</select></label>
+          <label><span><ImageIcon aria-hidden="true" /> Cover size</span><select aria-label={`${view.label} cover size`} value={override.coverSize ?? ""} disabled={!view.supportsCovers} onChange={(event) => updateOverride({ coverSize: event.target.value ? event.target.value as CoverSize : null })}><option value="">{view.supportsCovers ? `Use global · ${globalCoverLabel}` : "No adjustable covers"}</option>{view.supportsCovers && coverSizeOptions.map((option) => <option value={option.value} key={option.value}>{option.label} · {option.detail}</option>)}</select></label>
+        </div>
+      </section>
+
+      <div className="display-preview" data-text-size={effective.textSize} data-cover-size={effective.coverSize} aria-label={`${view.label} preview`}>
+        <span className="display-preview__cover" aria-hidden="true"><ImageIcon /></span>
+        <span><strong>{view.label} preview</strong><small>Readable metadata stays secondary without becoming microscopic.</small></span>
+      </div>
+
+      <button type="button" className="display-settings__restore" onClick={() => onPreferencesChange(createDefaultDisplayPreferences())}><RotateCcw aria-hidden="true" /> Restore readable defaults</button>
+    </div>
+  );
+}
+
+function copyDisplayPreferences(preferences: DisplayPreferences): DisplayPreferences {
+  return {
+    global: { ...preferences.global },
+    views: Object.fromEntries(Object.entries(preferences.views).map(([view, override]) => [view, { ...override }])) as DisplayPreferences["views"],
+  };
 }
 
 function AudioSettingsPanel({

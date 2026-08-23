@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AudioSettingsStatus } from "../audio";
 import { defaultShortcutBindings, type GlobalShortcutStatus } from "../shortcuts";
 import { acceleratorFromEvent } from "../shortcutCapture";
+import { createDefaultDisplayPreferences } from "../displayPreferences";
 import { SettingsDialog } from "./SettingsDialog";
 
 const shortcutStatus: GlobalShortcutStatus = {
@@ -37,7 +38,10 @@ function renderSettings(overrides: Partial<Parameters<typeof SettingsDialog>[0]>
     audioSaving: false,
     shortcutError: null,
     audioError: null,
+    displayPreferences: createDefaultDisplayPreferences(),
+    activeDisplayView: "charts",
     initialTab: "shortcuts",
+    onSaveDisplay: vi.fn(),
     onSaveShortcuts: vi.fn(),
     onSaveAudio: vi.fn(),
     onClose: vi.fn(),
@@ -102,6 +106,31 @@ describe("SettingsDialog", () => {
     expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "dac", replayGainMode: "album" });
     expect(screen.getByText("Clipping protection is always on")).toBeInTheDocument();
     expect(screen.getByText("Gapless queue transitions")).toBeInTheDocument();
+  });
+
+  it("saves global sizing and independent per-view overrides", () => {
+    const onSaveDisplay = vi.fn();
+    renderSettings({ initialTab: "display", onSaveDisplay });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Global text size" }), { target: { value: "large" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Global cover size" }), { target: { value: "large" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "View to customize" }), { target: { value: "albums" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Albums text size" }), { target: { value: "maximum" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Albums cover size" }), { target: { value: "extra-large" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(onSaveDisplay).toHaveBeenCalledWith(expect.objectContaining({
+      global: { textSize: "large", coverSize: "large" },
+      views: expect.objectContaining({
+        albums: { textSize: "maximum", coverSize: "extra-large" },
+      }),
+    }));
+  });
+
+  it("disables cover overrides for views without adjustable artwork", () => {
+    renderSettings({ initialTab: "display", activeDisplayView: "observatory" });
+
+    expect(screen.getByRole("combobox", { name: "Observatory cover size" })).toBeDisabled();
   });
 });
 
