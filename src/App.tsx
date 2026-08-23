@@ -1240,9 +1240,9 @@ function App() {
   }
 
   function explorePublisher(publisher: string) {
-    setActiveNav("Songs");
+    setActiveNav("Albums");
     expandLibraryNavigation();
-    setExplorerView("tracks");
+    setExplorerView("albums");
     setExplorerFilters({
       ...defaultExplorerFilters,
       query: `publisher:"${publisher.replace(/"/g, '\\"')}"`,
@@ -2110,7 +2110,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.18</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.19</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

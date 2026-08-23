@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.19] - 2026-08-23
+
+### Changed
+
+- **Explore publisher** now opens Albums with the exact `publisher:` filter instead of sending the user to Songs.
+
 ## [0.15.18] - 2026-08-23
 
 ### Added
