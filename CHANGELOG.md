@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-08-23
+
+### Added
+
+- Field-aware catalog search for `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, and `title:`.
+- Comma-separated search clauses combine with AND, including queries such as `aartist:def leppard,genre:hard rock`.
+
+### Changed
+
+- Track search inputs now advertise the field syntax while ordinary unscoped prefix search remains available.
+
 ## [0.15.4] - 2026-08-23
 
 ### Changed

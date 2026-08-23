@@ -28,6 +28,8 @@ export type ExplorerLoveFilter = "all" | Track["loveState"];
 export type ExplorerSort = "newest" | "titleAsc" | "artistAsc" | "albumAsc" | "releaseYearDesc" | "ratingDesc" | "trackCountDesc";
 export type ExplorerLoadState = "loading" | "ready" | "error";
 
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Combine fields with commas.";
+
 export interface ExplorerFilters {
   query: string;
   rating: ExplorerRatingFilter;
@@ -583,7 +585,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
           <input
             type="search"
             value={filters.query}
-            placeholder="Search title, album, artist…"
+            placeholder={view === "tracks" ? "Search or use artist:, album:, year:…" : "Search title, album, artist…"}
+            title={view === "tracks" ? trackSearchHelp : undefined}
             onChange={(event) => updateFilters({ query: event.currentTarget.value })}
           />
         </label>

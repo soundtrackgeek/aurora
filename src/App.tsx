@@ -210,6 +210,8 @@ const defaultExplorerFilters: ExplorerFilters = {
   sort: "newest",
 };
 
+const trackSearchHelp = "Track search fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Combine fields with commas.";
+
 const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
   tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "releaseYearDesc", "ratingDesc"],
   albums: ["releaseYearDesc", "titleAsc", "artistAsc", "ratingDesc"],
@@ -1779,7 +1781,9 @@ function App() {
         ? "Search your genre atlas…"
         : activeNav === "Years"
           ? "Year search arrives with the timeline…"
-        : "Search your universe…";
+        : explorerView === "tracks"
+          ? "Search or use artist:, album:, year:…"
+          : "Search your universe…";
   const topbarSearchLabel = activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
     : activeNav === "History"
@@ -1858,7 +1862,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.5</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1886,6 +1890,7 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
+              title={explorerView === "tracks" && !["Observatory", "History", "Genres", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
               disabled={activeNav === "Years"}
             />
             {topbarSearchValue

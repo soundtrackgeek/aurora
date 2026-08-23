@@ -104,6 +104,15 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it("advertises the fielded track-search grammar", () => {
+    render(<DeepExplorer {...explorerProps()} />);
+
+    const search = screen.getByRole("searchbox");
+    expect(search).toHaveAttribute("placeholder", "Search or use artist:, album:, year:…");
+    expect(search.getAttribute("title")).toContain("aartist (Album Artist display)");
+    expect(search.getAttribute("title")).toContain("ryear (Release Year)");
+  });
+
   it("emits backend-native view, rating, and sort changes", () => {
     const onViewChange = vi.fn();
     const onFiltersChange = vi.fn();

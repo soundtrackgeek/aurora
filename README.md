@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.4 leaves signed Windows release publication fully autonomous after a successful push.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.5 adds field-aware catalog search with composable track metadata clauses.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.2 slice
+## Current 0.15.5 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -53,6 +53,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
 - Exact half-star/unrated, Love/Neutral/Ban, release-year, genre, and artist filters, plus safely quoted FTS5 prefix search across the entire catalog.
+- Field-aware search supports `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, and `title:`. Comma-separated clauses are combined, for example `aartist:def leppard,genre:hard rock`.
 - Validated sorts for newest, title, artist, album, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
 - Clickable artist planets and artist results that open an exact artist focus which can be switched between tracks and albums.
 - A functional Constellations artist inspector opened from universe planets, Artist results, the selected track, or the Observatory review queue.

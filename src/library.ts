@@ -25,9 +25,11 @@ export interface Track {
   albumId: string | null;
   title: string;
   artist: string;
+  displayArtist?: string;
   album: string;
   releaseYear: number | null;
   originalYear?: number | null;
+  publisher?: string | null;
   rating: number | null;
   loved: boolean;
   loveState: "neutral" | "loved" | "banned";
@@ -283,12 +285,16 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
   return !query || values.join("\u0000").toLocaleLowerCase().includes(query);
 }
 
+function isFieldedLibrarySearch(search?: string): boolean {
+  return /(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|title)\s*:/iu.test(search ?? "");
+}
+
 function previewTrackPage(request: TrackPageRequest): TrackPage {
   const yearFor = (track: Track) => request.yearBasis === "original"
     ? (track.originalYear === undefined ? track.releaseYear : track.originalYear)
     : track.releaseYear;
   const items = browserPreview.tracks
-    .filter((track) => includesExplorerText([track.title, track.artist, track.album, track.genre], request.search))
+    .filter((track) => filterTracks([track], request.search ?? "", null).length > 0)
     .filter((track) => request.rating === undefined || track.rating === request.rating)
     .filter((track) => !request.unrated || track.rating === null)
     .filter((track) => request.loveState === undefined || track.loveState === request.loveState)
@@ -314,8 +320,13 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
   const yearFor = (album: AlbumSummary) => request.yearBasis === "original"
     ? (album.originalYear === undefined ? album.releaseYear : album.originalYear)
     : album.releaseYear;
+  const fieldedAlbumIds = isFieldedLibrarySearch(request.search)
+    ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.albumId))
+    : null;
   const items = browserAlbumSummaries()
-    .filter((album) => includesExplorerText([album.title, album.artist, album.genre], request.search))
+    .filter((album) => fieldedAlbumIds
+      ? fieldedAlbumIds.has(album.id)
+      : includesExplorerText([album.title, album.artist, album.genre], request.search))
     .filter((album) => request.rating === undefined || (album.rating !== null && Math.round(album.rating * 2) / 2 === request.rating))
     .filter((album) => !request.unrated || album.rating === null)
     .filter((album) => request.yearFrom === undefined || (yearFor(album) !== null && yearFor(album)! >= request.yearFrom))
@@ -338,8 +349,13 @@ function previewArtistPage(request: ArtistPageRequest): ArtistPage {
   const genreArtists = request.genre
     ? new Set(browserPreview.tracks.filter((track) => track.genre === request.genre).map((track) => track.artist))
     : null;
+  const fieldedArtists = isFieldedLibrarySearch(request.search)
+    ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.artist))
+    : null;
   const items = browserPreview.artists
-    .filter((artist) => includesExplorerText([artist.name], request.search))
+    .filter((artist) => fieldedArtists
+      ? fieldedArtists.has(artist.name)
+      : includesExplorerText([artist.name], request.search))
     .filter((artist) => !genreArtists || genreArtists.has(artist.name))
     .sort((left, right) => request.sort === "trackCountDesc"
       ? right.trackCount - left.trackCount || left.name.localeCompare(right.name)
@@ -392,13 +408,63 @@ export function formatDuration(seconds: number | null): string {
 }
 
 export function filterTracks(tracks: Track[], query: string, artist: string | null): Track[] {
-  const normalized = query.trim().toLocaleLowerCase();
+  const normalized = query.trim();
+  const clauses = normalized
+    .split(",")
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+
+  function terms(value: string): string[] {
+    return value.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  }
+
+  function matchesTerms(value: string, search: string): boolean {
+    const valueTerms = terms(value);
+    const searchTerms = terms(search);
+    return searchTerms.length > 0
+      && searchTerms.every((term) => valueTerms.some((valueTerm) => valueTerm.startsWith(term)));
+  }
+
+  function matchesClause(track: Track, clause: string): boolean {
+    const separator = clause.indexOf(":");
+    if (separator < 0) {
+      const values = [
+        track.title,
+        track.displayArtist ?? track.artist,
+        track.artist,
+        track.album,
+        track.genre ?? "",
+        track.publisher ?? "",
+      ];
+      return terms(clause).every((term) => values.some((value) => (
+        terms(value).some((valueTerm) => valueTerm.startsWith(term))
+      )));
+    }
+    const field = clause.slice(0, separator).trim().toLocaleLowerCase();
+    const value = clause.slice(separator + 1).trim();
+    switch (field) {
+      case "artist": return matchesTerms(track.displayArtist ?? track.artist, value);
+      case "aartist": return matchesTerms(track.artist, value);
+      case "album": return matchesTerms(track.album, value);
+      case "genre": return matchesTerms(track.genre ?? "", value);
+      case "publisher": return matchesTerms(track.publisher ?? "", value);
+      case "title": return matchesTerms(track.title, value);
+      case "year": return /^\d{4}$/.test(value)
+        && (track.originalYear === undefined ? track.releaseYear : track.originalYear) === Number(value);
+      case "ryear": return /^\d{4}$/.test(value) && track.releaseYear === Number(value);
+      default: return matchesTerms([
+        track.title,
+        track.displayArtist ?? track.artist,
+        track.artist,
+        track.album,
+        track.genre ?? "",
+        track.publisher ?? "",
+      ].join(" "), clause);
+    }
+  }
+
   return tracks.filter((track) => {
     if (artist && track.artist !== artist) return false;
-    if (!normalized) return true;
-    return [track.title, track.artist, track.album, track.genre ?? ""]
-      .join("\u0000")
-      .toLocaleLowerCase()
-      .includes(normalized);
+    return !normalized || clauses.every((clause) => matchesClause(track, clause));
   });
 }

@@ -3,7 +3,10 @@ use crate::{
     state_store::{StateStore, StoredQueueEntry},
     tag_model::{LoveState, TagSyncState, TagValues},
 };
-use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, named_params, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Row, named_params, params, params_from_iter,
+    types::Value,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -450,18 +453,107 @@ pub(crate) fn load_artist_tracks(
     )
 }
 
-pub(crate) fn build_fts_prefix_query(input: &str) -> Option<String> {
-    let terms: Vec<String> = input
+const MAX_FTS_SEARCH_TERMS: usize = 32;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CatalogSearch {
+    pub(crate) fts_query: Option<String>,
+    pub(crate) year: Option<i32>,
+    pub(crate) release_year: Option<i32>,
+    pub(crate) has_fields: bool,
+}
+
+impl CatalogSearch {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.fts_query.is_none() && self.year.is_none() && self.release_year.is_none()
+    }
+}
+
+fn push_fts_prefix_terms(terms: &mut Vec<String>, input: &str, column: Option<&str>) {
+    for term in input
         .split(|character: char| !character.is_alphanumeric())
         .filter(|term| !term.is_empty())
-        .take(8)
-        .map(|term| {
-            let bounded: String = term.chars().take(64).collect();
-            let escaped = bounded.replace('"', "\"\"");
-            format!("\"{escaped}\"*")
-        })
-        .collect();
-    (!terms.is_empty()).then(|| terms.join(" AND "))
+    {
+        if terms.len() >= MAX_FTS_SEARCH_TERMS {
+            break;
+        }
+        let bounded: String = term.chars().take(64).collect();
+        let escaped = bounded.replace('"', "\"\"");
+        let prefix = format!("\"{escaped}\"*");
+        terms.push(match column {
+            Some(column) => format!("{column} : {prefix}"),
+            None => prefix,
+        });
+    }
+}
+
+fn parse_search_year(value: &str, field: &str) -> Result<i32, String> {
+    let year = value
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| format!("{field} must be a year between 1000 and 2999."))?;
+    if !(1000..=2999).contains(&year) {
+        return Err(format!("{field} must be a year between 1000 and 2999."));
+    }
+    Ok(year)
+}
+
+fn set_search_year(target: &mut Option<i32>, year: i32, field: &str) -> Result<(), String> {
+    if target.is_some_and(|current| current != year) {
+        return Err(format!("{field} cannot contain two different years."));
+    }
+    *target = Some(year);
+    Ok(())
+}
+
+pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String> {
+    let mut terms = Vec::new();
+    let mut search = CatalogSearch::default();
+
+    for clause in input
+        .split(',')
+        .map(str::trim)
+        .filter(|clause| !clause.is_empty())
+    {
+        let Some((raw_field, raw_value)) = clause.split_once(':') else {
+            push_fts_prefix_terms(&mut terms, clause, None);
+            continue;
+        };
+        let field = raw_field.trim().to_ascii_lowercase();
+        let column = match field.as_str() {
+            "artist" => Some("display_artist"),
+            "aartist" => Some("album_artist_display"),
+            "album" => Some("album"),
+            "genre" => Some("canonical_genre"),
+            "publisher" => Some("publisher"),
+            "title" => Some("title"),
+            _ => None,
+        };
+        if let Some(column) = column {
+            search.has_fields = true;
+            if raw_value.trim().is_empty() {
+                return Err(format!("{field} needs a search value."));
+            }
+            push_fts_prefix_terms(&mut terms, raw_value, Some(column));
+            continue;
+        }
+        match field.as_str() {
+            "year" => {
+                search.has_fields = true;
+                let year = parse_search_year(raw_value, "year")?;
+                set_search_year(&mut search.year, year, "year")?;
+            }
+            "ryear" => {
+                search.has_fields = true;
+                let year = parse_search_year(raw_value, "ryear")?;
+                set_search_year(&mut search.release_year, year, "ryear")?;
+            }
+            _ => push_fts_prefix_terms(&mut terms, clause, None),
+        }
+    }
+
+    search.fts_query = (!terms.is_empty()).then(|| terms.join(" AND "));
+    Ok(search)
 }
 
 pub(crate) fn load_search_tracks(
@@ -471,21 +563,16 @@ pub(crate) fn load_search_tracks(
     if query.chars().count() > 512 {
         return Err("Search text is too long.".to_owned());
     }
-    let Some(match_query) = build_fts_prefix_query(&query) else {
+    let search = parse_catalog_search(&query)?;
+    if search.is_empty() {
         return Ok(Vec::new());
-    };
+    }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    query_tracks(
-        &connection,
+    let mut params = Vec::<Value>::new();
+    let has_fts = search.fts_query.is_some();
+    let mut sql = String::from(
         r#"
-        WITH hits AS MATERIALIZED (
-          SELECT CAST(track_id AS INTEGER) AS id, bm25(track_search_fts) AS relevance
-          FROM track_search_fts
-          WHERE track_search_fts MATCH :match_query
-          ORDER BY relevance
-          LIMIT 50
-        )
         SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
                COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
                  WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -495,14 +582,36 @@ pub(crate) fn load_search_tracks(
                  WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                t.love, t.time_seconds, t.canonical_genre,
                l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id
-        FROM hits AS h
-        JOIN tracks AS t ON t.id = h.id
-        LEFT JOIN lastfm_track_popularity AS l
-          ON l.artist_key = lower(trim(t.album_artist_display))
-         AND l.track_key = lower(trim(t.title))
-        ORDER BY h.relevance, t.id
+        FROM tracks AS t
         "#,
-        named_params! { ":match_query": match_query },
+    );
+    if has_fts {
+        sql.push_str(" JOIN track_search_fts ON CAST(track_search_fts.track_id AS INTEGER) = t.id");
+    }
+    sql.push_str(
+        " LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE 1 = 1",
+    );
+    if let Some(match_query) = search.fts_query {
+        sql.push_str(" AND track_search_fts MATCH ?");
+        params.push(Value::Text(match_query));
+    }
+    if let Some(year) = search.year {
+        sql.push_str(" AND t.year = ?");
+        params.push(Value::Integer(i64::from(year)));
+    }
+    if let Some(year) = search.release_year {
+        sql.push_str(" AND t.release_year = ?");
+        params.push(Value::Integer(i64::from(year)));
+    }
+    sql.push_str(if has_fts {
+        " ORDER BY bm25(track_search_fts), t.id LIMIT 50"
+    } else {
+        " ORDER BY t.id DESC LIMIT 50"
+    });
+    query_tracks(
+        &connection,
+        &sql,
+        params_from_iter(params.iter()),
         "catalog search",
         Some(store),
     )
@@ -855,10 +964,39 @@ mod tests {
     #[test]
     fn fts_query_quotes_and_bounds_user_terms() {
         assert_eq!(
-            build_fts_prefix_query("white ner OR star"),
+            parse_catalog_search("white ner OR star")
+                .expect("plain search")
+                .fts_query,
             Some("\"white\"* AND \"ner\"* AND \"OR\"* AND \"star\"*".to_owned())
         );
-        assert_eq!(build_fts_prefix_query("///"), None);
+        assert!(parse_catalog_search("///").expect("punctuation").is_empty());
+        let bounded = parse_catalog_search(&vec!["term"; 40].join(" "))
+            .expect("bounded search")
+            .fts_query
+            .expect("bounded terms");
+        assert_eq!(bounded.split(" AND ").count(), MAX_FTS_SEARCH_TERMS);
+    }
+
+    #[test]
+    fn catalog_search_maps_fields_and_exact_years() {
+        let search = parse_catalog_search(
+            "artist:kiss,aartist:def leppard,album:love gun,genre:hard rock,year:1985,ryear:2025,publisher:la-la land records,title:easy tonight",
+        )
+        .expect("fielded search");
+
+        assert!(search.has_fields);
+        assert_eq!(search.year, Some(1985));
+        assert_eq!(search.release_year, Some(2025));
+        let fts = search.fts_query.expect("text fields");
+        assert!(fts.contains("display_artist : \"kiss\"*"));
+        assert!(fts.contains("album_artist_display : \"def\"*"));
+        assert!(fts.contains("album : \"love\"*"));
+        assert!(fts.contains("canonical_genre : \"hard\"*"));
+        assert!(fts.contains("publisher : \"la\"*"));
+        assert!(fts.contains("title : \"easy\"*"));
+        assert_eq!(fts.split(" AND ").count(), 13);
+        assert!(parse_catalog_search("year:not-a-year").is_err());
+        assert!(parse_catalog_search("artist:").is_err());
     }
 
     #[test]
