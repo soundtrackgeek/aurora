@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.3 automatically publishes a signed Windows release after every successful `master` CI run.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.4 leaves signed Windows release publication fully autonomous after a successful push.
 
 ![Aurora design reference](Aurora.png)
 
@@ -136,7 +136,7 @@ Before pushing a new version:
 1. Update every manifest, lockfile, and user-facing version label to the same version.
 2. Move the relevant changelog notes from `Unreleased` into a dated version section.
 3. Run `npm run check:version` and the full verification commands above.
-4. Commit and push to `master`, then verify the CI run's `release-windows` job published the `.exe`, updater bundle and signature, and `latest.json`.
+4. Commit and push to `master`. CI verifies and publishes the release autonomously; no manual tag or post-push monitoring is required.
 
 The repository already has `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. The local encrypted key material is under `%USERPROFILE%\.tauri`:
 

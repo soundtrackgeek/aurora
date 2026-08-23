@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-08-23
+
+### Changed
+
+- Developer work now ends after a successful `git push`; agents must leave CI verification and release publication to the autonomous workflow without waiting or monitoring.
+- Release documentation no longer requires post-push asset verification or a manually pushed tag.
+
 ## [0.15.3] - 2026-08-23
 
 ### Fixed
