@@ -16,7 +16,8 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-const SETTINGS_VERSION: u8 = 1;
+const SETTINGS_VERSION: u8 = 2;
+const LEGACY_SETTINGS_VERSION: u8 = 1;
 pub(crate) const RESULT_EVENT: &str = "aurora-global-shortcut-result";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,37 +53,37 @@ const DEFINITIONS: [BindingDefinition; 9] = [
         action: ShortcutAction::Rating(0),
         action_key: "rating0",
         label: "Clear rating",
-        default_accelerator: "Ctrl+Alt+0",
+        default_accelerator: "Ctrl+Alt+Numpad0",
     },
     BindingDefinition {
         action: ShortcutAction::Rating(1),
         action_key: "rating1",
         label: "Rate 1 star",
-        default_accelerator: "Ctrl+Alt+1",
+        default_accelerator: "Ctrl+Alt+Numpad1",
     },
     BindingDefinition {
         action: ShortcutAction::Rating(2),
         action_key: "rating2",
         label: "Rate 2 stars",
-        default_accelerator: "Ctrl+Alt+2",
+        default_accelerator: "Ctrl+Alt+Numpad2",
     },
     BindingDefinition {
         action: ShortcutAction::Rating(3),
         action_key: "rating3",
         label: "Rate 3 stars",
-        default_accelerator: "Ctrl+Alt+3",
+        default_accelerator: "Ctrl+Alt+Numpad3",
     },
     BindingDefinition {
         action: ShortcutAction::Rating(4),
         action_key: "rating4",
         label: "Rate 4 stars",
-        default_accelerator: "Ctrl+Alt+4",
+        default_accelerator: "Ctrl+Alt+Numpad4",
     },
     BindingDefinition {
         action: ShortcutAction::Rating(5),
         action_key: "rating5",
         label: "Rate 5 stars",
-        default_accelerator: "Ctrl+Alt+5",
+        default_accelerator: "Ctrl+Alt+Numpad5",
     },
     BindingDefinition {
         action: ShortcutAction::Love,
@@ -163,6 +164,7 @@ pub(crate) struct GlobalShortcutRuntime {
 impl GlobalShortcutRuntime {
     pub(crate) fn load(path: PathBuf) -> Self {
         let mut warning = None;
+        let mut needs_persist = false;
         let defaults = default_bindings();
         let (enabled, bindings) = if path.is_file() {
             match fs::read_to_string(&path)
@@ -174,6 +176,28 @@ impl GlobalShortcutRuntime {
                 Ok(settings) if settings.version == SETTINGS_VERSION => {
                     match validate_bindings(settings.bindings) {
                         Ok(bindings) => (settings.enabled, bindings),
+                        Err(error) => {
+                            warning = Some(format!(
+                                "Aurora found invalid shortcut settings and used the defaults: {error}"
+                            ));
+                            (true, defaults)
+                        }
+                    }
+                }
+                Ok(settings) if settings.version == LEGACY_SETTINGS_VERSION => {
+                    match validate_bindings(settings.bindings) {
+                        Ok(bindings) => {
+                            needs_persist = true;
+                            let (bindings, moved_rating_defaults) =
+                                migrate_legacy_rating_defaults(bindings);
+                            if moved_rating_defaults {
+                                warning = Some(
+                                    "Aurora moved the default rating shortcuts to the numeric keypad so AltGr characters remain available."
+                                        .to_owned(),
+                                );
+                            }
+                            (settings.enabled, bindings)
+                        }
                         Err(error) => {
                             warning = Some(format!(
                                 "Aurora found invalid shortcut settings and used the defaults: {error}"
@@ -199,14 +223,20 @@ impl GlobalShortcutRuntime {
         } else {
             (true, defaults)
         };
-        Self {
+        let mut runtime = Self {
             path,
             enabled,
             bindings,
             registered: false,
             error: None,
             warning,
+        };
+        if needs_persist && let Err(error) = runtime.persist() {
+            runtime.warning = Some(format!(
+                "Aurora moved the default rating shortcuts to the numeric keypad but could not persist the migration: {error}"
+            ));
         }
+        runtime
     }
 
     pub(crate) fn initialize(&mut self, app: &AppHandle) {
@@ -217,6 +247,17 @@ impl GlobalShortcutRuntime {
             return;
         }
         self.registered = self.enabled;
+    }
+
+    pub(crate) fn release(&mut self, app: &AppHandle) -> Result<(), String> {
+        if !self.registered {
+            return Ok(());
+        }
+        app.global_shortcut().unregister_all().map_err(|error| {
+            format!("Aurora could not release its global shortcuts during shutdown: {error}")
+        })?;
+        self.registered = false;
+        Ok(())
     }
 
     pub(crate) fn status(&self) -> GlobalShortcutStatus {
@@ -340,6 +381,21 @@ fn default_bindings() -> Vec<StoredBinding> {
             accelerator: definition.default_accelerator.to_owned(),
         })
         .collect()
+}
+
+fn migrate_legacy_rating_defaults(mut bindings: Vec<StoredBinding>) -> (Vec<StoredBinding>, bool) {
+    let mut migrated = false;
+    for rating in 0..=5 {
+        let action = format!("rating{rating}");
+        let legacy = format!("Ctrl+Alt+{rating}");
+        if let Some(binding) = bindings.iter_mut().find(|binding| {
+            binding.action == action && binding.accelerator.eq_ignore_ascii_case(&legacy)
+        }) {
+            binding.accelerator = format!("Ctrl+Alt+Numpad{rating}");
+            migrated = true;
+        }
+    }
+    (bindings, migrated)
 }
 
 fn definition_for(action: &str) -> Option<&'static BindingDefinition> {
@@ -630,7 +686,9 @@ mod tests {
 
     #[test]
     fn defaults_match_the_requested_global_shortcuts() {
-        let accelerators = default_bindings()
+        let defaults = default_bindings();
+        validate_bindings(defaults.clone()).expect("default shortcuts must parse");
+        let accelerators = defaults
             .into_iter()
             .map(|binding| binding.accelerator)
             .collect::<Vec<_>>();
@@ -639,12 +697,12 @@ mod tests {
             [
                 "Ctrl+Alt+P",
                 "Ctrl+Alt+N",
-                "Ctrl+Alt+0",
-                "Ctrl+Alt+1",
-                "Ctrl+Alt+2",
-                "Ctrl+Alt+3",
-                "Ctrl+Alt+4",
-                "Ctrl+Alt+5",
+                "Ctrl+Alt+Numpad0",
+                "Ctrl+Alt+Numpad1",
+                "Ctrl+Alt+Numpad2",
+                "Ctrl+Alt+Numpad3",
+                "Ctrl+Alt+Numpad4",
+                "Ctrl+Alt+Numpad5",
                 "Ctrl+Alt+L",
             ]
         );
@@ -704,6 +762,48 @@ mod tests {
         let restored = GlobalShortcutRuntime::load(path.clone());
         assert!(!restored.enabled);
         assert_eq!(restored.bindings[0].accelerator, "Ctrl+Shift+P");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_top_row_rating_defaults_migrate_to_the_numeric_keypad() {
+        let path = std::env::temp_dir().join(format!(
+            "aurora-legacy-shortcut-settings-{}-{}.json",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut legacy = ShortcutSettingsFile {
+            version: LEGACY_SETTINGS_VERSION,
+            enabled: true,
+            bindings: DEFINITIONS
+                .iter()
+                .map(|definition| StoredBinding {
+                    action: definition.action_key.to_owned(),
+                    accelerator: match definition.action {
+                        ShortcutAction::Rating(rating) => format!("Ctrl+Alt+{rating}"),
+                        _ => definition.default_accelerator.to_owned(),
+                    },
+                })
+                .collect(),
+        };
+        legacy.bindings[0].accelerator = "Ctrl+Shift+P".to_owned();
+        fs::write(
+            &path,
+            serde_json::to_vec(&legacy).expect("encode legacy settings"),
+        )
+        .expect("write legacy settings");
+
+        let restored = GlobalShortcutRuntime::load(path.clone());
+        assert_eq!(restored.bindings[0].accelerator, "Ctrl+Shift+P");
+        assert_eq!(restored.bindings[4].accelerator, "Ctrl+Alt+Numpad2");
+        let persisted: ShortcutSettingsFile =
+            serde_json::from_slice(&fs::read(&path).expect("read migrated settings"))
+                .expect("decode migrated settings");
+        assert_eq!(persisted.version, SETTINGS_VERSION);
+        assert_eq!(persisted.bindings[4].accelerator, "Ctrl+Alt+Numpad2");
         let _ = fs::remove_file(path);
     }
 }

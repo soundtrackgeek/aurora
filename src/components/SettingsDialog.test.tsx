@@ -56,8 +56,9 @@ describe("SettingsDialog", () => {
 
     expect(screen.getByRole("dialog", { name: "Global shortcuts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Change Play or pause shortcut.*Ctrl\+Alt\+P/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Change Clear rating shortcut.*Ctrl\+Alt\+0/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Change Clear rating shortcut.*Ctrl\+Alt\+Numpad0/ })).toBeInTheDocument();
     expect(screen.getByText("Now playing is the only target.")).toBeInTheDocument();
+    expect(screen.getByText(/Rating defaults use the numeric keypad so AltGr characters stay available/)).toBeInTheDocument();
   });
 
   it("records custom bindings and saves the complete set", () => {

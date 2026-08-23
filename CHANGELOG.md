@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-08-23
+
+### Fixed
+
+- Moved the six default rating bindings from the number row to `Ctrl+Alt+Numpad0` through `Ctrl+Alt+Numpad5`, preventing Windows from treating Norwegian `AltGr+2` (`@`) as Aurora's rating shortcut.
+- Explicitly unregister every active Aurora shortcut when the main window closes and on application exit, including programmatic exit paths.
+
+### Changed
+
+- Version 1 shortcut settings migrate legacy number-row rating defaults to the numeric keypad while preserving custom bindings.
+- Documented that Windows cannot transfer a released registration to an already-running app automatically; MusicBee must retry its shortcut configuration or restart if registration failed while Aurora owned the key.
+
 ## [0.15.1] - 2026-08-23
 
 ### Added

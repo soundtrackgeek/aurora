@@ -8,8 +8,8 @@ Aurora 0.9.0 registers configurable Windows-wide controls while the native proce
 | --- | --- | --- |
 | Play or pause | `Ctrl+Alt+P` | Toggles Aurora's playback runtime. |
 | Next track | `Ctrl+Alt+N` | Advances Aurora's current queue. |
-| Clear rating | `Ctrl+Alt+0` | Writes an unrated MusicBee POPM value. |
-| Rate 1–5 stars | `Ctrl+Alt+1` … `Ctrl+Alt+5` | Writes the corresponding whole-star MusicBee POPM value. |
+| Clear rating | `Ctrl+Alt+Numpad0` | Writes an unrated MusicBee POPM value. |
+| Rate 1–5 stars | `Ctrl+Alt+Numpad1` … `Ctrl+Alt+Numpad5` | Writes the corresponding whole-star MusicBee POPM value. |
 | Toggle Love | `Ctrl+Alt+L` | Changes Loved to Neutral, or Neutral/Banned to Loved. |
 
 Only the track in `PlaybackRuntime.current_track` can receive rating or Love. The selected Explore row and inspector state are presentation-only and never cross the native shortcut command boundary.
@@ -22,8 +22,12 @@ Only the track in `PlaybackRuntime.current_track` can receive rating or Love. Th
 - Aurora unregisters and registers a requested set as one transaction. If any binding is unavailable, it releases the partial request and restores the previous registered set.
 - The settings file is replaced atomically only after Windows accepts the complete set. A persistence failure also rolls registration back.
 - Missing settings use enabled defaults. Unsupported or malformed settings use enabled defaults and surface a warning rather than blocking launch.
+- Version 1 settings migrate only legacy `Ctrl+Alt+0` through `Ctrl+Alt+5` rating defaults to their numeric-keypad equivalents. Custom bindings are preserved.
+- Aurora explicitly unregisters its complete set when the main window closes and again on application exit, making shutdown cleanup idempotent across normal and programmatic exit paths.
 
 Windows permits only one process to own a global binding. A conflict commonly means MusicBee or another player already registered the same keys; Aurora reports the unavailable accelerator and leaves the previous working configuration intact.
+
+Windows exposes AltGr combinations as `Ctrl+Alt`. Numeric-keypad rating defaults avoid consuming number-row AltGr characters such as Norwegian `AltGr+2` (`@`). Releasing a shortcut does not make another running application retry an earlier failed registration; if MusicBee started while Aurora owned a shared shortcut, MusicBee must refresh its shortcut configuration or restart once Aurora exits.
 
 ## Tag workflow
 

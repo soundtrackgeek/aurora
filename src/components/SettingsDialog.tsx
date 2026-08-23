@@ -401,7 +401,7 @@ function ShortcutSettingsPanel({
       </div>
 
       <p className="shortcut-scope"><strong>Now playing is the only target.</strong> Rating and Love shortcuts write instantly to the MP3 and Aurora state for the track currently playing. Selecting another song in Explore never changes the shortcut target.</p>
-      <p className="shortcut-atomic">Aurora registers the entire set together. If MusicBee or another app owns one binding, change that shortcut and save again.</p>
+      <p className="shortcut-atomic">Aurora registers the entire set together. Rating defaults use the numeric keypad so AltGr characters stay available. If MusicBee or another app owns one binding, change that shortcut and save again.</p>
     </>
   );
 }

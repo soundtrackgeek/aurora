@@ -34,12 +34,12 @@ export interface GlobalShortcutResult {
 export const defaultShortcutBindings: ShortcutBinding[] = [
   binding("playPause", "Play or pause", "Ctrl+Alt+P"),
   binding("next", "Next track", "Ctrl+Alt+N"),
-  binding("rating0", "Clear rating", "Ctrl+Alt+0"),
-  binding("rating1", "Rate 1 star", "Ctrl+Alt+1"),
-  binding("rating2", "Rate 2 stars", "Ctrl+Alt+2"),
-  binding("rating3", "Rate 3 stars", "Ctrl+Alt+3"),
-  binding("rating4", "Rate 4 stars", "Ctrl+Alt+4"),
-  binding("rating5", "Rate 5 stars", "Ctrl+Alt+5"),
+  binding("rating0", "Clear rating", "Ctrl+Alt+Numpad0"),
+  binding("rating1", "Rate 1 star", "Ctrl+Alt+Numpad1"),
+  binding("rating2", "Rate 2 stars", "Ctrl+Alt+Numpad2"),
+  binding("rating3", "Rate 3 stars", "Ctrl+Alt+Numpad3"),
+  binding("rating4", "Rate 4 stars", "Ctrl+Alt+Numpad4"),
+  binding("rating5", "Rate 5 stars", "Ctrl+Alt+Numpad5"),
   binding("love", "Toggle Love", "Ctrl+Alt+L"),
 ];
 

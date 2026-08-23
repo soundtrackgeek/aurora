@@ -666,6 +666,13 @@ fn update_global_shortcut_settings(
     runtime.update(&app, request)
 }
 
+fn release_global_shortcuts(app: &AppHandle) {
+    let state = app.state::<GlobalShortcutState>();
+    if let Ok(mut runtime) = state.lock() {
+        let _ = runtime.release(app);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -739,6 +746,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                release_global_shortcuts(window.app_handle());
                 let state = window.state::<PlaybackState>();
                 if let Ok(mut runtime) = state.lock() {
                     let _ = runtime.persist_for_shutdown();
@@ -806,6 +814,11 @@ pub fn run() {
             audio_settings,
             update_audio_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Aurora");
+        .build(tauri::generate_context!())
+        .expect("error while building Aurora")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                release_global_shortcuts(app);
+            }
+        });
 }
