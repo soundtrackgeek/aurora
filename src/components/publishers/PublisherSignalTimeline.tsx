@@ -1,17 +1,27 @@
 import {
   BadgeCheck,
-  Building2,
   CalendarRange,
   Disc3,
+  ImagePlus,
   LoaderCircle,
   Play,
   RefreshCw,
   Sparkles,
   Star,
+  Undo2,
 } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Artwork } from "../Artwork";
 import { formatCount, formatDuration, type Track } from "../../library";
+import {
+  clearPublisherLogoOverride,
+  loadPublisherLogoOverrides,
+  preparePublisherLogo,
+  publisherLogoKey,
+  publisherLogoVariant,
+  publisherMonogram,
+  savePublisherLogoOverride,
+} from "../../publisherLogos";
 import type {
   PublisherActivityBucket,
   PublisherAlbum,
@@ -47,6 +57,12 @@ const CHART_HEIGHT = 72;
 const BASELINE = 66;
 const TIMELINE_PRESENT_YEAR = 2026;
 
+interface PublisherLogoMessage {
+  kind: "success" | "error";
+  publisher: string;
+  text: string;
+}
+
 function albumAsTrack(album: PublisherAlbum): Track {
   return {
     id: album.id,
@@ -71,6 +87,23 @@ function albumAsTrack(album: PublisherAlbum): Track {
 
 function activityFor(publisher: PublisherSummary, mode: PublisherTimelineMode) {
   return mode === "original" ? publisher.originalActivity : publisher.releaseActivity;
+}
+
+function PublisherLogo({ publisher, logoUrl, large = false }: { publisher: string; logoUrl: string | null; large?: boolean }) {
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
+  const monogram = publisherMonogram(publisher);
+  const showImage = Boolean(logoUrl) && failedLogoUrl !== logoUrl;
+  return (
+    <span
+      className={`publisher-logo${large ? " publisher-logo--large" : ""}${showImage ? " has-image" : " publisher-logo--generated"}`}
+      data-variant={publisherLogoVariant(publisher)}
+      aria-hidden="true"
+    >
+      {showImage
+        ? <img src={logoUrl ?? undefined} alt="" onError={() => setFailedLogoUrl(logoUrl)} />
+        : <span className={`publisher-logo__monogram is-${Math.min(3, monogram.length)}`}>{monogram}</span>}
+    </span>
+  );
 }
 
 function timelineDomain(overview: PublisherOverview) {
@@ -116,6 +149,7 @@ const PublisherSignal = memo(function PublisherSignal({
   selected,
   mode,
   shareMaximum,
+  logoUrl,
   firstYear,
   lastYear,
   onSelect,
@@ -124,6 +158,7 @@ const PublisherSignal = memo(function PublisherSignal({
   selected: boolean;
   mode: PublisherTimelineMode;
   shareMaximum: number;
+  logoUrl: string | null;
   firstYear: number;
   lastYear: number;
   onSelect: () => void;
@@ -141,9 +176,7 @@ const PublisherSignal = memo(function PublisherSignal({
       onClick={onSelect}
     >
       <span className="publisher-signal__identity">
-        <span className="publisher-logo" aria-hidden="true">
-          {publisher.logoUrl ? <img src={publisher.logoUrl} alt="" /> : <Disc3 />}
-        </span>
+        <PublisherLogo publisher={publisher.name} logoUrl={logoUrl} />
         <span>
           <strong>{publisher.name}</strong>
           <small>Albums <b>{formatCount(publisher.albumCount)}</b></small>
@@ -220,17 +253,31 @@ function PublisherSelection({
   onSelectAlbum,
   onExplore,
   onPlayPublisher,
-}: Pick<PublisherSignalTimelineProps, "selectedAlbumId" | "queueBusy" | "queueMessage" | "onSelectAlbum" | "onExplore" | "onPlayPublisher"> & { detail: PublisherDetail }) {
+  logoUrl,
+  hasLogoOverride,
+  logoBusy,
+  logoMessage,
+  onChooseLogo,
+  onClearLogo,
+}: Pick<PublisherSignalTimelineProps, "selectedAlbumId" | "queueBusy" | "queueMessage" | "onSelectAlbum" | "onExplore" | "onPlayPublisher"> & {
+  detail: PublisherDetail;
+  logoUrl: string | null;
+  hasLogoOverride: boolean;
+  logoBusy: boolean;
+  logoMessage: PublisherLogoMessage | null;
+  onChooseLogo: () => void;
+  onClearLogo: () => void;
+}) {
   const publisher = detail.publisher;
   const highlights = useMemo(() => groupHighlights(detail.albums), [detail.albums]);
   return (
     <section className="publisher-selection" aria-labelledby="publisher-selection-title">
       <header>
         <div className="publisher-selection__identity">
-          <span className="publisher-logo publisher-logo--large" aria-hidden="true">{publisher.logoUrl ? <img src={publisher.logoUrl} alt="" /> : <Building2 />}</span>
+          <PublisherLogo publisher={publisher.name} logoUrl={logoUrl} large />
           <span>
             <span className="publisher-selection__name"><h2 id="publisher-selection-title">{publisher.name}</h2><em><BadgeCheck aria-hidden="true" /> Selected</em></span>
-            <p>Publisher value preserved exactly as stored in your Music Library catalog.</p>
+            <p>Publisher value preserved exactly as stored in your Music Library catalog. Logo choices stay on this device.</p>
           </span>
         </div>
         <dl>
@@ -240,9 +287,11 @@ function PublisherSelection({
         </dl>
       </header>
       <div className="publisher-selection__actions">
+        {logoMessage ? <span className={logoMessage.kind === "error" ? "is-error" : undefined} role={logoMessage.kind === "error" ? "alert" : "status"}>{logoMessage.text}</span> : queueMessage ? <span role="status">{queueMessage}</span> : null}
         <button type="button" className="button button--quiet" onClick={() => onExplore(publisher.name)}><Sparkles aria-hidden="true" /> Explore publisher</button>
+        <button type="button" className="button button--quiet" disabled={logoBusy} onClick={onChooseLogo}>{logoBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <ImagePlus aria-hidden="true" />} Choose logo</button>
+        {hasLogoOverride ? <button type="button" className="button button--quiet" disabled={logoBusy} onClick={onClearLogo}><Undo2 aria-hidden="true" /> Use monogram</button> : null}
         <button type="button" className="button button--primary" disabled={queueBusy || publisher.trackCount === 0} onClick={() => onPlayPublisher(publisher.name)}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play selection</button>
-        {queueMessage ? <span role="status">{queueMessage}</span> : null}
       </div>
       <div className="publisher-highlights">
         <h3>Release highlights by decade</h3>
@@ -269,10 +318,48 @@ function Feedback({ detail, state, error, onRetry }: { detail: boolean; state: P
 
 export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
   const [mode, setMode] = useState<PublisherTimelineMode>("release");
+  const [logoOverrides, setLogoOverrides] = useState(loadPublisherLogoOverrides);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoMessage, setLogoMessage] = useState<PublisherLogoMessage | null>(null);
+  const logoOverridesRef = useRef(logoOverrides);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const selectedName = props.detail?.publisher.name ?? null;
+
+  async function choosePublisherLogo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !selectedName || logoBusy) return;
+    const publisher = selectedName;
+    setLogoBusy(true);
+    setLogoMessage(null);
+    try {
+      const dataUrl = await preparePublisherLogo(file);
+      const next = savePublisherLogoOverride(logoOverridesRef.current, publisher, dataUrl);
+      logoOverridesRef.current = next;
+      setLogoOverrides(next);
+      setLogoMessage({ kind: "success", publisher, text: `Using a local logo for ${publisher}.` });
+    } catch (error) {
+      setLogoMessage({ kind: "error", publisher, text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  function clearSelectedPublisherLogo() {
+    if (!selectedName || logoBusy) return;
+    try {
+      const next = clearPublisherLogoOverride(logoOverridesRef.current, selectedName);
+      logoOverridesRef.current = next;
+      setLogoOverrides(next);
+      setLogoMessage({ kind: "success", publisher: selectedName, text: `Restored the Aurora monogram for ${selectedName}.` });
+    } catch (error) {
+      setLogoMessage({ kind: "error", publisher: selectedName, text: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   if (props.loadState !== "ready" || !props.overview) {
     return <section className="publisher-timeline"><Feedback detail={false} state={props.loadState} error={props.errorMessage} onRetry={props.onRetry} /></section>;
   }
-  const selectedName = props.detail?.publisher.name ?? null;
   const shareMaximum = Math.max(1, ...props.overview.publishers.flatMap((publisher) => publisher.releaseActivity.map((bucket) => bucket.albumCount)));
   const domain = timelineDomain(props.overview);
   return (
@@ -286,6 +373,7 @@ export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
             selected={selectedName === publisher.name}
             mode={mode}
             shareMaximum={shareMaximum}
+            logoUrl={logoOverrides[publisherLogoKey(publisher.name)]?.dataUrl ?? publisher.logoUrl}
             firstYear={domain.first}
             lastYear={domain.last}
             onSelect={() => props.onSelectPublisher(publisher)}
@@ -300,10 +388,24 @@ export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
           selectedAlbumId={props.selectedAlbumId}
           queueBusy={props.queueBusy}
           queueMessage={props.queueMessage}
+          logoUrl={logoOverrides[publisherLogoKey(props.detail.publisher.name)]?.dataUrl ?? props.detail.publisher.logoUrl}
+          hasLogoOverride={Boolean(logoOverrides[publisherLogoKey(props.detail.publisher.name)])}
+          logoBusy={logoBusy}
+          logoMessage={logoMessage?.publisher === props.detail.publisher.name ? logoMessage : null}
+          onChooseLogo={() => logoInputRef.current?.click()}
+          onClearLogo={clearSelectedPublisherLogo}
           onSelectAlbum={props.onSelectAlbum}
           onExplore={props.onExplore}
           onPlayPublisher={props.onPlayPublisher}
         />}
+      <input
+        ref={logoInputRef}
+        className="publisher-logo-input"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        aria-label={selectedName ? `Choose a local logo for ${selectedName}` : "Choose a local publisher logo"}
+        onChange={(event) => void choosePublisherLogo(event)}
+      />
     </section>
   );
 }

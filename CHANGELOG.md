@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.18] - 2026-08-23
+
+### Added
+
+- Distinctive deterministic Aurora monograms for every publisher, replacing the repeated generic record icon while remaining complete offline.
+- Device-local publisher-logo overrides with PNG, JPEG, and WebP validation, bounded resizing, immediate row/detail updates, persistence, and a one-click return to the Aurora monogram.
+
 ## [0.15.17] - 2026-08-23
 
 ### Fixed

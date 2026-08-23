@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublisherOverview } from "../../publishers";
+import { savePublisherLogoOverride } from "../../publisherLogos";
 import { PublisherSignalTimeline } from "./PublisherSignalTimeline";
 
 afterEach(cleanup);
+beforeEach(() => window.localStorage.clear());
 
 const overview: PublisherOverview = {
   publishers: [{
@@ -80,5 +82,56 @@ describe("PublisherSignalTimeline", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /1960s Revolver/ }));
     expect(onSelectAlbum).toHaveBeenCalledWith(overview.initialDetail.albums[0]);
+  });
+
+  it("loads and clears a device-local publisher logo override", () => {
+    savePublisherLogoOverride({}, "Parlophone", "data:image/png;base64,aGVsbG8=");
+    const { container } = render(<PublisherSignalTimeline
+      overview={overview}
+      detail={overview.initialDetail}
+      loadState="ready"
+      detailState="ready"
+      errorMessage={null}
+      detailError={null}
+      selectedAlbumId={null}
+      queueBusy={false}
+      queueMessage={null}
+      onSelectPublisher={vi.fn()}
+      onSelectAlbum={vi.fn()}
+      onExplore={vi.fn()}
+      onPlayPublisher={vi.fn()}
+      onRetry={vi.fn()}
+      onRetryDetail={vi.fn()}
+    />);
+
+    expect(container.querySelectorAll(".publisher-logo.has-image img")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Use monogram" }));
+    expect(container.querySelectorAll(".publisher-logo--generated")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Restored the Aurora monogram for Parlophone.");
+  });
+
+  it("rejects an unsafe local logo format inline", async () => {
+    render(<PublisherSignalTimeline
+      overview={overview}
+      detail={overview.initialDetail}
+      loadState="ready"
+      detailState="ready"
+      errorMessage={null}
+      detailError={null}
+      selectedAlbumId={null}
+      queueBusy={false}
+      queueMessage={null}
+      onSelectPublisher={vi.fn()}
+      onSelectAlbum={vi.fn()}
+      onExplore={vi.fn()}
+      onPlayPublisher={vi.fn()}
+      onRetry={vi.fn()}
+      onRetryDetail={vi.fn()}
+    />);
+
+    fireEvent.change(screen.getByLabelText("Choose a local logo for Parlophone"), {
+      target: { files: [new File(["<svg />"], "logo.svg", { type: "image/svg+xml" })] },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PNG, JPEG, or WebP image.");
   });
 });

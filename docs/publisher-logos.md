@@ -1,6 +1,13 @@
 # Publisher logo sourcing
 
-Aurora 0.15.16 reserves a logo slot on the Publishers page but intentionally renders the Aurora publisher fallback unless a verified image is available. Publisher names in Music Library are free text, and neither the catalog nor MusicBrainz guarantees that a label has a reusable logo.
+Aurora 0.15.18 fills every logo slot with a deterministic Aurora monogram and lets the user choose an optional device-local image. Publisher names in Music Library remain free text, and neither the catalog nor MusicBrainz guarantees that a label has a reusable logo.
+
+## Implemented offline identity
+
+- Monograms are derived deterministically from meaningful publisher-name initials, excluding generic suffixes such as Records, Recordings, Label, and Music. A stable name hash selects one of six restrained Aurora ring motifs.
+- Local overrides accept PNG, JPEG, and WebP files up to 5 MB. Aurora decodes and fits the image onto a transparent 192 × 192 canvas, rejects active SVG content, and stores only the bounded raster result.
+- Overrides use the versioned `aurora.publisher-logo-overrides.v1` browser-storage contract, are capped at 48 publishers and a 3.5-million-character serialized budget, and never enter the catalog, MP3 tags, OneDrive state, or Aurora's repository.
+- A local override takes precedence over future enriched artwork. **Use monogram** removes only that publisher's device-local override.
 
 ## Recommended source chain
 
@@ -15,8 +22,8 @@ MusicBrainz core data is CC0 while supplementary data has separate terms; an ima
 ## Product decision
 
 - Ship no third-party publisher logos in the Aurora binary.
-- Keep a deterministic Aurora fallback icon for every publisher.
-- Allow future user-provided local overrides without network access.
+- Keep a deterministic Aurora monogram for every publisher.
+- Keep user-provided local overrides offline and device-local.
 - Treat MusicBrainz → Wikidata → Commons as optional runtime enrichment with a local cache, explicit provenance, and a license allowlist.
 - Do not use Discogs as a general logo source. Its [API terms](https://support.discogs.com/hc/en-us/articles/360009334593-API-Terms-of-Use) restrict content use and caching in ways that do not fit a durable local logo library.
 
