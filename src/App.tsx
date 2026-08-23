@@ -1497,12 +1497,13 @@ function App() {
     else changeExplorerView("tracks");
   }
 
-  function focusArtist(artist: Artist) {
+  function focusArtist(artist: Artist, destination: "tracks" | "albums" = "tracks") {
     setSelectedArtistId(artist.id);
-    setActiveNav("Artists");
+    setActiveNav(destination === "albums" ? "Albums" : "Artists");
     expandLibraryNavigation();
-    setExplorerView("tracks");
-    setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: "newest" }));
+    setExplorerView(destination);
+    setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: defaultSort[destination] }));
+    if (destination === "albums") setSelectedAlbumId(null);
     openArtistInspector(artist.name);
   }
 
@@ -1887,7 +1888,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.13</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.14</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2136,7 +2137,7 @@ function App() {
                 onSelectTrack={selectTrack}
                 onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                 onSelectAlbum={selectAlbum}
-                onSelectArtist={(artist) => { if (artist) focusArtist(artist); else setSelectedArtistId(null); }}
+                onSelectArtist={(artist) => { if (artist) focusArtist(artist, "albums"); else setSelectedArtistId(null); }}
                 onLoadMore={() => void loadMoreExplorerResults()}
                 onRetry={() => {
                   if (selectedAlbumId && albumDetailState === "error") {

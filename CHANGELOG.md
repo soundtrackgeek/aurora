@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.14] - 2026-08-23
+
+### Changed
+
+- Selecting an artist from the Artists page now opens Albums with that artist applied as an exact filter, while Universe artist planets retain their existing Songs handoff.
+
 ## [0.15.13] - 2026-08-23
 
 ### Fixed
