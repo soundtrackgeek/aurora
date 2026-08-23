@@ -83,6 +83,15 @@ impl TrackSummary {
         self.release_year = values.release_year.map(i64::from);
         self.tag_sync_state = pending_import.then_some(TagSyncState::PendingImport);
     }
+
+    pub(crate) fn apply_tag_projection(&mut self, updated: &Self) {
+        self.rating = updated.rating;
+        self.loved = updated.loved;
+        self.love_state = updated.love_state;
+        self.release_year = updated.release_year;
+        self.tag_sync_state = updated.tag_sync_state;
+        self.can_undo_tag_edit = updated.can_undo_tag_edit;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +114,7 @@ pub(crate) struct LibrarySnapshot {
     pub(crate) source_state: &'static str,
     pub(crate) source_label: &'static str,
     pub(crate) source_path: String,
+    pub(crate) catalog_revision: i64,
     pub(crate) summary: LibrarySummary,
     pub(crate) artists: Vec<ArtistSummary>,
     pub(crate) tracks: Vec<TrackSummary>,
@@ -134,6 +144,22 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         .pragma_update(None, "query_only", true)
         .map_err(|error| format!("Could not enforce read-only catalog access: {error}"))?;
     Ok(connection)
+}
+
+fn completed_import_revision_for_connection(connection: &Connection) -> Result<i64, String> {
+    connection
+        .query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM import_runs WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Could not identify the current library import: {error}"))
+}
+
+pub(crate) fn completed_import_revision() -> Result<i64, String> {
+    let path = default_catalog_path()?;
+    let connection = open_catalog(&path)?;
+    completed_import_revision_for_connection(&connection)
 }
 
 pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
@@ -274,16 +300,14 @@ pub(crate) fn query_snapshot(
     source_path: String,
     store: Option<&StateStore>,
 ) -> Result<LibrarySnapshot, String> {
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("Could not start a consistent catalog snapshot: {error}"))?;
+    let connection = &*transaction;
+    let current_import_run_id = completed_import_revision_for_connection(connection)?;
     if let Some(store) = store {
         reconcile_all_overlays(connection, store)?;
     }
-    let current_import_run_id = connection
-        .query_row(
-            "SELECT COALESCE(MAX(id), 0) FROM import_runs WHERE status = 'completed'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|error| format!("Could not identify the current library import: {error}"))?;
     let mut summary = connection
         .query_row(
             r#"
@@ -382,14 +406,20 @@ pub(crate) fn query_snapshot(
         summary.rated = (summary.rated + rated_delta).max(0);
     }
 
-    Ok(LibrarySnapshot {
+    let snapshot = LibrarySnapshot {
         source_state: "connected",
         source_label: "Live catalog · file-tag overlay",
         source_path,
+        catalog_revision: current_import_run_id,
         summary,
         artists,
         tracks,
-    })
+    };
+    drop(artist_statement);
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not finish the consistent catalog snapshot: {error}"))?;
+    Ok(snapshot)
 }
 
 pub(crate) fn query_tracks<P: rusqlite::Params>(
@@ -1160,13 +1190,16 @@ pub(crate) fn load_tracks_by_ids(
     let mut tracks = track_references
         .iter()
         .map(|reference| {
-            let parsed = parse_track_id(&reference.id)?;
-            let track = statement
-                .query_row(named_params! { ":track_id": parsed }, map_track_row)
-                .map_err(|error| {
-                    format!("Track {} is no longer available: {error}", reference.id)
-                })?;
-            verify_track_identity(track, &reference.track_key)
+            let by_id = parse_track_id(&reference.id)
+                .and_then(|parsed| {
+                    statement
+                        .query_row(named_params! { ":track_id": parsed }, map_track_row)
+                        .map_err(|error| {
+                            format!("Track {} is no longer available: {error}", reference.id)
+                        })
+                })
+                .and_then(|track| verify_track_identity(track, &reference.track_key));
+            by_id.or_else(|_| load_track_by_stable_key(&connection, &reference.track_key))
         })
         .collect::<Result<Vec<_>, _>>()?;
     apply_overlays(&mut tracks, Some(store))?;
@@ -1176,13 +1209,17 @@ pub(crate) fn load_tracks_by_ids(
 pub(crate) fn load_tracks_by_references(
     references: &[StoredQueueEntry],
     store: &StateStore,
-) -> Result<(Vec<TrackSummary>, usize), String> {
+) -> Result<(Vec<TrackSummary>, usize, i64), String> {
     if references.is_empty() || references.len() > 200 {
         return Err("A playback queue must contain between 1 and 200 tracks.".to_owned());
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    let mut by_path = connection
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("Could not start a consistent queue rebind: {error}"))?;
+    let catalog_revision = completed_import_revision_for_connection(&transaction)?;
+    let mut by_path = transaction
         .prepare_cached(
             r#"
             SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -1202,7 +1239,7 @@ pub(crate) fn load_tracks_by_references(
             "#,
         )
         .map_err(|error| format!("Could not prepare stable queue restore: {error}"))?;
-    let mut by_id = connection
+    let mut by_id = transaction
         .prepare_cached(
             r#"
             SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -1226,22 +1263,76 @@ pub(crate) fn load_tracks_by_references(
     let mut tracks = Vec::with_capacity(references.len());
     let mut missing = 0;
     for reference in references {
-        let track_result = match (&reference.directory, &reference.filename) {
-            (Some(directory), Some(filename)) => by_path.query_row(
-                named_params! { ":directory": directory, ":filename": filename },
-                map_track_row,
-            ),
+        let track = match (&reference.directory, &reference.filename) {
+            (Some(directory), Some(filename)) => {
+                let exact = by_path.query_row(
+                    named_params! { ":directory": directory, ":filename": filename },
+                    map_track_row,
+                );
+                match exact {
+                    Ok(track) => Some(track),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => {
+                        match canonical_catalog_identity(directory, filename) {
+                            Some((canonical_directory, canonical_filename)) => {
+                                match by_path.query_row(
+                                    named_params! {
+                                        ":directory": canonical_directory,
+                                        ":filename": canonical_filename,
+                                    },
+                                    map_track_row,
+                                ) {
+                                    Ok(track) => Some(track),
+                                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                                    Err(error) => {
+                                        return Err(format!(
+                                            "Could not resolve the playback queue from its canonical paths: {error}"
+                                        ));
+                                    }
+                                }
+                            }
+                            None => None,
+                        }
+                    }
+                    Err(error) => {
+                        return Err(format!(
+                            "Could not resolve the playback queue from its stored paths: {error}"
+                        ));
+                    }
+                }
+            }
             _ => match parse_track_id(&reference.track_id) {
-                Ok(parsed) => by_id.query_row(named_params! { ":track_id": parsed }, map_track_row),
-                Err(_) => {
+                Ok(parsed) => {
+                    match by_id.query_row(named_params! { ":track_id": parsed }, map_track_row) {
+                        Ok(track) => Some(track),
+                        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                        Err(error) => {
+                            return Err(format!(
+                                "Could not resolve the playback queue from its legacy IDs: {error}"
+                            ));
+                        }
+                    }
+                }
+                Err(_) => None,
+            },
+        };
+        let verified = track.and_then(|track| match reference.track_key.as_deref() {
+            Some(track_key) => verify_track_identity(track, track_key).ok(),
+            None => Some(track),
+        });
+        let track = match (verified, reference.track_key.as_deref()) {
+            (Some(track), _) => track,
+            (None, Some(track_key)) => match lookup_track_by_stable_key(&transaction, track_key) {
+                Ok(track) => track,
+                Err(StableTrackLookupError::Invalid | StableTrackLookupError::Missing) => {
                     missing += 1;
                     continue;
                 }
+                Err(StableTrackLookupError::Failure(error)) => return Err(error),
             },
-        };
-        let Ok(track) = track_result else {
-            missing += 1;
-            continue;
+            (None, None) => {
+                missing += 1;
+                continue;
+            }
         };
         if reference
             .track_key
@@ -1253,19 +1344,40 @@ pub(crate) fn load_tracks_by_references(
         }
         tracks.push(track);
     }
+    drop(by_id);
+    drop(by_path);
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not finish the consistent queue rebind: {error}"))?;
     if !tracks.is_empty() {
         apply_overlays(&mut tracks, Some(store))?;
     }
-    Ok((tracks, missing))
+    Ok((tracks, missing, catalog_revision))
+}
+
+fn canonical_catalog_identity(directory: &str, filename: &str) -> Option<(String, String)> {
+    let canonical = Path::new(directory).join(filename).canonicalize().ok()?;
+    let canonical_directory = canonical.parent()?.to_string_lossy();
+    let canonical_filename = canonical.file_name()?.to_str()?.to_owned();
+    let canonical_directory = if let Some(rest) = canonical_directory.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        canonical_directory
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&canonical_directory)
+            .to_owned()
+    };
+    Some((canonical_directory, canonical_filename))
 }
 
 fn load_catalog_track_by_id(track_id: &str, track_key: &str) -> Result<TrackSummary, String> {
-    let parsed = parse_track_id(track_id)?;
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    let track = connection
-        .query_row(
-            r#"
+    let by_id = parse_track_id(track_id)
+        .and_then(|parsed| {
+            connection
+                .query_row(
+                    r#"
             SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
                    COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
                      WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -1281,11 +1393,139 @@ fn load_catalog_track_by_id(track_id: &str, track_key: &str) -> Result<TrackSumm
              AND l.track_key = lower(trim(t.title))
             WHERE t.id = :track_id
             "#,
-            named_params! { ":track_id": parsed },
-            map_track_row,
+                    named_params! { ":track_id": parsed },
+                    map_track_row,
+                )
+                .map_err(|error| format!("Could not resolve this track from the catalog: {error}"))
+        })
+        .and_then(|track| verify_track_identity(track, track_key));
+    by_id.or_else(|_| load_track_by_stable_key(&connection, track_key))
+}
+
+enum StableTrackLookupError {
+    Invalid,
+    Missing,
+    Failure(String),
+}
+
+impl StableTrackLookupError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Invalid => "Stable track identity is invalid.".to_owned(),
+            Self::Missing => {
+                "This track is no longer present in the Music Library catalog.".to_owned()
+            }
+            Self::Failure(error) => error,
+        }
+    }
+}
+
+fn load_track_by_stable_key(
+    connection: &Connection,
+    track_key: &str,
+) -> Result<TrackSummary, String> {
+    lookup_track_by_stable_key(connection, track_key).map_err(StableTrackLookupError::into_message)
+}
+
+fn lookup_track_by_stable_key(
+    connection: &Connection,
+    track_key: &str,
+) -> Result<TrackSummary, StableTrackLookupError> {
+    if track_key.is_empty() || track_key.chars().count() > 1024 {
+        return Err(StableTrackLookupError::Invalid);
+    }
+    let (directory, filename) = track_key
+        .rsplit_once('\\')
+        .filter(|(directory, filename)| !directory.is_empty() && !filename.is_empty())
+        .ok_or(StableTrackLookupError::Invalid)?;
+    let mut statement = connection
+        .prepare_cached(
+            r#"
+            SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
+                   COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
+                     WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
+                     WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
+                     WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
+                     WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
+                     WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
+                   t.love, t.time_seconds, t.canonical_genre,
+                   l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id
+            FROM tracks AS t
+            LEFT JOIN lastfm_track_popularity AS l
+              ON l.artist_key = lower(trim(t.album_artist_display))
+             AND l.track_key = lower(trim(t.title))
+            WHERE t.file_path = :directory AND t.filename = :filename
+            "#,
         )
-        .map_err(|error| format!("Could not resolve this track from the catalog: {error}"))?;
-    verify_track_identity(track, track_key)
+        .map_err(|error| {
+            StableTrackLookupError::Failure(format!(
+                "Could not prepare stable track resolution: {error}"
+            ))
+        })?;
+    if let Some((canonical_directory, canonical_filename)) =
+        canonical_catalog_identity(directory, filename)
+    {
+        match statement.query_row(
+            named_params! {
+                ":directory": canonical_directory,
+                ":filename": canonical_filename,
+            },
+            map_track_row,
+        ) {
+            Ok(track) => {
+                return verify_track_identity(track, track_key)
+                    .map_err(|_| StableTrackLookupError::Missing);
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(error) => {
+                return Err(StableTrackLookupError::Failure(format!(
+                    "Could not resolve the canonical track path: {error}"
+                )));
+            }
+        }
+    }
+
+    let mut case_insensitive = connection
+        .prepare_cached(
+            r#"
+            SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
+                   COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
+                     WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
+                     WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
+                     WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
+                     WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
+                     WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
+                   t.love, t.time_seconds, t.canonical_genre,
+                   l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id
+            FROM tracks AS t
+            LEFT JOIN lastfm_track_popularity AS l
+              ON l.artist_key = lower(trim(t.album_artist_display))
+             AND l.track_key = lower(trim(t.title))
+            WHERE replace(t.file_path, '/', char(92)) = :directory COLLATE NOCASE
+              AND t.filename = :filename COLLATE NOCASE
+            LIMIT 1
+            "#,
+        )
+        .map_err(|error| {
+            StableTrackLookupError::Failure(format!(
+                "Could not prepare normalized track resolution: {error}"
+            ))
+        })?;
+    let track = match case_insensitive.query_row(
+        named_params! { ":directory": directory, ":filename": filename },
+        map_track_row,
+    ) {
+        Ok(track) => track,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(StableTrackLookupError::Missing);
+        }
+        Err(error) => {
+            return Err(StableTrackLookupError::Failure(format!(
+                "Could not resolve the normalized track path: {error}"
+            )));
+        }
+    };
+    verify_track_identity(track, track_key).map_err(|_| StableTrackLookupError::Missing)
 }
 
 fn verify_track_identity(track: TrackSummary, expected_key: &str) -> Result<TrackSummary, String> {
@@ -1457,6 +1697,70 @@ mod tests {
             "h:\\music\\sigur rós\\01 sæglópur.mp3"
         );
         assert!(verify_track_identity(snapshot.tracks[0].clone(), "wrong-track-key").is_err());
+        assert_eq!(snapshot.catalog_revision, 52);
+        assert_eq!(
+            load_track_by_stable_key(&connection, &snapshot.tracks[0].track_key)
+                .expect("stable-key lookup")
+                .id,
+            "7"
+        );
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = 'H:/MUSIC/Sigur Rós' WHERE id = 7",
+                [],
+            )
+            .expect("alternate path spelling");
+        assert_eq!(
+            load_track_by_stable_key(&connection, &snapshot.tracks[0].track_key)
+                .expect("slash-normalized stable-key lookup")
+                .id,
+            "7"
+        );
+
+        let mut rebound = snapshot.tracks[0].clone();
+        rebound.id = "fresh-id".to_owned();
+        let mut stale_tag_update = snapshot.tracks[0].clone();
+        stale_tag_update.id = "old-id".to_owned();
+        stale_tag_update.rating = Some(3.5);
+        stale_tag_update.love_state = LoveState::Banned;
+        stale_tag_update.loved = false;
+        rebound.apply_tag_projection(&stale_tag_update);
+        assert_eq!(rebound.id, "fresh-id");
+        assert_eq!(rebound.rating, Some(3.5));
+        assert_eq!(rebound.love_state, LoveState::Banned);
+    }
+
+    #[test]
+    fn completed_import_revision_ignores_unfinished_runs() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE import_runs (id INTEGER PRIMARY KEY, status TEXT NOT NULL);
+                INSERT INTO import_runs VALUES (51, 'failed');
+                INSERT INTO import_runs VALUES (52, 'completed');
+                INSERT INTO import_runs VALUES (53, 'running');
+                "#,
+            )
+            .expect("fixture schema");
+
+        assert_eq!(
+            completed_import_revision_for_connection(&connection).expect("completed revision"),
+            52
+        );
+    }
+
+    #[test]
+    fn stable_track_lookup_does_not_treat_catalog_errors_as_missing_tracks() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY)", [])
+            .expect("incomplete fixture schema");
+
+        assert!(matches!(
+            lookup_track_by_stable_key(&connection, r"h:\music\artist\track.mp3"),
+            Err(StableTrackLookupError::Failure(_))
+        ));
     }
 
     #[test]

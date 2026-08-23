@@ -42,7 +42,7 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
     onTrackChange(snapshot.track);
   }
 
-  // The parent keys this editor by track ID, so each file read belongs to one component lifetime.
+  // The parent keys this editor by stable file identity, so import-time ID churn keeps drafts mounted.
   useEffect(() => {
     const requestId = ++requestRef.current;
     void readTrackTagState(track)
@@ -107,7 +107,7 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
     try {
       const snapshot = await updateTrackTags(track, confirmed, desired);
       applySnapshot(snapshot, "saved");
-      setMessage("Verified in the MP3. Music Library will catch up after your next MusicBee TSV import.");
+      setMessage("Verified in the MP3. Music Library will catch up when this album folder is synced.");
     } catch (error) {
       setPhase("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -146,7 +146,7 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
     <section className="tag-editor" aria-labelledby="tag-editor-title">
       <div className="tag-editor__heading">
         <div><p className="eyebrow">File metadata</p><h3 id="tag-editor-title">MusicBee tags</h3></div>
-        {syncState === "pendingImport" && <span className="sync-badge">Pending TSV import</span>}
+        {syncState === "pendingImport" && <span className="sync-badge">Pending library sync</span>}
       </div>
 
       <label className="tag-field">

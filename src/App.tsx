@@ -79,9 +79,12 @@ import {
   exploreTracks,
   formatCount,
   formatDuration,
+  catalogRefreshIsConsistent,
   loadAlbumDetail,
   loadArtistDetail,
+  loadCatalogRevision,
   loadLibrarySnapshot,
+  applyTrackTagProjection,
   type AlbumSummary,
   type Artist,
   type ArtistDetail,
@@ -533,6 +536,7 @@ function App() {
   const [yearAlbumBusy, setYearAlbumBusy] = useState(false);
   const [chartSelection, setChartSelection] = useState<ChartSelectionContext | null>(null);
   const [chartPlaybackBusy, setChartPlaybackBusy] = useState(false);
+  const [chartReloadToken, setChartReloadToken] = useState(0);
   const [ratingsOverview, setRatingsOverview] = useState<RatingsOverview | null>(null);
   const [ratingsPage, setRatingsPage] = useState<RatingAlbumPage | null>(null);
   const [ratingsLoadState, setRatingsLoadState] = useState<RatingsLoadState>("loading");
@@ -565,23 +569,45 @@ function App() {
   const publisherOverviewRequestRef = useRef(0);
   const publisherDetailRequestRef = useRef(0);
   const publisherAlbumRequestRef = useRef(0);
+  const publisherLoadedSearchRef = useRef<string | null>(null);
+  const publisherDetailRef = useRef<PublisherDetail | null>(publisherDetail);
+  const selectedPublisherAlbumRef = useRef<PublisherAlbum | null>(selectedPublisherAlbum);
   const yearOverviewRequestRef = useRef(0);
   const yearDetailRequestRef = useRef(0);
   const yearAlbumRequestRef = useRef(0);
   const yearLoadedTokenRef = useRef(-1);
+  const yearDetailRef = useRef<YearDetail | null>(yearDetail);
+  const selectedYearAlbumRef = useRef<YearAlbum | null>(selectedYearAlbum);
   const ratingsRequestRef = useRef(0);
   const ratingsPageRequestRef = useRef(0);
   const ratingsAlbumRequestRef = useRef(0);
   const ratingsLoadedTokenRef = useRef(-1);
+  const ratingsPreserveInspectorTokenRef = useRef<number | null>(null);
+  const selectedRatingAlbumRef = useRef<RatingAlbum | null>(selectedRatingAlbum);
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
+  const catalogRevisionRef = useRef<number | null>(null);
+  const catalogRefreshRunningRef = useRef(false);
+  const selectedTrackRef = useRef<Track | null>(selectedTrack);
+  const inspectorViewRef = useRef(inspectorView);
+  const inspectorArtistNameRef = useRef(inspectorArtistName);
+  const openArtistInspectorRef = useRef<(artistName: string) => void>(() => undefined);
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
   const updater = useAuroraUpdater();
   const playback = usePlayback();
   const appendPlayback = playback.append;
+  const rebindPlaybackCatalog = playback.rebindCatalog;
   const selectedGenreRef = useRef(selectedGenre);
   selectedGenreRef.current = selectedGenre;
+  selectedTrackRef.current = selectedTrack;
+  inspectorViewRef.current = inspectorView;
+  inspectorArtistNameRef.current = inspectorArtistName;
+  publisherDetailRef.current = publisherDetail;
+  selectedPublisherAlbumRef.current = selectedPublisherAlbum;
+  yearDetailRef.current = yearDetail;
+  selectedYearAlbumRef.current = selectedYearAlbum;
+  selectedRatingAlbumRef.current = selectedRatingAlbum;
 
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
@@ -666,8 +692,13 @@ function App() {
     void loadLibrarySnapshot()
       .then((nextSnapshot) => {
         if (cancelled) return;
+        if (
+          catalogRevisionRef.current !== null
+          && nextSnapshot.catalogRevision < catalogRevisionRef.current
+        ) return;
+        catalogRevisionRef.current ??= nextSnapshot.catalogRevision;
         setSnapshot(nextSnapshot);
-        setSelectedTrack(nextSnapshot.tracks[0] ?? null);
+        setSelectedTrack((current) => current ?? nextSnapshot.tracks[0] ?? null);
       })
       .catch((error: unknown) => {
         if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
@@ -706,6 +737,112 @@ function App() {
   }, [selectedTrack?.trackKey]);
 
   const libraryReady = snapshot !== null;
+
+  useEffect(() => {
+    if (!libraryReady) return;
+    let cancelled = false;
+
+    const refreshCatalogIfChanged = async () => {
+      if (catalogRefreshRunningRef.current) return;
+      catalogRefreshRunningRef.current = true;
+      try {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const revision = await loadCatalogRevision();
+          if (cancelled) return;
+          const previousRevision = catalogRevisionRef.current;
+          if (previousRevision === null) {
+            catalogRevisionRef.current = revision;
+            return;
+          }
+          if (revision === previousRevision) return;
+
+          const reboundResult = await rebindPlaybackCatalog();
+          if (cancelled || reboundResult === null) return;
+
+          const nextSnapshot = await loadLibrarySnapshot();
+          if (cancelled) return;
+          if (!catalogRefreshIsConsistent(
+            revision,
+            reboundResult.catalogRevision,
+            nextSnapshot.catalogRevision,
+          )) {
+            if (attempt === 0) continue;
+            throw new Error("The Music Library catalog changed again during Aurora's refresh.");
+          }
+
+          const rebound = reboundResult.playback;
+          setLoadError(null);
+          setSnapshot(nextSnapshot);
+          const selectedKey = selectedTrackRef.current?.trackKey;
+          if (selectedKey) {
+            const reboundSelection = rebound.queue.find((track) => track.trackKey === selectedKey)
+              ?? nextSnapshot.tracks.find((track) => track.trackKey === selectedKey);
+            if (reboundSelection) setSelectedTrack(reboundSelection);
+          }
+          catalogRevisionRef.current = revision;
+
+          setExplorerReloadToken((value) => value + 1);
+          setReviewReloadToken((value) => value + 1);
+          setHistoryReloadToken((value) => value + 1);
+          setGenreIndexReloadToken((value) => value + 1);
+          setGenreDetailReloadToken((value) => value + 1);
+          setPublisherReloadToken((value) => value + 1);
+          setYearReloadToken((value) => value + 1);
+          setRatingsReloadToken((value) => value + 1);
+          setChartReloadToken((value) => value + 1);
+          setSyncMessage("Music Library import detected · refreshed Aurora");
+          const artistName = inspectorArtistNameRef.current;
+          if (inspectorViewRef.current === "artist" && artistName) {
+            openArtistInspectorRef.current(artistName);
+          }
+          return;
+        }
+      } catch (error) {
+        console.warn("Aurora could not check the Music Library catalog revision", error);
+      } finally {
+        catalogRefreshRunningRef.current = false;
+      }
+    };
+
+    const initialRefresh = window.setTimeout(() => void refreshCatalogIfChanged(), 0);
+    const interval = window.setInterval(() => void refreshCatalogIfChanged(), 5_000);
+    const refreshOnFocus = () => void refreshCatalogIfChanged();
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [libraryReady, rebindPlaybackCatalog]);
+
+  useEffect(() => {
+    const candidates = [
+      ...(snapshot?.tracks ?? []),
+      ...explorerTracks,
+      ...albumTracks,
+      ...yearAlbumTracks,
+      ...ratingAlbumTracks,
+      ...publisherAlbumTracks,
+      ...(genreDetail?.highlights ?? []),
+    ];
+    if (candidates.length === 0) return;
+    const timer = window.setTimeout(() => {
+      setSelectedTrack((current) => {
+        if (!current) return current;
+        return candidates.find((track) => track.trackKey === current.trackKey) ?? current;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [
+    snapshot,
+    explorerTracks,
+    albumTracks,
+    yearAlbumTracks,
+    ratingAlbumTracks,
+    publisherAlbumTracks,
+    genreDetail,
+  ]);
 
   useEffect(() => {
     if (
@@ -813,6 +950,13 @@ function App() {
     const requestId = ++publisherOverviewRequestRef.current;
     publisherDetailRequestRef.current += 1;
     publisherAlbumRequestRef.current += 1;
+    const preserveSelection = publisherLoadedSearchRef.current === publisherSearch;
+    const previousPublisher = preserveSelection
+      ? publisherDetailRef.current?.publisher.name ?? null
+      : null;
+    const previousAlbumId = preserveSelection
+      ? selectedPublisherAlbumRef.current?.id ?? null
+      : null;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setPublisherLoadState("loading");
@@ -820,18 +964,25 @@ function App() {
       setPublisherError(null);
       setPublisherDetailError(null);
       setPublisherQueueMessage(null);
-      void loadPublisherOverview(publisherSearch)
-        .then((overview) => {
+      const detailRequest = previousPublisher
+        ? loadPublisherDetail(previousPublisher).catch(() => null)
+        : Promise.resolve(null);
+      void Promise.all([loadPublisherOverview(publisherSearch), detailRequest])
+        .then(([overview, refreshedDetail]) => {
           if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
+          const detail = refreshedDetail ?? overview.initialDetail;
+          publisherLoadedSearchRef.current = publisherSearch;
           setPublisherOverview(overview);
-          setPublisherDetail(overview.initialDetail);
+          setPublisherDetail(detail);
           setPublisherLoadState("ready");
           setPublisherDetailState("ready");
-          const initialAlbum = overview.initialDetail.albums[0] ?? null;
+          const initialAlbum = detail.albums.find((album) => album.id === previousAlbumId)
+            ?? detail.albums[0]
+            ?? null;
           setSelectedPublisherAlbum(initialAlbum);
           setPublisherAlbumTracks([]);
           if (!initialAlbum) return;
-          setInspectorView("album");
+          if (!preserveSelection) setInspectorView("album");
           const albumRequestId = ++publisherAlbumRequestRef.current;
           void loadPublisherAlbumTracks(initialAlbum)
             .then((tracks) => {
@@ -862,6 +1013,9 @@ function App() {
     }
     const requestId = ++yearOverviewRequestRef.current;
     yearDetailRequestRef.current += 1;
+    const preserveSelection = yearLoadedTokenRef.current >= 0;
+    const previousSelection = preserveSelection ? yearDetailRef.current?.selection ?? null : null;
+    const previousAlbumId = preserveSelection ? selectedYearAlbumRef.current?.id ?? null : null;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setYearLoadState("loading");
@@ -869,19 +1023,25 @@ function App() {
       setYearError(null);
       setYearDetailError(null);
       setYearQueueMessage(null);
-      void loadYearOverview()
-        .then((overview) => {
+      const detailRequest = previousSelection
+        ? loadYearDetail(previousSelection).catch(() => null)
+        : Promise.resolve(null);
+      void Promise.all([loadYearOverview(), detailRequest])
+        .then(([overview, refreshedDetail]) => {
           if (cancelled || requestId !== yearOverviewRequestRef.current) return;
+          const detail = refreshedDetail ?? overview.initialDetail;
           setYearOverview(overview);
           yearLoadedTokenRef.current = yearReloadToken;
-          setYearDetail(overview.initialDetail);
+          setYearDetail(detail);
           setYearLoadState("ready");
           setYearDetailState("ready");
-          const initialAlbum = overview.initialDetail.albums[0] ?? null;
+          const initialAlbum = detail.albums.find((album) => album.id === previousAlbumId)
+            ?? detail.albums[0]
+            ?? null;
           setSelectedYearAlbum(initialAlbum);
           setYearAlbumTracks([]);
           if (!initialAlbum) return;
-          setInspectorView("album");
+          if (!preserveSelection) setInspectorView("album");
           const albumRequestId = ++yearAlbumRequestRef.current;
           void loadYearAlbumTracks(initialAlbum)
             .then((tracks) => {
@@ -907,6 +1067,7 @@ function App() {
     const requestId = ++ratingsRequestRef.current;
     ratingsPageRequestRef.current += 1;
     ratingsAlbumRequestRef.current += 1;
+    const preserveSelection = ratingsLoadedTokenRef.current >= 0;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setRatingsLoadState("loading");
@@ -919,6 +1080,9 @@ function App() {
         .then((overview) => {
           if (cancelled || requestId !== ratingsRequestRef.current) return;
           setRatingsOverview(overview);
+          ratingsPreserveInspectorTokenRef.current = preserveSelection
+            ? ratingsReloadToken
+            : null;
           ratingsLoadedTokenRef.current = ratingsReloadToken;
           setRatingsLoadState("ready");
         })
@@ -940,6 +1104,8 @@ function App() {
     if (ratingsLoadedTokenRef.current !== ratingsReloadToken) return;
     const pageRequestId = ++ratingsPageRequestRef.current;
     ratingsAlbumRequestRef.current += 1;
+    const preserveSelection = ratingsPreserveInspectorTokenRef.current === ratingsReloadToken;
+    const previousAlbumId = preserveSelection ? selectedRatingAlbumRef.current?.id ?? null : null;
     let cancelled = false;
     setRatingsPageState("loading");
     setRatingsPageError(null);
@@ -948,14 +1114,17 @@ function App() {
       : loadRatingAlbumPage(ratingsCompletion);
     void request
       .then((page) => {
-        if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
-        setRatingsPage(page);
-        setRatingsPageState("ready");
-        const initialAlbum = page.albums[0] ?? null;
-        setSelectedRatingAlbum(initialAlbum);
-        setRatingAlbumTracks([]);
-        if (!initialAlbum) return;
-        setInspectorView("album");
+          if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
+          setRatingsPage(page);
+          setRatingsPageState("ready");
+          const initialAlbum = page.albums.find((album) => album.id === previousAlbumId)
+            ?? page.albums[0]
+            ?? null;
+          setSelectedRatingAlbum(initialAlbum);
+          setRatingAlbumTracks([]);
+          ratingsPreserveInspectorTokenRef.current = null;
+          if (!initialAlbum) return;
+          if (!preserveSelection) setInspectorView("album");
         const albumRequestId = ++ratingsAlbumRequestRef.current;
         void loadRatingAlbumTracks(initialAlbum)
           .then((tracks) => {
@@ -1539,21 +1708,24 @@ function App() {
   }
 
   function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
-    const baseline = previous ?? (selectedTrack?.id === updated.id ? selectedTrack : undefined);
+    const baseline = previous ?? (selectedTrack?.trackKey === updated.trackKey ? selectedTrack : undefined);
+    const refreshMatchingTrack = (track: Track) => track.trackKey === updated.trackKey
+      ? applyTrackTagProjection(track, updated)
+      : track;
     if (updateSelected) {
-      setSelectedTrack((current) => current?.id === updated.id ? updated : current);
+      setSelectedTrack((current) => current ? refreshMatchingTrack(current) : current);
     }
-    setExplorerTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
-    setAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
-    setYearAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
-    setRatingAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
-    setPublisherAlbumTracks((current) => current.map((track) => track.id === updated.id ? updated : track));
+    setExplorerTracks((current) => current.map(refreshMatchingTrack));
+    setAlbumTracks((current) => current.map(refreshMatchingTrack));
+    setYearAlbumTracks((current) => current.map(refreshMatchingTrack));
+    setRatingAlbumTracks((current) => current.map(refreshMatchingTrack));
+    setPublisherAlbumTracks((current) => current.map(refreshMatchingTrack));
     setGenreDetail((current) => {
       if (!current) return current;
       return {
         ...current,
         summary: baseline ? genreSummaryWithTrackChange(current.summary, baseline, updated) : current.summary,
-        highlights: current.highlights.map((track) => track.id === updated.id ? updated : track),
+        highlights: current.highlights.map(refreshMatchingTrack),
       };
     });
     if (baseline) {
@@ -1571,7 +1743,7 @@ function App() {
           loved: Math.max(0, current.summary.loved + lovedDelta),
           rated: Math.max(0, current.summary.rated + ratedDelta),
         },
-        tracks: current.tracks.map((track) => track.id === updated.id ? updated : track),
+        tracks: current.tracks.map(refreshMatchingTrack),
       };
     });
   }
@@ -1728,6 +1900,8 @@ function App() {
       setArtistWorldState("ready");
     });
   }
+
+  openArtistInspectorRef.current = openArtistInspector;
 
   async function applyArtistDecision(request: ArtistDecisionRequest) {
     if (curationActionBusy) return;
@@ -2110,7 +2284,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.19</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.20</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2210,11 +2384,20 @@ function App() {
               />
             ) : activeNav === "Charts" ? (
               <ChartStudio
-                onSelectionChange={(selection) => {
+                catalogRevision={chartReloadToken}
+                onSelectionChange={(selection, options) => {
                   setChartSelection(selection);
-                  if (selection) setInspectorView(selection.kind === "albums" ? "album" : "track");
+                  if (selection && !options?.preserveInspector) {
+                    setInspectorView(selection.kind === "albums" ? "album" : "track");
+                  }
                 }}
-                onSelectTrack={selectTrack}
+                onSelectTrack={(track, options) => {
+                  if (!options?.preserveInspector) {
+                    selectTrack(track);
+                    return;
+                  }
+                  setSelectedTrack((current) => current?.trackKey === track.trackKey ? track : current);
+                }}
                 onPlayQueue={playChartQueue}
               />
             ) : activeNav === "History" ? (
@@ -2488,7 +2671,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
-            <TagEditor key={`${inspectorTrack.id}:${inlineTagRevisions[inspectorTrack.trackKey] ?? 0}`} track={inspectorTrack} onTrackChange={applyTrackChange} />
+            <TagEditor key={`${inspectorTrack.trackKey}:${inlineTagRevisions[inspectorTrack.trackKey] ?? 0}`} track={inspectorTrack} onTrackChange={applyTrackChange} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
           </div>
         ) : <EmptyInspector />}

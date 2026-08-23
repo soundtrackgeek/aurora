@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { previewAudioSnapshot, type ReplayGainMode } from "./audio";
-import { isTauriRuntime, type Track } from "./library";
+import { applyTrackTagProjection, isTauriRuntime, type Track } from "./library";
 
 export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
 export type RepeatMode = "off" | "all" | "one";
@@ -22,6 +22,11 @@ export interface PlaybackSnapshot {
   replayGainDb: number | null;
   replayGainSource: ReplayGainMode | null;
   clippingPrevented: boolean;
+}
+
+export interface PlaybackCatalogRebind {
+  playback: PlaybackSnapshot;
+  catalogRevision: number;
 }
 
 const emptyPlayback: PlaybackSnapshot = {
@@ -99,14 +104,23 @@ function refreshBrowserClock(): void {
   };
 }
 
-async function command(name: string, args?: Record<string, unknown>): Promise<PlaybackSnapshot> {
-  return invoke<PlaybackSnapshot>(name, args);
+async function command<T = PlaybackSnapshot>(name: string, args?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(name, args);
 }
 
 export async function getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
   if (isTauriRuntime()) return command("playback_state");
   refreshBrowserClock();
   return cloneBrowserPlayback();
+}
+
+export async function rebindPlaybackCatalog(): Promise<PlaybackCatalogRebind> {
+  if (isTauriRuntime()) return command<PlaybackCatalogRebind>("playback_rebind_catalog");
+  refreshBrowserClock();
+  return {
+    playback: cloneBrowserPlayback(),
+    catalogRevision: 0,
+  };
 }
 
 export async function playTrackQueue(tracks: Track[], startTrackId: string): Promise<PlaybackSnapshot> {
@@ -308,7 +322,10 @@ export function usePlayback() {
     };
   }, [refresh]);
 
-  const run = useCallback(async (action: () => Promise<PlaybackSnapshot>) => {
+  const runCommand = useCallback(async <T,>(
+    action: () => Promise<T>,
+    snapshotFor: (result: T) => PlaybackSnapshot,
+  ) => {
     const sequence = ++commandSequenceRef.current;
     activeCommandCountRef.current += 1;
     setIsWorking(true);
@@ -316,7 +333,7 @@ export function usePlayback() {
     setDismissedError(null);
     try {
       const next = await action();
-      if (commandSequenceRef.current === sequence) setState(next);
+      if (commandSequenceRef.current === sequence) setState(snapshotFor(next));
       return next;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -327,30 +344,44 @@ export function usePlayback() {
       if (activeCommandCountRef.current === 0) setIsWorking(false);
     }
   }, []);
+  const run = useCallback(
+    (action: () => Promise<PlaybackSnapshot>) => runCommand(action, (snapshot) => snapshot),
+    [runCommand],
+  );
 
   const visibleError = commandError ?? state.error;
 
   const refreshTrack = useCallback((updated: Track) => {
     if (!isTauriRuntime()) {
-      const queue = browserPlayback.queue.map((track) => track.trackKey === updated.trackKey ? updated : track);
+      const queue = browserPlayback.queue.map((track) => track.trackKey === updated.trackKey
+        ? applyTrackTagProjection(track, updated)
+        : track);
       browserPlayback = {
         ...browserPlayback,
         queue,
         currentTrack: browserPlayback.currentTrack?.trackKey === updated.trackKey
-          ? updated
+          ? applyTrackTagProjection(browserPlayback.currentTrack, updated)
           : browserPlayback.currentTrack,
       };
     }
     setState((current) => ({
       ...current,
-      queue: current.queue.map((track) => track.trackKey === updated.trackKey ? updated : track),
-      currentTrack: current.currentTrack?.trackKey === updated.trackKey ? updated : current.currentTrack,
+      queue: current.queue.map((track) => track.trackKey === updated.trackKey
+        ? applyTrackTagProjection(track, updated)
+        : track),
+      currentTrack: current.currentTrack?.trackKey === updated.trackKey
+        ? applyTrackTagProjection(current.currentTrack, updated)
+        : current.currentTrack,
     }));
   }, []);
 
   const append = useCallback(
     (tracks: Track[]) => run(() => appendTrackQueue(tracks)),
     [run],
+  );
+  const rebindCatalog = useCallback(
+    () => runCommand(rebindPlaybackCatalog, (result) => result.playback),
+    [runCommand],
   );
 
   return {
@@ -363,6 +394,7 @@ export function usePlayback() {
     },
     play: (tracks: Track[], startTrackId: string) => run(() => playTrackQueue(tracks, startTrackId)),
     append,
+    rebindCatalog,
     toggle: () => run(togglePlayback),
     next: () => run(nextTrack),
     previous: () => run(previousTrack),

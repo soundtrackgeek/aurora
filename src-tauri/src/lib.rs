@@ -34,7 +34,7 @@ use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
 use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
-use playback::{PlaybackRuntime, PlaybackSnapshot, RepeatMode};
+use playback::{PlaybackCatalogRebind, PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use publishers::{PublisherDetail, PublisherOverview, PublisherQueueRequest};
 use ratings::{
     CompletionKind, RatingAlbumPage, RatingAlbumQueueRequest, RatingCollectionRequest,
@@ -72,6 +72,13 @@ async fn library_snapshot(app: AppHandle) -> Result<LibrarySnapshot, String> {
     })
     .await
     .map_err(|error| format!("The catalog worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn catalog_revision() -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(catalog::completed_import_revision)
+        .await
+        .map_err(|error| format!("The catalog revision worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -384,6 +391,13 @@ async fn export_musicbrainz_curation(app: AppHandle) -> Result<CurationExportRes
 #[tauri::command]
 fn playback_state(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
     with_playback(state, |runtime| Ok(runtime.snapshot()))
+}
+
+#[tauri::command]
+fn playback_rebind_catalog(
+    state: State<'_, PlaybackState>,
+) -> Result<PlaybackCatalogRebind, String> {
+    with_playback(state, PlaybackRuntime::rebind_catalog)
 }
 
 #[tauri::command]
@@ -788,6 +802,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             library_snapshot,
+            catalog_revision,
             artist_tracks,
             search_tracks,
             explore_tracks,
@@ -819,6 +834,7 @@ pub fn run() {
             undo_musicbrainz_curation,
             export_musicbrainz_curation,
             playback_state,
+            playback_rebind_catalog,
             playback_replace_queue,
             playback_append_queue,
             playback_toggle,

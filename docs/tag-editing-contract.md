@@ -7,7 +7,7 @@ Aurora 0.3.0 edits MusicBee-compatible metadata in MP3 files while keeping `%APP
 - React submits a bounded catalog track ID, its stable normalized path key, and tag values, never a filesystem path. Rust requires both identities to match the same current row.
 - Rust resolves the ID from the read-only catalog and accepts only an existing `.mp3` with a single-component filename.
 - The MP3 becomes authoritative for rating, Love/Ban, and Release Year after save.
-- Aurora's private SQLite overlay supplies immediate UI state until the next MusicBee TSV export and Music Library import produces matching catalog values.
+- Aurora's private SQLite overlay supplies immediate UI state until Music Library next syncs that complete album folder, or a legacy MusicBee TSV import produces matching catalog values.
 - A normalized directory-plus-filename key persists across full imports that replace integer track IDs.
 
 ## Save transaction
@@ -34,7 +34,7 @@ Aurora retains the newest 20 verified or rolled-back operation backups globally.
 Aurora never updates Music Library's database directly. The established workflow remains:
 
 ```text
-Aurora edits MP3 → MusicBee rescan → MusicBee TSV export → Music Library import
+Aurora edits MP3 → Music Library syncs that complete album folder → Aurora detects the completed import
         │                                                   │
         └── Aurora private overlay (pending) ───────────────┘ auto-reconciles
 ```

@@ -12,7 +12,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Audio files are authoritative for rating, Love/Ban, and Release Year after an Aurora edit.
 - Aurora-owned playback state, optimistic tag overlays, and the tag-operation journal live in a separate writable Aurora database.
 - Each Aurora installation owns a separate writable listening-history database and publishes only its device-named, read-only snapshot for cross-device aggregation.
-- Integer track IDs are transient because Music Library's full TSV import replaces rows. Aurora persists queue and overlay identity with the normalized directory plus filename; album IDs remain opaque strings.
+- Integer track IDs are transient because Music Library's full catalog imports replace rows. Aurora persists queue and overlay identity with the normalized directory plus filename; album IDs remain opaque strings.
 - The MusicBrainz overlay is curated sync/export state. The broad cache is a lazy discovery source, not a startup dependency.
 - Aurora's explicit MusicBrainz decisions live in its own writable state database; the imported overlay remains read-only until the user deliberately publishes an exported snapshot.
 - Album covers resolve only through the catalog's exact `album_id` mapping. Filename normalization is not an identity strategy.

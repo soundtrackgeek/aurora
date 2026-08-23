@@ -83,4 +83,48 @@ describe("ChartStudio", () => {
     expect(screen.getByRole("button", { name: "My 1995 run" })).toHaveClass("is-active");
     expect(screen.getByText("1995")).toBeInTheDocument();
   });
+
+  it("preserves the selected entry and inspector mode during a catalog refresh", async () => {
+    const onSelectionChange = vi.fn();
+    const onSelectTrack = vi.fn();
+    const onPlayQueue = vi.fn(async () => true);
+    const { rerender } = render(
+      <ChartStudio
+        catalogRevision={0}
+        onSelectionChange={onSelectionChange}
+        onSelectTrack={onSelectTrack}
+        onPlayQueue={onPlayQueue}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+
+    const selectedRow = screen.getByText("19").closest('[role="row"]');
+    expect(selectedRow).not.toBeNull();
+    fireEvent.click(selectedRow!);
+    await waitFor(() => expect(onSelectTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "19" }),
+      undefined,
+    ));
+    onSelectionChange.mockClear();
+    onSelectTrack.mockClear();
+
+    rerender(
+      <ChartStudio
+        catalogRevision={1}
+        onSelectionChange={onSelectionChange}
+        onSelectTrack={onSelectTrack}
+        onPlayQueue={onPlayQueue}
+      />,
+    );
+
+    await waitFor(() => expect(onSelectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: expect.objectContaining({ title: "19" }) }),
+      { preserveInspector: true },
+    ));
+    expect(screen.getByText("19").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(onSelectTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "19" }),
+      { preserveInspector: true },
+    ));
+  });
 });

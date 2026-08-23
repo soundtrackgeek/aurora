@@ -796,7 +796,7 @@ impl HistoryStore {
             Vec::new()
         } else {
             catalog::load_tracks_by_references(&references, state_store)
-                .map(|(tracks, _)| tracks)
+                .map(|(tracks, _, _)| tracks)
                 .unwrap_or_default()
         };
         let resolved_by_key = resolved

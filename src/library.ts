@@ -40,6 +40,26 @@ export interface Track {
   playCount: number | null;
 }
 
+export function catalogRefreshIsConsistent(
+  detectedRevision: number,
+  reboundRevision: number,
+  snapshotRevision: number,
+): boolean {
+  return detectedRevision === reboundRevision && detectedRevision === snapshotRevision;
+}
+
+export function applyTrackTagProjection(current: Track, updated: Track): Track {
+  return {
+    ...current,
+    rating: updated.rating,
+    loved: updated.loved,
+    loveState: updated.loveState,
+    releaseYear: updated.releaseYear,
+    tagSyncState: updated.tagSyncState,
+    canUndoTagEdit: updated.canUndoTagEdit,
+  };
+}
+
 type PreviewTrack = Omit<Track, "trackKey" | "loveState" | "tagSyncState" | "canUndoTagEdit">;
 
 function previewTrack(track: PreviewTrack): Track {
@@ -56,6 +76,7 @@ export interface LibrarySnapshot {
   sourceState: SourceState;
   sourceLabel: string;
   sourcePath: string | null;
+  catalogRevision: number;
   summary: LibrarySummary;
   artists: Artist[];
   tracks: Track[];
@@ -187,6 +208,7 @@ export const browserPreview: LibrarySnapshot = {
   sourceState: "browser-preview",
   sourceLabel: "Browser preview data",
   sourcePath: null,
+  catalogRevision: 0,
   summary: {
     songs: 12_846,
     albums: 1_208,
@@ -248,6 +270,11 @@ export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {
   }
 
   return invoke<LibrarySnapshot>("library_snapshot");
+}
+
+export async function loadCatalogRevision(): Promise<number> {
+  if (!isTauriRuntime()) return browserPreview.catalogRevision;
+  return invoke<number>("catalog_revision");
 }
 
 export function updateBrowserPreviewTrack(updated: Track): void {

@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.20] - 2026-08-23
+
+### Added
+
+- Runtime detection of completed Music Library imports every five seconds and on window focus, followed by bounded refreshes of the current catalog-backed view.
+
+### Changed
+
+- Live playback queues now re-resolve transient catalog IDs from stable track keys inside one SQLite read snapshot before view refresh. Unchanged stable queue order preserves the current and preloaded audio sources; removed entries are remapped conservatively and a removed current track stops safely. Transient catalog errors abort without pruning the queue.
+- Catalog revisions are acknowledged only when the detector, queue rebind, and refreshed base snapshot report the same completed import, so concurrent imports and transient read failures retry automatically. Track and artist inspectors refresh without replacing stable selections or discarding a stable-key tag draft.
+- Import-time tag results now patch only mutable tag state onto refreshed queue rows, preventing an in-flight rating save from restoring obsolete catalog IDs. Canonical-path and bounded case-insensitive fallbacks preserve stable identity when path spelling changes.
+
 ## [0.15.19] - 2026-08-23
 
 ### Changed

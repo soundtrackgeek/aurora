@@ -1,6 +1,6 @@
 # Database contract
 
-Verified read-only on 2026-08-22. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 7.
+Verified read-only on 2026-08-23. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 7.
 
 ## Sources
 
@@ -37,6 +37,8 @@ The originally supplied cache path included a nonexistent `musicbrainz` director
 - File metadata writes update audio files plus Aurora optimistic state. The source catalog reconciles later through its importer/rescan.
 - Treat `rating_raw` values on MusicBee's exact half-star scale as the catalog fallback when the current importer leaves `normalized_rating` null.
 - Pending overlays from an older import remain durable but are excluded from summary totals when their exact track path is absent from the current import.
+
+Aurora treats the largest `import_runs.id` whose status is `completed` as the live catalog revision. The WebView checks that single read-only value every five seconds and on focus; running, failed, or otherwise unfinished imports do not trigger a refresh. Queue rebinding and the base snapshot each use one deferred SQLite read transaction with the revision query first, so every row in either result belongs to the revision it reports. Aurora acknowledges a change only when the detected, rebound, and snapshot revisions are equal; a concurrent import or transient failure remains pending and is retried. Current bounded views and an open Artist inspector are then re-queried without replacing their stable selection.
 
 ## Runtime repository shape
 

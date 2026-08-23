@@ -76,9 +76,67 @@ pub(crate) struct PlaybackSnapshot {
     pub(crate) clipping_prevented: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlaybackCatalogRebind {
+    pub(crate) playback: PlaybackSnapshot,
+    pub(crate) catalog_revision: i64,
+}
+
 struct PreparedTrack {
     index: usize,
     gain: ReplayGainAdjustment,
+}
+
+#[derive(Debug, PartialEq)]
+struct CatalogRebindPlan {
+    key_order_unchanged: bool,
+    current_index: Option<usize>,
+    current_removed: bool,
+}
+
+fn catalog_rebind_plan(
+    current_queue: &[TrackSummary],
+    current_index: Option<usize>,
+    refreshed_queue: &[TrackSummary],
+) -> CatalogRebindPlan {
+    let key_order_unchanged = current_queue.len() == refreshed_queue.len()
+        && current_queue
+            .iter()
+            .zip(refreshed_queue)
+            .all(|(current, refreshed)| current.track_key == refreshed.track_key);
+    let Some(current_index) = current_index.filter(|index| *index < current_queue.len()) else {
+        return CatalogRebindPlan {
+            key_order_unchanged,
+            current_index: None,
+            current_removed: false,
+        };
+    };
+    let current_key = &current_queue[current_index].track_key;
+    if let Some(refreshed_index) = refreshed_queue
+        .iter()
+        .position(|track| &track.track_key == current_key)
+    {
+        return CatalogRebindPlan {
+            key_order_unchanged,
+            current_index: Some(refreshed_index),
+            current_removed: false,
+        };
+    }
+
+    let replacement_key = current_queue[current_index + 1..]
+        .iter()
+        .chain(current_queue[..current_index].iter().rev())
+        .find_map(|track| {
+            refreshed_queue
+                .iter()
+                .position(|refreshed| refreshed.track_key == track.track_key)
+        });
+    CatalogRebindPlan {
+        key_order_unchanged,
+        current_index: replacement_key,
+        current_removed: true,
+    }
 }
 
 fn append_queue_entries(
@@ -152,12 +210,12 @@ impl PlaybackRuntime {
     ) -> Result<Self, String> {
         let stored = store.load()?;
         let queue_result = if stored.queue.is_empty() {
-            Ok((Vec::new(), 0))
+            Ok((Vec::new(), 0, 0))
         } else {
             catalog::load_tracks_by_references(&stored.queue, &store)
         };
         let (queue, error) = match queue_result {
-            Ok((queue, missing)) => {
+            Ok((queue, missing, _)) => {
                 let error = (missing > 0).then(|| {
                     format!(
                         "Aurora restored the surviving queue and skipped {missing} unavailable track{}.",
@@ -692,6 +750,91 @@ impl PlaybackRuntime {
         Ok(self.snapshot())
     }
 
+    pub(crate) fn rebind_catalog(&mut self) -> Result<PlaybackCatalogRebind, String> {
+        self.synchronize_audio_runtime();
+        if self.queue.is_empty() {
+            return Ok(PlaybackCatalogRebind {
+                playback: self.snapshot(),
+                catalog_revision: catalog::completed_import_revision()?,
+            });
+        }
+
+        let references = self
+            .queue
+            .iter()
+            .map(|track| StoredQueueEntry {
+                track_id: track.id.clone(),
+                track_key: Some(track.track_key.clone()),
+                directory: Some(track.directory.clone()),
+                filename: Some(track.filename.clone()),
+            })
+            .collect::<Vec<_>>();
+        let (refreshed_queue, _, catalog_revision) =
+            catalog::load_tracks_by_references(&references, &self.store)?;
+        self.reconcile_current_source();
+        let plan = catalog_rebind_plan(&self.queue, self.current_index, &refreshed_queue);
+
+        if plan.key_order_unchanged {
+            self.queue = refreshed_queue;
+            self.current_index = plan.current_index;
+            self.persist()?;
+            return Ok(PlaybackCatalogRebind {
+                playback: self.snapshot(),
+                catalog_revision,
+            });
+        }
+
+        self.capture_position();
+        self.observe_history();
+        let should_play = self.status == PlaybackStatus::Playing;
+        let had_prepared_track = self.prepared_next.is_some();
+        self.queue = refreshed_queue;
+        self.current_index = plan.current_index;
+        self.prepared_next = None;
+        self.preparation_attempted = false;
+
+        if plan.current_removed {
+            self.finish_history("interrupted");
+            if let Some(player) = &self.player {
+                player.stop();
+            }
+            self.position_seconds = 0.0;
+            self.status = if self.current_index.is_some() {
+                PlaybackStatus::Paused
+            } else {
+                PlaybackStatus::Stopped
+            };
+            self.current_gain = ReplayGainAdjustment {
+                linear: 1.0,
+                ..Default::default()
+            };
+        } else if self.current_index.is_none() {
+            if let Some(player) = &self.player {
+                player.stop();
+            }
+            self.position_seconds = 0.0;
+            self.status = PlaybackStatus::Stopped;
+        } else if had_prepared_track {
+            let position = self
+                .current_track()
+                .and_then(|track| track.duration_seconds)
+                .map_or(self.position_seconds.max(0.0), |duration| {
+                    self.position_seconds.clamp(0.0, duration.max(0) as f64)
+                });
+            if let Err(error) = self.load_current(should_play, position) {
+                self.set_error(error);
+            } else {
+                self.reset_history_position();
+            }
+        }
+
+        self.persist()?;
+        Ok(PlaybackCatalogRebind {
+            playback: self.snapshot(),
+            catalog_revision,
+        })
+    }
+
     pub(crate) fn toggle(&mut self) -> Result<PlaybackSnapshot, String> {
         self.synchronize_audio_runtime();
         if self.current_index.is_none() {
@@ -1013,7 +1156,7 @@ impl PlaybackRuntime {
     pub(crate) fn refresh_track_metadata(&mut self, updated: &TrackSummary) {
         for track in &mut self.queue {
             if track.track_key == updated.track_key {
-                *track = updated.clone();
+                track.apply_tag_projection(updated);
             }
         }
     }
@@ -1135,6 +1278,48 @@ mod tests {
         assert_eq!(appended, 1);
         assert_eq!(queue.len(), 2);
         assert_eq!(queue[1].id, "2");
+    }
+
+    #[test]
+    fn catalog_rebind_preserves_current_index_when_stable_order_is_unchanged() {
+        let current = (0..3).map(queue_track).collect::<Vec<_>>();
+        let mut refreshed = current.clone();
+        for (index, track) in refreshed.iter_mut().enumerate() {
+            track.id = format!("fresh-{index}");
+            track.catalog_import_run_id = 2;
+        }
+
+        assert_eq!(
+            catalog_rebind_plan(&current, Some(1), &refreshed),
+            CatalogRebindPlan {
+                key_order_unchanged: true,
+                current_index: Some(1),
+                current_removed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn catalog_rebind_remaps_survivors_and_selects_the_next_track_if_current_was_removed() {
+        let current = (0..4).map(queue_track).collect::<Vec<_>>();
+        let refreshed = vec![queue_track(1), queue_track(3)];
+
+        assert_eq!(
+            catalog_rebind_plan(&current, Some(1), &refreshed),
+            CatalogRebindPlan {
+                key_order_unchanged: false,
+                current_index: Some(0),
+                current_removed: false,
+            }
+        );
+        assert_eq!(
+            catalog_rebind_plan(&current, Some(2), &refreshed),
+            CatalogRebindPlan {
+                key_order_unchanged: false,
+                current_index: Some(1),
+                current_removed: true,
+            }
+        );
     }
 
     #[test]

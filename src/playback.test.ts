@@ -8,6 +8,7 @@ import {
   getPlaybackSnapshot,
   moveQueueItem,
   playTrackQueue,
+  rebindPlaybackCatalog,
   seekPlayback,
   togglePlayback,
 } from "./playback";
@@ -70,5 +71,18 @@ describe("browser playback adapter", () => {
     expect(state.currentIndex).toBe(20);
     expect(state.queue).toHaveLength(139);
     expect(state.queue[state.queue.length - 1]?.id).toBe("addition-99");
+  });
+
+  it("keeps browser playback intact when the catalog revision is rebound", async () => {
+    const tracks = browserPreview.tracks.slice(0, 3);
+    const playing = await playTrackQueue(tracks, tracks[1].id);
+    const rebound = await rebindPlaybackCatalog();
+
+    expect(rebound.catalogRevision).toBe(0);
+    expect(rebound.playback.status).toBe(playing.status);
+    expect(rebound.playback.currentTrack?.trackKey).toBe(tracks[1].trackKey);
+    expect(rebound.playback.queue.map((track) => track.trackKey)).toEqual(
+      tracks.map((track) => track.trackKey),
+    );
   });
 });

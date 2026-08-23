@@ -42,4 +42,4 @@ Aurora's Rust writer:
 
 Aurora keeps at most 20 verified rollback copies as hidden, uniquely owned siblings of edited files. A one-step undo is offered only when the file still has the values Aurora wrote and its audio payload matches the backup.
 
-MusicBee's continuous folder monitoring is disabled locally. Aurora therefore updates its private overlay immediately. The catalog catches up through the existing MusicBee rescan/export and Music Library TSV import workflow; Aurora then removes a matching overlay automatically.
+Aurora updates its private overlay immediately. The catalog catches up when Music Library syncs that complete tagged album folder, or through the legacy MusicBee TSV workflow; Aurora then removes a matching overlay automatically.

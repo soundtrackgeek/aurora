@@ -37,7 +37,7 @@ The rating and Love handler snapshots the native now-playing track, derives the 
 2. Records the operation journal and optimistic overlay in `aurora-state.sqlite3`.
 3. Refreshes playback metadata and emits a result event for visible Aurora surfaces.
 
-The shared Music Library catalog remains read-only. A later MusicBee TSV export and Music Library import updates that catalog; Aurora reconciliation then clears an overlay that has caught up. External MusicBee edits can still become visible through the existing bounded reconciliation path.
+The shared Music Library catalog remains read-only. A later tagged-album folder sync, or a legacy MusicBee TSV import, updates that catalog; Aurora reconciliation then clears an overlay that has caught up. External file-tag edits can still become visible through the existing bounded reconciliation path.
 
 ## Failure behavior
 

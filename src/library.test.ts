@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyTrackTagProjection,
+  catalogRefreshIsConsistent,
   exploreAlbums,
   exploreArtists,
   exploreTracks,
@@ -32,6 +34,36 @@ const yearRangeTracks: Track[] = [
 ];
 
 describe("library presentation", () => {
+  it("acknowledges a catalog refresh only when every read used one revision", () => {
+    expect(catalogRefreshIsConsistent(52, 52, 52)).toBe(true);
+    expect(catalogRefreshIsConsistent(52, 51, 52)).toBe(false);
+    expect(catalogRefreshIsConsistent(52, 52, 53)).toBe(false);
+  });
+
+  it("applies tag state without restoring stale catalog identity", () => {
+    const current = { ...tracks[0], id: "fresh-id", albumId: "fresh-album" };
+    const staleUpdate = {
+      ...tracks[0],
+      id: "old-id",
+      albumId: "old-album",
+      rating: 3.5,
+      loved: false,
+      loveState: "banned" as const,
+      tagSyncState: "pendingImport" as const,
+      canUndoTagEdit: true,
+    };
+
+    expect(applyTrackTagProjection(current, staleUpdate)).toMatchObject({
+      id: "fresh-id",
+      albumId: "fresh-album",
+      trackKey: current.trackKey,
+      rating: 3.5,
+      loveState: "banned",
+      tagSyncState: "pendingImport",
+      canUndoTagEdit: true,
+    });
+  });
+
   it("formats durations and counts for dense rows", () => {
     expect(formatDuration(243)).toBe("4:03");
     expect(formatDuration(null)).toBe("—");

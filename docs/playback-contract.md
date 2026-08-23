@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; version 0.10.0 adds the [audio-output contract](audio-output-contract.md); and version 0.11.0 adds bounded append/refill behavior for [Genre Atlas](genre-atlas-contract.md).
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; version 0.10.0 adds the [audio-output contract](audio-output-contract.md); version 0.11.0 adds bounded append/refill behavior for [Genre Atlas](genre-atlas-contract.md); and version 0.15.20 adds live queue rebinding after a completed Music Library import.
 
 ## Trust boundary
 
@@ -24,6 +24,9 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 - The player waveform samples 64 evenly spaced windows from the decoded MP3 stream and reduces them to 320 normalized peaks. It does not fully decode a song just to draw the timeline.
 - Waveform requests contain only catalog ID plus stable track key. Rust performs the same identity and path validation as playback before opening the MP3.
 - Player rating and Love controls use the tag-editing boundary; they do not mutate the imported catalog directly.
+- When a new completed import revision appears, Rust re-resolves every live queue entry inside one SQLite read transaction, preserving queue order by stable track key and replacing catalog metadata and transient row IDs. An exact indexed lookup is preferred, followed by canonical filesystem spelling and normalized slash/case matching. Missing identities may be dropped, but busy, I/O, schema, and decode failures abort the rebind without pruning or persisting the queue.
+- If stable key order is unchanged, the current source, play/pause state, position, listening session, and any appended gapless successor remain untouched. If entries disappeared, Aurora remaps the current key, discards an unsafe prepared successor, and reloads only when required. A removed current entry stops immediately and leaves the next surviving entry selected but paused.
+- A tag read, write, or undo that overlaps an import may return a summary carrying the prior transient row ID. Queue refresh applies only rating, Love/Ban, release-year, sync, and undo fields from that summary; it never replaces the rebound identity or catalog projection.
 
 ## Persistence
 
@@ -36,7 +39,7 @@ Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data di
 - repeat mode.
 - a normalized path key plus the exact indexed directory and filename for every queue entry.
 
-Position is checkpointed in roughly ten-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them. Exact directory and filename re-resolution keeps queues valid when a full TSV import replaces source track IDs; unavailable entries are skipped without discarding surviving tracks.
+Position is checkpointed in roughly ten-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them. Stable path re-resolution keeps queues valid when a full catalog import replaces source track IDs; unavailable entries are skipped without discarding surviving tracks.
 
 Decoded peaks are derived data in device-local `aurora-waveforms.sqlite3`. A cache row is reused only while MP3 size and modification time still match, is capped to the 2,000 most recently accessed tracks, and is not copied to OneDrive or included in Aurora's shared-state lineage.
 

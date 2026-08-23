@@ -52,9 +52,14 @@ export interface ChartSelectionContext {
   chartTitle: string;
 }
 
+export interface ChartSelectionOptions {
+  preserveInspector?: boolean;
+}
+
 interface ChartStudioProps {
-  onSelectionChange: (selection: ChartSelectionContext | null) => void;
-  onSelectTrack: (track: Track) => void;
+  catalogRevision?: number;
+  onSelectionChange: (selection: ChartSelectionContext | null, options?: ChartSelectionOptions) => void;
+  onSelectTrack: (track: Track, options?: ChartSelectionOptions) => void;
   onPlayQueue: (tracks: Track[]) => Promise<boolean>;
 }
 
@@ -174,7 +179,7 @@ function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: str
   </div>;
 }
 
-export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: ChartStudioProps) {
+export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue }: ChartStudioProps) {
   const [request, setRequest] = useState(initialRequest);
   const [page, setPage] = useState<ChartPage | null>(null);
   const [loadState, setLoadState] = useState<ChartLoadState>("loading");
@@ -186,6 +191,8 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
   const [customOpen, setCustomOpen] = useState(false);
   const requestIdRef = useRef(0);
   const selectionIdRef = useRef(0);
+  const selectedEntryRef = useRef<ChartEntry | null>(selectedEntry);
+  const catalogRevisionRef = useRef(catalogRevision);
   const callbacksRef = useRef({ onSelectionChange, onSelectTrack, onPlayQueue });
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -193,12 +200,21 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
     callbacksRef.current = { onSelectionChange, onSelectTrack, onPlayQueue };
   }, [onPlayQueue, onSelectTrack, onSelectionChange]);
 
-  const selectEntry = useCallback((entry: ChartEntry, nextPage: ChartPage) => {
+  useEffect(() => {
+    selectedEntryRef.current = selectedEntry;
+  }, [selectedEntry]);
+
+  const selectEntry = useCallback((
+    entry: ChartEntry,
+    nextPage: ChartPage,
+    options?: ChartSelectionOptions,
+  ) => {
     const selectionId = ++selectionIdRef.current;
+    selectedEntryRef.current = entry;
     setSelectedEntry(entry);
     setDetail(null);
     const context: ChartSelectionContext = { kind: nextPage.request.kind, entry, detail: null, pageRequest: nextPage.request, chartTitle: nextPage.chartTitle };
-    callbacksRef.current.onSelectionChange(context);
+    callbacksRef.current.onSelectionChange(context, options);
     const detailRequest = loadChartItemDetail({ page: nextPage.request, artistKey: entry.artistKey, titleKey: entry.titleKey });
     const trackRequest = nextPage.request.kind === "singles" && entry.matchedTrackId
       ? loadChartEntryTrack(entry.matchedTrackId)
@@ -207,13 +223,17 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
       if (selectionId !== selectionIdRef.current) return;
       const value = nextDetail.status === "fulfilled" ? nextDetail.value : null;
       setDetail(value);
-      callbacksRef.current.onSelectionChange({ ...context, detail: value });
-      if (nextTrack.status === "fulfilled" && nextTrack.value) callbacksRef.current.onSelectTrack(nextTrack.value);
+      callbacksRef.current.onSelectionChange({ ...context, detail: value }, options);
+      if (nextTrack.status === "fulfilled" && nextTrack.value) {
+        callbacksRef.current.onSelectTrack(nextTrack.value, options);
+      }
     });
   }, []);
 
   useEffect(() => {
     const loadId = ++requestIdRef.current;
+    const preserveInspector = catalogRevisionRef.current !== catalogRevision;
+    catalogRevisionRef.current = catalogRevision;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setLoadState("loading");
@@ -224,12 +244,31 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
           if (cancelled || loadId !== requestIdRef.current) return;
           setPage(nextPage);
           setLoadState("ready");
-          const nextSelection = nextPage.entries.find((entry) => entry.loved) ?? nextPage.entries[0] ?? null;
-          if (nextSelection) selectEntry(nextSelection, nextPage);
+          const previousSelection = selectedEntryRef.current;
+          const nextSelection = previousSelection
+            ? nextPage.entries.find((entry) => (
+              entry.artistKey === previousSelection.artistKey
+              && entry.titleKey === previousSelection.titleKey
+            ))
+            : null;
+          const selected = nextSelection
+            ?? nextPage.entries.find((entry) => entry.loved)
+            ?? nextPage.entries[0]
+            ?? null;
+          if (selected) {
+            selectEntry(
+              selected,
+              nextPage,
+              preserveInspector ? { preserveInspector: true } : undefined,
+            );
+          }
           else {
             setSelectedEntry(null);
             setDetail(null);
-            callbacksRef.current.onSelectionChange(null);
+            callbacksRef.current.onSelectionChange(
+              null,
+              preserveInspector ? { preserveInspector: true } : undefined,
+            );
           }
         })
         .catch((cause: unknown) => {
@@ -242,7 +281,7 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [reloadToken, request, selectEntry]);
+  }, [catalogRevision, reloadToken, request, selectEntry]);
 
   const visibleWeeks = (() => {
     if (!page?.weeks.length) return [];
