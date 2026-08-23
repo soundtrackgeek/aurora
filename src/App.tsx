@@ -210,7 +210,7 @@ const defaultExplorerFilters: ExplorerFilters = {
   sort: "newest",
 };
 
-const trackSearchHelp = "Track search fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Combine fields with commas.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 
 const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
   tracks: ["newest", "titleAsc", "artistAsc", "albumAsc", "releaseYearDesc", "ratingDesc"],
@@ -1782,7 +1782,7 @@ function App() {
         : activeNav === "Years"
           ? "Year search arrives with the timeline…"
         : explorerView === "tracks"
-          ? "Search or use artist:, album:, year:…"
+          ? "Search fields with OR, NOT, or \"exact\"…"
           : "Search your universe…";
   const topbarSearchLabel = activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
@@ -1862,7 +1862,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

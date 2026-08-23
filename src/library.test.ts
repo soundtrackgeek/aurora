@@ -15,6 +15,16 @@ const tracks: Track[] = [
   { id: "2", trackKey: "c:/music/m83/hurry up/midnight city.mp3", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 4.5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 243, genre: "Electronic", playCount: 42 },
 ];
 
+const similarlyNamedArtists: Track[] = [
+  { ...tracks[0], id: "3", trackKey: "c:/music/kiss/strutter.mp3", albumId: "album-3", title: "Strutter", artist: "Kiss", displayArtist: "Kiss", album: "Kiss", originalYear: 1974, releaseYear: 1974, genre: "Rock" },
+  { ...tracks[1], id: "4", trackKey: "c:/music/kissing-the-pink/certain-things.mp3", albumId: "album-4", title: "Certain Things Are Likely", artist: "Kissing the Pink", album: "Certain Things Are Likely", releaseYear: 1986, genre: "Synth-pop" },
+];
+
+const scoreTracks: Track[] = [
+  { ...tracks[0], id: "5", trackKey: "c:/music/composer/main-theme.mp3", albumId: "album-5", title: "Main Theme", artist: "Composer", album: "Film Music", genre: "Drama" },
+  { ...tracks[1], id: "6", trackKey: "c:/music/singer/pop-song.mp3", albumId: "album-6", title: "Pop Song", artist: "Singer", album: "Compilation", genre: "Soundtrack" },
+];
+
 describe("library presentation", () => {
   it("formats durations and counts for dense rows", () => {
     expect(formatDuration(243)).toBe("4:03");
@@ -36,6 +46,20 @@ describe("library presentation", () => {
     expect(filterTracks(tracks, "publisher:emi,title:sæglópur", null)).toEqual([tracks[0]]);
   });
 
+  it("supports OR inheritance, NOT, negative fields, and exact quoted values", () => {
+    expect(filterTracks(tracks, "aartist:sigur rós OR m83", null)).toEqual(tracks);
+    expect(filterTracks(tracks, "genre:post rock OR electronic NOT aartist:m83", null)).toEqual([tracks[0]]);
+    expect(filterTracks(tracks, "-genre:post rock", null)).toEqual([tracks[1]]);
+    expect(filterTracks(tracks, "genre:post rock,-aartist:sigur", null)).toEqual([]);
+    expect(filterTracks(similarlyNamedArtists, "aartist:kiss", null)).toHaveLength(2);
+    expect(filterTracks(similarlyNamedArtists, "aartist:\"kiss\"", null)).toEqual([similarlyNamedArtists[0]]);
+  });
+
+  it("expands the Music Library scores umbrella without changing quoted exact search", () => {
+    expect(filterTracks(scoreTracks, "genre:scores", null)).toEqual([scoreTracks[0]]);
+    expect(filterTracks(scoreTracks, "genre:\"scores\"", null)).toEqual([]);
+  });
+
   it("keeps browser-preview explorer filtering faithful to native requests", async () => {
     const trackPage = await exploreTracks({ rating: 4.5, loveState: "loved", sort: "titleAsc" });
     expect(trackPage.items.map((track) => track.title)).toEqual(["Nightcall", "On Melancholy Hill"]);
@@ -54,6 +78,9 @@ describe("library presentation", () => {
     expect(fieldedAlbums.items.map((album) => album.title)).toEqual(["Discovery"]);
     const fieldedArtists = await exploreArtists({ search: "title:digital love" });
     expect(fieldedArtists.items.map((artist) => artist.name)).toEqual(["Daft Punk"]);
+
+    const booleanTracks = await exploreTracks({ search: "genre:house OR electronic NOT aartist:m83" });
+    expect(booleanTracks.items.map((track) => track.title)).toEqual(["Digital Love"]);
   });
 
   it("loads browser-preview album details by stable album identity", async () => {

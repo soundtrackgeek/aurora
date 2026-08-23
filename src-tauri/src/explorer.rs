@@ -1,7 +1,8 @@
 use crate::{
     catalog::{
         ArtistSummary, TrackSummary, apply_overlays, default_catalog_path, map_track_row,
-        open_catalog, parse_catalog_search,
+        open_catalog, parse_catalog_search, push_album_search_predicates,
+        push_track_search_predicates,
     },
     ratings,
     state_store::StateStore,
@@ -475,9 +476,6 @@ fn track_page_from_connection(
             next_cursor: None,
         });
     }
-    let match_query = parsed_search
-        .as_ref()
-        .and_then(|search| search.fts_query.clone());
     let sort = track_sort(request.sort.unwrap_or_default());
     let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
@@ -485,26 +483,11 @@ fn track_page_from_connection(
         "SELECT {TRACK_COLUMNS}, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t",
         sort.expression
     );
-    if match_query.is_some() {
-        sql.push_str(" JOIN track_search_fts ON CAST(track_search_fts.track_id AS INTEGER) = t.id");
-    }
     sql.push_str(
         " LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE 1 = 1",
     );
-    if let Some(match_query) = match_query {
-        sql.push_str(" AND track_search_fts MATCH ?");
-        params.push(Value::Text(match_query));
-    }
-    if let Some(year) = parsed_search.as_ref().and_then(|search| search.year) {
-        sql.push_str(" AND t.year = ?");
-        params.push(Value::Integer(i64::from(year)));
-    }
-    if let Some(year) = parsed_search
-        .as_ref()
-        .and_then(|search| search.release_year)
-    {
-        sql.push_str(" AND t.release_year = ?");
-        params.push(Value::Integer(i64::from(year)));
+    if let Some(search) = &parsed_search {
+        push_track_search_predicates(&mut sql, &mut params, search);
     }
     if let Some(rating) = rating {
         sql.push_str(" AND t.normalized_rating = ?");
@@ -661,12 +644,9 @@ fn album_page_from_connection(
             next_cursor: None,
         });
     }
-    let match_query = parsed_search
+    let plain_match_query = parsed_search
         .as_ref()
-        .and_then(|search| search.fts_query.clone());
-    let fielded_search = parsed_search
-        .as_ref()
-        .is_some_and(|search| search.has_fields);
+        .and_then(|search| search.plain_fts_query().map(str::to_owned));
     let sort = album_sort(request.sort.unwrap_or_default());
     let direction = if sort.descending { "DESC" } else { "ASC" };
     let mut params = Vec::<Value>::new();
@@ -674,28 +654,15 @@ fn album_page_from_connection(
         "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, CAST(({}) AS TEXT) AS cursor_value FROM albums AS a",
         sort.expression
     );
-    if match_query.is_some() && !fielded_search {
+    if plain_match_query.is_some() {
         sql.push_str(" JOIN album_search_fts ON album_search_fts.album_id = a.id");
     }
     sql.push_str(" WHERE 1 = 1");
-    if let Some(match_query) = match_query {
-        if fielded_search {
-            sql.push_str(" AND a.id IN (SELECT search_track.album_id FROM track_search_fts JOIN tracks AS search_track ON search_track.id = CAST(track_search_fts.track_id AS INTEGER) WHERE track_search_fts MATCH ?)");
-        } else {
-            sql.push_str(" AND album_search_fts MATCH ?");
-        }
+    if let Some(match_query) = plain_match_query {
+        sql.push_str(" AND album_search_fts MATCH ?");
         params.push(Value::Text(match_query));
-    }
-    if let Some(year) = parsed_search.as_ref().and_then(|search| search.year) {
-        sql.push_str(" AND a.year = ?");
-        params.push(Value::Integer(i64::from(year)));
-    }
-    if let Some(year) = parsed_search
-        .as_ref()
-        .and_then(|search| search.release_year)
-    {
-        sql.push_str(" AND a.release_year = ?");
-        params.push(Value::Integer(i64::from(year)));
+    } else if let Some(search) = &parsed_search {
+        push_album_search_predicates(&mut sql, &mut params, search);
     }
     if let Some(rating) = rating {
         sql.push_str(" AND CAST(ROUND(a.effective_album_rating / 10.0) AS INTEGER) * 10 = ?");
@@ -806,26 +773,15 @@ fn artist_page_from_connection(
                 next_cursor: None,
             });
         }
-        if parsed_search.has_fields {
-            if let Some(match_query) = parsed_search.fts_query {
-                rollup_where.push_str(" AND a.id IN (SELECT search_track.album_id FROM track_search_fts JOIN tracks AS search_track ON search_track.id = CAST(track_search_fts.track_id AS INTEGER) WHERE track_search_fts MATCH ?)");
-                params.push(Value::Text(match_query));
-            }
-            if let Some(year) = parsed_search.year {
-                rollup_where.push_str(" AND a.year = ?");
-                params.push(Value::Integer(i64::from(year)));
-            }
-            if let Some(year) = parsed_search.release_year {
-                rollup_where.push_str(" AND a.release_year = ?");
-                params.push(Value::Integer(i64::from(year)));
-            }
-        } else {
+        if parsed_search.plain_fts_query().is_some() {
             rollup_where.push_str(" AND a.album_artist_display LIKE ? ESCAPE '\\' COLLATE NOCASE");
             let escaped = search
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
             params.push(Value::Text(format!("%{escaped}%")));
+        } else {
+            push_album_search_predicates(&mut rollup_where, &mut params, &parsed_search);
         }
     }
     if let Some(genre) = genre {
@@ -1210,6 +1166,120 @@ mod tests {
         .expect("fielded artist search");
         assert_eq!(artists.items.len(), 1);
         assert_eq!(artists.items[0].name, "Sigur Rós");
+    }
+
+    #[test]
+    fn track_search_supports_or_not_negative_prefix_and_exact_values() {
+        let connection = fixture();
+        let boolean = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("genre:post rock OR house NOT aartist:daft punk".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("boolean track search");
+        assert_eq!(boolean.items.len(), 3);
+        assert!(
+            boolean
+                .items
+                .iter()
+                .all(|track| track.artist == "Sigur Rós")
+        );
+
+        let boolean_albums = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("genre:post rock OR house NOT aartist:daft punk".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("boolean album search");
+        assert_eq!(boolean_albums.items.len(), 2);
+        assert!(
+            boolean_albums
+                .items
+                .iter()
+                .all(|album| album.artist == "Sigur Rós")
+        );
+
+        let boolean_artists = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                search: Some("genre:post rock OR house NOT aartist:daft punk".to_owned()),
+                ..ArtistPageRequest::default()
+            },
+        )
+        .expect("boolean artist search");
+        assert_eq!(boolean_artists.items.len(), 1);
+        assert_eq!(boolean_artists.items[0].name, "Sigur Rós");
+
+        let excluded = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("genre:post rock,-aartist:sigur rós".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("negative prefix search");
+        assert!(excluded.items.is_empty());
+
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO albums VALUES
+                  ('a4', 'Kiss', 'Kiss', 'Rock', 1974, 1, 0, 0, 180, NULL, NULL, 1974),
+                  ('a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Synth-pop', 1986, 1, 0, 0, 210, NULL, NULL, 1986),
+                  ('a6', 'Film Music', 'Composer', 'Drama', 2020, 1, 0, 0, 180, NULL, NULL, 2020),
+                  ('a7', 'Compilation', 'Various Artists', 'Soundtrack', 2020, 1, 0, 0, 180, NULL, NULL, 2020);
+                INSERT INTO tracks VALUES
+                  (11, 1, 'a4', 'Strutter', 'Kiss', 'Kiss', 'Kiss', 'Rock', 'Casablanca', NULL, '', NULL, 1974, 180, 'H:\Music\Kiss', '01.mp3', 1, 1, 1974),
+                  (12, 1, 'a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Kissing the Pink', 'Certain Things Are Likely', 'Synth-pop', 'Magnet', NULL, '', NULL, 1986, 210, 'H:\Music\Kissing the Pink', '01.mp3', 1, 1, 1986),
+                  (13, 1, 'a6', 'Main Theme', 'Composer', 'Composer', 'Film Music', 'Drama', 'Label', NULL, '', NULL, 2020, 180, 'H:\Music\Composer', '01.mp3', 1, 1, 2020),
+                  (14, 1, 'a7', 'Pop Song', 'Singer', 'Various Artists', 'Compilation', 'Soundtrack', 'Label', NULL, '', NULL, 2020, 180, 'H:\Music\Various', '01.mp3', 1, 1, 2020);
+                INSERT INTO track_search_fts
+                  SELECT id, album_id, title, display_artist, album, album_artist_display,
+                         canonical_genre, publisher, file_path, filename FROM tracks WHERE id IN (11, 12, 13, 14);
+                "#,
+            )
+            .expect("exact-search fixture rows");
+
+        let prefix = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("aartist:kiss".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("prefix artist search");
+        assert_eq!(prefix.items.len(), 2);
+
+        let exact = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("aartist:\"kiss\"".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("exact artist search");
+        assert_eq!(exact.items.len(), 1);
+        assert_eq!(exact.items[0].artist, "Kiss");
+
+        let scores = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("genre:scores".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("scores genre search");
+        assert_eq!(scores.items.len(), 1);
+        assert_eq!(scores.items[0].genre.as_deref(), Some("Drama"));
     }
 
     #[test]

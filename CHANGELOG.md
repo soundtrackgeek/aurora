@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.7] - 2026-08-23
+
+### Added
+
+- Search groups now support uppercase `OR`, `AND`, and `NOT`, plus leading `-` exclusions. Alternatives after `OR` inherit the preceding field, so `aartist:bon jovi OR def leppard OR kiss` stays scoped to Album Artist.
+- Complete quoted values use exact case-insensitive matching; unquoted values keep prefix matching, allowing `aartist:\"kiss\"` to distinguish Kiss from names such as Kissing the Pink.
+- Unquoted `genre:score` and `genre:scores` expand to the Music Library Scores umbrella for film, TV, animation, anime, and video-game score genres.
+
+### Changed
+
+- Track-search guidance now documents boolean operators, exclusions, exact quotes, and the Scores umbrella.
+
 ## [0.15.6] - 2026-08-23
 
 ### Fixed

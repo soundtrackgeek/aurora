@@ -454,29 +454,219 @@ pub(crate) fn load_artist_tracks(
 }
 
 const MAX_FTS_SEARCH_TERMS: usize = 32;
+const MAX_SEARCH_ALTERNATIVES: usize = 32;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CatalogSearchField {
+    Any,
+    Artist,
+    AlbumArtist,
+    Album,
+    Genre,
+    Year,
+    ReleaseYear,
+    Publisher,
+    Title,
+}
+
+impl CatalogSearchField {
+    fn fts_column(self) -> Option<&'static str> {
+        match self {
+            Self::Any | Self::Year | Self::ReleaseYear => None,
+            Self::Artist => Some("display_artist"),
+            Self::AlbumArtist => Some("album_artist_display"),
+            Self::Album => Some("album"),
+            Self::Genre => Some("canonical_genre"),
+            Self::Publisher => Some("publisher"),
+            Self::Title => Some("title"),
+        }
+    }
+
+    fn sql_column(self) -> Option<&'static str> {
+        match self {
+            Self::Any | Self::Year | Self::ReleaseYear => None,
+            Self::Artist => Some("display_artist"),
+            Self::AlbumArtist => Some("album_artist_display"),
+            Self::Album => Some("album"),
+            Self::Genre => Some("canonical_genre"),
+            Self::Publisher => Some("publisher"),
+            Self::Title => Some("title"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum CatalogSearchMatch {
+    Prefix(String),
+    Exact(String),
+    ScoreGenreGroup,
+    Year(i32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CatalogSearchAlternative {
+    field: CatalogSearchField,
+    matcher: CatalogSearchMatch,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CatalogSearchGroup {
+    negated: bool,
+    alternatives: Vec<CatalogSearchAlternative>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CatalogSearch {
-    pub(crate) fts_query: Option<String>,
-    pub(crate) year: Option<i32>,
-    pub(crate) release_year: Option<i32>,
-    pub(crate) has_fields: bool,
+    groups: Vec<CatalogSearchGroup>,
 }
 
 impl CatalogSearch {
     pub(crate) fn is_empty(&self) -> bool {
-        self.fts_query.is_none() && self.year.is_none() && self.release_year.is_none()
+        self.groups.is_empty()
+    }
+
+    pub(crate) fn plain_fts_query(&self) -> Option<&str> {
+        let group = self.groups.first()?;
+        if self.groups.len() != 1 || group.negated || group.alternatives.len() != 1 {
+            return None;
+        }
+        let alternative = group.alternatives.first()?;
+        if alternative.field != CatalogSearchField::Any {
+            return None;
+        }
+        match &alternative.matcher {
+            CatalogSearchMatch::Prefix(query) => Some(query),
+            CatalogSearchMatch::Exact(_)
+            | CatalogSearchMatch::ScoreGenreGroup
+            | CatalogSearchMatch::Year(_) => None,
+        }
+    }
+
+    fn fts_only_query(&self) -> Option<String> {
+        let group = self.groups.first()?;
+        if self.groups.len() != 1
+            || group.negated
+            || group
+                .alternatives
+                .iter()
+                .any(|alternative| !matches!(alternative.matcher, CatalogSearchMatch::Prefix(_)))
+        {
+            return None;
+        }
+        group_fts_query(group)
     }
 }
 
-fn push_fts_prefix_terms(terms: &mut Vec<String>, input: &str, column: Option<&str>) {
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SearchTokenKind {
+    And,
+    Or,
+    Not,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum SearchToken {
+    Text(String),
+    Operator(SearchTokenKind),
+}
+
+fn push_search_text(tokens: &mut Vec<SearchToken>, value: &mut String) {
+    let value = value.trim();
+    if !value.is_empty() {
+        tokens.push(SearchToken::Text(value.to_owned()));
+    }
+}
+
+fn tokenize_catalog_search(input: &str) -> Result<Vec<SearchToken>, String> {
+    let characters = input.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut value = String::new();
+    let mut quoted = false;
+    let mut index = 0;
+
+    while index < characters.len() {
+        let character = characters[index];
+        if character == '"' {
+            quoted = !quoted;
+            value.push(character);
+            index += 1;
+            continue;
+        }
+        if !quoted && character == ',' {
+            push_search_text(&mut tokens, &mut value);
+            value.clear();
+            tokens.push(SearchToken::Operator(SearchTokenKind::And));
+            index += 1;
+            continue;
+        }
+        let at_word_boundary =
+            index == 0 || characters[index - 1].is_whitespace() || characters[index - 1] == ',';
+        if !quoted && at_word_boundary && character.is_ascii_alphabetic() {
+            let mut end = index;
+            while end < characters.len() && characters[end].is_ascii_alphabetic() {
+                end += 1;
+            }
+            let boundary_after = end == characters.len()
+                || characters[end].is_whitespace()
+                || characters[end] == ',';
+            if boundary_after {
+                let word = characters[index..end].iter().collect::<String>();
+                let operator = match word.as_str() {
+                    "AND" => Some(SearchTokenKind::And),
+                    "OR" => Some(SearchTokenKind::Or),
+                    "NOT" => Some(SearchTokenKind::Not),
+                    _ => None,
+                };
+                if let Some(operator) = operator {
+                    push_search_text(&mut tokens, &mut value);
+                    value.clear();
+                    tokens.push(SearchToken::Operator(operator));
+                    index = end;
+                    continue;
+                }
+            }
+        }
+        value.push(character);
+        index += 1;
+    }
+
+    if quoted {
+        return Err("Search quotes are not closed.".to_owned());
+    }
+    push_search_text(&mut tokens, &mut value);
+    Ok(tokens)
+}
+
+fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "artist" => Some(CatalogSearchField::Artist),
+        "aartist" => Some(CatalogSearchField::AlbumArtist),
+        "album" => Some(CatalogSearchField::Album),
+        "genre" => Some(CatalogSearchField::Genre),
+        "year" => Some(CatalogSearchField::Year),
+        "ryear" => Some(CatalogSearchField::ReleaseYear),
+        "publisher" => Some(CatalogSearchField::Publisher),
+        "title" => Some(CatalogSearchField::Title),
+        _ => None,
+    }
+}
+
+fn build_fts_prefix_query(
+    input: &str,
+    column: Option<&str>,
+    term_count: &mut usize,
+) -> Result<String, String> {
+    let mut terms = Vec::new();
     for term in input
         .split(|character: char| !character.is_alphanumeric())
         .filter(|term| !term.is_empty())
     {
-        if terms.len() >= MAX_FTS_SEARCH_TERMS {
-            break;
+        if *term_count >= MAX_FTS_SEARCH_TERMS {
+            return Err(format!(
+                "Search can contain at most {MAX_FTS_SEARCH_TERMS} words."
+            ));
         }
+        *term_count += 1;
         let bounded: String = term.chars().take(64).collect();
         let escaped = bounded.replace('"', "\"\"");
         let prefix = format!("\"{escaped}\"*");
@@ -485,6 +675,10 @@ fn push_fts_prefix_terms(terms: &mut Vec<String>, input: &str, column: Option<&s
             None => prefix,
         });
     }
+    if terms.is_empty() {
+        return Err("Search needs a word or an exact quoted value.".to_owned());
+    }
+    Ok(terms.join(" AND "))
 }
 
 fn parse_search_year(value: &str, field: &str) -> Result<i32, String> {
@@ -498,62 +692,322 @@ fn parse_search_year(value: &str, field: &str) -> Result<i32, String> {
     Ok(year)
 }
 
-fn set_search_year(target: &mut Option<i32>, year: i32, field: &str) -> Result<(), String> {
-    if target.is_some_and(|current| current != year) {
-        return Err(format!("{field} cannot contain two different years."));
+fn exact_search_value(value: &str) -> Result<Option<String>, String> {
+    let value = value.trim();
+    let starts = value.starts_with('"');
+    let ends = value.ends_with('"');
+    if starts != ends || (!starts && value.contains('"')) {
+        return Err("Quotes must wrap one complete search value.".to_owned());
     }
-    *target = Some(year);
-    Ok(())
+    if !starts {
+        return Ok(None);
+    }
+    let exact = value[1..value.len() - 1].trim();
+    if exact.is_empty() {
+        return Err("Exact search quotes cannot be empty.".to_owned());
+    }
+    Ok(Some(exact.to_owned()))
 }
 
 pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String> {
-    let mut terms = Vec::new();
-    let mut search = CatalogSearch::default();
+    let tokens = tokenize_catalog_search(input)?;
+    let mut groups = Vec::new();
+    let mut current: Option<CatalogSearchGroup> = None;
+    let mut inherited_field = None;
+    let mut pending_not = false;
+    let mut after_or = false;
+    let mut term_count = 0;
+    let mut alternative_count = 0;
 
-    for clause in input
-        .split(',')
-        .map(str::trim)
-        .filter(|clause| !clause.is_empty())
-    {
-        let Some((raw_field, raw_value)) = clause.split_once(':') else {
-            push_fts_prefix_terms(&mut terms, clause, None);
-            continue;
-        };
-        let field = raw_field.trim().to_ascii_lowercase();
-        let column = match field.as_str() {
-            "artist" => Some("display_artist"),
-            "aartist" => Some("album_artist_display"),
-            "album" => Some("album"),
-            "genre" => Some("canonical_genre"),
-            "publisher" => Some("publisher"),
-            "title" => Some("title"),
-            _ => None,
-        };
-        if let Some(column) = column {
-            search.has_fields = true;
-            if raw_value.trim().is_empty() {
-                return Err(format!("{field} needs a search value."));
+    for token in tokens {
+        match token {
+            SearchToken::Text(raw) => {
+                let mut raw = raw.trim();
+                let negative_prefix = raw.starts_with('-');
+                if negative_prefix {
+                    raw = raw[1..].trim();
+                    if raw.is_empty() {
+                        return Err("Negative search needs a value after '-'.".to_owned());
+                    }
+                    if current.is_some() {
+                        return Err(
+                            "Use a comma, AND, or NOT before a negative '-' clause.".to_owned()
+                        );
+                    }
+                }
+                if current.is_none() {
+                    current = Some(CatalogSearchGroup {
+                        negated: pending_not || negative_prefix,
+                        alternatives: Vec::new(),
+                    });
+                    pending_not = false;
+                }
+
+                let (field, value, explicit_field) = raw
+                    .split_once(':')
+                    .and_then(|(field, value)| {
+                        parse_search_field(field).map(|field| (field, value.trim(), true))
+                    })
+                    .unwrap_or((
+                        inherited_field.unwrap_or(CatalogSearchField::Any),
+                        raw,
+                        false,
+                    ));
+                if explicit_field {
+                    inherited_field = Some(field);
+                }
+                if value.is_empty() {
+                    return Err("Search field needs a value.".to_owned());
+                }
+                let exact = exact_search_value(value)?;
+                let matcher = match field {
+                    CatalogSearchField::Year => CatalogSearchMatch::Year(parse_search_year(
+                        exact.as_deref().unwrap_or(value),
+                        "year",
+                    )?),
+                    CatalogSearchField::ReleaseYear => CatalogSearchMatch::Year(parse_search_year(
+                        exact.as_deref().unwrap_or(value),
+                        "ryear",
+                    )?),
+                    CatalogSearchField::Genre
+                        if exact.is_none()
+                            && matches!(
+                                value.to_ascii_lowercase().as_str(),
+                                "score" | "scores"
+                            ) =>
+                    {
+                        CatalogSearchMatch::ScoreGenreGroup
+                    }
+                    _ => match exact {
+                        Some(value) => CatalogSearchMatch::Exact(value),
+                        None => CatalogSearchMatch::Prefix(build_fts_prefix_query(
+                            value,
+                            field.fts_column(),
+                            &mut term_count,
+                        )?),
+                    },
+                };
+                alternative_count += 1;
+                if alternative_count > MAX_SEARCH_ALTERNATIVES {
+                    return Err(format!(
+                        "Search can contain at most {MAX_SEARCH_ALTERNATIVES} alternatives."
+                    ));
+                }
+                current
+                    .as_mut()
+                    .expect("a search value creates a group")
+                    .alternatives
+                    .push(CatalogSearchAlternative { field, matcher });
+                after_or = false;
             }
-            push_fts_prefix_terms(&mut terms, raw_value, Some(column));
-            continue;
-        }
-        match field.as_str() {
-            "year" => {
-                search.has_fields = true;
-                let year = parse_search_year(raw_value, "year")?;
-                set_search_year(&mut search.year, year, "year")?;
+            SearchToken::Operator(SearchTokenKind::Or) => {
+                if current
+                    .as_ref()
+                    .is_none_or(|group| group.alternatives.is_empty())
+                    || after_or
+                {
+                    return Err("OR needs a search value on both sides.".to_owned());
+                }
+                after_or = true;
             }
-            "ryear" => {
-                search.has_fields = true;
-                let year = parse_search_year(raw_value, "ryear")?;
-                set_search_year(&mut search.release_year, year, "ryear")?;
+            SearchToken::Operator(SearchTokenKind::And) => {
+                if after_or {
+                    return Err("OR needs a search value on both sides.".to_owned());
+                }
+                if let Some(group) = current.take() {
+                    groups.push(group);
+                }
+                inherited_field = None;
+                pending_not = false;
             }
-            _ => push_fts_prefix_terms(&mut terms, clause, None),
+            SearchToken::Operator(SearchTokenKind::Not) => {
+                if after_or {
+                    return Err("NOT cannot replace a value after OR.".to_owned());
+                }
+                if let Some(group) = current.take() {
+                    groups.push(group);
+                }
+                inherited_field = None;
+                if pending_not {
+                    return Err("NOT needs one search clause.".to_owned());
+                }
+                pending_not = true;
+            }
         }
     }
+    if after_or {
+        return Err("OR needs a search value on both sides.".to_owned());
+    }
+    if pending_not {
+        return Err("NOT needs one search clause.".to_owned());
+    }
+    if let Some(group) = current {
+        groups.push(group);
+    }
+    Ok(CatalogSearch { groups })
+}
 
-    search.fts_query = (!terms.is_empty()).then(|| terms.join(" AND "));
-    Ok(search)
+const EXACT_TEXT_COLUMNS: [&str; 6] = [
+    "display_artist",
+    "album_artist_display",
+    "album",
+    "canonical_genre",
+    "publisher",
+    "title",
+];
+
+const SCORE_GENRE_GROUP: [&str; 13] = [
+    "action",
+    "animation",
+    "comedy",
+    "documentary",
+    "drama",
+    "fantasy",
+    "horror",
+    "sci-fi",
+    "thriller",
+    "tv",
+    "video game",
+    "western",
+    "anime",
+];
+
+fn exact_text_predicate(
+    alias: &str,
+    field: CatalogSearchField,
+    value: &str,
+    params: &mut Vec<Value>,
+) -> String {
+    if field == CatalogSearchField::Any {
+        return format!(
+            "({})",
+            EXACT_TEXT_COLUMNS
+                .iter()
+                .map(|column| {
+                    params.push(Value::Text(value.to_owned()));
+                    format!("TRIM(COALESCE({alias}.{column}, '')) = ? COLLATE NOCASE")
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        );
+    }
+    let column = field
+        .sql_column()
+        .expect("exact text search uses a text field");
+    params.push(Value::Text(value.to_owned()));
+    format!("TRIM(COALESCE({alias}.{column}, '')) = ? COLLATE NOCASE")
+}
+
+fn non_prefix_predicate(
+    alias: &str,
+    alternative: &CatalogSearchAlternative,
+    params: &mut Vec<Value>,
+) -> Option<String> {
+    match &alternative.matcher {
+        CatalogSearchMatch::Prefix(_) => None,
+        CatalogSearchMatch::Exact(value) => Some(exact_text_predicate(
+            alias,
+            alternative.field,
+            value,
+            params,
+        )),
+        CatalogSearchMatch::ScoreGenreGroup => Some(format!(
+            "LOWER(TRIM(COALESCE({alias}.canonical_genre, ''))) IN ({})",
+            SCORE_GENRE_GROUP
+                .iter()
+                .map(|genre| {
+                    params.push(Value::Text((*genre).to_owned()));
+                    "?"
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        CatalogSearchMatch::Year(year) => {
+            let column = match alternative.field {
+                CatalogSearchField::Year => "year",
+                CatalogSearchField::ReleaseYear => "release_year",
+                _ => unreachable!("numeric search uses a year field"),
+            };
+            params.push(Value::Integer(i64::from(*year)));
+            Some(format!("{alias}.{column} = ?"))
+        }
+    }
+}
+
+fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
+    let queries = group
+        .alternatives
+        .iter()
+        .filter_map(|alternative| match &alternative.matcher {
+            CatalogSearchMatch::Prefix(query) => Some(format!("({query})")),
+            CatalogSearchMatch::Exact(_)
+            | CatalogSearchMatch::ScoreGenreGroup
+            | CatalogSearchMatch::Year(_) => None,
+        })
+        .collect::<Vec<_>>();
+    (!queries.is_empty()).then(|| queries.join(" OR "))
+}
+
+pub(crate) fn push_track_search_predicates(
+    sql: &mut String,
+    params: &mut Vec<Value>,
+    search: &CatalogSearch,
+) {
+    for group in &search.groups {
+        let mut alternatives = Vec::new();
+        if let Some(match_query) = group_fts_query(group) {
+            alternatives.push("t.id IN (SELECT CAST(track_id AS INTEGER) FROM track_search_fts WHERE track_search_fts MATCH ?)".to_owned());
+            params.push(Value::Text(match_query));
+        }
+        alternatives.extend(
+            group
+                .alternatives
+                .iter()
+                .filter_map(|alternative| non_prefix_predicate("t", alternative, params)),
+        );
+        sql.push_str(if group.negated {
+            " AND NOT ("
+        } else {
+            " AND ("
+        });
+        sql.push_str(&alternatives.join(" OR "));
+        sql.push(')');
+    }
+}
+
+pub(crate) fn push_album_search_predicates(
+    sql: &mut String,
+    params: &mut Vec<Value>,
+    search: &CatalogSearch,
+) {
+    for group in &search.groups {
+        let mut alternatives = Vec::new();
+        if let Some(match_query) = group_fts_query(group) {
+            alternatives.push(
+                "a.id IN (SELECT album_id FROM track_search_fts WHERE track_search_fts MATCH ?)"
+                    .to_owned(),
+            );
+            params.push(Value::Text(match_query));
+        }
+        let track_predicates = group
+            .alternatives
+            .iter()
+            .filter_map(|alternative| non_prefix_predicate("search_track", alternative, params))
+            .collect::<Vec<_>>();
+        if !track_predicates.is_empty() {
+            alternatives.push(format!(
+                "a.id IN (SELECT search_track.album_id FROM tracks AS search_track WHERE {})",
+                track_predicates.join(" OR ")
+            ));
+        }
+        sql.push_str(if group.negated {
+            " AND NOT ("
+        } else {
+            " AND ("
+        });
+        sql.push_str(&alternatives.join(" OR "));
+        sql.push(')');
+    }
 }
 
 pub(crate) fn load_search_tracks(
@@ -569,8 +1023,8 @@ pub(crate) fn load_search_tracks(
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
+    let ranked_query = search.fts_only_query();
     let mut params = Vec::<Value>::new();
-    let has_fts = search.fts_query.is_some();
     let mut sql = String::from(
         r#"
         SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -585,29 +1039,20 @@ pub(crate) fn load_search_tracks(
         FROM tracks AS t
         "#,
     );
-    if has_fts {
+    if ranked_query.is_some() {
         sql.push_str(" JOIN track_search_fts ON CAST(track_search_fts.track_id AS INTEGER) = t.id");
     }
     sql.push_str(
         " LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE 1 = 1",
     );
-    if let Some(match_query) = search.fts_query {
+    if let Some(match_query) = ranked_query {
         sql.push_str(" AND track_search_fts MATCH ?");
         params.push(Value::Text(match_query));
-    }
-    if let Some(year) = search.year {
-        sql.push_str(" AND t.year = ?");
-        params.push(Value::Integer(i64::from(year)));
-    }
-    if let Some(year) = search.release_year {
-        sql.push_str(" AND t.release_year = ?");
-        params.push(Value::Integer(i64::from(year)));
-    }
-    sql.push_str(if has_fts {
-        " ORDER BY bm25(track_search_fts), t.id LIMIT 50"
+        sql.push_str(" ORDER BY bm25(track_search_fts), t.id LIMIT 50");
     } else {
-        " ORDER BY t.id DESC LIMIT 50"
-    });
+        push_track_search_predicates(&mut sql, &mut params, &search);
+        sql.push_str(" ORDER BY t.id DESC LIMIT 50");
+    }
     query_tracks(
         &connection,
         &sql,
@@ -962,19 +1407,22 @@ mod tests {
     }
 
     #[test]
-    fn fts_query_quotes_and_bounds_user_terms() {
+    fn fts_query_quotes_boolean_operators_and_bounds_user_terms() {
         assert_eq!(
-            parse_catalog_search("white ner OR star")
+            parse_catalog_search("white ner star")
                 .expect("plain search")
-                .fts_query,
-            Some("\"white\"* AND \"ner\"* AND \"OR\"* AND \"star\"*".to_owned())
+                .plain_fts_query(),
+            Some("\"white\"* AND \"ner\"* AND \"star\"*")
         );
-        assert!(parse_catalog_search("///").expect("punctuation").is_empty());
-        let bounded = parse_catalog_search(&vec!["term"; 40].join(" "))
-            .expect("bounded search")
-            .fts_query
-            .expect("bounded terms");
-        assert_eq!(bounded.split(" AND ").count(), MAX_FTS_SEARCH_TERMS);
+        let alternatives = parse_catalog_search("white ner OR star").expect("OR search");
+        assert_eq!(alternatives.groups.len(), 1);
+        assert_eq!(alternatives.groups[0].alternatives.len(), 2);
+        assert_eq!(
+            alternatives.fts_only_query(),
+            Some("(\"white\"* AND \"ner\"*) OR (\"star\"*)".to_owned())
+        );
+        assert!(parse_catalog_search("///").is_err());
+        assert!(parse_catalog_search(&vec!["term"; 40].join(" ")).is_err());
     }
 
     #[test]
@@ -984,19 +1432,79 @@ mod tests {
         )
         .expect("fielded search");
 
-        assert!(search.has_fields);
-        assert_eq!(search.year, Some(1985));
-        assert_eq!(search.release_year, Some(2025));
-        let fts = search.fts_query.expect("text fields");
-        assert!(fts.contains("display_artist : \"kiss\"*"));
-        assert!(fts.contains("album_artist_display : \"def\"*"));
-        assert!(fts.contains("album : \"love\"*"));
-        assert!(fts.contains("canonical_genre : \"hard\"*"));
-        assert!(fts.contains("publisher : \"la\"*"));
-        assert!(fts.contains("title : \"easy\"*"));
-        assert_eq!(fts.split(" AND ").count(), 13);
+        assert_eq!(search.groups.len(), 8);
+        assert_eq!(
+            search.groups[0].alternatives[0].field,
+            CatalogSearchField::Artist
+        );
+        assert_eq!(
+            search.groups[1].alternatives[0].field,
+            CatalogSearchField::AlbumArtist
+        );
+        assert_eq!(
+            search.groups[4].alternatives[0].matcher,
+            CatalogSearchMatch::Year(1985)
+        );
+        assert_eq!(
+            search.groups[5].alternatives[0].matcher,
+            CatalogSearchMatch::Year(2025)
+        );
         assert!(parse_catalog_search("year:not-a-year").is_err());
         assert!(parse_catalog_search("artist:").is_err());
+    }
+
+    #[test]
+    fn catalog_search_inherits_or_fields_and_negates_groups() {
+        let search = parse_catalog_search(
+            "genre:hard rock OR heavy metal OR AOR NOT aartist:bon jovi OR def leppard OR \"Kiss\"",
+        )
+        .expect("boolean search");
+
+        assert_eq!(search.groups.len(), 2);
+        assert!(!search.groups[0].negated);
+        assert!(search.groups[1].negated);
+        assert!(
+            search.groups[0]
+                .alternatives
+                .iter()
+                .all(|alternative| alternative.field == CatalogSearchField::Genre)
+        );
+        assert!(
+            search.groups[1]
+                .alternatives
+                .iter()
+                .all(|alternative| alternative.field == CatalogSearchField::AlbumArtist)
+        );
+        assert_eq!(
+            search.groups[1].alternatives[2].matcher,
+            CatalogSearchMatch::Exact("Kiss".to_owned())
+        );
+
+        let negative = parse_catalog_search("genre:synthpop,-aartist:madonna")
+            .expect("negative prefix search");
+        assert_eq!(negative.groups.len(), 2);
+        assert!(negative.groups[1].negated);
+        assert!(parse_catalog_search("genre:rock OR").is_err());
+        assert!(parse_catalog_search("aartist:\"Kiss").is_err());
+    }
+
+    #[test]
+    fn catalog_search_expands_the_music_library_scores_group() {
+        let search = parse_catalog_search("genre:scores OR synthpop").expect("scores search");
+        assert_eq!(
+            search.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::ScoreGenreGroup
+        );
+        assert!(matches!(
+            search.groups[0].alternatives[1].matcher,
+            CatalogSearchMatch::Prefix(_)
+        ));
+
+        let exact = parse_catalog_search("genre:\"scores\"").expect("exact scores search");
+        assert_eq!(
+            exact.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::Exact("scores".to_owned())
+        );
     }
 
     #[test]

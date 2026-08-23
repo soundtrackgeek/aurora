@@ -285,8 +285,8 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
   return !query || values.join("\u0000").toLocaleLowerCase().includes(query);
 }
 
-function isFieldedLibrarySearch(search?: string): boolean {
-  return /(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|title)\s*:/iu.test(search ?? "");
+function usesAdvancedLibrarySearch(search?: string): boolean {
+  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|title)\s*:|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
 function previewTrackPage(request: TrackPageRequest): TrackPage {
@@ -320,7 +320,7 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
   const yearFor = (album: AlbumSummary) => request.yearBasis === "original"
     ? (album.originalYear === undefined ? album.releaseYear : album.originalYear)
     : album.releaseYear;
-  const fieldedAlbumIds = isFieldedLibrarySearch(request.search)
+  const fieldedAlbumIds = usesAdvancedLibrarySearch(request.search)
     ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.albumId))
     : null;
   const items = browserAlbumSummaries()
@@ -349,7 +349,7 @@ function previewArtistPage(request: ArtistPageRequest): ArtistPage {
   const genreArtists = request.genre
     ? new Set(browserPreview.tracks.filter((track) => track.genre === request.genre).map((track) => track.artist))
     : null;
-  const fieldedArtists = isFieldedLibrarySearch(request.search)
+  const fieldedArtists = usesAdvancedLibrarySearch(request.search)
     ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.artist))
     : null;
   const items = browserPreview.artists
@@ -407,64 +407,223 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "title";
+
+interface LibrarySearchAlternative {
+  field: LibrarySearchField;
+  value: string;
+  exact: boolean;
+  year: number | null;
+}
+
+interface LibrarySearchGroup {
+  negated: boolean;
+  alternatives: LibrarySearchAlternative[];
+}
+
+type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
+
+const librarySearchFields = new Set<LibrarySearchField>([
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "title",
+]);
+
+const scoreGenreGroup = new Set([
+  "action", "animation", "comedy", "documentary", "drama", "fantasy", "horror",
+  "sci-fi", "thriller", "tv", "video game", "western", "anime",
+]);
+
+function searchTerms(value: string): string[] {
+  return value.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function tokenizeLibrarySearch(input: string): LibrarySearchToken[] {
+  const characters = Array.from(input);
+  const tokens: LibrarySearchToken[] = [];
+  let value = "";
+  let quoted = false;
+  const pushText = () => {
+    const text = value.trim();
+    if (text) tokens.push({ kind: "text", value: text });
+    value = "";
+  };
+
+  for (let index = 0; index < characters.length;) {
+    const character = characters[index];
+    if (character === "\"") {
+      quoted = !quoted;
+      value += character;
+      index += 1;
+      continue;
+    }
+    if (!quoted && character === ",") {
+      pushText();
+      tokens.push({ kind: "and" });
+      index += 1;
+      continue;
+    }
+    const atWordBoundary = index === 0 || /\s/u.test(characters[index - 1]) || characters[index - 1] === ",";
+    if (!quoted && atWordBoundary && /[A-Za-z]/u.test(character)) {
+      let end = index;
+      while (end < characters.length && /[A-Za-z]/u.test(characters[end])) end += 1;
+      const boundaryAfter = end === characters.length || /\s/u.test(characters[end]) || characters[end] === ",";
+      const word = characters.slice(index, end).join("");
+      if (boundaryAfter && (word === "AND" || word === "OR" || word === "NOT")) {
+        pushText();
+        tokens.push({ kind: word.toLocaleLowerCase() as "and" | "or" | "not" });
+        index = end;
+        continue;
+      }
+    }
+    value += character;
+    index += 1;
+  }
+  if (quoted) throw new Error("Search quotes are not closed.");
+  pushText();
+  return tokens;
+}
+
+function exactLibrarySearchValue(value: string): string | null {
+  const trimmed = value.trim();
+  const starts = trimmed.startsWith("\"");
+  const ends = trimmed.endsWith("\"");
+  if (starts !== ends || (!starts && trimmed.includes("\""))) {
+    throw new Error("Quotes must wrap one complete search value.");
+  }
+  if (!starts) return null;
+  const exact = trimmed.slice(1, -1).trim();
+  if (!exact) throw new Error("Exact search quotes cannot be empty.");
+  return exact;
+}
+
+function parseLibrarySearch(query: string): LibrarySearchGroup[] {
+  const groups: LibrarySearchGroup[] = [];
+  let current: LibrarySearchGroup | null = null;
+  let inheritedField: LibrarySearchField | null = null;
+  let pendingNot = false;
+  let afterOr = false;
+  let termCount = 0;
+  let alternativeCount = 0;
+
+  for (const token of tokenizeLibrarySearch(query)) {
+    if (token.kind === "text") {
+      let raw = token.value.trim();
+      const negativePrefix = raw.startsWith("-");
+      if (negativePrefix) {
+        raw = raw.slice(1).trim();
+        if (!raw) throw new Error("Negative search needs a value after '-'.");
+        if (current) throw new Error("Use a comma, AND, or NOT before a negative '-' clause.");
+      }
+      if (!current) {
+        current = { negated: pendingNot || negativePrefix, alternatives: [] };
+        pendingNot = false;
+      }
+      const separator = raw.indexOf(":");
+      const candidateField = separator >= 0 ? raw.slice(0, separator).trim().toLocaleLowerCase() : "";
+      const explicitField = librarySearchFields.has(candidateField as LibrarySearchField);
+      const field: LibrarySearchField = explicitField
+        ? candidateField as LibrarySearchField
+        : (inheritedField ?? "any");
+      const value = explicitField ? raw.slice(separator + 1).trim() : raw;
+      if (explicitField) inheritedField = field;
+      if (!value) throw new Error("Search field needs a value.");
+      const exact = exactLibrarySearchValue(value);
+      let year: number | null = null;
+      if (field === "year" || field === "ryear") {
+        const yearText = exact ?? value;
+        if (!/^\d{4}$/u.test(yearText) || Number(yearText) < 1000 || Number(yearText) > 2999) {
+          throw new Error(`${field} must be a year between 1000 and 2999.`);
+        }
+        year = Number(yearText);
+      } else if (exact === null) {
+        termCount += searchTerms(value).length;
+        if (termCount > 32) throw new Error("Search can contain at most 32 words.");
+        if (searchTerms(value).length === 0) throw new Error("Search needs a word or an exact quoted value.");
+      }
+      alternativeCount += 1;
+      if (alternativeCount > 32) throw new Error("Search can contain at most 32 alternatives.");
+      current.alternatives.push({ field, value: exact ?? value, exact: exact !== null, year });
+      afterOr = false;
+      continue;
+    }
+    if (token.kind === "or") {
+      if (!current || current.alternatives.length === 0 || afterOr) {
+        throw new Error("OR needs a search value on both sides.");
+      }
+      afterOr = true;
+      continue;
+    }
+    if (afterOr) throw new Error(token.kind === "not" ? "NOT cannot replace a value after OR." : "OR needs a search value on both sides.");
+    if (current) groups.push(current);
+    current = null;
+    inheritedField = null;
+    if (token.kind === "not") {
+      if (pendingNot) throw new Error("NOT needs one search clause.");
+      pendingNot = true;
+    } else {
+      pendingNot = false;
+    }
+  }
+  if (afterOr) throw new Error("OR needs a search value on both sides.");
+  if (pendingNot) throw new Error("NOT needs one search clause.");
+  if (current) groups.push(current);
+  return groups;
+}
+
+function librarySearchValues(track: Track, field: LibrarySearchField): string[] {
+  switch (field) {
+    case "artist": return [track.displayArtist ?? track.artist];
+    case "aartist": return [track.artist];
+    case "album": return [track.album];
+    case "genre": return [track.genre ?? ""];
+    case "publisher": return [track.publisher ?? ""];
+    case "title": return [track.title];
+    case "year":
+    case "ryear": return [];
+    default: return [
+      track.title,
+      track.displayArtist ?? track.artist,
+      track.artist,
+      track.album,
+      track.genre ?? "",
+      track.publisher ?? "",
+    ];
+  }
+}
+
+function matchesLibrarySearchAlternative(track: Track, alternative: LibrarySearchAlternative): boolean {
+  if (alternative.field === "year") {
+    return (track.originalYear === undefined ? track.releaseYear : track.originalYear) === alternative.year;
+  }
+  if (alternative.field === "ryear") return track.releaseYear === alternative.year;
+  const values = librarySearchValues(track, alternative.field);
+  if (
+    alternative.field === "genre"
+    && !alternative.exact
+    && (alternative.value.toLocaleLowerCase() === "score" || alternative.value.toLocaleLowerCase() === "scores")
+  ) {
+    return values.some((value) => scoreGenreGroup.has(value.trim().toLocaleLowerCase()));
+  }
+  if (alternative.exact) {
+    const exact = alternative.value.trim().toLocaleLowerCase();
+    return values.some((value) => value.trim().toLocaleLowerCase() === exact);
+  }
+  const queryTerms = searchTerms(alternative.value);
+  return queryTerms.every((term) => values.some((value) => (
+    searchTerms(value).some((valueTerm) => valueTerm.startsWith(term))
+  )));
+}
+
 export function filterTracks(tracks: Track[], query: string, artist: string | null): Track[] {
   const normalized = query.trim();
-  const clauses = normalized
-    .split(",")
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-
-  function terms(value: string): string[] {
-    return value.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  }
-
-  function matchesTerms(value: string, search: string): boolean {
-    const valueTerms = terms(value);
-    const searchTerms = terms(search);
-    return searchTerms.length > 0
-      && searchTerms.every((term) => valueTerms.some((valueTerm) => valueTerm.startsWith(term)));
-  }
-
-  function matchesClause(track: Track, clause: string): boolean {
-    const separator = clause.indexOf(":");
-    if (separator < 0) {
-      const values = [
-        track.title,
-        track.displayArtist ?? track.artist,
-        track.artist,
-        track.album,
-        track.genre ?? "",
-        track.publisher ?? "",
-      ];
-      return terms(clause).every((term) => values.some((value) => (
-        terms(value).some((valueTerm) => valueTerm.startsWith(term))
-      )));
-    }
-    const field = clause.slice(0, separator).trim().toLocaleLowerCase();
-    const value = clause.slice(separator + 1).trim();
-    switch (field) {
-      case "artist": return matchesTerms(track.displayArtist ?? track.artist, value);
-      case "aartist": return matchesTerms(track.artist, value);
-      case "album": return matchesTerms(track.album, value);
-      case "genre": return matchesTerms(track.genre ?? "", value);
-      case "publisher": return matchesTerms(track.publisher ?? "", value);
-      case "title": return matchesTerms(track.title, value);
-      case "year": return /^\d{4}$/.test(value)
-        && (track.originalYear === undefined ? track.releaseYear : track.originalYear) === Number(value);
-      case "ryear": return /^\d{4}$/.test(value) && track.releaseYear === Number(value);
-      default: return matchesTerms([
-        track.title,
-        track.displayArtist ?? track.artist,
-        track.artist,
-        track.album,
-        track.genre ?? "",
-        track.publisher ?? "",
-      ].join(" "), clause);
-    }
-  }
+  const groups = normalized ? parseLibrarySearch(normalized) : [];
 
   return tracks.filter((track) => {
     if (artist && track.artist !== artist) return false;
-    return !normalized || clauses.every((clause) => matchesClause(track, clause));
+    return !normalized || groups.every((group) => {
+      const matched = group.alternatives.some((alternative) => (
+        matchesLibrarySearchAlternative(track, alternative)
+      ));
+      return group.negated ? !matched : matched;
+    });
   });
 }
