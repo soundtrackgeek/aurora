@@ -34,6 +34,7 @@ import {
   type ChartPeriod,
   type ChartScope,
   type ChartSource,
+  type ChartYearBasis,
 } from "../../charts";
 import type { Track } from "../../library";
 import type { LoveState } from "../../tags";
@@ -80,6 +81,7 @@ const initialRequest: ChartPageRequest = {
   period: chartPresets[0],
   selectedYear: 1985,
   selectedWeek: 23,
+  yearBasis: "year",
   limit: 100,
 };
 
@@ -268,6 +270,10 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
     setRequest((current) => ({ ...current, scope }));
   }
 
+  function changeYearBasis(yearBasis: ChartYearBasis) {
+    setRequest((current) => ({ ...current, yearBasis }));
+  }
+
   async function playChart() {
     if (queueBusy) return;
     setQueueBusy(true);
@@ -336,7 +342,7 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
     {loadState !== "ready" || !page ? <Feedback state={loadState} error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : <>
       <section className="chart-ranking" aria-labelledby="chart-ranking-heading">
         <header>
-          <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.scope === "week" ? `Week ${page.request.selectedWeek} · ${formatDate(page.chartDate)}` : `${page.request.period.label} · ranked by position finishes`}</p></div></div>
+          <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `Week ${page.request.selectedWeek} · ${formatDate(page.chartDate)}` : `${page.request.period.label} · ranked by position finishes`}</p></div></div>
           <button type="button" className="button button--primary" disabled={queueBusy || !page.entries.length} onClick={() => void playChart()}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play this chart</button>
         </header>
         <div className="chart-table" role="table" aria-label={page.chartTitle}>
@@ -366,7 +372,16 @@ export function ChartStudio({ onSelectionChange, onSelectTrack, onPlayQueue }: C
       </section> : null}
 
       <section className="chart-score-shelf" aria-labelledby="chart-score-heading">
-        <header><div><h3 id="chart-score-heading">Aurora Album Score <span>· {page.request.period.fromYear === page.request.period.toYear ? page.request.period.fromYear : page.request.period.label}</span></h3><p>Your album chart for the selected period</p></div><button type="button" onClick={() => { changeKind("albums"); changeSource("auroraScore"); }}>View full chart <ChevronRight aria-hidden="true" /></button></header>
+        <header>
+          <div><h3 id="chart-score-heading">Aurora Album Score <span>· {page.request.period.fromYear === page.request.period.toYear ? page.request.period.fromYear : page.request.period.label}</span></h3><p>Using {page.request.yearBasis === "year" ? "Year" : "Release Year"} for the selected period</p></div>
+          <div className="chart-score-shelf__actions">
+            <div className="chart-year-basis" role="group" aria-label="Aurora Score year basis">
+              <button type="button" aria-pressed={page.request.yearBasis === "year"} onClick={() => changeYearBasis("year")}>Year</button>
+              <button type="button" aria-pressed={page.request.yearBasis === "releaseYear"} onClick={() => changeYearBasis("releaseYear")}>Release Year</button>
+            </div>
+            <button type="button" className="chart-score-shelf__open" onClick={() => { changeKind("albums"); changeSource("auroraScore"); }}>View full chart <ChevronRight aria-hidden="true" /></button>
+          </div>
+        </header>
         <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small>{album.artist}</small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
       </section>
     </>}

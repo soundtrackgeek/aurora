@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.5 adds field-aware catalog search with composable track metadata clauses.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.6 makes `Year` the default Aurora Album Score chart lens while keeping `Release Year` available as an explicit option.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.5 slice
+## Current 0.15.6 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -33,7 +33,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A dedicated Charts page above History with Singles and Albums modes, direct weekly drill-down, named period presets, editable custom week ranges, and one-click full-year charts.
 - Historical Official UK, VG Lista, Ti i Skuddet, and Norsktoppen weekly charts plus the catalog's annual Billboard singles and album charts. Unsupported source/type combinations are never presented as data.
 - Calculated period charts rank by number of #1 finishes, then #2 finishes, then each lower position in order; chart points and appearances provide deterministic final tie-breaks.
-- A first-class Aurora Album Score chart and year shelf reuse Music Library's exact numeric formula without converting it to stars.
+- A first-class Aurora Album Score chart and year shelf reuse Music Library's exact numeric formula without converting it to stars, use `Year` by default, and can switch explicitly to `Release Year`.
 - Library-matched chart entries expose real cover art, rating, Love, movement, peak, source history, direct playback, chart-queue playback, and handoff into the ordinary library inspector. Requests and playback queues remain capped at 100 items.
 - Instant Ratings Studio star and Love controls reuse the verified MP3 transaction and Aurora overlay, then refresh only the affected bounded UI. Switching completion lanes does not rerun the full ratings overview.
 - Persistent icon-only device mode: a monitor identifies Desktop Mode, a laptop identifies Laptop Mode, and each computer remembers its own choice in `aurora-device.json` outside the shared state database.

@@ -4,6 +4,7 @@ import { isTauriRuntime, type Track } from "./library";
 export type ChartKind = "singles" | "albums";
 export type ChartSource = "officialUk" | "vgLista" | "tiISkuddet" | "norsktoppen" | "billboard" | "auroraScore";
 export type ChartScope = "week" | "period";
+export type ChartYearBasis = "year" | "releaseYear";
 
 export interface ChartPeriod {
   fromYear: number;
@@ -20,6 +21,7 @@ export interface ChartPageRequest {
   period: ChartPeriod;
   selectedYear: number;
   selectedWeek: number;
+  yearBasis: ChartYearBasis;
   limit: number;
 }
 
@@ -132,11 +134,12 @@ const previewEntries: ChartEntry[] = previewTracks.map((track, index) => ({
 }));
 
 const previewScores: AlbumScoreEntry[] = [
-  { id: "preview-score-rocky", title: "Rocky IV", artist: "Various Artists", originalYear: 1985, releaseYear: 1985, score: 815.0 },
+  { id: "preview-score-rocky", title: "Rocky IV", artist: "Various Artists", originalYear: 1985, releaseYear: 2006, score: 815.0 },
   { id: "preview-score-miami", title: "Miami Vice", artist: "Various Artists", originalYear: 1985, releaseYear: 1985, score: 615.3 },
   { id: "preview-score-back-future", title: "Back to the Future", artist: "Various Artists", originalYear: 1985, releaseYear: 1985, score: 613.8 },
   { id: "preview-score-american-flyers", title: "American Flyers", artist: "Various Artists", originalYear: 1985, releaseYear: 1985, score: 514.8 },
   { id: "preview-score-magnum", title: "On a Storyteller's Night", artist: "Magnum", originalYear: 1985, releaseYear: 1985, score: 416.4 },
+  { id: "preview-score-kind-blue", title: "Kind of Blue", artist: "Miles Davis", originalYear: 1959, releaseYear: 1985, score: 390.2 },
 ];
 
 function previewWeeks(period: ChartPeriod): ChartWeek[] {
@@ -150,8 +153,8 @@ function previewWeeks(period: ChartPeriod): ChartWeek[] {
   return [{ year: period.fromYear, week: period.fromWeek, date: null }, { year: period.toYear, week: period.toWeek, date: null }];
 }
 
-function scoreEntries(): ChartEntry[] {
-  return previewScores.map((album, index) => ({
+function scoreEntries(scores: readonly AlbumScoreEntry[]): ChartEntry[] {
+  return scores.map((album, index) => ({
     position: index + 1,
     sourcePosition: index + 1,
     previousPosition: null,
@@ -183,8 +186,15 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     billboard: "Billboard",
     auroraScore: "Aurora Score",
   };
+  const scoreYear = (album: AlbumScoreEntry) => request.yearBasis === "year" ? album.originalYear : album.releaseYear;
+  const scores = previewScores
+    .filter((album) => {
+      const year = scoreYear(album);
+      return year !== null && year >= request.period.fromYear && year <= request.period.toYear;
+    })
+    .sort((left, right) => right.score - left.score);
   const useScores = request.kind === "albums";
-  const entries = (useScores ? scoreEntries() : previewEntries).map((entry, index) => ({
+  const entries = (useScores ? scoreEntries(scores) : previewEntries).map((entry, index) => ({
     ...entry,
     position: index + 1,
     sourcePosition: index + 1,
@@ -202,7 +212,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     weeks: annualOnly ? [] : previewWeeks(request.period),
     entries,
     totalEntries: entries.length,
-    albumScoreEntries: previewScores,
+    albumScoreEntries: scores.slice(0, 5),
   };
 }
 

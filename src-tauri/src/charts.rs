@@ -34,6 +34,30 @@ pub(crate) enum ChartScope {
     Period,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ChartYearBasis {
+    #[default]
+    Year,
+    ReleaseYear,
+}
+
+impl ChartYearBasis {
+    fn album_column(self) -> &'static str {
+        match self {
+            Self::Year => "a.year",
+            Self::ReleaseYear => "a.release_year",
+        }
+    }
+
+    fn column(self) -> &'static str {
+        match self {
+            Self::Year => "year",
+            Self::ReleaseYear => "release_year",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChartPeriod {
@@ -53,6 +77,8 @@ pub(crate) struct ChartPageRequest {
     pub(crate) period: ChartPeriod,
     pub(crate) selected_year: i32,
     pub(crate) selected_week: u8,
+    #[serde(default)]
+    pub(crate) year_basis: ChartYearBasis,
     pub(crate) limit: usize,
 }
 
@@ -389,30 +415,33 @@ fn annual_select(kind: ChartKind, table: &str) -> String {
     }
 }
 
-fn score_select() -> &'static str {
-    r#"
+fn score_select(year_basis: ChartYearBasis) -> String {
+    let year_column = year_basis.album_column();
+    format!(
+        r#"
     WITH ranked AS MATERIALIZED (
       SELECT a.*,
              ROW_NUMBER() OVER (
-               ORDER BY a.album_score DESC, COALESCE(a.release_year, a.year) DESC,
+               ORDER BY a.album_score DESC, {year_column} DESC,
                         a.album_artist_display COLLATE NOCASE, a.album COLLATE NOCASE, a.id
              ) AS score_rank
       FROM albums AS a
       WHERE a.album_score IS NOT NULL
-        AND COALESCE(a.release_year, a.year) BETWEEN :from_year AND :to_year
+        AND {year_column} BETWEEN :from_year AND :to_year
     )
-    SELECT COALESCE(a.release_year, a.year), NULL, a.score_rank,
+    SELECT {year_column}, NULL, a.score_rank,
            COALESCE(NULLIF(a.album_artist_display, ''), 'Unknown Artist'),
            COALESCE(NULLIF(a.album, ''), 'Unknown Album'),
            lower(trim(COALESCE(a.album_artist_display, ''))), lower(trim(COALESCE(a.album, ''))),
            NULL, NULL, NULL, NULL, a.id, a.id,
            CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
            CASE WHEN a.loved_tracks > 0 THEN 1 ELSE 0 END, a.album_score,
-           CAST(COALESCE(a.release_year, a.year) AS TEXT)
+           CAST({year_column} AS TEXT)
     FROM ranked AS a
     ORDER BY a.score_rank
     LIMIT 100
-    "#
+    "#,
+    )
 }
 
 fn query_rows(
@@ -424,7 +453,7 @@ fn query_rows(
     let sql = match shape {
         SourceShape::Weekly => weekly_select(request.kind, request.source, table),
         SourceShape::Annual => annual_select(request.kind, table),
-        SourceShape::Score => score_select().to_owned(),
+        SourceShape::Score => score_select(request.year_basis),
     };
     let mut statement = connection
         .prepare(&sql)
@@ -643,20 +672,22 @@ fn entries_from_rows(
 fn query_album_scores(
     connection: &Connection,
     period: &ChartPeriod,
+    year_basis: ChartYearBasis,
 ) -> Result<Vec<AlbumScoreEntry>, String> {
+    let year_column = year_basis.column();
     let mut statement = connection
-        .prepare_cached(
+        .prepare(&format!(
             r#"
             SELECT id, COALESCE(NULLIF(album, ''), 'Unknown Album'),
                    COALESCE(NULLIF(album_artist_display, ''), 'Unknown Artist'),
                    year, release_year, album_score
             FROM albums
             WHERE album_score IS NOT NULL
-              AND COALESCE(release_year, year) BETWEEN :from_year AND :to_year
+              AND {year_column} BETWEEN :from_year AND :to_year
             ORDER BY album_score DESC, album COLLATE NOCASE, id
             LIMIT 5
             "#,
-        )
+        ))
         .map_err(|error| format!("Could not prepare the Aurora Score shelf: {error}"))?;
     statement
         .query_map(
@@ -708,7 +739,7 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     let chart_date = rows.first().and_then(|row| row.chart_date.clone());
     let weeks = query_weeks(connection, &request)?;
     let (entries, total_entries) = entries_from_rows(rows, effective_scope, request.limit);
-    let album_score_entries = query_album_scores(connection, &request.period)?;
+    let album_score_entries = query_album_scores(connection, &request.period, request.year_basis)?;
     let mut response_request = request;
     response_request.scope = effective_scope;
     Ok(ChartPage {
@@ -786,17 +817,17 @@ fn query_matching_ranks(
               SELECT lower(trim(COALESCE(album_artist_display, ''))) AS artist_key,
                      lower(trim(COALESCE(album, ''))) AS title_key,
                      ROW_NUMBER() OVER (
-                       ORDER BY album_score DESC, COALESCE(release_year, year) DESC,
+                       ORDER BY album_score DESC, {year_column} DESC,
                                 album_artist_display COLLATE NOCASE, album COLLATE NOCASE, id
                      ) AS rank
               FROM albums
               WHERE album_score IS NOT NULL
-                AND COALESCE(release_year, year) BETWEEN :from_year AND :to_year
+                AND {year_column} BETWEEN :from_year AND :to_year
             )
             SELECT rank FROM ranked
             WHERE artist_key = :artist_key AND title_key = :title_key
             "#
-        .to_owned(),
+        .replace("{year_column}", page.year_basis.column()),
     };
     let mut statement = connection
         .prepare(&sql)
@@ -1071,12 +1102,104 @@ mod tests {
             },
             selected_year: 1985,
             selected_week: 23,
+            year_basis: ChartYearBasis::Year,
             limit: 100,
         };
         assert!(validate_request(&request).is_err());
         request.source = ChartSource::OfficialUk;
         request.period.to_year = 2026;
         assert!(validate_request(&request).is_err());
+    }
+
+    fn score_request(year_basis: ChartYearBasis) -> ChartPageRequest {
+        ChartPageRequest {
+            kind: ChartKind::Albums,
+            source: ChartSource::AuroraScore,
+            scope: ChartScope::Period,
+            period: ChartPeriod {
+                from_year: 1985,
+                from_week: 1,
+                to_year: 1985,
+                to_week: 53,
+                label: "1985".to_owned(),
+            },
+            selected_year: 1985,
+            selected_week: 1,
+            year_basis,
+            limit: 100,
+        }
+    }
+
+    fn score_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("score database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE albums (
+                  id TEXT PRIMARY KEY,
+                  album TEXT,
+                  album_artist_display TEXT,
+                  year INTEGER,
+                  release_year INTEGER,
+                  album_score REAL,
+                  effective_album_rating INTEGER,
+                  calculated_album_rating INTEGER,
+                  album_rating INTEGER,
+                  loved_tracks INTEGER NOT NULL
+                );
+                INSERT INTO albums VALUES
+                  ('year-match', 'Year Match', 'Test Artist', 1985, 2005, 1000, 100, NULL, NULL, 1),
+                  ('release-match', 'Release Match', 'Test Artist', 1975, 1985, 900, 80, NULL, NULL, 0);
+                "#,
+            )
+            .expect("score fixtures");
+        connection
+    }
+
+    #[test]
+    fn aurora_score_defaults_to_year_and_can_use_release_year() {
+        assert_eq!(ChartYearBasis::default(), ChartYearBasis::Year);
+        let connection = score_connection();
+        let year_request = score_request(ChartYearBasis::Year);
+        let year_rows = query_rows(&connection, &year_request).expect("Year chart");
+        assert_eq!(
+            year_rows
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Year Match"]
+        );
+        let year_shelf =
+            query_album_scores(&connection, &year_request.period, ChartYearBasis::Year)
+                .expect("Year shelf");
+        assert_eq!(year_shelf[0].id, "year-match");
+        assert_eq!(
+            query_matching_ranks(&connection, &year_request, "test artist", "year match")
+                .expect("Year source rank"),
+            vec![1]
+        );
+
+        let release_request = score_request(ChartYearBasis::ReleaseYear);
+        let release_rows = query_rows(&connection, &release_request).expect("Release Year chart");
+        assert_eq!(
+            release_rows
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Release Match"]
+        );
+        let release_shelf = query_album_scores(
+            &connection,
+            &release_request.period,
+            ChartYearBasis::ReleaseYear,
+        )
+        .expect("Release Year shelf");
+        assert_eq!(release_shelf[0].id, "release-match");
+        assert!(
+            query_matching_ranks(&connection, &release_request, "test artist", "year match")
+                .expect("Release Year source rank")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1097,6 +1220,7 @@ mod tests {
             },
             selected_year: 1985,
             selected_week: 23,
+            year_basis: ChartYearBasis::Year,
             limit: 100,
         };
         let weekly = query_page(&connection, base.clone()).expect("weekly chart");

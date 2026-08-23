@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-08-23
+
+### Fixed
+
+- Aurora Album Score charts and the score shelf now use the catalog `Year` field by default instead of substituting `Release Year`.
+
+### Added
+
+- Charts can optionally switch Aurora Album Score period filtering to `Release Year`; the active basis is shown beside the score shelf and in the full chart summary.
+
 ## [0.15.5] - 2026-08-23
 
 ### Added

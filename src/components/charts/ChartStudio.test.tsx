@@ -52,6 +52,20 @@ describe("ChartStudio", () => {
     expect(screen.getByRole("tab", { name: /Aurora Score/i })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("uses Year for Aurora Score by default and offers Release Year", async () => {
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+
+    expect(screen.getByRole("button", { name: "Year" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Rocky IV")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Release Year" }));
+
+    expect(await screen.findByText("Kind of Blue")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release Year" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Rocky IV")).not.toBeInTheDocument();
+  });
+
   it("accepts a custom week range", async () => {
     renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });

@@ -16,6 +16,7 @@ Billboard is annual-only in the current catalog. Aurora therefore disables exact
 - Exact week selects one ISO year/week from a weekly source.
 - A named preset or custom range includes every source row from its inclusive first ISO week through its inclusive last ISO week.
 - Clicking the displayed year builds an inclusive week 1–53 period for that year.
+- Aurora Album Score filters the catalog's distinct `year` field by default. Its explicit Release Year option filters `release_year` instead; neither basis falls back to the other when its selected field is missing.
 - Requests may span at most 20 years and return at most 100 entries.
 
 ## Period ranking
