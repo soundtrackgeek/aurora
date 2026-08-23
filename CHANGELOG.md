@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.8] - 2026-08-23
+
+### Fixed
+
+- Rust search tokenization now accepts a string slice instead of an unnecessarily mutable `String` reference, satisfying the release workflow's warnings-as-errors Clippy gate.
+
 ## [0.15.7] - 2026-08-23
 
 ### Added

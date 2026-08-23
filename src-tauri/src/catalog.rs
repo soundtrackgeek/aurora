@@ -570,7 +570,7 @@ enum SearchToken {
     Operator(SearchTokenKind),
 }
 
-fn push_search_text(tokens: &mut Vec<SearchToken>, value: &mut String) {
+fn push_search_text(tokens: &mut Vec<SearchToken>, value: &str) {
     let value = value.trim();
     if !value.is_empty() {
         tokens.push(SearchToken::Text(value.to_owned()));
@@ -593,7 +593,7 @@ fn tokenize_catalog_search(input: &str) -> Result<Vec<SearchToken>, String> {
             continue;
         }
         if !quoted && character == ',' {
-            push_search_text(&mut tokens, &mut value);
+            push_search_text(&mut tokens, &value);
             value.clear();
             tokens.push(SearchToken::Operator(SearchTokenKind::And));
             index += 1;
@@ -618,7 +618,7 @@ fn tokenize_catalog_search(input: &str) -> Result<Vec<SearchToken>, String> {
                     _ => None,
                 };
                 if let Some(operator) = operator {
-                    push_search_text(&mut tokens, &mut value);
+                    push_search_text(&mut tokens, &value);
                     value.clear();
                     tokens.push(SearchToken::Operator(operator));
                     index = end;
@@ -633,7 +633,7 @@ fn tokenize_catalog_search(input: &str) -> Result<Vec<SearchToken>, String> {
     if quoted {
         return Err("Search quotes are not closed.".to_owned());
     }
-    push_search_text(&mut tokens, &mut value);
+    push_search_text(&mut tokens, &value);
     Ok(tokens)
 }
 

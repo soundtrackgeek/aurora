@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.7 adds boolean, negative, exact, and inherited-field catalog search plus the Music Library `scores` genre umbrella.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.15.8 keeps the 0.15.7 boolean, negative, exact, inherited-field, and `scores` search release while restoring warnings-as-errors Rust CI compatibility.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.15.7 slice
+## Current 0.15.8 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
