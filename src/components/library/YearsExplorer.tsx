@@ -53,7 +53,20 @@ const PLOT_RIGHT = 872;
 const TOP_BASELINE = 118;
 const BOTTOM_BASELINE = 350;
 
-function albumAsTrack(album: YearAlbum): Track {
+interface AlbumInspectorAlbum {
+  id: string;
+  title: string;
+  artist: string;
+  originalYear?: number | null;
+  releaseYear: number | null;
+  totalTracks: number;
+  lovedTracks: number;
+  durationSeconds: number | null;
+  genre: string | null;
+  rating: number | null;
+}
+
+function albumAsTrack(album: AlbumInspectorAlbum): Track {
   return {
     id: `year-album:${album.id}`,
     trackKey: `year-album:${album.id}`,
@@ -342,7 +355,7 @@ function YearsToolbar({ mode, stats, onModeChange }: { mode: YearsMode; stats: Y
   </header>;
 }
 
-export function YearAlbumInspector({ album, busy, onPlay }: { album: YearAlbum; busy: boolean; onPlay: (album: YearAlbum) => void }) {
+export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy, onPlay }: { album: T; busy: boolean; onPlay: (album: T) => void }) {
   return <div className="year-album-inspector">
     <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
     <div className="year-album-inspector__heading"><div><h2>{album.title}</h2><p>{album.artist}</p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>

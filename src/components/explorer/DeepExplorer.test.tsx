@@ -7,6 +7,7 @@ import {
   type ExplorerAlbum,
   type ExplorerFilters,
 } from "./DeepExplorer";
+import { resolveExplorerAlbumInspectorContext } from "./inspectorContext";
 
 const tracks: Track[] = [
   {
@@ -106,6 +107,28 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it("keeps album, track, and artist inspector context on the selected album", () => {
+    const staleTrack: Track = {
+      ...tracks[0],
+      id: "stale-track",
+      trackKey: "file:stale-track",
+      albumId: "another-album",
+      artist: "Another Artist",
+      album: "Another Album",
+    };
+
+    expect(resolveExplorerAlbumInspectorContext(albums, "album-1", tracks, staleTrack)).toEqual({
+      album: albums[0],
+      track: tracks[0],
+      artistName: "Aurora Lines",
+    });
+    expect(resolveExplorerAlbumInspectorContext(albums, "album-1", [], staleTrack)).toEqual({
+      album: albums[0],
+      track: null,
+      artistName: "Aurora Lines",
+    });
+  });
+
   it.each(["tracks", "albums", "artists"] as const)("keeps only Sort and Reset in the %s filter bar", (view) => {
     const onClearFilters = vi.fn();
     render(<DeepExplorer {...explorerProps({ view, onClearFilters })} />);

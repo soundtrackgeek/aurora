@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.15.15] - 2026-08-23
+
+### Fixed
+
+- Selecting an album in Albums now makes the right inspector show that album, a track from that album, and the album artist across the Album, Track, and Artist tabs instead of leaking older selections from other pages.
+
 ## [0.15.14] - 2026-08-23
 
 ### Changed

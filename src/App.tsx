@@ -41,6 +41,7 @@ import {
   type ExplorerSort,
   type ExplorerView,
 } from "./components/explorer/DeepExplorer";
+import { resolveExplorerAlbumInspectorContext } from "./components/explorer/inspectorContext";
 import { ArtistWorld, type ArtistWorldState } from "./components/musicbrainz/ArtistWorld";
 import { Observatory, type ObservatoryLoadState } from "./components/curation/Observatory";
 import {
@@ -1675,13 +1676,17 @@ function App() {
 
   function selectAlbum(album: ExplorerAlbum | null) {
     const requestId = ++albumRequestRef.current;
+    artistRequestRef.current += 1;
     setSelectedAlbumId(album?.id ?? null);
     setAlbumTracks([]);
     setAlbumTracksTruncated(false);
     if (!album) {
       setAlbumDetailState("ready");
+      setInspectorView("track");
       return;
     }
+    setSelectedTrack(null);
+    setInspectorView("album");
     setAlbumDetailState("loading");
     void loadAlbumDetail(album.id)
       .then((detail) => {
@@ -1689,6 +1694,7 @@ function App() {
         setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? detail.album : candidate));
         setAlbumTracks(detail.tracks);
         setAlbumTracksTruncated(detail.tracksTruncated);
+        setSelectedTrack(detail.tracks[0] ?? null);
         setAlbumDetailState("ready");
       })
       .catch((error: unknown) => {
@@ -1696,6 +1702,23 @@ function App() {
         console.warn("Aurora could not open album details", error);
         setAlbumDetailState("error");
       });
+  }
+
+  async function playExplorerAlbum(album: ExplorerAlbum) {
+    try {
+      const tracks = selectedAlbumId === album.id && albumTracks.length > 0
+        ? albumTracks
+        : (await loadAlbumDetail(album.id)).tracks;
+      if (tracks.length === 0) {
+        setSyncMessage(`${album.title} has no playable tracks in the bounded album detail.`);
+        return;
+      }
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (next) selectTrack(tracks[0]);
+    } catch (error) {
+      setSyncMessage(`Could not play ${album.title}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async function loadMoreExplorerResults() {
@@ -1774,6 +1797,22 @@ function App() {
   function submitSearch(event: FormEvent) {
     event.preventDefault();
   }
+
+  const explorerAlbumInspectorContext = activeNav === "Albums" && explorerView === "albums"
+    ? resolveExplorerAlbumInspectorContext(explorerAlbums, selectedAlbumId, albumTracks, selectedTrack)
+    : null;
+  const inspectorTrack = explorerAlbumInspectorContext
+    ? explorerAlbumInspectorContext.track
+    : selectedTrack;
+  const inspectorAlbumAvailable = Boolean(
+    explorerAlbumInspectorContext
+    || (activeNav === "Years" && selectedYearAlbum)
+    || (activeNav === "Ratings" && selectedRatingAlbum)
+    || (activeNav === "Charts" && chartSelection?.kind === "albums"),
+  );
+  const inspectorArtistCandidate = explorerAlbumInspectorContext?.artistName
+    ?? inspectorTrack?.artist
+    ?? inspectorArtistName;
 
   const explorerLoaded = explorerView === "tracks"
     ? explorerTracks.length
@@ -1888,7 +1927,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.15.14</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.15.15</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2169,15 +2208,15 @@ function App() {
         data-cover-size={activeDisplayPreferences.coverSize}
       >
         <div className="inspector-tabs" role="tablist" aria-label="Library details">
-          <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!selectedTrack} onClick={() => setInspectorView("track")}>Track</button>
-          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!selectedYearAlbum && !selectedRatingAlbum && !(activeNav === "Charts" && chartSelection?.kind === "albums")} onClick={() => setInspectorView("album")}>Album</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "track"} disabled={!inspectorTrack} onClick={() => setInspectorView("track")}>Track</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "album"} disabled={!inspectorAlbumAvailable} onClick={() => setInspectorView("album")}>Album</button>
           <button
             type="button"
             role="tab"
             aria-selected={inspectorView === "artist"}
-            disabled={!selectedTrack && !inspectorArtistName}
+            disabled={!inspectorArtistCandidate}
             onClick={() => {
-              const artistName = selectedTrack?.artist ?? inspectorArtistName;
+              const artistName = explorerAlbumInspectorContext?.artistName ?? inspectorTrack?.artist ?? inspectorArtistName;
               if (artistName) openArtistInspector(artistName);
             }}
           >Artist</button>
@@ -2195,11 +2234,19 @@ function App() {
               onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
             />
           </div>
+        ) : inspectorView === "album" && explorerAlbumInspectorContext ? (
+          <div className="inspector-scroll">
+            <YearAlbumInspector
+              album={explorerAlbumInspectorContext.album}
+              busy={albumDetailState === "loading"}
+              onPlay={(album) => void playExplorerAlbum(album)}
+            />
+          </div>
         ) : inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
           <div className="inspector-scroll">
             <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} />
           </div>
-        ) : inspectorView === "album" && selectedYearAlbum ? (
+        ) : inspectorView === "album" && activeNav === "Years" && selectedYearAlbum ? (
           <div className="inspector-scroll">
             <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} />
           </div>
@@ -2220,22 +2267,22 @@ function App() {
               onReleaseDecision={(request) => void applyReleaseDecision(request)}
             />
           </div>
-        ) : selectedTrack ? (
+        ) : inspectorTrack ? (
           <div className="inspector-scroll">
-            <Artwork track={selectedTrack} size="large" />
+            <Artwork track={inspectorTrack} size="large" />
             <div className="track-hero-copy">
-              <div><h2>{selectedTrack.title}</h2><p>{selectedTrack.artist}</p><span>{selectedTrack.album}</span></div>
-              <button type="button" className="inspector-play" onClick={() => playTrack(selectedTrack)}><Play aria-hidden="true" /> Play</button>
+              <div><h2>{inspectorTrack.title}</h2><p>{inspectorTrack.artist}</p><span>{inspectorTrack.album}</span></div>
+              <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
-              <div><dt>Genre</dt><dd>{selectedTrack.genre ?? "Unknown"}</dd></div>
-              <div><dt>Last.fm popularity</dt><dd>{selectedTrack.playCount === null ? "—" : formatCount(selectedTrack.playCount)}</dd></div>
-              <div><dt>Duration</dt><dd>{formatDuration(selectedTrack.durationSeconds)}</dd></div>
-              <div><dt>Your registered plays</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? formatCount(trackHistory.value.plays) : "—"}</dd></div>
-              <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
-              <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === selectedTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
+              <div><dt>Genre</dt><dd>{inspectorTrack.genre ?? "Unknown"}</dd></div>
+              <div><dt>Last.fm popularity</dt><dd>{inspectorTrack.playCount === null ? "—" : formatCount(inspectorTrack.playCount)}</dd></div>
+              <div><dt>Duration</dt><dd>{formatDuration(inspectorTrack.durationSeconds)}</dd></div>
+              <div><dt>Your registered plays</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatCount(trackHistory.value.plays) : "—"}</dd></div>
+              <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
+              <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
-            <TagEditor key={`${selectedTrack.id}:${inlineTagRevisions[selectedTrack.trackKey] ?? 0}`} track={selectedTrack} onTrackChange={applyTrackChange} />
+            <TagEditor key={`${inspectorTrack.id}:${inlineTagRevisions[inspectorTrack.trackKey] ?? 0}`} track={inspectorTrack} onTrackChange={applyTrackChange} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
           </div>
         ) : <EmptyInspector />}
