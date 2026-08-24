@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime, updateBrowserPreviewTrack, type Track } from "./library";
+import {
+  browserPreview,
+  currentBrowserPreviewTrack,
+  isTauriRuntime,
+  updateBrowserPreviewTrack,
+  type Track,
+} from "./library";
 
 export type LoveState = "neutral" | "loved" | "banned";
 
@@ -45,8 +51,227 @@ export interface TagReconciliationReport {
   issues: TagReconciliationIssue[];
 }
 
+export type TagEditorTarget =
+  | { kind: "track"; trackId: string; trackKey: string; label: string }
+  | { kind: "album"; albumId: string; label: string };
+
+export const EDITABLE_TAG_FIELDS = [
+  "albumArtist",
+  "artist",
+  "album",
+  "title",
+  "genre",
+  "publisher",
+  "rating",
+  "year",
+  "releaseYear",
+  "trackNumber",
+  "trackTotal",
+  "discNumber",
+  "discTotal",
+] as const;
+
+export type EditableTagField = (typeof EDITABLE_TAG_FIELDS)[number];
+
+export interface EditableTagValues {
+  albumArtist: string | null;
+  artist: string | null;
+  album: string | null;
+  title: string | null;
+  genre: string | null;
+  publisher: string | null;
+  rating: number | null;
+  year: number | null;
+  releaseYear: number | null;
+  trackNumber: number | null;
+  trackTotal: number | null;
+  discNumber: number | null;
+  discTotal: number | null;
+}
+
+export interface TagEditorTrackState {
+  trackId: string;
+  trackKey: string;
+  revision: string;
+  values: EditableTagValues;
+}
+
+export interface TagEditorSnapshot {
+  tracks: TagEditorTrackState[];
+}
+
+export interface TagEditorUpdateResult {
+  state: TagEditorSnapshot;
+  tracks: Track[];
+  catalogSync?: {
+    status: "synced" | "pending";
+    message?: string | null;
+  };
+}
+
+export type EditableTagAggregation = {
+  [Field in EditableTagField]: {
+    value: EditableTagValues[Field];
+    mixed: boolean;
+  };
+};
+
+type PreviewEditableTrack = Track & {
+  trackNumber?: number | null;
+  trackTotal?: number | null;
+  discNumber?: number | null;
+  discTotal?: number | null;
+};
+
 const browserUndo = new Map<string, Track>();
 const browserTracks = new Map<string, Track>();
+const browserEditableValues = new Map<string, EditableTagValues>();
+const browserTagRevisions = new Map<string, number>();
+
+function nullableText(value: string | null | undefined): string | null {
+  return value?.trim() ? value : null;
+}
+
+export function editableTagValuesForTrack(track: Track): EditableTagValues {
+  const editableTrack = track as PreviewEditableTrack;
+  return {
+    albumArtist: nullableText(track.artist),
+    // Browser preview has no raw TPE1 field, so its display artist is the closest faithful stand-in.
+    artist: nullableText(track.displayArtist ?? track.artist),
+    album: nullableText(track.album),
+    title: nullableText(track.title),
+    genre: nullableText(track.genre),
+    publisher: nullableText(track.publisher),
+    rating: track.rating,
+    year: track.originalYear ?? null,
+    releaseYear: track.releaseYear,
+    trackNumber: editableTrack.trackNumber ?? null,
+    trackTotal: editableTrack.trackTotal ?? null,
+    discNumber: editableTrack.discNumber ?? null,
+    discTotal: editableTrack.discTotal ?? null,
+  };
+}
+
+export function aggregateEditableTagValues(tracks: TagEditorTrackState[]): EditableTagAggregation {
+  return Object.fromEntries(EDITABLE_TAG_FIELDS.map((field) => {
+    const first = tracks[0]?.values[field] ?? null;
+    return [field, {
+      value: first,
+      mixed: tracks.some((track) => !Object.is(track.values[field], first)),
+    }];
+  })) as EditableTagAggregation;
+}
+
+function browserValuesForTrack(track: Track): EditableTagValues {
+  return browserEditableValues.get(track.id) ?? editableTagValuesForTrack(track);
+}
+
+function syncInlineBrowserValues(track: Track): void {
+  const values = browserEditableValues.get(track.id);
+  if (!values) return;
+  browserEditableValues.set(track.id, {
+    ...values,
+    rating: track.rating,
+    releaseYear: track.releaseYear,
+  });
+}
+
+function bumpBrowserRevision(trackId: string): void {
+  browserTagRevisions.set(trackId, (browserTagRevisions.get(trackId) ?? 0) + 1);
+}
+
+function browserRevision(track: Track): string {
+  return `preview:${track.trackKey}:${browserTagRevisions.get(track.id) ?? 0}`;
+}
+
+function browserTracksForTarget(target: TagEditorTarget): Track[] {
+  const matches = browserPreview.tracks
+    .map((track) => browserTracks.get(track.id) ?? currentBrowserPreviewTrack(track))
+    .filter((track) => target.kind === "album"
+      ? track.albumId === target.albumId
+      : track.id === target.trackId && track.trackKey === target.trackKey);
+  if (!matches.length) throw new Error(`${target.kind === "album" ? "Album" : "Track"} is no longer available.`);
+  return matches;
+}
+
+function browserTagEditorSnapshot(target: TagEditorTarget): TagEditorSnapshot {
+  return {
+    tracks: browserTracksForTarget(target).map((track) => ({
+      trackId: track.id,
+      trackKey: track.trackKey,
+      revision: browserRevision(track),
+      values: { ...browserValuesForTrack(track) },
+    })),
+  };
+}
+
+function trackWithEditableTagValues(
+  track: Track,
+  fields: readonly EditableTagField[],
+  values: EditableTagValues,
+): Track {
+  const updated: PreviewEditableTrack = { ...track };
+  const selected = new Set(fields);
+  if (selected.has("albumArtist")) updated.artist = values.albumArtist ?? "";
+  if (selected.has("artist")) updated.displayArtist = values.artist ?? "";
+  if (selected.has("album")) updated.album = values.album ?? "";
+  if (selected.has("title")) updated.title = values.title ?? "";
+  if (selected.has("genre")) updated.genre = values.genre;
+  if (selected.has("publisher")) updated.publisher = values.publisher;
+  if (selected.has("rating")) updated.rating = values.rating;
+  if (selected.has("year")) updated.originalYear = values.year;
+  if (selected.has("releaseYear")) updated.releaseYear = values.releaseYear;
+  if (selected.has("trackNumber")) updated.trackNumber = values.trackNumber;
+  if (selected.has("trackTotal")) updated.trackTotal = values.trackTotal;
+  if (selected.has("discNumber")) updated.discNumber = values.discNumber;
+  if (selected.has("discTotal")) updated.discTotal = values.discTotal;
+  updated.tagSyncState = "pendingImport";
+  return updated;
+}
+
+export async function readTagEditorState(target: TagEditorTarget): Promise<TagEditorSnapshot> {
+  if (!isTauriRuntime()) return browserTagEditorSnapshot(target);
+  return invoke<TagEditorSnapshot>("tag_editor_state", { target });
+}
+
+export async function updateTagEditor(
+  target: TagEditorTarget,
+  expected: TagEditorSnapshot,
+  fields: EditableTagField[],
+  values: EditableTagValues,
+): Promise<TagEditorUpdateResult> {
+  if (!isTauriRuntime()) {
+    const current = browserTagEditorSnapshot(target);
+    if (JSON.stringify(current) !== JSON.stringify(expected)) {
+      throw new Error("One or more preview files changed after the editor opened. Refresh before saving.");
+    }
+    const updatedTracks = browserTracksForTarget(target).map((track) => {
+      const currentValues = browserValuesForTrack(track);
+      const desired = { ...currentValues };
+      for (const field of fields) {
+        (desired[field] as EditableTagValues[typeof field]) = values[field];
+      }
+      browserEditableValues.set(track.id, desired);
+      const updated = {
+        ...trackWithEditableTagValues(track, fields, desired),
+        // The browser preview models a successful companion receipt immediately.
+        tagSyncState: null,
+      };
+      browserTracks.set(track.id, updated);
+      updateBrowserPreviewTrack(updated);
+      bumpBrowserRevision(track.id);
+      return updated;
+    });
+    return {
+      state: browserTagEditorSnapshot(target),
+      tracks: updatedTracks,
+      catalogSync: { status: "synced" },
+    };
+  }
+  return invoke<TagEditorUpdateResult>("update_tag_editor", {
+    request: { target, expected, fields, values },
+  });
+}
 
 export function tagValuesForTrack(track: Track): TagValues {
   return {
@@ -109,6 +334,8 @@ export async function updateTrackTags(
     browserUndo.set(track.id, current);
     const updated = trackWithTagValues(current, desired);
     browserTracks.set(track.id, updated);
+    syncInlineBrowserValues(updated);
+    bumpBrowserRevision(track.id);
     updateBrowserPreviewTrack(updated);
     return browserSnapshot(updated);
   }
@@ -124,6 +351,8 @@ export async function undoTrackTagEdit(track: Track): Promise<TrackTagSnapshot> 
     browserUndo.delete(track.id);
     const restored = { ...previous, canUndoTagEdit: false, tagSyncState: null };
     browserTracks.set(track.id, restored);
+    syncInlineBrowserValues(restored);
+    bumpBrowserRevision(track.id);
     updateBrowserPreviewTrack(restored);
     return browserSnapshot(restored);
   }

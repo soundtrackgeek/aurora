@@ -4,6 +4,22 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-24
+
+### Added
+
+- A MusicBee-style vertical **Tags** inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- Track-wide and album-wide editing with shared-value aggregation, explicit **Mixed** states, checked-field write intent, and checked blank values for deliberate tag removal while preserving Music Library's required Album Artist, Album, and Track Title identity fields.
+- Full-batch stale-revision preflight, same-folder atomic MP3 replacement, per-file verification, earlier-file rollback on later failure, and full editable-tag metadata in Aurora's durable recovery journal.
+- A companion `syncExistingFolders` bridge operation in Music Library `0.144.0` for guarded reimport of already-cataloged album folders after Aurora writes their MP3 tags.
+
+### Changed
+
+- Aurora now reads editable values directly from each selected MP3 and projects verified saves into the current views immediately; album selections are bounded at 500 tracks.
+- Post-save catalog synchronization requires stable album identity and a zero add/remove delta. A helper failure never misreports the MP3 write: the editor confirms the verified file save, durably retains every affected folder, and retries the pending synchronization on startup, focus, and later saves.
+- The tag writer now preserves unselected ID3 frames and audio bytes while supporting both ID3v2.3 and ID3v2.4 year/release-year conventions, MusicBee POPM ratings, `DISPLAY ARTIST` overrides that leave the underlying performer credits untouched, multi-value Album Artist credits, and coupled track/disc number pairs.
+- A MusicBee POPM byte of `0` is read as unrated. Aurora continues to write only supported half-star values or removes its MusicBee POPM frame when clearing a rating.
+
 ## [0.16.0] - 2026-08-24
 
 ### Added

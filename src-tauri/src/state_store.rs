@@ -10,7 +10,9 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 7;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
+
+const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -65,6 +67,9 @@ pub(crate) struct TagOperation {
     pub(crate) after: TagValues,
     pub(crate) source_fingerprint: String,
     pub(crate) status: String,
+    pub(crate) before_file_tags_json: Option<String>,
+    pub(crate) after_file_tags_json: Option<String>,
+    pub(crate) edited_fields_json: Option<String>,
 }
 
 #[derive(Clone)]
@@ -252,6 +257,38 @@ impl StateStore {
                     .map_err(|error| format!("Could not upgrade Aurora's undo journal: {error}"))?;
             }
         }
+        let journal_columns = {
+            let mut statement = transaction
+                .prepare("PRAGMA table_info(tag_edit_operations)")
+                .map_err(|error| {
+                    format!("Could not inspect Aurora's tag journal columns: {error}")
+                })?;
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|error| {
+                    format!("Could not inspect Aurora's tag journal columns: {error}")
+                })?
+                .collect::<Result<HashSet<_>, _>>()
+                .map_err(|error| {
+                    format!("Could not decode Aurora's tag journal columns: {error}")
+                })?
+        };
+        for (column, definition) in [
+            ("before_file_tags_json", "TEXT"),
+            ("after_file_tags_json", "TEXT"),
+            ("edited_fields_json", "TEXT"),
+        ] {
+            if !journal_columns.contains(column) {
+                transaction
+                    .execute(
+                        &format!(
+                            "ALTER TABLE tag_edit_operations ADD COLUMN {column} {definition}"
+                        ),
+                        [],
+                    )
+                    .map_err(|error| format!("Could not extend Aurora's tag journal: {error}"))?;
+            }
+        }
         transaction
             .execute_batch(
                 r#"
@@ -308,6 +345,13 @@ impl StateStore {
         transaction
             .execute_batch(
                 r#"
+                CREATE TABLE IF NOT EXISTS pending_library_folder_sync (
+                  directory TEXT PRIMARY KEY COLLATE NOCASE,
+                  updated_at_ms INTEGER NOT NULL,
+                  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                  last_error TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS state_sync_meta (
                   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                   lineage_id TEXT NOT NULL,
@@ -739,6 +783,30 @@ impl StateStore {
         after: &TagValues,
         source_fingerprint: &str,
     ) -> Result<i64, String> {
+        self.begin_tag_operation_with_metadata(
+            track_key,
+            target_path,
+            before,
+            after,
+            source_fingerprint,
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn begin_tag_operation_with_metadata(
+        &self,
+        track_key: &str,
+        target_path: &str,
+        before: &TagValues,
+        after: &TagValues,
+        source_fingerprint: &str,
+        before_file_tags_json: Option<&str>,
+        after_file_tags_json: Option<&str>,
+        edited_fields_json: Option<&str>,
+    ) -> Result<i64, String> {
         let connection = self.open()?;
         let timestamp = now_ms();
         connection
@@ -748,8 +816,9 @@ impl StateStore {
                   track_key, target_path,
                   before_rating, before_love_state, before_release_year,
                   after_rating, after_love_state, after_release_year,
-                  source_fingerprint, status, created_at_ms, updated_at_ms
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'prepared', ?10, ?10)
+                  source_fingerprint, status, created_at_ms, updated_at_ms,
+                  before_file_tags_json, after_file_tags_json, edited_fields_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'prepared', ?10, ?10, ?11, ?12, ?13)
                 "#,
                 params![
                     track_key,
@@ -762,6 +831,9 @@ impl StateStore {
                     after.release_year,
                     source_fingerprint,
                     timestamp,
+                    before_file_tags_json,
+                    after_file_tags_json,
+                    edited_fields_json,
                 ],
             )
             .map_err(|error| format!("Could not start Aurora's tag journal: {error}"))?;
@@ -915,6 +987,7 @@ impl StateStore {
         if updated != 1 {
             return Err("Aurora's tag journal changed before verification.".to_owned());
         }
+        enqueue_pending_library_folder_sync(&transaction, directory)?;
         transaction
             .commit()
             .map_err(|error| format!("Could not commit Aurora's tag transaction: {error}"))
@@ -992,9 +1065,100 @@ impl StateStore {
         if updated != 1 {
             return Err("Aurora's undo journal changed before verification.".to_owned());
         }
+        enqueue_pending_library_folder_sync(&transaction, directory)?;
         transaction
             .commit()
             .map_err(|error| format!("Could not commit Aurora's undo transaction: {error}"))
+    }
+
+    pub(crate) fn pending_library_folder_sync(&self, limit: usize) -> Result<Vec<String>, String> {
+        let limit = limit.min(MAX_PENDING_LIBRARY_FOLDER_SYNCS);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT directory
+                FROM pending_library_folder_sync
+                ORDER BY updated_at_ms, directory COLLATE NOCASE
+                LIMIT ?1
+                "#,
+            )
+            .map_err(|error| {
+                format!("Could not prepare Aurora's pending library-folder sync: {error}")
+            })?;
+        statement
+            .query_map(params![limit as i64], |row| row.get(0))
+            .map_err(|error| {
+                format!("Could not read Aurora's pending library-folder sync: {error}")
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                format!("Could not decode Aurora's pending library-folder sync: {error}")
+            })
+    }
+
+    pub(crate) fn complete_library_folder_sync(&self, paths: &[String]) -> Result<(), String> {
+        validate_pending_library_folder_sync_paths(paths)?;
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                format!("Could not start Aurora's library-folder sync completion: {error}")
+            })?;
+        for path in paths {
+            transaction
+                .execute(
+                    "DELETE FROM pending_library_folder_sync WHERE directory = ?1",
+                    params![path],
+                )
+                .map_err(|error| {
+                    format!("Could not complete Aurora's library-folder sync: {error}")
+                })?;
+        }
+        transaction.commit().map_err(|error| {
+            format!("Could not commit Aurora's library-folder sync completion: {error}")
+        })
+    }
+
+    pub(crate) fn defer_library_folder_sync(
+        &self,
+        paths: &[String],
+        error_message: &str,
+    ) -> Result<(), String> {
+        validate_pending_library_folder_sync_paths(paths)?;
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                format!("Could not start Aurora's library-folder sync retry: {error}")
+            })?;
+        let timestamp = now_ms();
+        for path in paths {
+            transaction
+                .execute(
+                    r#"
+                    UPDATE pending_library_folder_sync
+                    SET updated_at_ms = ?1, attempt_count = attempt_count + 1, last_error = ?2
+                    WHERE directory = ?3
+                    "#,
+                    params![timestamp, error_message, path],
+                )
+                .map_err(|error| {
+                    format!("Could not defer Aurora's library-folder sync: {error}")
+                })?;
+        }
+        transaction.commit().map_err(|error| {
+            format!("Could not commit Aurora's library-folder sync retry: {error}")
+        })
     }
 
     pub(crate) fn interrupted_operations(&self) -> Result<Vec<TagOperation>, String> {
@@ -1005,7 +1169,8 @@ impl StateStore {
                 SELECT id, track_key, target_path, temp_path, backup_path,
                        before_rating, before_love_state, before_release_year,
                        after_rating, after_love_state, after_release_year,
-                       source_fingerprint, status
+                       source_fingerprint, status, before_file_tags_json,
+                       after_file_tags_json, edited_fields_json
                 FROM tag_edit_operations
                 WHERE status IN ('prepared', 'replaced', 'undoing') ORDER BY id
                 "#,
@@ -1029,7 +1194,8 @@ impl StateStore {
                 SELECT id, track_key, target_path, temp_path, backup_path,
                        before_rating, before_love_state, before_release_year,
                        after_rating, after_love_state, after_release_year,
-                       source_fingerprint, status
+                       source_fingerprint, status, before_file_tags_json,
+                       after_file_tags_json, edited_fields_json
                 FROM tag_edit_operations
                 WHERE track_key = ?1 AND status = 'verified' AND backup_path IS NOT NULL
                   AND id = (SELECT MAX(id) FROM tag_edit_operations WHERE track_key = ?1)
@@ -1123,6 +1289,41 @@ impl StateStore {
     }
 }
 
+fn enqueue_pending_library_folder_sync(
+    transaction: &rusqlite::Transaction<'_>,
+    directory: &str,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            r#"
+            INSERT INTO pending_library_folder_sync (
+              directory, updated_at_ms, attempt_count, last_error
+            ) VALUES (?1, ?2, 0, NULL)
+            ON CONFLICT(directory) DO UPDATE SET
+              updated_at_ms = excluded.updated_at_ms,
+              attempt_count = 0,
+              last_error = NULL
+            "#,
+            params![directory, now_ms()],
+        )
+        .map_err(|error| {
+            format!("Could not queue Aurora's library-folder synchronization: {error}")
+        })?;
+    Ok(())
+}
+
+fn validate_pending_library_folder_sync_paths(paths: &[String]) -> Result<(), String> {
+    if paths.len() > MAX_PENDING_LIBRARY_FOLDER_SYNCS {
+        return Err(format!(
+            "Aurora can update at most {MAX_PENDING_LIBRARY_FOLDER_SYNCS} pending library folders at once."
+        ));
+    }
+    if paths.iter().any(|path| path.trim().is_empty()) {
+        return Err("Aurora refused an empty pending library-folder path.".to_owned());
+    }
+    Ok(())
+}
+
 fn overlay_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TagOverlay> {
     let love_state: String = row.get(4)?;
     let catalog_love_state: String = row.get(7)?;
@@ -1179,6 +1380,9 @@ fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TagOperation>
         },
         source_fingerprint: row.get(11)?,
         status: row.get(12)?,
+        before_file_tags_json: row.get(13)?,
+        after_file_tags_json: row.get(14)?,
+        edited_fields_json: row.get(15)?,
     })
 }
 
@@ -1427,7 +1631,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .expect("schema version"),
-            7
+            SCHEMA_VERSION
         );
         assert_eq!(
             connection
@@ -1463,6 +1667,199 @@ mod tests {
 
         drop(connection);
         drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_v8_pending_folder_sync_without_semantic_state_triggers() {
+        let path = temporary_state_path();
+        {
+            let store = StateStore::new(path.clone()).expect("create current state");
+            let connection = store.open().expect("open current state");
+            connection
+                .execute_batch(
+                    r#"
+                    DROP TABLE pending_library_folder_sync;
+                    PRAGMA user_version = 8;
+                    "#,
+                )
+                .expect("simulate v8 state");
+        }
+
+        let store = StateStore::new(path.clone()).expect("migrate v8 state");
+        let connection = store.open().expect("open migrated state");
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .expect("schema version"),
+            SCHEMA_VERSION
+        );
+        let table_sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pending_library_folder_sync'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pending sync table");
+        assert!(table_sql.contains("PRIMARY KEY COLLATE NOCASE"));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'pending_library_folder_sync'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("pending sync trigger count"),
+            0
+        );
+        let revision_before: i64 = connection
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision before pending sync update");
+        connection
+            .execute(
+                "INSERT INTO pending_library_folder_sync(directory, updated_at_ms) VALUES (?1, ?2)",
+                params![r"D:\Music\Artist\Album", now_ms()],
+            )
+            .expect("queue pending sync directly");
+        let revision_after: i64 = connection
+            .query_row(
+                "SELECT content_revision FROM state_sync_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("revision after pending sync update");
+        assert_eq!(revision_after, revision_before);
+        drop(connection);
+        drop(store);
+
+        let reopened = StateStore::new(path.clone()).expect("repeat migration idempotently");
+        assert_eq!(
+            reopened
+                .pending_library_folder_sync(32)
+                .expect("load migrated pending sync"),
+            vec![r"D:\Music\Artist\Album".to_owned()]
+        );
+
+        drop(reopened);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn verified_tag_and_undo_transactions_durably_queue_folder_sync() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let directory = r"D:\Music\Artist\Album";
+        let catalog = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: Some(2025),
+        };
+        let edited = TagValues {
+            rating: Some(4.5),
+            love_state: LoveState::Loved,
+            release_year: Some(2026),
+        };
+        let operation_id = store
+            .begin_tag_operation(
+                r"d:\music\artist\album\track.mp3",
+                r"D:\Music\Artist\Album\Track.mp3",
+                &catalog,
+                &edited,
+                "before-fingerprint",
+            )
+            .expect("start tag operation");
+        store
+            .finish_tag_operation(
+                operation_id,
+                r"d:\music\artist\album\track.mp3",
+                directory,
+                "Track.mp3",
+                &catalog,
+                &edited,
+                72,
+            )
+            .expect("finish tag operation");
+        assert_eq!(
+            store
+                .pending_library_folder_sync(32)
+                .expect("pending tag sync"),
+            vec![directory.to_owned()]
+        );
+
+        store
+            .defer_library_folder_sync(
+                &[r"d:\music\artist\album".to_owned()],
+                "Music Library is unavailable.",
+            )
+            .expect("defer case-insensitive path");
+        let (attempt_count, last_error): (i64, Option<String>) = store
+            .open()
+            .expect("read retry state")
+            .query_row(
+                "SELECT attempt_count, last_error FROM pending_library_folder_sync WHERE directory = ?1",
+                params![directory],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("retry metadata");
+        assert_eq!(attempt_count, 1);
+        assert_eq!(last_error.as_deref(), Some("Music Library is unavailable."));
+
+        store
+            .complete_library_folder_sync(&[r"d:\MUSIC\ARTIST\ALBUM".to_owned()])
+            .expect("complete case-insensitive path");
+        assert!(
+            store
+                .pending_library_folder_sync(32)
+                .expect("completed tag sync")
+                .is_empty()
+        );
+
+        store
+            .begin_undo(
+                operation_id,
+                r"D:\Music\Artist\Album\.Track.aurora-current.backup",
+                "edited-fingerprint",
+            )
+            .expect("start undo");
+        store
+            .finish_undo_operation(
+                operation_id,
+                r"d:\music\artist\album\track.mp3",
+                directory,
+                "Track.mp3",
+                &catalog,
+                &catalog,
+                72,
+            )
+            .expect("finish undo");
+        assert_eq!(
+            store
+                .pending_library_folder_sync(32)
+                .expect("pending undo sync"),
+            vec![directory.to_owned()]
+        );
+
+        assert!(store.pending_library_folder_sync(0).unwrap().is_empty());
+        assert!(
+            store
+                .complete_library_folder_sync(&vec!["folder".to_owned(); 33])
+                .is_err()
+        );
+
+        drop(store);
+        let reopened = StateStore::new(path.clone()).expect("reopen queued state");
+        assert_eq!(
+            reopened
+                .pending_library_folder_sync(99)
+                .expect("durable pending undo sync"),
+            vec![directory.to_owned()]
+        );
+
+        drop(reopened);
         let _ = fs::remove_file(path);
     }
 

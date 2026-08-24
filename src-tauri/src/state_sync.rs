@@ -2,6 +2,7 @@ use crate::state_store::{SCHEMA_VERSION, StateStore};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Serialize;
 use std::{
+    collections::HashSet,
     env,
     ffi::c_void,
     fs::{self, File},
@@ -331,6 +332,21 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
             format!("Could not attach Aurora's OneDrive snapshot read-only: {error}")
         })?;
 
+    let journal_metadata_columns = [
+        "before_file_tags_json",
+        "after_file_tags_json",
+        "edited_fields_json",
+    ];
+    let local_journal_columns = table_columns(&connection, "main", "tag_edit_operations")?;
+    let remote_journal_columns = table_columns(&connection, "remote_state", "tag_edit_operations")?;
+    let mut journal_comparison = "id, track_key, target_path, temp_path, backup_path, before_rating, before_love_state, before_release_year, after_rating, after_love_state, after_release_year, source_fingerprint, status, created_at_ms, updated_at_ms, error_message".to_owned();
+    if journal_metadata_columns.iter().all(|column| {
+        local_journal_columns.contains(*column) && remote_journal_columns.contains(*column)
+    }) {
+        journal_comparison
+            .push_str(", before_file_tags_json, after_file_tags_json, edited_fields_json");
+    }
+
     for (table, columns) in [
         ("playback_queue", "position, track_key, directory, filename"),
         (
@@ -341,10 +357,7 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
             "tag_overlays",
             "track_key, rating, love_state, release_year, last_operation_id",
         ),
-        (
-            "tag_edit_operations",
-            "id, track_key, target_path, temp_path, backup_path, before_rating, before_love_state, before_release_year, after_rating, after_love_state, after_release_year, source_fingerprint, status, created_at_ms, updated_at_ms, error_message",
-        ),
+        ("tag_edit_operations", journal_comparison.as_str()),
         (
             "musicbrainz_artist_decisions",
             "local_artist_key, display_artist, decision, artist_mbid, canonical_name, created_at_ms, updated_at_ms",
@@ -384,6 +397,28 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
         }
     }
     Ok(true)
+}
+
+fn table_columns(
+    connection: &Connection,
+    schema: &str,
+    table: &str,
+) -> Result<HashSet<String>, String> {
+    if !matches!(schema, "main" | "remote_state")
+        || !table
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err("Aurora refused an unsafe state-schema inspection.".to_owned());
+    }
+    let mut statement = connection
+        .prepare(&format!("PRAGMA {schema}.table_info({table})"))
+        .map_err(|error| format!("Could not inspect Aurora's {table} schema: {error}"))?;
+    statement
+        .query_map([], |row| row.get(1))
+        .map_err(|error| format!("Could not inspect Aurora's {table} columns: {error}"))?
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|error| format!("Could not decode Aurora's {table} columns: {error}"))
 }
 
 fn adopt_remote_snapshot_identity(

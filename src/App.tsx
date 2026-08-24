@@ -85,6 +85,7 @@ import {
   loadArtistDetail,
   loadCatalogRevision,
   loadLibrarySnapshot,
+  applyEditableTrackTagProjection,
   applyTrackTagProjection,
   type AlbumSummary,
   type Artist,
@@ -447,7 +448,8 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight } | null>(null);
-  const [inspectorView, setInspectorView] = useState<"track" | "album" | "artist">("track");
+  const [inspectorView, setInspectorView] = useState<"track" | "album" | "artist" | "tags">("track");
+  const [tagSelectionKind, setTagSelectionKind] = useState<"track" | "album">("track");
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
@@ -1438,7 +1440,8 @@ function App() {
   function openPublisherAlbum(album: PublisherAlbum) {
     const requestId = ++publisherAlbumRequestRef.current;
     setSelectedPublisherAlbum(album);
-    setInspectorView("album");
+    setTagSelectionKind("album");
+    if (inspectorViewRef.current !== "tags") setInspectorView("album");
     setPublisherAlbumTracks([]);
     void loadPublisherAlbumTracks(album)
       .then((tracks) => {
@@ -1533,7 +1536,8 @@ function App() {
     const requestId = ++yearAlbumRequestRef.current;
     setSelectedYearAlbum(album);
     setYearAlbumTracks([]);
-    setInspectorView("album");
+    setTagSelectionKind("album");
+    if (inspectorViewRef.current !== "tags") setInspectorView("album");
     void loadYearAlbumTracks(album)
       .then((tracks) => {
         if (requestId === yearAlbumRequestRef.current) setYearAlbumTracks(tracks);
@@ -1651,7 +1655,8 @@ function App() {
   function openRatingAlbum(album: RatingAlbum) {
     const requestId = ++ratingsAlbumRequestRef.current;
     setSelectedRatingAlbum(album);
-    setInspectorView("album");
+    setTagSelectionKind("album");
+    if (inspectorViewRef.current !== "tags") setInspectorView("album");
     setRatingAlbumTracks([]);
     void loadRatingAlbumTracks(album)
       .then((tracks) => {
@@ -1747,7 +1752,66 @@ function App() {
   function selectTrack(track: Track) {
     artistRequestRef.current += 1;
     setSelectedTrack(track);
-    setInspectorView("track");
+    setTagSelectionKind("track");
+    if (inspectorViewRef.current !== "tags") setInspectorView("track");
+  }
+
+  function applyTrackChanges(updatedTracks: Track[]) {
+    if (updatedTracks.length === 0) return;
+    const updatedByKey = new Map(updatedTracks.map((track) => [track.trackKey, track]));
+    const project = (track: Track) => {
+      const updated = updatedByKey.get(track.trackKey);
+      return updated ? applyEditableTrackTagProjection(track, updated) : track;
+    };
+    const knownTracks = [
+      ...(selectedTrack ? [selectedTrack] : []),
+      ...explorerTracks,
+      ...albumTracks,
+      ...yearAlbumTracks,
+      ...ratingAlbumTracks,
+      ...publisherAlbumTracks,
+      ...(snapshot?.tracks ?? []),
+    ];
+    const baselines = new Map(knownTracks.map((track) => [track.trackKey, track]));
+
+    setSelectedTrack((current) => current ? project(current) : current);
+    setExplorerTracks((current) => current.map(project));
+    setAlbumTracks((current) => current.map(project));
+    setYearAlbumTracks((current) => current.map(project));
+    setRatingAlbumTracks((current) => current.map(project));
+    setPublisherAlbumTracks((current) => current.map(project));
+    setGenreDetail((current) => {
+      if (!current) return current;
+      const summary = updatedTracks.reduce((next, updated) => {
+        const baseline = baselines.get(updated.trackKey);
+        return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
+      }, current.summary);
+      return { ...current, summary, highlights: current.highlights.map(project) };
+    });
+    setGenreAtlasGenres((current) => current.map((summary) => updatedTracks.reduce((next, updated) => {
+      const baseline = baselines.get(updated.trackKey);
+      return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
+    }, summary)));
+    updatedTracks.forEach((track) => playback.refreshTrack(track, true));
+    setSnapshot((current) => {
+      if (!current) return current;
+      const deltas = updatedTracks.reduce((totals, updated) => {
+        const baseline = baselines.get(updated.trackKey);
+        if (!baseline) return totals;
+        totals.loved += Number(updated.loved) - Number(baseline.loved);
+        totals.rated += Number(updated.rating !== null) - Number(baseline.rating !== null);
+        return totals;
+      }, { loved: 0, rated: 0 });
+      return {
+        ...current,
+        summary: {
+          ...current.summary,
+          loved: Math.max(0, current.summary.loved + deltas.loved),
+          rated: Math.max(0, current.summary.rated + deltas.rated),
+        },
+        tracks: current.tracks.map(project),
+      };
+    });
   }
 
   function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
@@ -2075,10 +2139,12 @@ function App() {
     if (!album) {
       setAlbumDetailState("ready");
       setInspectorView("track");
+      setTagSelectionKind("track");
       return;
     }
     setSelectedTrack(null);
-    setInspectorView("album");
+    setTagSelectionKind("album");
+    if (inspectorViewRef.current !== "tags") setInspectorView("album");
     setAlbumDetailState("loading");
     void loadAlbumDetail(album.id)
       .then((detail) => {
@@ -2206,6 +2272,22 @@ function App() {
   const inspectorArtistCandidate = explorerAlbumInspectorContext?.artistName
     ?? inspectorTrack?.artist
     ?? inspectorArtistName;
+  const albumTagTarget = explorerAlbumInspectorContext
+    ? { kind: "album" as const, albumId: explorerAlbumInspectorContext.album.id, label: explorerAlbumInspectorContext.album.title }
+    : activeNav === "Publishers" && selectedPublisherAlbum
+      ? { kind: "album" as const, albumId: selectedPublisherAlbum.id, label: selectedPublisherAlbum.title }
+      : activeNav === "Years" && selectedYearAlbum
+        ? { kind: "album" as const, albumId: selectedYearAlbum.id, label: selectedYearAlbum.title }
+        : activeNav === "Ratings" && selectedRatingAlbum
+          ? { kind: "album" as const, albumId: selectedRatingAlbum.id, label: selectedRatingAlbum.title }
+          : activeNav === "Charts" && chartSelection?.kind === "albums" && chartSelection.entry.matchedAlbumId
+            ? { kind: "album" as const, albumId: chartSelection.entry.matchedAlbumId, label: chartSelection.entry.title }
+            : null;
+  const tagEditorTarget = tagSelectionKind === "album"
+    ? albumTagTarget
+    : inspectorTrack
+      ? { kind: "track" as const, trackId: inspectorTrack.id, trackKey: inspectorTrack.trackKey, label: inspectorTrack.title }
+      : null;
 
   const explorerLoaded = explorerView === "tracks"
     ? explorerTracks.length
@@ -2327,7 +2409,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.16.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2432,6 +2514,7 @@ function App() {
                 onSelectionChange={(selection, options) => {
                   setChartSelection(selection);
                   if (selection && !options?.preserveInspector) {
+                    setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
                     setInspectorView(selection.kind === "albums" ? "album" : "track");
                   }
                 }}
@@ -2648,9 +2731,19 @@ function App() {
               if (artistName) openArtistInspector(artistName);
             }}
           >Artist</button>
-          <button type="button" role="tab" aria-selected="false" disabled>Lyrics</button>
+          <button type="button" role="tab" aria-selected={inspectorView === "tags"} disabled={!tagEditorTarget} onClick={() => setInspectorView("tags")}>Tags</button>
         </div>
-        {activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
+        {inspectorView === "tags" && tagEditorTarget ? (
+          <div className="inspector-scroll inspector-scroll--tag-editor">
+            <TagEditor
+              key={tagEditorTarget.kind === "album"
+                ? `album:${tagEditorTarget.albumId}`
+                : `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`}
+              target={tagEditorTarget}
+              onTracksChange={applyTrackChanges}
+            />
+          </div>
+        ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
           <div className="inspector-scroll">
             <ChartInspector
               selection={chartSelection}
@@ -2715,8 +2808,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
-            <TagEditor key={`${inspectorTrack.trackKey}:${inlineTagRevisions[inspectorTrack.trackKey] ?? 0}`} track={inspectorTrack} onTrackChange={applyTrackChange} />
-            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Aurora edits only MusicBee rating, Love/Ban, and Release Time frames. The catalog remains read-only.</span></div>
+            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit this MP3 or the selected album without leaving Aurora.</span></div>
           </div>
         ) : <EmptyInspector />}
       </aside>}

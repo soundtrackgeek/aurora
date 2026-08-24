@@ -1,14 +1,20 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.16.0 adds already-tagged single albums or multi-album folders through a safe Music Library companion workflow, then refreshes playback and catalog views in place.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.0 adds a MusicBee-style vertical tag editor that writes selected fields directly to one MP3 or every MP3 in a selected album, then synchronizes the existing Music Library catalog automatically.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.16.0 slice
+## Current 0.17.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
-- Aurora invokes Music Library `0.143.0` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
+- A dedicated **Tags** tab in the right inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- Track and album selection semantics model MusicBee's vertical editor: common values are shown once, differing values are labelled **Mixed**, and only checked or edited fields are written. A checked blank value is an explicit clear except for Album Artist, Album, and Track Title, which Music Library requires for safe catalog identity.
+- Artist edits MusicBee's `DISPLAY ARTIST` override while preserving the underlying multi-value performer credits; Album Artist retains semicolon-separated multi-value `TPE2` credits.
+- Album saves preflight every selected MP3 and its revision before the first write. Aurora then performs verified same-folder atomic writes, rolls back earlier completed files if a later file fails, and retains recovery evidence for ambiguous Windows replacement failures.
+- Aurora invokes Music Library `0.144.0` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
+- After a verified tag save, Music Library safely reimports only the already-cataloged album folders, requires a zero add/remove delta and stable album identity, and advances the catalog revision that Aurora already watches. Aurora durably queues affected folders with the verified write or undo; if the companion is unavailable or outdated, the MP3 save remains successful and startup, focus, or a later save retries the pending synchronization.
+- Album intake and tag editing deliberately assume that files have already been manually identified, tagged, and named as intended; Aurora does not add an automatic MusicBrainz, Discogs, or fingerprint-matching step.
 - Native folder selection, strict bridge/category/receipt validation, bounded helper timeouts, and clear update guidance when the installed Music Library does not yet support album intake. Source paths are passed in private request files rather than command-line arguments.
 - Truthful batch completion distinguishes fully moved albums from verified catalog copies whose source cleanup needs attention. A successful import triggers Aurora's existing revision check, stable queue rebind, and bounded view refresh immediately.
 - A lightweight completed-import revision check every five seconds and whenever Aurora regains focus. Queue rebinding and the base view each use one consistent SQLite read snapshot, and Aurora refreshes only after their reported revisions match the detected completed import. Stable normalized path keys keep replaced catalog row IDs from becoming playback identity.
@@ -77,7 +83,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Visible local provenance and source availability for the catalog, curated overlay, and broad cache; missing optional databases never block normal library browsing.
 - Explicit overlay export creates a new, complete Music Library-compatible SQLite snapshot in Aurora's app-data `exports` folder. Aurora never mutates the live shared overlay; publishing the exported file remains a deliberate user step.
 - Album cover grids with bounded album track details, playback activation, keyboard row navigation, inline tag controls, and a right inspector whose Album, Track, and Artist tabs stay scoped to the selected album.
-- Inspector editor for half-star ratings, Love/Neutral/Ban, and Release Year, plus read-only genre, duration, and optional Last.fm popularity.
+- A vertical multi-file inspector tag editor plus existing inline half-star rating and Love/Neutral/Ban controls, with read-only duration and optional Last.fm popularity in the Track view.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
 - A real MP3-derived, purple-to-cyan waveform timeline. Native builds sample 64 evenly spaced decoded windows into 320 peaks, cache them in device-local `aurora-waveforms.sqlite3`, and never accept an arbitrary WebView path.
@@ -87,16 +93,16 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A bounded 200-track queue with play-now, reorder, remove, and clear actions.
 - Durable queue, current track, position, volume, shuffle, and repeat state in Aurora's own SQLite database.
 - Stable queue identity based on the normalized MP3 path, verified alongside every transient track ID so queue items survive Music Library catalog imports without being retargeted.
-- Transactional same-folder MP3 writes using MusicBee's exact POPM byte map, `LOVE RATING`, and Release Time conventions.
+- Transactional same-folder MP3 writes using standard ID3 text/position frames, MusicBee's exact POPM byte map, `LOVE RATING`, Release Time, and existing `DISPLAY ARTIST` conventions.
 - Conflict detection, post-write tag/audio verification, Windows atomic replacement, retained rollback copies, crash recovery, and one-step undo. Ambiguous or externally changed files are never auto-overwritten; Aurora retains both versions for manual recovery.
-- Aurora-owned tag overlays that update the UI immediately and reconcile automatically after Music Library next syncs that complete album folder, or after a legacy MusicBee TSV import.
-- Focus-time MusicBee reconciliation that reads only pending-overlay MP3s in bounded batches, treats their tags as authoritative, clears caught-up overlays, and rotates unavailable files so they cannot starve later work.
+- Aurora-owned tag overlays update rating, Love, and Release Year immediately while the verified save asks Music Library to reimport the existing album folder. The normal catalog-revision watcher then refreshes every affected view.
+- Focus-time reconciliation remains as a recovery path for pending overlays: it reads only bounded pending MP3s, treats their tags as authoritative, clears caught-up overlays, and rotates unavailable files so they cannot starve later work.
 - Half-star track reconciliation reads Music Library's raw rating when its older normalized field is null; removed-track overlays are excluded from library totals.
 - Album covers served through a narrow Rust protocol that resolves exact album IDs, contains canonical paths to the configured archive, rejects oversized sources, and caches 64–512 px WebP thumbnails.
 - Packaged-app update checks at startup and every 60 seconds, with an Aurora-styled install prompt.
 - Windows NSIS release workflow with mandatory Tauri updater signatures.
 
-The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; it records a small optimistic tag overlay in `aurora-state.sqlite3` until Music Library syncs the edited album folder (or imports a legacy MusicBee TSV) and catches up. Aurora's MusicBrainz decisions are also stored in that app-owned database, but they are independent of MP3 tags and the imported catalog. Listening events deliberately use a separate per-device database instead of the single shared state snapshot. All OneDrive copies are consistent SQLite snapshots rather than copies of live WAL-backed files. See [docs/audio-output-contract.md](docs/audio-output-contract.md), [docs/charts-contract.md](docs/charts-contract.md), [docs/genre-atlas-contract.md](docs/genre-atlas-contract.md), [docs/global-shortcuts-contract.md](docs/global-shortcuts-contract.md), [docs/listening-history-contract.md](docs/listening-history-contract.md), [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/publisher-logos.md](docs/publisher-logos.md), [docs/ratings-studio-contract.md](docs/ratings-studio-contract.md), [docs/sidebar-navigation-contract.md](docs/sidebar-navigation-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), [docs/playback-contract.md](docs/playback-contract.md), and [docs/years-explorer-contract.md](docs/years-explorer-contract.md).
+The MP3 is authoritative for Aurora tag edits. Aurora never writes the shared Music Library SQLite database; the companion performs a guarded existing-folder reimport after verified saves, while Aurora's private overlay covers the short interval before the catalog catches up. Aurora's MusicBrainz decisions are stored in Aurora's app-owned database, but they are independent of MP3 tags and the imported catalog. Listening events deliberately use a separate per-device database instead of the single shared state snapshot. All OneDrive copies are consistent SQLite snapshots rather than copies of live WAL-backed files. See [docs/audio-output-contract.md](docs/audio-output-contract.md), [docs/charts-contract.md](docs/charts-contract.md), [docs/genre-atlas-contract.md](docs/genre-atlas-contract.md), [docs/global-shortcuts-contract.md](docs/global-shortcuts-contract.md), [docs/listening-history-contract.md](docs/listening-history-contract.md), [docs/laptop-mode-contract.md](docs/laptop-mode-contract.md), [docs/publisher-logos.md](docs/publisher-logos.md), [docs/ratings-studio-contract.md](docs/ratings-studio-contract.md), [docs/sidebar-navigation-contract.md](docs/sidebar-navigation-contract.md), [docs/tag-editing-contract.md](docs/tag-editing-contract.md), [docs/musicbee-tags.md](docs/musicbee-tags.md), [docs/playback-contract.md](docs/playback-contract.md), and [docs/years-explorer-contract.md](docs/years-explorer-contract.md).
 
 ## Data model
 
@@ -112,6 +118,7 @@ The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,32
 - Node.js 22+
 - Rust stable with the MSVC target and Windows C++ build tools
 - The music catalog at the default `%APPDATA%` path above
+- Music Library `0.144.0` or newer installed at `%LOCALAPPDATA%\Music Library\music-library.exe` for album intake and immediate post-edit catalog synchronization
 - The referenced MP3 files and album-cover archive mounted at their cataloged paths for playback and real artwork
 - For Laptop Mode, the equivalent library roots mounted at `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`
 - A locally available `%USERPROFILE%\OneDrive\_musicbackup` directory for Aurora state and per-device history mirroring; catalog browsing and local history still work and report a sync warning when it is unavailable

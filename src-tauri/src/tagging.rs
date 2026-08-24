@@ -1,16 +1,21 @@
 use crate::{
     catalog::{self, ResolvedTrack, TrackSummary},
-    state_store::{StateStore, TagOverlay},
-    tag_model::{LoveState, TagEditRequest, TagSyncState, TagValues, TrackTagState},
+    state_store::{StateStore, TagOperation, TagOverlay},
+    tag_model::{
+        EditableTagField, EditableTagValues, LoveState, TagEditRequest, TagEditorSnapshot,
+        TagEditorTarget, TagEditorTrackState, TagEditorUpdateRequest, TagEditorUpdateResult,
+        TagSyncState, TagValues, TrackTagState,
+    },
 };
 use id3::{
     Tag, TagLike, Version,
     frame::{Content, ExtendedText, Frame, Unknown},
     no_tag_ok,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::{HashMap, HashSet},
     ffi::c_void,
     fs::{self, File, OpenOptions},
     io::{Read, Seek},
@@ -21,8 +26,10 @@ use std::{
 const MUSICBEE_POPM_OWNER: &str = "MusicBee";
 const LOVE_RATING_DESCRIPTION: &str = "LOVE RATING";
 const RELEASE_TIME_DESCRIPTION: &str = "TDRL";
+const DISPLAY_ARTIST_DESCRIPTION: &str = "DISPLAY ARTIST";
 const RETAINED_BACKUPS: usize = 20;
 const MAX_PENDING_RECONCILIATION_BATCH: usize = 200;
+const MAX_TAG_EDITOR_ALBUM_TRACKS: usize = 500;
 
 const MUSICBEE_RATINGS: [(f64, u8); 10] = [
     (0.5, 13),
@@ -130,6 +137,40 @@ pub(crate) struct TagService {
     store: StateStore,
 }
 
+struct PreparedEditorWrite {
+    resolved: ResolvedTrack,
+    fingerprint: FileFingerprint,
+    tag: Tag,
+    version: Version,
+    payload_hash: [u8; 32],
+    before: EditableTagValues,
+    after: EditableTagValues,
+    before_legacy: TagValues,
+    after_legacy: TagValues,
+    preserved_frames: Vec<Frame>,
+}
+
+struct PreparedEditorWriteFailure {
+    message: String,
+    installed: bool,
+}
+
+impl From<String> for PreparedEditorWriteFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            installed: false,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct OperationEditorMetadata {
+    before: EditableTagValues,
+    after: EditableTagValues,
+    fields: Vec<EditableTagField>,
+}
+
 impl TagService {
     pub(crate) fn new(store: StateStore) -> Result<Self, String> {
         let service = Self { store };
@@ -145,6 +186,408 @@ impl TagService {
         let resolved = catalog::resolve_track(track_id, track_key, &self.store)?;
         let values = read_tag_values_from_path(&resolved.audio_path)?;
         self.snapshot_with_values(resolved, values, None)
+    }
+
+    pub(crate) fn inspect_editor(
+        &self,
+        target: TagEditorTarget,
+    ) -> Result<TagEditorSnapshot, String> {
+        let resolved = self.resolve_editor_target(&target)?;
+        let mut tracks = Vec::with_capacity(resolved.len());
+        for track in resolved {
+            let (state, _) = editor_state_for_resolved(track)?;
+            tracks.push(state);
+        }
+        Ok(TagEditorSnapshot { tracks })
+    }
+
+    pub(crate) fn update_editor(
+        &self,
+        request: TagEditorUpdateRequest,
+    ) -> Result<TagEditorUpdateResult, String> {
+        request.validate()?;
+        let desired_patch = request.values.clone().normalize();
+        desired_patch.validate()?;
+        let resolved = self.resolve_editor_update_target(&request.target, &request.expected)?;
+        if request.expected.tracks.len() != resolved.len() {
+            return Err(
+                "The tag selection changed after the editor opened. Reload before saving."
+                    .to_owned(),
+            );
+        }
+
+        let mut expected_by_key = HashMap::with_capacity(request.expected.tracks.len());
+        let mut expected_ids = HashSet::with_capacity(request.expected.tracks.len());
+        for expected in &request.expected.tracks {
+            if !expected_ids.insert(expected.track_id.as_str())
+                || expected_by_key
+                    .insert(expected.track_key.as_str(), expected)
+                    .is_some()
+            {
+                return Err(
+                    "The saved tag selection contains duplicate tracks. Reload before saving."
+                        .to_owned(),
+                );
+            }
+        }
+
+        // Every selected file is opened, decoded and revision-checked before the first write.
+        let mut prepared = Vec::with_capacity(resolved.len());
+        for resolved in resolved {
+            let expected = expected_by_key
+                .remove(resolved.summary.track_key.as_str())
+                .ok_or_else(|| {
+                    "The tag selection changed after the editor opened. Reload before saving."
+                        .to_owned()
+                })?;
+            let fingerprint = FileFingerprint::read(&resolved.audio_path)?;
+            let (tag, version) = read_tag_for_write(&resolved.audio_path)?;
+            let before = read_editable_tag_values(&tag)?;
+            let before_legacy = read_tag_values(&tag)?;
+            let payload_hash = audio_payload_hash(&resolved.audio_path)?;
+            if FileFingerprint::read(&resolved.audio_path)? != fingerprint {
+                return Err(
+                    "An MP3 changed while Aurora checked the batch. No tags were written."
+                        .to_owned(),
+                );
+            }
+            verify_editor_expected(expected, &fingerprint, &before)?;
+            let after = merge_editor_patch(&before, &request.fields, &desired_patch)?;
+            let mut after_legacy = before_legacy.clone();
+            after_legacy.rating = after.rating;
+            after_legacy.release_year = after.release_year;
+            after_legacy.validate()?;
+            let preserved_frames = editor_non_target_frames(&tag, &request.fields);
+            prepared.push(PreparedEditorWrite {
+                resolved,
+                fingerprint,
+                tag,
+                version,
+                payload_hash,
+                before,
+                after,
+                before_legacy,
+                after_legacy,
+                preserved_frames,
+            });
+        }
+        if !expected_by_key.is_empty() {
+            return Err(
+                "The tag selection changed after the editor opened. No tags were written."
+                    .to_owned(),
+            );
+        }
+
+        let mut completed = Vec::new();
+        for item in prepared {
+            if item.before == item.after {
+                continue;
+            }
+            let track_id = item.resolved.summary.id.clone();
+            let track_key = item.resolved.summary.track_key.clone();
+            match self.write_prepared_editor(item, &request.fields) {
+                Ok(()) => completed.push((track_id, track_key)),
+                Err(write_error) => {
+                    let mut rollback_errors = Vec::new();
+                    if write_error.installed {
+                        let recovered = self.recover_interrupted_operations();
+                        match recovered.and_then(|()| self.undo(&track_id, &track_key).map(|_| ()))
+                        {
+                            Ok(()) => {}
+                            Err(error) => rollback_errors.push(format!("{track_key}: {error}")),
+                        }
+                    }
+                    for (track_id, track_key) in completed.iter().rev() {
+                        if let Err(error) = self.undo(track_id, track_key) {
+                            rollback_errors.push(format!("{track_key}: {error}"));
+                        }
+                    }
+                    if rollback_errors.is_empty() {
+                        let _ = self.store.prune_old_backups(RETAINED_BACKUPS);
+                        return Err(format!(
+                            "Aurora could not finish the batch and restored every MP3 it had changed. {}",
+                            write_error.message
+                        ));
+                    }
+                    return Err(format!(
+                        "Aurora could not finish the batch. Some MP3s may still contain the edit; retained backups require recovery. Write error: {}. Rollback errors: {}",
+                        write_error.message,
+                        rollback_errors.join("; ")
+                    ));
+                }
+            }
+        }
+        let changed_keys = completed
+            .iter()
+            .map(|(_, track_key)| track_key.clone())
+            .collect::<HashSet<_>>();
+        let result = self.editor_result(&request.target, &request.expected, &changed_keys);
+        if result.is_ok() {
+            let _ = self
+                .store
+                .prune_old_backups(RETAINED_BACKUPS.max(changed_keys.len()));
+        }
+        result
+    }
+
+    fn resolve_editor_target(
+        &self,
+        target: &TagEditorTarget,
+    ) -> Result<Vec<ResolvedTrack>, String> {
+        match target {
+            TagEditorTarget::Track {
+                track_id,
+                track_key,
+                ..
+            } => Ok(vec![catalog::resolve_track(
+                track_id,
+                track_key,
+                &self.store,
+            )?]),
+            TagEditorTarget::Album { album_id, .. } => {
+                catalog::resolve_album_tracks(album_id, &self.store)
+            }
+        }
+    }
+
+    fn resolve_editor_update_target(
+        &self,
+        target: &TagEditorTarget,
+        expected: &TagEditorSnapshot,
+    ) -> Result<Vec<ResolvedTrack>, String> {
+        let primary = self.resolve_editor_target(target);
+        let TagEditorTarget::Album { album_id, .. } = target else {
+            return primary;
+        };
+        if album_id.trim().is_empty() || album_id.chars().count() > 512 {
+            return Err("Album identity is invalid.".to_owned());
+        }
+        if let Ok(resolved) = &primary
+            && editor_selection_matches_expected(resolved, expected)
+        {
+            return primary;
+        }
+
+        self.resolve_expected_album_tracks(expected).map_err(|fallback_error| {
+            let primary_error = primary
+                .err()
+                .unwrap_or_else(|| "the catalog album now has a different track set".to_owned());
+            format!(
+                "The album changed identity after Music Library refreshed it, and Aurora could not safely rebind every selected file. Original lookup: {primary_error}. Stable-file lookup: {fallback_error}"
+            )
+        })
+    }
+
+    fn resolve_expected_album_tracks(
+        &self,
+        expected: &TagEditorSnapshot,
+    ) -> Result<Vec<ResolvedTrack>, String> {
+        if expected.tracks.is_empty() || expected.tracks.len() > MAX_TAG_EDITOR_ALBUM_TRACKS {
+            return Err(format!(
+                "The saved album selection must contain between 1 and {MAX_TAG_EDITOR_ALBUM_TRACKS} tracks."
+            ));
+        }
+        let mut seen_keys = HashSet::with_capacity(expected.tracks.len());
+        let mut seen_ids = HashSet::with_capacity(expected.tracks.len());
+        let mut resolved = Vec::with_capacity(expected.tracks.len());
+        for track in &expected.tracks {
+            if !seen_keys.insert(track.track_key.as_str())
+                || !seen_ids.insert(track.track_id.as_str())
+            {
+                return Err("The saved album selection contains duplicate tracks.".to_owned());
+            }
+            resolved.push(catalog::resolve_track(
+                &track.track_id,
+                &track.track_key,
+                &self.store,
+            )?);
+        }
+        let album_ids = resolved
+            .iter()
+            .filter_map(|track| track.summary.album_id.as_deref())
+            .collect::<HashSet<_>>();
+        if album_ids.len() != 1
+            || resolved
+                .iter()
+                .any(|track| track.summary.album_id.is_none())
+        {
+            return Err(
+                "The selected files no longer resolve to one complete catalog album.".to_owned(),
+            );
+        }
+        let current_album_id =
+            (*album_ids.iter().next().expect("one album id was validated")).to_owned();
+        let complete_album = catalog::resolve_album_tracks(&current_album_id, &self.store)?;
+        if !editor_selection_matches_expected(&complete_album, expected) {
+            return Err(
+                "The catalog album membership changed after the editor opened. Reload before saving."
+                    .to_owned(),
+            );
+        }
+        Ok(complete_album)
+    }
+
+    fn editor_result(
+        &self,
+        target: &TagEditorTarget,
+        expected: &TagEditorSnapshot,
+        changed_keys: &HashSet<String>,
+    ) -> Result<TagEditorUpdateResult, String> {
+        let resolved = self.resolve_editor_update_target(target, expected)?;
+        let mut states = Vec::with_capacity(resolved.len());
+        let mut tracks = Vec::with_capacity(resolved.len());
+        for resolved in resolved {
+            let (state, mut resolved) = editor_state_for_resolved(resolved)?;
+            apply_editable_values_to_summary(&mut resolved.summary, &state.values);
+            if changed_keys.contains(&resolved.summary.track_key) {
+                resolved.summary.tag_sync_state = Some(TagSyncState::PendingImport);
+            }
+            resolved.summary.can_undo_tag_edit =
+                self.store.can_undo(&resolved.summary.track_key)?;
+            states.push(state);
+            tracks.push(resolved.summary);
+        }
+        Ok(TagEditorUpdateResult {
+            state: TagEditorSnapshot { tracks: states },
+            tracks,
+            catalog_sync: None,
+        })
+    }
+
+    fn write_prepared_editor(
+        &self,
+        mut item: PreparedEditorWrite,
+        fields: &[EditableTagField],
+    ) -> Result<(), PreparedEditorWriteFailure> {
+        let target_path_text = item.resolved.audio_path.to_string_lossy().into_owned();
+        let before_json = serde_json::to_string(&item.before)
+            .map_err(|error| format!("Could not journal the original MP3 tags: {error}"))?;
+        let after_json = serde_json::to_string(&item.after)
+            .map_err(|error| format!("Could not journal the edited MP3 tags: {error}"))?;
+        let fields_json = serde_json::to_string(fields)
+            .map_err(|error| format!("Could not journal the selected tag fields: {error}"))?;
+        let operation_id = self.store.begin_tag_operation_with_metadata(
+            &item.resolved.summary.track_key,
+            &target_path_text,
+            &item.before_legacy,
+            &item.after_legacy,
+            &item.fingerprint.to_string(),
+            Some(&before_json),
+            Some(&after_json),
+            Some(&fields_json),
+        )?;
+        let (temp_path, backup_path) = operation_paths(&item.resolved.audio_path, operation_id)?;
+        self.store.set_operation_paths(
+            operation_id,
+            &temp_path.to_string_lossy(),
+            &backup_path.to_string_lossy(),
+        )?;
+
+        let mut installed = false;
+        let write_result = (|| -> Result<(), String> {
+            if temp_path.exists() || backup_path.exists() {
+                return Err(
+                    "Aurora's safe-write paths already exist; no file was changed.".to_owned(),
+                );
+            }
+            fs::copy(&item.resolved.audio_path, &temp_path).map_err(|error| {
+                format!("Could not create the same-folder MP3 working copy: {error}")
+            })?;
+            apply_editor_tag_changes(&mut item.tag, item.version, fields, &item.after)?;
+            item.tag
+                .write_to_path(&temp_path, item.version)
+                .map_err(|error| format!("Could not write the MP3 working copy: {error}"))?;
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&temp_path)
+                .and_then(|file| file.sync_all())
+                .map_err(|error| format!("Could not flush the MP3 working copy: {error}"))?;
+            verify_editor_written_file(
+                &temp_path,
+                &item.after,
+                fields,
+                &item.preserved_frames,
+                &item.payload_hash,
+            )?;
+            let _write_exclusion = open_write_exclusion(&item.resolved.audio_path)?;
+            if FileFingerprint::read(&item.resolved.audio_path)? != item.fingerprint {
+                return Err(
+                    "The MP3 changed while Aurora prepared the edit. Its original was left untouched."
+                        .to_owned(),
+                );
+            }
+            if let Err(error) =
+                replace_file_atomic(&item.resolved.audio_path, &temp_path, Some(&backup_path))
+            {
+                installed = replacement_requires_recovery(
+                    &item.resolved.audio_path,
+                    &backup_path,
+                    &item.fingerprint,
+                );
+                return Err(if installed {
+                    format!(
+                        "Windows could not complete Aurora's atomic save. Every file was retained for startup recovery: {error}"
+                    )
+                } else {
+                    format!(
+                        "Windows could not start Aurora's atomic save. The original MP3 was left untouched: {error}"
+                    )
+                });
+            }
+            installed = true;
+            if let Err(error) = self.store.mark_operation(operation_id, "replaced", None) {
+                return Err(format!(
+                    "Aurora installed the edit but could not checkpoint its journal; startup recovery will verify it: {error}"
+                ));
+            }
+            if FileFingerprint::read(&backup_path)?.to_string() != item.fingerprint.to_string() {
+                return Err(
+                    "Another application replaced the MP3 during Aurora's save. Aurora retained both files for recovery."
+                        .to_owned(),
+                );
+            }
+            verify_editor_written_file(
+                &item.resolved.audio_path,
+                &item.after,
+                fields,
+                &item.preserved_frames,
+                &item.payload_hash,
+            )
+            .map_err(|error| {
+                format!(
+                    "Aurora could not verify the installed edit and retained both files: {error}"
+                )
+            })?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            if !installed {
+                cleanup_owned_working_file(&temp_path);
+                let _ = self
+                    .store
+                    .mark_operation(operation_id, "failed", Some(&error));
+            }
+            return Err(PreparedEditorWriteFailure {
+                message: error,
+                installed,
+            });
+        }
+        self.store.finish_tag_operation(
+            operation_id,
+            &item.resolved.summary.track_key,
+            &item.resolved.summary.directory,
+            &item.resolved.summary.filename,
+            &item.resolved.catalog_values,
+            &item.after_legacy,
+            item.resolved.summary.catalog_import_run_id,
+        )
+        .map_err(|error| PreparedEditorWriteFailure {
+            message: format!(
+                "Aurora installed the MP3 edit, but could not finish its journal; startup recovery will reconcile it: {error}"
+            ),
+            installed: true,
+        })
     }
 
     pub(crate) fn reconcile_pending_overlays(
@@ -385,9 +828,25 @@ impl TagService {
             if let Err(error) =
                 replace_file_atomic(&resolved.audio_path, &temp_path, Some(&backup_path))
             {
-                recovery_required = true;
+                recovery_required = replacement_requires_recovery(
+                    &resolved.audio_path,
+                    &backup_path,
+                    &original_fingerprint,
+                );
+                return Err(if recovery_required {
+                    format!(
+                        "Windows could not complete Aurora's atomic save. Every file was retained for startup recovery: {error}"
+                    )
+                } else {
+                    format!(
+                        "Windows could not start Aurora's atomic save. The original MP3 was left untouched: {error}"
+                    )
+                });
+            }
+            recovery_required = true;
+            if let Err(error) = self.store.mark_operation(operation_id, "replaced", None) {
                 return Err(format!(
-                    "Windows could not complete Aurora's atomic save. Every file was retained for startup recovery: {error}"
+                    "Aurora installed and retained the edit, but could not checkpoint its journal. It will verify the retained files at startup: {error}"
                 ));
             }
             if FileFingerprint::read(&backup_path)?.to_string() != original_fingerprint.to_string()
@@ -396,12 +855,6 @@ impl TagService {
                     "Another application atomically replaced the MP3 during Aurora's save. Aurora retained both files without overwriting either; reload the track before editing again."
                         .to_owned(),
                 );
-            }
-            if let Err(error) = self.store.mark_operation(operation_id, "replaced", None) {
-                recovery_required = true;
-                return Err(format!(
-                    "Aurora installed and retained the edit, but could not checkpoint its journal. It will verify the retained files at startup: {error}"
-                ));
             }
             if let Err(error) = verify_written_file(
                 &resolved.audio_path,
@@ -458,7 +911,13 @@ impl TagService {
         let undo_source_fingerprint = FileFingerprint::read(&resolved.audio_path)?;
         let (current_tag, _) = read_tag_for_write(&resolved.audio_path)?;
         let current = read_tag_values(&current_tag)?;
-        if current != operation.after {
+        let editor_metadata = operation_editor_metadata(&operation)?;
+        let current_matches = if let Some(metadata) = &editor_metadata {
+            read_editable_tag_values(&current_tag)? == metadata.after
+        } else {
+            current == operation.after
+        };
+        if !current_matches {
             return Err(
                 "The MP3 tags changed after Aurora's edit, so undo will not overwrite them."
                     .to_owned(),
@@ -469,10 +928,18 @@ impl TagService {
             .as_ref()
             .ok_or_else(|| "Aurora's rollback copy is no longer available.".to_owned())?;
         let (backup_tag, _) = read_tag_for_write(backup_path)?;
-        if !same_frames(
-            &non_target_frames(&current_tag),
-            &non_target_frames(&backup_tag),
-        ) {
+        let non_target_frames_match = if let Some(metadata) = &editor_metadata {
+            same_frames(
+                &editor_non_target_frames(&current_tag, &metadata.fields),
+                &editor_non_target_frames(&backup_tag, &metadata.fields),
+            )
+        } else {
+            same_frames(
+                &non_target_frames(&current_tag),
+                &non_target_frames(&backup_tag),
+            )
+        };
+        if !non_target_frames_match {
             return Err(
                 "The MP3 has other metadata changes after Aurora's edit, so undo will not erase them."
                     .to_owned(),
@@ -513,23 +980,41 @@ impl TagService {
             ));
         }
         if FileFingerprint::read(&undo_backup)?.to_string() != undo_source_fingerprint.to_string() {
-            let message = "Another application atomically replaced the MP3 during undo. Aurora retained every file without overwriting either version.";
-            self.store
-                .mark_operation(operation.id, "failed", Some(message))?;
-            return Err(message.to_owned());
+            return Err(
+                "Another application atomically replaced the MP3 during undo. Aurora retained every file and left the undo journal pending for startup recovery."
+                    .to_owned(),
+            );
         }
         let restored = read_tag_values_from_path(&resolved.audio_path)?;
-        let restored_is_verified = restored == operation.before
-            && audio_payload_hash(&resolved.audio_path)? == audio_payload_hash(backup_path)?
-            && same_frames(
-                &non_target_frames(&read_tag_for_write(&resolved.audio_path)?.0),
+        let restored_tag = read_tag_for_write(&resolved.audio_path)?.0;
+        let restored_editor_values = editor_metadata
+            .as_ref()
+            .map(|_| read_editable_tag_values(&restored_tag))
+            .transpose()?;
+        let restored_values_match = if let Some(metadata) = &editor_metadata {
+            restored_editor_values.as_ref() == Some(&metadata.before)
+        } else {
+            restored == operation.before
+        };
+        let restored_frames_match = if let Some(metadata) = &editor_metadata {
+            same_frames(
+                &editor_non_target_frames(&restored_tag, &metadata.fields),
+                &editor_non_target_frames(&backup_tag, &metadata.fields),
+            )
+        } else {
+            same_frames(
+                &non_target_frames(&restored_tag),
                 &non_target_frames(&backup_tag),
-            );
+            )
+        };
+        let restored_is_verified = restored_values_match
+            && audio_payload_hash(&resolved.audio_path)? == audio_payload_hash(backup_path)?
+            && restored_frames_match;
         if !restored_is_verified {
-            let message = "Aurora could not verify the installed undo and retained every file without overwriting a possibly newer external edit.";
-            self.store
-                .mark_operation(operation.id, "failed", Some(message))?;
-            return Err(message.to_owned());
+            return Err(
+                "Aurora could not verify the installed undo. It retained every file and left the undo journal pending for startup recovery."
+                    .to_owned(),
+            );
         }
         if let Err(error) = self.store.finish_undo_operation(
             operation.id,
@@ -545,7 +1030,11 @@ impl TagService {
             ));
         }
         cleanup_owned_working_file(&undo_backup);
-        self.snapshot_with_values(resolved, restored, Some(operation.id))
+        let mut snapshot = self.snapshot_with_values(resolved, restored, Some(operation.id))?;
+        if let Some(values) = restored_editor_values {
+            apply_full_editor_undo_projection(&mut snapshot, &values);
+        }
+        Ok(snapshot)
     }
 
     fn snapshot_with_values(
@@ -626,14 +1115,38 @@ impl TagService {
         &self,
         operation: &crate::state_store::TagOperation,
     ) -> Result<(), String> {
-        let current_backup = operation.temp_path.as_ref().ok_or_else(|| {
-            "Aurora cannot recover an interrupted undo because its safety path is missing."
-                .to_owned()
-        })?;
+        let Some(current_backup) = operation.temp_path.as_ref() else {
+            self.store.mark_operation(
+                operation.id,
+                "failed",
+                Some(
+                    "Aurora cannot recover this interrupted undo because its journal has no safety path. The target was left untouched.",
+                ),
+            )?;
+            return Ok(());
+        };
         let undo_replacement =
             sibling_operation_path(&operation.target_path, operation.id, "undo-original.tmp")?;
+        let Some(original_backup) = operation.backup_path.as_ref().filter(|path| path.is_file())
+        else {
+            self.store.mark_operation(
+                operation.id,
+                "failed",
+                Some(
+                    "Aurora cannot recover this interrupted undo because its original rollback copy is missing. Every remaining file was retained.",
+                ),
+            )?;
+            return Ok(());
+        };
         if !current_backup.is_file() {
-            if operation.target_path.is_file() {
+            if operation.target_path.is_file()
+                && operation_file_matches(&operation.target_path, original_backup, operation, false)
+            {
+                self.finish_recovered_undo(operation)?;
+                cleanup_owned_working_file(&undo_replacement);
+            } else if operation.target_path.is_file()
+                && operation_file_matches(&operation.target_path, original_backup, operation, true)
+            {
                 cleanup_owned_working_file(&undo_replacement);
                 self.store.mark_operation(
                     operation.id,
@@ -641,13 +1154,13 @@ impl TagService {
                     Some("Aurora closed before replacing the MP3 during undo."),
                 )?;
             } else {
-                self.store.mark_operation(
-                    operation.id,
-                    "failed",
-                    Some(
-                        "Undo recovery found a missing target without its safety backup and retained every remaining file.",
-                    ),
-                )?;
+                let message = if operation.target_path.is_file() {
+                    "Undo recovery found an ambiguous or externally changed target and retained every remaining file."
+                } else {
+                    "Undo recovery found a missing target without its safety backup and retained every remaining file."
+                };
+                self.store
+                    .mark_operation(operation.id, "failed", Some(message))?;
             }
             return Ok(());
         }
@@ -663,14 +1176,9 @@ impl TagService {
             )?;
             return Ok(());
         }
-        let original_backup = operation
-            .backup_path
-            .as_ref()
-            .filter(|path| path.is_file())
-            .ok_or_else(|| "Aurora's original undo backup is missing.".to_owned())?;
         if !operation.target_path.is_file() {
             if undo_replacement.is_file()
-                && known_file_matches(&undo_replacement, original_backup, &operation.before)
+                && operation_file_matches(&undo_replacement, original_backup, operation, false)
             {
                 if let Err(error) =
                     move_file_without_replacing(&undo_replacement, &operation.target_path)
@@ -696,58 +1204,17 @@ impl TagService {
                 return Ok(());
             }
         }
-        let target_values_match = read_tag_values_from_path(&operation.target_path)
-            .is_ok_and(|values| values == operation.before);
-        let target_frames_match = match (
-            read_tag_for_write(&operation.target_path),
-            read_tag_for_write(original_backup),
-        ) {
-            (Ok((target, _)), Ok((backup, _))) => {
-                same_frames(&non_target_frames(&target), &non_target_frames(&backup))
-            }
-            _ => false,
-        };
-        let audio_matches = match (
-            audio_payload_hash(&operation.target_path),
-            audio_payload_hash(original_backup),
-        ) {
-            (Ok(target), Ok(backup)) => target == backup,
-            _ => false,
-        };
-        if target_values_match && target_frames_match && audio_matches {
-            let catalog_target =
-                crate::device_mode::catalog_path_for_device_path(&operation.target_path);
-            let directory = catalog_target
-                .parent()
-                .ok_or_else(|| "The recovered undo path has no parent directory.".to_owned())?
-                .to_string_lossy()
-                .into_owned();
-            let filename = catalog_target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| "The recovered undo filename is invalid.".to_owned())?;
-            let prior_overlay = self
-                .store
-                .overlays_for_keys(std::slice::from_ref(&operation.track_key))?
-                .into_iter()
-                .next();
-            let current_catalog = catalog::catalog_tag_values_by_path(&directory, filename)
-                .ok()
-                .flatten();
-            let (catalog_values, import_run_id) = current_catalog
-                .or_else(|| {
-                    prior_overlay
-                        .map(|overlay| (overlay.catalog_values, overlay.catalog_import_run_id))
-                })
-                .unwrap_or_else(|| (operation.before.clone(), 0));
-            self.store.finish_undo_operation(
+        if operation_file_matches(&operation.target_path, original_backup, operation, false) {
+            self.finish_recovered_undo(operation)?;
+            cleanup_owned_working_file(current_backup);
+            cleanup_owned_working_file(&undo_replacement);
+        } else if operation_file_matches(&operation.target_path, original_backup, operation, true)
+            && operation_file_matches(current_backup, original_backup, operation, true)
+        {
+            self.store.mark_operation(
                 operation.id,
-                &operation.track_key,
-                &directory,
-                filename,
-                &catalog_values,
-                &operation.before,
-                import_run_id,
+                "verified",
+                Some("Aurora recovered an undo that stopped before installing its replacement."),
             )?;
             cleanup_owned_working_file(current_backup);
             cleanup_owned_working_file(&undo_replacement);
@@ -763,25 +1230,66 @@ impl TagService {
         Ok(())
     }
 
+    fn finish_recovered_undo(
+        &self,
+        operation: &crate::state_store::TagOperation,
+    ) -> Result<(), String> {
+        let catalog_target =
+            crate::device_mode::catalog_path_for_device_path(&operation.target_path);
+        let directory = catalog_target
+            .parent()
+            .ok_or_else(|| "The recovered undo path has no parent directory.".to_owned())?
+            .to_string_lossy()
+            .into_owned();
+        let filename = catalog_target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "The recovered undo filename is invalid.".to_owned())?;
+        let prior_overlay = self
+            .store
+            .overlays_for_keys(std::slice::from_ref(&operation.track_key))?
+            .into_iter()
+            .next();
+        let current_catalog = catalog::catalog_tag_values_by_path(&directory, filename)
+            .ok()
+            .flatten();
+        let (catalog_values, import_run_id) = current_catalog
+            .or_else(|| {
+                prior_overlay.map(|overlay| (overlay.catalog_values, overlay.catalog_import_run_id))
+            })
+            .unwrap_or_else(|| (operation.before.clone(), 0));
+        self.store.finish_undo_operation(
+            operation.id,
+            &operation.track_key,
+            &directory,
+            filename,
+            &catalog_values,
+            &operation.before,
+            import_run_id,
+        )
+    }
+
     fn recover_replaced_operation(
         &self,
         operation: &crate::state_store::TagOperation,
     ) -> Result<(), String> {
-        let backup_path = operation
-            .backup_path
-            .as_ref()
-            .filter(|path| path.is_file())
-            .ok_or_else(|| {
-                "Aurora cannot recover an interrupted tag write because its rollback copy is missing."
-                    .to_owned()
-            })?;
+        let Some(backup_path) = operation.backup_path.as_ref().filter(|path| path.is_file()) else {
+            self.store.mark_operation(
+                operation.id,
+                "failed",
+                Some(
+                    "Aurora cannot recover this interrupted tag write because its rollback copy is missing. The target and every remaining file were retained.",
+                ),
+            )?;
+            return Ok(());
+        };
         let backup_matches_source = FileFingerprint::read(backup_path)
             .is_ok_and(|fingerprint| fingerprint.to_string() == operation.source_fingerprint);
         if !operation.target_path.is_file() {
             let replacement = operation.temp_path.as_ref().filter(|path| path.is_file());
             if backup_matches_source
                 && replacement
-                    .is_some_and(|path| known_file_matches(path, backup_path, &operation.after))
+                    .is_some_and(|path| operation_file_matches(path, backup_path, operation, true))
             {
                 let replacement = replacement.expect("verified replacement path");
                 if let Err(error) = move_file_without_replacing(replacement, &operation.target_path)
@@ -807,25 +1315,8 @@ impl TagService {
                 return Ok(());
             }
         }
-        let target_values_match = read_tag_values_from_path(&operation.target_path)
-            .is_ok_and(|values| values == operation.after);
-        let audio_matches = match (
-            audio_payload_hash(&operation.target_path),
-            audio_payload_hash(backup_path),
-        ) {
-            (Ok(target), Ok(backup)) => target == backup,
-            _ => false,
-        };
-        let non_target_frames_match = match (
-            read_tag_for_write(&operation.target_path),
-            read_tag_for_write(backup_path),
-        ) {
-            (Ok((target, _)), Ok((backup, _))) => {
-                same_frames(&non_target_frames(&target), &non_target_frames(&backup))
-            }
-            _ => false,
-        };
-        if target_values_match && audio_matches && non_target_frames_match && backup_matches_source
+        if operation_file_matches(&operation.target_path, backup_path, operation, true)
+            && backup_matches_source
         {
             if let Some(temp_path) = &operation.temp_path {
                 cleanup_owned_working_file(temp_path);
@@ -864,6 +1355,20 @@ impl TagService {
                 &operation.after,
                 import_run_id,
             )?;
+        } else if backup_matches_source
+            && operation_file_matches(&operation.target_path, backup_path, operation, false)
+        {
+            self.store.mark_operation(
+                operation.id,
+                "failed",
+                Some(
+                    "Aurora recovered an atomic save that stopped before installing the edit; the original MP3 was untouched.",
+                ),
+            )?;
+            if let Some(temp_path) = &operation.temp_path {
+                cleanup_owned_working_file(temp_path);
+            }
+            cleanup_owned_working_file(backup_path);
         } else {
             self.store.mark_operation(
                 operation.id,
@@ -875,6 +1380,442 @@ impl TagService {
         }
         Ok(())
     }
+}
+
+fn editor_selection_matches_expected(
+    resolved: &[ResolvedTrack],
+    expected: &TagEditorSnapshot,
+) -> bool {
+    if resolved.len() != expected.tracks.len() {
+        return false;
+    }
+    let expected_keys = expected
+        .tracks
+        .iter()
+        .map(|track| track.track_key.as_str())
+        .collect::<HashSet<_>>();
+    expected_keys.len() == expected.tracks.len()
+        && resolved
+            .iter()
+            .all(|track| expected_keys.contains(track.summary.track_key.as_str()))
+}
+
+fn editor_state_for_resolved(
+    resolved: ResolvedTrack,
+) -> Result<(TagEditorTrackState, ResolvedTrack), String> {
+    let before = FileFingerprint::read(&resolved.audio_path)?;
+    let (tag, _) = read_tag_for_write(&resolved.audio_path)?;
+    let values = read_editable_tag_values(&tag)?;
+    let after = FileFingerprint::read(&resolved.audio_path)?;
+    if before != after {
+        return Err("An MP3 changed while Aurora read its tags. Reload the editor.".to_owned());
+    }
+    Ok((
+        TagEditorTrackState {
+            track_id: resolved.summary.id.clone(),
+            track_key: resolved.summary.track_key.clone(),
+            revision: before.to_string(),
+            values,
+        },
+        resolved,
+    ))
+}
+
+fn verify_editor_expected(
+    expected: &TagEditorTrackState,
+    fingerprint: &FileFingerprint,
+    values: &EditableTagValues,
+) -> Result<(), String> {
+    if expected.revision != fingerprint.to_string() || expected.values != *values {
+        return Err(
+            "An MP3 changed outside Aurora after the editor opened. No tags were written; reload before saving."
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn read_editable_tag_values(tag: &Tag) -> Result<EditableTagValues, String> {
+    let legacy = read_tag_values(tag)?;
+    let display_artist =
+        unique_extended_text_value(tag, DISPLAY_ARTIST_DESCRIPTION, "DISPLAY ARTIST")?;
+    Ok(EditableTagValues {
+        album_artist: joined_text_frame_values(tag, "TPE2"),
+        artist: display_artist.or_else(|| joined_text_frame_values(tag, "TPE1")),
+        album: normalized_tag_text(tag.album()),
+        title: normalized_tag_text(tag.title()),
+        genre: normalized_tag_text(tag.genre()),
+        publisher: normalized_tag_text(tag.get("TPUB").and_then(|frame| frame.content().text())),
+        rating: legacy.rating,
+        year: tag
+            .date_recorded()
+            .map(|timestamp| timestamp.year)
+            .or_else(|| tag.year())
+            .or_else(|| {
+                tag.get("TDRC")
+                    .and_then(|frame| frame.content().text())
+                    .and_then(parse_release_year)
+            }),
+        release_year: legacy.release_year,
+        track_number: tag.track(),
+        track_total: tag.total_tracks(),
+        disc_number: tag.disc(),
+        disc_total: tag.total_discs(),
+    })
+}
+
+fn normalized_tag_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn unique_extended_text_value(
+    tag: &Tag,
+    description: &str,
+    label: &str,
+) -> Result<Option<String>, String> {
+    let values = tag
+        .extended_texts()
+        .filter(|text| text.description.eq_ignore_ascii_case(description))
+        .map(|text| text.value.trim().to_owned())
+        .collect::<Vec<_>>();
+    if values.len() > 1 {
+        return Err(format!(
+            "This MP3 has duplicate {label} values; Aurora left it untouched."
+        ));
+    }
+    Ok(values.into_iter().next().filter(|value| !value.is_empty()))
+}
+
+fn remove_extended_text_case_insensitive(tag: &mut Tag, description: &str) -> bool {
+    let descriptions = tag
+        .extended_texts()
+        .filter(|text| text.description.eq_ignore_ascii_case(description))
+        .map(|text| text.description.clone())
+        .collect::<HashSet<_>>();
+    let had_match = !descriptions.is_empty();
+    for description in descriptions {
+        tag.remove_extended_text(Some(&description), None);
+    }
+    had_match
+}
+
+fn joined_text_frame_values(tag: &Tag, id: &str) -> Option<String> {
+    let values = tag
+        .get(id)?
+        .content()
+        .text_values()?
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.join("; "))
+}
+
+fn set_optional_credit_text(tag: &mut Tag, id: &str, value: Option<&str>) -> Result<(), String> {
+    tag.remove(id);
+    if let Some(value) = value {
+        let credits = value.split(';').map(str::trim).collect::<Vec<_>>();
+        if credits.is_empty()
+            || credits.len() > 64
+            || credits
+                .iter()
+                .any(|credit| credit.is_empty() || credit.chars().any(char::is_control))
+        {
+            return Err("Album Artist contains an invalid or empty credit.".to_owned());
+        }
+        tag.set_text_values(id, credits);
+    }
+    Ok(())
+}
+
+fn merge_editor_patch(
+    before: &EditableTagValues,
+    fields: &[EditableTagField],
+    patch: &EditableTagValues,
+) -> Result<EditableTagValues, String> {
+    let mut after = before.clone();
+    for field in fields {
+        match field {
+            EditableTagField::AlbumArtist => after.album_artist = patch.album_artist.clone(),
+            EditableTagField::Artist => after.artist = patch.artist.clone(),
+            EditableTagField::Album => after.album = patch.album.clone(),
+            EditableTagField::Title => after.title = patch.title.clone(),
+            EditableTagField::Genre => after.genre = patch.genre.clone(),
+            EditableTagField::Publisher => after.publisher = patch.publisher.clone(),
+            EditableTagField::Rating => after.rating = patch.rating,
+            EditableTagField::Year => after.year = patch.year,
+            EditableTagField::ReleaseYear => after.release_year = patch.release_year,
+            EditableTagField::TrackNumber => after.track_number = patch.track_number,
+            EditableTagField::TrackTotal => after.track_total = patch.track_total,
+            EditableTagField::DiscNumber => after.disc_number = patch.disc_number,
+            EditableTagField::DiscTotal => after.disc_total = patch.disc_total,
+        }
+    }
+    normalize_number_pair(
+        &mut after.track_number,
+        &mut after.track_total,
+        fields.contains(&EditableTagField::TrackNumber),
+        fields.contains(&EditableTagField::TrackTotal),
+        patch.track_number,
+        patch.track_total,
+        "track",
+    )?;
+    normalize_number_pair(
+        &mut after.disc_number,
+        &mut after.disc_total,
+        fields.contains(&EditableTagField::DiscNumber),
+        fields.contains(&EditableTagField::DiscTotal),
+        patch.disc_number,
+        patch.disc_total,
+        "disc",
+    )?;
+    after.validate()?;
+    Ok(after)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn normalize_number_pair(
+    number: &mut Option<u32>,
+    total: &mut Option<u32>,
+    number_selected: bool,
+    total_selected: bool,
+    requested_number: Option<u32>,
+    requested_total: Option<u32>,
+    label: &str,
+) -> Result<(), String> {
+    if number_selected && requested_number.is_none() {
+        if total_selected && requested_total.is_some() {
+            return Err(format!(
+                "A {label} total cannot be saved without a {label} number."
+            ));
+        }
+        *total = None;
+    }
+    if number.is_none() && total.is_some() {
+        return Err(format!(
+            "A {label} total cannot be saved on a file without a {label} number."
+        ));
+    }
+    if matches!((*number, *total), (Some(number), Some(total)) if number > total) {
+        return Err(format!(
+            "The {label} number cannot be greater than the {label} total."
+        ));
+    }
+    Ok(())
+}
+
+fn apply_editor_tag_changes(
+    tag: &mut Tag,
+    version: Version,
+    fields: &[EditableTagField],
+    after: &EditableTagValues,
+) -> Result<(), String> {
+    for field in fields {
+        match field {
+            EditableTagField::AlbumArtist => {
+                set_optional_credit_text(tag, "TPE2", after.album_artist.as_deref())?
+            }
+            EditableTagField::Artist => {
+                remove_extended_text_case_insensitive(tag, DISPLAY_ARTIST_DESCRIPTION);
+                if let Some(artist) = &after.artist {
+                    tag.add_frame(ExtendedText {
+                        description: DISPLAY_ARTIST_DESCRIPTION.to_owned(),
+                        value: artist.clone(),
+                    });
+                }
+            }
+            EditableTagField::Album => set_optional_text(tag, "TALB", after.album.as_deref()),
+            EditableTagField::Title => set_optional_text(tag, "TIT2", after.title.as_deref()),
+            EditableTagField::Genre => set_optional_text(tag, "TCON", after.genre.as_deref()),
+            EditableTagField::Publisher => {
+                set_optional_text(tag, "TPUB", after.publisher.as_deref())
+            }
+            EditableTagField::Rating => set_musicbee_rating(tag, version, after.rating)?,
+            EditableTagField::Year => {
+                tag.remove("TDRC");
+                tag.remove("TYER");
+                if let Some(year) = after.year {
+                    if version == Version::Id3v24 {
+                        tag.set_text("TDRC", year.to_string());
+                    } else {
+                        tag.set_text("TYER", year.to_string());
+                    }
+                }
+            }
+            EditableTagField::ReleaseYear => {
+                let had_legacy =
+                    remove_extended_text_case_insensitive(tag, RELEASE_TIME_DESCRIPTION);
+                tag.remove("TDRL");
+                if let Some(year) = after.release_year {
+                    let value = year.to_string();
+                    if version == Version::Id3v24 {
+                        tag.set_text("TDRL", value.clone());
+                        if had_legacy {
+                            tag.add_frame(ExtendedText {
+                                description: RELEASE_TIME_DESCRIPTION.to_owned(),
+                                value,
+                            });
+                        }
+                    } else {
+                        tag.add_frame(ExtendedText {
+                            description: RELEASE_TIME_DESCRIPTION.to_owned(),
+                            value,
+                        });
+                    }
+                }
+            }
+            EditableTagField::TrackNumber | EditableTagField::TrackTotal => {
+                set_number_pair(tag, "TRCK", after.track_number, after.track_total)
+            }
+            EditableTagField::DiscNumber | EditableTagField::DiscTotal => {
+                set_number_pair(tag, "TPOS", after.disc_number, after.disc_total)
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_optional_text(tag: &mut Tag, id: &str, value: Option<&str>) {
+    tag.remove(id);
+    if let Some(value) = value {
+        tag.set_text(id, value.to_owned());
+    }
+}
+
+fn set_number_pair(tag: &mut Tag, id: &str, number: Option<u32>, total: Option<u32>) {
+    tag.remove(id);
+    if let Some(number) = number {
+        let value = total.map_or_else(|| number.to_string(), |total| format!("{number}/{total}"));
+        tag.set_text(id, value);
+    }
+}
+
+fn set_musicbee_rating(tag: &mut Tag, version: Version, rating: Option<f64>) -> Result<(), String> {
+    let preserved = tag
+        .remove("POPM")
+        .into_iter()
+        .filter(|frame| {
+            frame
+                .content()
+                .popularimeter()
+                .is_none_or(|value| value.user != MUSICBEE_POPM_OWNER)
+        })
+        .collect::<Vec<_>>();
+    for frame in preserved {
+        tag.add_frame(frame);
+    }
+    if let Some(rating) = rating {
+        let byte = rating_to_byte(rating)?;
+        let mut data = Vec::with_capacity(MUSICBEE_POPM_OWNER.len() + 6);
+        data.extend_from_slice(MUSICBEE_POPM_OWNER.as_bytes());
+        data.push(0);
+        data.push(byte);
+        data.extend_from_slice(&[0, 0, 0, 0]);
+        tag.add_frame(Frame::with_content(
+            "POPM",
+            Content::Unknown(Unknown { data, version }),
+        ));
+    }
+    Ok(())
+}
+
+fn apply_editable_values_to_summary(summary: &mut TrackSummary, values: &EditableTagValues) {
+    summary.title = values
+        .title
+        .clone()
+        .unwrap_or_else(|| "Untitled".to_owned());
+    summary.artist = values
+        .album_artist
+        .clone()
+        .or_else(|| values.artist.clone())
+        .unwrap_or_else(|| "Unknown Artist".to_owned());
+    summary.display_artist = values.artist.clone();
+    summary.album = values
+        .album
+        .clone()
+        .unwrap_or_else(|| "Unknown Album".to_owned());
+    summary.genre = values.genre.clone();
+    summary.publisher = values.publisher.clone();
+    summary.rating = values.rating;
+    summary.original_year = values.year.map(i64::from);
+    summary.release_year = values.release_year.map(i64::from);
+    summary.track_number = values.track_number;
+    summary.track_total = values.track_total;
+    summary.disc_number = values.disc_number;
+    summary.disc_total = values.disc_total;
+}
+
+fn apply_full_editor_undo_projection(snapshot: &mut TrackTagSnapshot, values: &EditableTagValues) {
+    apply_editable_values_to_summary(&mut snapshot.track, values);
+    snapshot.track.tag_sync_state = Some(TagSyncState::PendingImport);
+    snapshot.tag_state.sync_state = Some(TagSyncState::PendingImport);
+}
+
+fn is_editor_target_frame(frame: &Frame, fields: &[EditableTagField]) -> bool {
+    match frame.id() {
+        "TPE2" => fields.contains(&EditableTagField::AlbumArtist),
+        "TALB" => fields.contains(&EditableTagField::Album),
+        "TIT2" => fields.contains(&EditableTagField::Title),
+        "TCON" => fields.contains(&EditableTagField::Genre),
+        "TPUB" => fields.contains(&EditableTagField::Publisher),
+        "TDRC" | "TYER" => fields.contains(&EditableTagField::Year),
+        "TDRL" => fields.contains(&EditableTagField::ReleaseYear),
+        "TRCK" => {
+            fields.contains(&EditableTagField::TrackNumber)
+                || fields.contains(&EditableTagField::TrackTotal)
+        }
+        "TPOS" => {
+            fields.contains(&EditableTagField::DiscNumber)
+                || fields.contains(&EditableTagField::DiscTotal)
+        }
+        "POPM" => {
+            fields.contains(&EditableTagField::Rating)
+                && frame
+                    .content()
+                    .popularimeter()
+                    .is_some_and(|value| value.user == MUSICBEE_POPM_OWNER)
+        }
+        "TXXX" => frame.content().extended_text().is_some_and(|value| {
+            (fields.contains(&EditableTagField::ReleaseYear)
+                && value
+                    .description
+                    .eq_ignore_ascii_case(RELEASE_TIME_DESCRIPTION))
+                || (fields.contains(&EditableTagField::Artist)
+                    && value
+                        .description
+                        .eq_ignore_ascii_case(DISPLAY_ARTIST_DESCRIPTION))
+        }),
+        _ => false,
+    }
+}
+
+fn editor_non_target_frames(tag: &Tag, fields: &[EditableTagField]) -> Vec<Frame> {
+    tag.frames()
+        .filter(|frame| !is_editor_target_frame(frame, fields))
+        .cloned()
+        .collect()
+}
+
+fn verify_editor_written_file(
+    path: &Path,
+    expected: &EditableTagValues,
+    fields: &[EditableTagField],
+    preserved_frames: &[Frame],
+    expected_payload_hash: &[u8; 32],
+) -> Result<(), String> {
+    let (tag, _) = read_tag_for_write(path)?;
+    if read_editable_tag_values(&tag)? != *expected {
+        return Err("the edited ID3 values did not round-trip".to_owned());
+    }
+    if !same_frames(&editor_non_target_frames(&tag, fields), preserved_frames) {
+        return Err("an unselected ID3 frame changed".to_owned());
+    }
+    if &audio_payload_hash(path)? != expected_payload_hash {
+        return Err("the audio payload changed".to_owned());
+    }
+    Ok(())
 }
 
 fn validated_pending_overlay_path(
@@ -942,21 +1883,13 @@ fn read_tag_values(tag: &Tag) -> Result<TagValues, String> {
     }
     let rating = musicbee_ratings
         .first()
+        .filter(|byte| **byte != 0)
         .map(|byte| rating_from_byte(*byte))
         .transpose()?;
 
-    let love_values = tag
-        .extended_texts()
-        .filter(|text| text.description == LOVE_RATING_DESCRIPTION)
-        .map(|text| text.value.trim())
-        .collect::<Vec<_>>();
-    if love_values.len() > 1 {
-        return Err(
-            "This MP3 has duplicate MusicBee Love frames; Aurora left it untouched.".to_owned(),
-        );
-    }
-    let love_state = match love_values.first().copied() {
-        None | Some("") => LoveState::Neutral,
+    let love_value = unique_extended_text_value(tag, LOVE_RATING_DESCRIPTION, "MusicBee Love")?;
+    let love_state = match love_value.as_deref() {
+        None => LoveState::Neutral,
         Some("L") => LoveState::Loved,
         Some("B") => LoveState::Banned,
         Some(_) => {
@@ -971,10 +1904,9 @@ fn read_tag_values(tag: &Tag) -> Result<TagValues, String> {
         .get("TDRL")
         .and_then(|frame| frame.content().text())
         .and_then(parse_release_year);
-    let legacy_release = tag
-        .extended_texts()
-        .find(|text| text.description == RELEASE_TIME_DESCRIPTION)
-        .and_then(|text| parse_release_year(&text.value));
+    let legacy_release_value =
+        unique_extended_text_value(tag, RELEASE_TIME_DESCRIPTION, "MusicBee Release Time")?;
+    let legacy_release = legacy_release_value.as_deref().and_then(parse_release_year);
 
     Ok(TagValues {
         rating,
@@ -1018,7 +1950,7 @@ fn apply_tag_changes(
     }
 
     if before.love_state != after.love_state {
-        tag.remove_extended_text(Some(LOVE_RATING_DESCRIPTION), None);
+        remove_extended_text_case_insensitive(tag, LOVE_RATING_DESCRIPTION);
         let value = match after.love_state {
             LoveState::Neutral => None,
             LoveState::Loved => Some("L"),
@@ -1033,11 +1965,8 @@ fn apply_tag_changes(
     }
 
     if before.release_year != after.release_year {
-        let had_legacy = tag
-            .extended_texts()
-            .any(|text| text.description == RELEASE_TIME_DESCRIPTION);
+        let had_legacy = remove_extended_text_case_insensitive(tag, RELEASE_TIME_DESCRIPTION);
         tag.remove("TDRL");
-        tag.remove_extended_text(Some(RELEASE_TIME_DESCRIPTION), None);
         if let Some(year) = after.release_year {
             let value = year.to_string();
             if version == Version::Id3v24 {
@@ -1097,10 +2026,12 @@ fn is_target_frame(frame: &Frame) -> bool {
             .popularimeter()
             .is_some_and(|value| value.user == MUSICBEE_POPM_OWNER),
         "TXXX" => frame.content().extended_text().is_some_and(|value| {
-            matches!(
-                value.description.as_str(),
-                LOVE_RATING_DESCRIPTION | RELEASE_TIME_DESCRIPTION
-            )
+            value
+                .description
+                .eq_ignore_ascii_case(LOVE_RATING_DESCRIPTION)
+                || value
+                    .description
+                    .eq_ignore_ascii_case(RELEASE_TIME_DESCRIPTION)
         }),
         _ => false,
     }
@@ -1147,6 +2078,71 @@ fn known_file_matches(candidate: &Path, reference: &Path, expected: &TagValues) 
         _ => false,
     };
     values_match && frames_match && audio_matches
+}
+
+fn operation_editor_metadata(
+    operation: &TagOperation,
+) -> Result<Option<OperationEditorMetadata>, String> {
+    match (
+        operation.before_file_tags_json.as_deref(),
+        operation.after_file_tags_json.as_deref(),
+        operation.edited_fields_json.as_deref(),
+    ) {
+        (None, None, None) => Ok(None),
+        (Some(before), Some(after), Some(fields)) => Ok(Some(OperationEditorMetadata {
+            before: serde_json::from_str(before).map_err(|error| {
+                format!("Aurora's original full-tag journal is invalid: {error}")
+            })?,
+            after: serde_json::from_str(after)
+                .map_err(|error| format!("Aurora's edited full-tag journal is invalid: {error}"))?,
+            fields: serde_json::from_str(fields)
+                .map_err(|error| format!("Aurora's edited-field journal is invalid: {error}"))?,
+        })),
+        _ => Err("Aurora's full-tag journal is incomplete; no file was overwritten.".to_owned()),
+    }
+}
+
+fn operation_file_matches(
+    candidate: &Path,
+    reference: &Path,
+    operation: &TagOperation,
+    expected_after: bool,
+) -> bool {
+    let Ok(metadata) = operation_editor_metadata(operation) else {
+        return false;
+    };
+    if let Some(metadata) = metadata {
+        let expected = if expected_after {
+            &metadata.after
+        } else {
+            &metadata.before
+        };
+        let tags_match = match (read_tag_for_write(candidate), read_tag_for_write(reference)) {
+            (Ok((candidate_tag, _)), Ok((reference_tag, _))) => {
+                read_editable_tag_values(&candidate_tag).is_ok_and(|values| values == *expected)
+                    && same_frames(
+                        &editor_non_target_frames(&candidate_tag, &metadata.fields),
+                        &editor_non_target_frames(&reference_tag, &metadata.fields),
+                    )
+            }
+            _ => false,
+        };
+        let audio_matches = match (audio_payload_hash(candidate), audio_payload_hash(reference)) {
+            (Ok(candidate), Ok(reference)) => candidate == reference,
+            _ => false,
+        };
+        tags_match && audio_matches
+    } else {
+        known_file_matches(
+            candidate,
+            reference,
+            if expected_after {
+                &operation.after
+            } else {
+                &operation.before
+            },
+        )
+    }
 }
 
 fn same_frames(actual: &[Frame], expected: &[Frame]) -> bool {
@@ -1296,6 +2292,15 @@ fn operation_paths(target: &Path, operation_id: i64) -> Result<(PathBuf, PathBuf
         sibling_operation_path(target, operation_id, "working.tmp")?,
         sibling_operation_path(target, operation_id, "original.backup")?,
     ))
+}
+
+fn replacement_requires_recovery(target: &Path, backup: &Path, original: &FileFingerprint) -> bool {
+    if backup.is_file() || !target.is_file() {
+        return true;
+    }
+    FileFingerprint::read(target)
+        .ok()
+        .is_none_or(|current| current != *original)
 }
 
 fn sibling_operation_path(
@@ -1554,6 +2559,45 @@ mod tests {
         let _ = fs::remove_file(PathBuf::from(format!("{}-shm", path.display())));
     }
 
+    fn resolved_track_fixture(track_id: &str, track_key: &str, album_id: &str) -> ResolvedTrack {
+        let values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        ResolvedTrack {
+            summary: TrackSummary {
+                id: track_id.to_owned(),
+                track_key: track_key.to_owned(),
+                album_id: Some(album_id.to_owned()),
+                title: "Fixture title".to_owned(),
+                artist: "Fixture album artist".to_owned(),
+                display_artist: Some("Fixture artist".to_owned()),
+                album: "Fixture album".to_owned(),
+                release_year: None,
+                original_year: None,
+                publisher: None,
+                rating: None,
+                loved: false,
+                love_state: LoveState::Neutral,
+                tag_sync_state: None,
+                can_undo_tag_edit: false,
+                duration_seconds: None,
+                genre: None,
+                play_count: None,
+                track_number: None,
+                track_total: None,
+                disc_number: None,
+                disc_total: None,
+                directory: r"D:\Music\Fixture".to_owned(),
+                filename: "01.mp3".to_owned(),
+                catalog_import_run_id: 1,
+            },
+            audio_path: PathBuf::from(r"D:\Music\Fixture\01.mp3"),
+            catalog_values: values,
+        }
+    }
+
     #[test]
     fn pending_reconciliation_adopts_external_musicbee_rating() {
         let target = fixture_path("external-rating");
@@ -1765,6 +2809,399 @@ mod tests {
     }
 
     #[test]
+    fn mixed_track_total_patch_preserves_each_track_number() {
+        let fields = [EditableTagField::TrackTotal];
+        let patch = EditableTagValues {
+            track_total: Some(12),
+            ..Default::default()
+        };
+        let first = EditableTagValues {
+            track_number: Some(1),
+            track_total: Some(10),
+            ..Default::default()
+        };
+        let second = EditableTagValues {
+            track_number: Some(7),
+            track_total: Some(10),
+            ..Default::default()
+        };
+
+        let first = merge_editor_patch(&first, &fields, &patch).expect("first track patch");
+        let second = merge_editor_patch(&second, &fields, &patch).expect("second track patch");
+
+        assert_eq!((first.track_number, first.track_total), (Some(1), Some(12)));
+        assert_eq!(
+            (second.track_number, second.track_total),
+            (Some(7), Some(12))
+        );
+    }
+
+    #[test]
+    fn editor_rejects_track_or_disc_numbers_above_their_totals() {
+        let before = EditableTagValues {
+            track_number: Some(3),
+            track_total: Some(10),
+            disc_number: Some(1),
+            disc_total: Some(2),
+            ..Default::default()
+        };
+        let track_error = merge_editor_patch(
+            &before,
+            &[EditableTagField::TrackNumber],
+            &EditableTagValues {
+                track_number: Some(11),
+                ..Default::default()
+            },
+        )
+        .expect_err("track number above total");
+        assert!(track_error.contains("track number cannot be greater"));
+
+        let disc_error = merge_editor_patch(
+            &before,
+            &[EditableTagField::DiscNumber],
+            &EditableTagValues {
+                disc_number: Some(3),
+                ..Default::default()
+            },
+        )
+        .expect_err("disc number above total");
+        assert!(disc_error.contains("disc number cannot be greater"));
+    }
+
+    #[test]
+    fn full_editor_preserves_audio_and_unselected_frames() {
+        let path = fixture_path("full-editor-roundtrip");
+        write_fixture(&path, Version::Id3v24);
+        let (mut tag, version) = read_tag_for_write(&path).expect("read fixture");
+        tag.set_artist("Old Artist");
+        tag.set_album_artist("Old Album Artist");
+        tag.set_album("Old Album");
+        tag.set_text("TRCK", "3/10");
+        tag.add_frame(ExtendedText {
+            description: DISPLAY_ARTIST_DESCRIPTION.to_owned(),
+            value: "Old Artist".to_owned(),
+        });
+        tag.write_to_path(&path, version).expect("seed editor tags");
+
+        let payload_hash = audio_payload_hash(&path).expect("payload before");
+        let (mut tag, version) = read_tag_for_write(&path).expect("read seeded fixture");
+        let before = read_editable_tag_values(&tag).expect("editable values before");
+        let fields = [
+            EditableTagField::Artist,
+            EditableTagField::Album,
+            EditableTagField::Rating,
+            EditableTagField::TrackTotal,
+        ];
+        let patch = EditableTagValues {
+            artist: Some("New Artist".to_owned()),
+            album: Some("New Album".to_owned()),
+            rating: Some(4.5),
+            track_total: Some(12),
+            ..Default::default()
+        };
+        let after = merge_editor_patch(&before, &fields, &patch).expect("merge edit");
+        let preserved = editor_non_target_frames(&tag, &fields);
+        apply_editor_tag_changes(&mut tag, version, &fields, &after).expect("apply edit");
+        tag.write_to_path(&path, version).expect("write edit");
+
+        verify_editor_written_file(&path, &after, &fields, &preserved, &payload_hash)
+            .expect("verify full edit");
+        let written = Tag::read_from_path(&path).expect("read written tag");
+        assert!(written.extended_texts().any(|text| {
+            text.description == DISPLAY_ARTIST_DESCRIPTION && text.value == "New Artist"
+        }));
+        assert!(written.extended_texts().any(|text| {
+            text.description == "MUSICBRAINZ_TRACKID" && text.value == "fixture-mbid"
+        }));
+        assert!(written.frames().any(|frame| {
+            frame.content().popularimeter().is_some_and(|popm| {
+                popm.user == "other-player" && popm.rating == 77 && popm.counter == 42
+            })
+        }));
+        assert_eq!(
+            audio_payload_hash(&path).expect("payload after"),
+            payload_hash
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn editor_reads_display_artist_and_round_trips_multi_value_credits() {
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.set_text("TPE1", "A.L.I.S.O.N\0Krosia\0VIQ");
+        tag.set_text("TPE2", "Various Artists\0Score Collective");
+        tag.add_frame(ExtendedText {
+            description: DISPLAY_ARTIST_DESCRIPTION.to_owned(),
+            value: "A.L.I.S.O.N; Krosia; VIQ".to_owned(),
+        });
+
+        let before = read_editable_tag_values(&tag).expect("read multi-value credits");
+        assert_eq!(before.artist.as_deref(), Some("A.L.I.S.O.N; Krosia; VIQ"));
+        assert_eq!(
+            before.album_artist.as_deref(),
+            Some("Various Artists; Score Collective")
+        );
+
+        let original_artist_credits = tag
+            .artists()
+            .expect("artist credits")
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let fields = [EditableTagField::Artist, EditableTagField::AlbumArtist];
+        let after = merge_editor_patch(
+            &before,
+            &fields,
+            &EditableTagValues {
+                artist: Some("New Artist featuring Guest Artist".to_owned()),
+                album_artist: Some("New Album Artist; Score Collective".to_owned()),
+                ..Default::default()
+            },
+        )
+        .expect("merge artist credits");
+        apply_editor_tag_changes(&mut tag, Version::Id3v24, &fields, &after)
+            .expect("write artist credits");
+
+        assert_eq!(
+            tag.artists()
+                .map(|credits| credits.into_iter().map(str::to_owned).collect::<Vec<_>>()),
+            Some(original_artist_credits)
+        );
+        assert_eq!(
+            joined_text_frame_values(&tag, "TPE2").as_deref(),
+            Some("New Album Artist; Score Collective")
+        );
+        assert!(tag.extended_texts().any(|text| {
+            text.description == DISPLAY_ARTIST_DESCRIPTION
+                && text.value == "New Artist featuring Guest Artist"
+        }));
+        assert_eq!(
+            read_editable_tag_values(&tag).expect("read edited credits"),
+            after
+        );
+    }
+
+    #[test]
+    fn editor_maps_year_and_release_year_for_v23_and_v24() {
+        let desired = EditableTagValues {
+            year: Some(1999),
+            release_year: Some(2001),
+            ..Default::default()
+        };
+        let fields = [EditableTagField::Year, EditableTagField::ReleaseYear];
+
+        let mut v23 = Tag::with_version(Version::Id3v23);
+        apply_editor_tag_changes(&mut v23, Version::Id3v23, &fields, &desired)
+            .expect("write v2.3 dates");
+        assert_eq!(
+            v23.get("TYER").and_then(|frame| frame.content().text()),
+            Some("1999")
+        );
+        assert!(v23.get("TDRC").is_none());
+        assert!(v23.get("TDRL").is_none());
+        assert!(
+            v23.extended_texts().any(|text| {
+                text.description == RELEASE_TIME_DESCRIPTION && text.value == "2001"
+            })
+        );
+        assert_eq!(read_editable_tag_values(&v23).expect("read v2.3"), desired);
+
+        let mut v24 = Tag::with_version(Version::Id3v24);
+        apply_editor_tag_changes(&mut v24, Version::Id3v24, &fields, &desired)
+            .expect("write v2.4 dates");
+        assert_eq!(
+            v24.get("TDRC").and_then(|frame| frame.content().text()),
+            Some("1999")
+        );
+        assert_eq!(
+            v24.get("TDRL").and_then(|frame| frame.content().text()),
+            Some("2001")
+        );
+        assert!(v24.get("TYER").is_none());
+        assert_eq!(read_editable_tag_values(&v24).expect("read v2.4"), desired);
+    }
+
+    #[test]
+    fn musicbee_popm_zero_is_unrated() {
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.add_frame(Popularimeter {
+            user: MUSICBEE_POPM_OWNER.to_owned(),
+            rating: 0,
+            counter: 0,
+        });
+        assert_eq!(
+            read_tag_values(&tag).expect("read unrated POPM").rating,
+            None
+        );
+        assert_eq!(
+            read_editable_tag_values(&tag)
+                .expect("read editable unrated POPM")
+                .rating,
+            None
+        );
+    }
+
+    #[test]
+    fn musicbee_extended_text_descriptions_are_case_insensitive_and_unique() {
+        let mut tag = Tag::with_version(Version::Id3v23);
+        tag.add_frame(ExtendedText {
+            description: "love rating".to_owned(),
+            value: "L".to_owned(),
+        });
+        tag.add_frame(ExtendedText {
+            description: "tdrl".to_owned(),
+            value: "2004-10-08".to_owned(),
+        });
+
+        let before = read_tag_values(&tag).expect("read case-insensitive MusicBee fields");
+        assert_eq!(before.love_state, LoveState::Loved);
+        assert_eq!(before.release_year, Some(2004));
+
+        let after = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: Some(2010),
+        };
+        apply_tag_changes(&mut tag, Version::Id3v23, &before, &after)
+            .expect("rewrite case-insensitive MusicBee fields");
+        assert!(!tag.extended_texts().any(|text| {
+            text.description
+                .eq_ignore_ascii_case(LOVE_RATING_DESCRIPTION)
+        }));
+        let release_values = tag
+            .extended_texts()
+            .filter(|text| {
+                text.description
+                    .eq_ignore_ascii_case(RELEASE_TIME_DESCRIPTION)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(release_values.len(), 1);
+        assert_eq!(release_values[0].description, RELEASE_TIME_DESCRIPTION);
+        assert_eq!(release_values[0].value, "2010");
+
+        tag.add_frame(ExtendedText {
+            description: "Love Rating".to_owned(),
+            value: "B".to_owned(),
+        });
+        tag.add_frame(ExtendedText {
+            description: "LOVE RATING".to_owned(),
+            value: "L".to_owned(),
+        });
+        assert!(
+            read_tag_values(&tag)
+                .expect_err("case-insensitive duplicate Love fields")
+                .contains("duplicate MusicBee Love")
+        );
+    }
+
+    #[test]
+    fn album_selection_rebind_uses_stable_keys_when_track_ids_change() {
+        let expected = TagEditorSnapshot {
+            tracks: vec![TagEditorTrackState {
+                track_id: "old-track-id".to_owned(),
+                track_key: r"d:\music\fixture\01.mp3".to_owned(),
+                revision: "revision".to_owned(),
+                values: EditableTagValues::default(),
+            }],
+        };
+        let rebound = vec![resolved_track_fixture(
+            "new-track-id",
+            r"d:\music\fixture\01.mp3",
+            "new-album-id",
+        )];
+        assert!(editor_selection_matches_expected(&rebound, &expected));
+
+        let different = vec![resolved_track_fixture(
+            "new-track-id",
+            r"d:\music\fixture\02.mp3",
+            "new-album-id",
+        )];
+        assert!(!editor_selection_matches_expected(&different, &expected));
+
+        let expanded_album = vec![
+            resolved_track_fixture("new-track-id", r"d:\music\fixture\01.mp3", "new-album-id"),
+            resolved_track_fixture("added-track-id", r"d:\music\fixture\02.mp3", "new-album-id"),
+        ];
+        assert!(!editor_selection_matches_expected(
+            &expanded_album,
+            &expected
+        ));
+    }
+
+    #[test]
+    fn full_editor_undo_projects_every_restored_field_and_marks_catalog_pending() {
+        let resolved = resolved_track_fixture("track-id", r"d:\music\fixture\01.mp3", "album-id");
+        let mut snapshot = TrackTagSnapshot {
+            track: resolved.summary,
+            tag_state: TrackTagState {
+                values: TagValues {
+                    rating: Some(4.5),
+                    love_state: LoveState::Neutral,
+                    release_year: Some(2026),
+                },
+                sync_state: None,
+                can_undo: false,
+            },
+        };
+        let restored = EditableTagValues {
+            album_artist: Some("Restored Album Artist".to_owned()),
+            artist: Some("Restored Display Artist".to_owned()),
+            album: Some("Restored Album".to_owned()),
+            title: Some("Restored Title".to_owned()),
+            genre: Some("Soundtrack".to_owned()),
+            publisher: Some("Restored Label".to_owned()),
+            rating: Some(4.5),
+            year: Some(1999),
+            release_year: Some(2026),
+            track_number: Some(3),
+            track_total: Some(12),
+            disc_number: Some(1),
+            disc_total: Some(2),
+        };
+
+        apply_full_editor_undo_projection(&mut snapshot, &restored);
+
+        assert_eq!(snapshot.track.title, "Restored Title");
+        assert_eq!(snapshot.track.artist, "Restored Album Artist");
+        assert_eq!(
+            snapshot.track.display_artist.as_deref(),
+            Some("Restored Display Artist")
+        );
+        assert_eq!(snapshot.track.album, "Restored Album");
+        assert_eq!(snapshot.track.original_year, Some(1999));
+        assert_eq!(snapshot.track.track_number, Some(3));
+        assert_eq!(snapshot.track.track_total, Some(12));
+        assert_eq!(
+            snapshot.track.tag_sync_state,
+            Some(TagSyncState::PendingImport)
+        );
+        assert_eq!(
+            snapshot.tag_state.sync_state,
+            Some(TagSyncState::PendingImport)
+        );
+    }
+
+    #[test]
+    fn stale_editor_revision_fails_before_file_mutation() {
+        let path = fixture_path("stale-editor-revision");
+        write_fixture(&path, Version::Id3v24);
+        let bytes_before = fs::read(&path).expect("fixture bytes before");
+        let fingerprint = FileFingerprint::read(&path).expect("fixture fingerprint");
+        let (tag, _) = read_tag_for_write(&path).expect("read fixture");
+        let values = read_editable_tag_values(&tag).expect("read editable values");
+        let expected = TagEditorTrackState {
+            track_id: "1".to_owned(),
+            track_key: "fixture".to_owned(),
+            revision: "stale-revision".to_owned(),
+            values,
+        };
+
+        assert!(verify_editor_expected(&expected, &fingerprint, &expected.values).is_err());
+        assert_eq!(fs::read(&path).expect("fixture bytes after"), bytes_before);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn validation_rejects_unknown_musicbee_rating_without_mutating() {
         let mut tag = Tag::with_version(Version::Id3v23);
         tag.add_frame(Popularimeter {
@@ -1919,6 +3356,158 @@ mod tests {
         let _ = fs::remove_file(&state_path);
         let _ = fs::remove_file(PathBuf::from(format!("{}-wal", state_path.display())));
         let _ = fs::remove_file(PathBuf::from(format!("{}-shm", state_path.display())));
+    }
+
+    #[test]
+    fn undo_recovery_recognizes_a_completed_restore_without_its_current_backup() {
+        let target = fixture_path("undo-finished-missing-current-target");
+        write_fixture(&target, Version::Id3v23);
+        let state_path = fixture_path("undo-finished-missing-current-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("create state store");
+        let (mut tag, version) = read_tag_for_write(&target).expect("read source tag");
+        let before = read_tag_values(&tag).expect("read source values");
+        let after = TagValues {
+            rating: Some(4.5),
+            love_state: LoveState::Loved,
+            release_year: Some(2005),
+        };
+        let operation_id = store
+            .begin_tag_operation(
+                "undo-finished-missing-current-key",
+                &target.to_string_lossy(),
+                &before,
+                &after,
+                &FileFingerprint::read(&target)
+                    .expect("source fingerprint")
+                    .to_string(),
+            )
+            .expect("begin operation");
+        let (working, backup) = operation_paths(&target, operation_id).expect("operation paths");
+        store
+            .set_operation_paths(
+                operation_id,
+                &working.to_string_lossy(),
+                &backup.to_string_lossy(),
+            )
+            .expect("save operation paths");
+        fs::copy(&target, &working).expect("copy source");
+        apply_tag_changes(&mut tag, version, &before, &after).expect("mutate working tag");
+        tag.write_to_path(&working, version)
+            .expect("write working tag");
+        replace_file_atomic(&target, &working, Some(&backup)).expect("install edit");
+        store
+            .mark_operation(operation_id, "replaced", None)
+            .expect("checkpoint replacement");
+        let directory = target
+            .parent()
+            .expect("target parent")
+            .to_string_lossy()
+            .into_owned();
+        let filename = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("target filename");
+        store
+            .finish_tag_operation(
+                operation_id,
+                "undo-finished-missing-current-key",
+                &directory,
+                filename,
+                &before,
+                &after,
+                0,
+            )
+            .expect("finish edit journal");
+
+        let undo_current = sibling_operation_path(&target, operation_id, "undo-current.backup")
+            .expect("undo safety path");
+        let undo_replacement = sibling_operation_path(&target, operation_id, "undo-original.tmp")
+            .expect("undo replacement path");
+        fs::copy(&backup, &undo_replacement).expect("copy undo replacement");
+        store
+            .begin_undo(
+                operation_id,
+                &undo_current.to_string_lossy(),
+                &FileFingerprint::read(&target)
+                    .expect("undo source fingerprint")
+                    .to_string(),
+            )
+            .expect("begin undo");
+        replace_file_atomic(&target, &undo_replacement, Some(&undo_current)).expect("install undo");
+        fs::remove_file(&undo_current).expect("simulate missing current backup after replacement");
+
+        TagService::new(store.clone()).expect("recover completed undo");
+
+        assert_eq!(
+            read_tag_values_from_path(&target).expect("read recovered target"),
+            before
+        );
+        assert!(store.interrupted_operations().expect("journal").is_empty());
+        assert!(
+            store
+                .latest_undo_operation("undo-finished-missing-current-key")
+                .expect("undo lookup")
+                .is_none()
+        );
+
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_file(backup);
+        let _ = fs::remove_file(undo_replacement);
+        remove_state_fixture(&state_path);
+    }
+
+    #[test]
+    fn missing_post_replace_backup_is_terminal_without_blocking_startup() {
+        let target = fixture_path("missing-post-replace-backup-target");
+        write_fixture(&target, Version::Id3v23);
+        let state_path = fixture_path("missing-post-replace-backup-state.sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("create state store");
+        let (mut tag, version) = read_tag_for_write(&target).expect("read source tag");
+        let before = read_tag_values(&tag).expect("read source values");
+        let after = TagValues {
+            rating: Some(4.5),
+            love_state: LoveState::Loved,
+            release_year: Some(2005),
+        };
+        let operation_id = store
+            .begin_tag_operation(
+                "missing-post-replace-backup-key",
+                &target.to_string_lossy(),
+                &before,
+                &after,
+                &FileFingerprint::read(&target)
+                    .expect("source fingerprint")
+                    .to_string(),
+            )
+            .expect("begin operation");
+        let (working, backup) = operation_paths(&target, operation_id).expect("operation paths");
+        store
+            .set_operation_paths(
+                operation_id,
+                &working.to_string_lossy(),
+                &backup.to_string_lossy(),
+            )
+            .expect("save operation paths");
+        fs::copy(&target, &working).expect("copy source");
+        apply_tag_changes(&mut tag, version, &before, &after).expect("mutate working tag");
+        tag.write_to_path(&working, version)
+            .expect("write working tag");
+        replace_file_atomic(&target, &working, Some(&backup)).expect("install edit");
+        store
+            .mark_operation(operation_id, "replaced", None)
+            .expect("checkpoint replacement");
+        fs::remove_file(&backup).expect("simulate missing rollback copy");
+
+        TagService::new(store.clone()).expect("start despite missing rollback copy");
+
+        assert_eq!(
+            read_tag_values_from_path(&target).expect("read retained target"),
+            after
+        );
+        assert!(store.interrupted_operations().expect("journal").is_empty());
+
+        let _ = fs::remove_file(target);
+        remove_state_fixture(&state_path);
     }
 
     #[test]

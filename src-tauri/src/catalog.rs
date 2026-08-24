@@ -47,6 +47,7 @@ pub(crate) struct TrackSummary {
     pub(crate) album_id: Option<String>,
     pub(crate) title: String,
     pub(crate) artist: String,
+    pub(crate) display_artist: Option<String>,
     pub(crate) album: String,
     pub(crate) release_year: Option<i64>,
     pub(crate) original_year: Option<i64>,
@@ -59,6 +60,10 @@ pub(crate) struct TrackSummary {
     pub(crate) duration_seconds: Option<i64>,
     pub(crate) genre: Option<String>,
     pub(crate) play_count: Option<i64>,
+    pub(crate) track_number: Option<u32>,
+    pub(crate) track_total: Option<u32>,
+    pub(crate) disc_number: Option<u32>,
+    pub(crate) disc_total: Option<u32>,
     #[serde(skip)]
     pub(crate) directory: String,
     #[serde(skip)]
@@ -85,10 +90,21 @@ impl TrackSummary {
     }
 
     pub(crate) fn apply_tag_projection(&mut self, updated: &Self) {
+        self.title = updated.title.clone();
+        self.artist = updated.artist.clone();
+        self.display_artist = updated.display_artist.clone();
+        self.album = updated.album.clone();
         self.rating = updated.rating;
         self.loved = updated.loved;
         self.love_state = updated.love_state;
         self.release_year = updated.release_year;
+        self.original_year = updated.original_year;
+        self.publisher = updated.publisher.clone();
+        self.genre = updated.genre.clone();
+        self.track_number = updated.track_number;
+        self.track_total = updated.track_total;
+        self.disc_number = updated.disc_number;
+        self.disc_total = updated.disc_total;
         self.tag_sync_state = updated.tag_sync_state;
         self.can_undo_tag_edit = updated.can_undo_tag_edit;
     }
@@ -178,6 +194,10 @@ pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
         artist: row
             .get::<_, Option<String>>(2)?
             .unwrap_or_else(|| "Unknown Artist".to_owned()),
+        display_artist: match row.as_ref().column_index("display_artist") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
         album: row
             .get::<_, Option<String>>(3)?
             .unwrap_or_else(|| "Unknown Album".to_owned()),
@@ -198,11 +218,31 @@ pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
         duration_seconds: row.get(7)?,
         genre: row.get(8)?,
         play_count: row.get(9)?,
+        track_number: optional_u32(row, "track_number")?,
+        track_total: optional_u32(row, "track_total")?,
+        disc_number: optional_u32(row, "disc_number")?,
+        disc_total: optional_u32(row, "disc_total")?,
         album_id: row.get(10)?,
         directory,
         filename,
         catalog_import_run_id: row.get(13)?,
     })
+}
+
+fn optional_u32(row: &Row<'_>, name: &str) -> rusqlite::Result<Option<u32>> {
+    let Ok(index) = row.as_ref().column_index(name) else {
+        return Ok(None);
+    };
+    row.get::<_, Option<i64>>(index)?
+        .map(u32::try_from)
+        .transpose()
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Integer,
+                Box::new(error),
+            )
+        })
 }
 
 pub(crate) fn normalize_track_key(directory: &str, filename: &str) -> String {
@@ -1557,6 +1597,82 @@ pub(crate) fn resolve_track(
     })
 }
 
+pub(crate) fn resolve_album_tracks(
+    album_id: &str,
+    store: &StateStore,
+) -> Result<Vec<ResolvedTrack>, String> {
+    let album_id = album_id.trim();
+    if album_id.is_empty() || album_id.chars().count() > 512 {
+        return Err("Album identity is invalid.".to_owned());
+    }
+    let connection = open_catalog(&default_catalog_path()?)?;
+    let mut summaries = album_tag_tracks_from_connection(&connection, album_id)?;
+    let catalog_values = summaries
+        .iter()
+        .map(TrackSummary::catalog_tag_values)
+        .collect::<Vec<_>>();
+    apply_overlays(&mut summaries, Some(store))?;
+    summaries
+        .into_iter()
+        .zip(catalog_values)
+        .map(|(summary, catalog_values)| {
+            let audio_path = validated_audio_path(&summary.directory, &summary.filename)?;
+            Ok(ResolvedTrack {
+                summary,
+                audio_path,
+                catalog_values,
+            })
+        })
+        .collect()
+}
+
+fn album_tag_tracks_from_connection(
+    connection: &Connection,
+    album_id: &str,
+) -> Result<Vec<TrackSummary>, String> {
+    const MAX_TAG_EDITOR_ALBUM_TRACKS: usize = 500;
+    let mut statement = connection
+        .prepare(
+            r#"
+            SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
+                   COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
+                     WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
+                     WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
+                     WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
+                     WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
+                     WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
+                   t.love, t.time_seconds, t.canonical_genre, l.play_count,
+                   t.album_id, t.file_path, t.filename, t.import_run_id,
+                   t.year AS original_year, t.publisher AS publisher,
+                   t.display_artist AS display_artist,
+                   t.track_number AS track_number, NULL AS track_total,
+                   t.disc_number AS disc_number, NULL AS disc_total
+            FROM tracks AS t
+            LEFT JOIN lastfm_track_popularity AS l
+              ON l.artist_key = lower(trim(t.album_artist_display))
+             AND l.track_key = lower(trim(t.title))
+            WHERE t.album_id = ?1
+            ORDER BY COALESCE(t.disc_number, 0), COALESCE(t.track_number, 0), t.id
+            LIMIT 501
+            "#,
+        )
+        .map_err(|error| format!("Could not prepare the album tag selection: {error}"))?;
+    let summaries = statement
+        .query_map([album_id], map_track_row)
+        .map_err(|error| format!("Could not read the album tag selection: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not decode the album tag selection: {error}"))?;
+    if summaries.is_empty() {
+        return Err("This album is no longer available in the catalog.".to_owned());
+    }
+    if summaries.len() > MAX_TAG_EDITOR_ALBUM_TRACKS {
+        return Err(format!(
+            "This album contains more than {MAX_TAG_EDITOR_ALBUM_TRACKS} tracks; Aurora refused an unsafe batch edit."
+        ));
+    }
+    Ok(summaries)
+}
+
 pub(crate) fn resolve_audio_path(
     track_id: &str,
     track_key: &str,
@@ -1748,6 +1864,50 @@ mod tests {
             completed_import_revision_for_connection(&connection).expect("completed revision"),
             52
         );
+    }
+
+    #[test]
+    fn album_tag_resolver_is_not_limited_to_the_ui_page_size() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks (
+                  id INTEGER PRIMARY KEY, album_id TEXT, title TEXT,
+                  album_artist_display TEXT, display_artist TEXT, album TEXT,
+                  release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT,
+                  love TEXT, time_seconds INTEGER, canonical_genre TEXT,
+                  file_path TEXT, filename TEXT, import_run_id INTEGER NOT NULL,
+                  year INTEGER, publisher TEXT, track_number INTEGER, disc_number INTEGER
+                );
+                CREATE TABLE lastfm_track_popularity (
+                  artist_key TEXT, track_key TEXT, play_count INTEGER,
+                  PRIMARY KEY (artist_key, track_key)
+                );
+                "#,
+            )
+            .expect("fixture schema");
+        for index in 1..=125_i64 {
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO tracks(
+                      id, album_id, title, album_artist_display, display_artist, album,
+                      file_path, filename, import_run_id, track_number, disc_number
+                    ) VALUES (?1, 'album-large', ?2, 'Composer', 'Performer', 'Large Album',
+                              'D:\Music\Large Album', ?3, 52, ?1, 1)
+                    "#,
+                    params![index, format!("Track {index}"), format!("{index:03}.mp3")],
+                )
+                .expect("insert track");
+        }
+
+        let tracks = album_tag_tracks_from_connection(&connection, "album-large")
+            .expect("resolve complete album selection");
+
+        assert_eq!(tracks.len(), 125);
+        assert_eq!(tracks[0].track_number, Some(1));
+        assert_eq!(tracks[124].track_number, Some(125));
     }
 
     #[test]

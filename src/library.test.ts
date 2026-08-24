@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyEditableTrackTagProjection,
   applyTrackTagProjection,
   catalogRefreshIsConsistent,
   exploreAlbums,
@@ -46,6 +47,10 @@ describe("library presentation", () => {
       ...tracks[0],
       id: "old-id",
       albumId: "old-album",
+      title: "Missing projection title",
+      displayArtist: null,
+      originalYear: undefined,
+      publisher: undefined,
       rating: 3.5,
       loved: false,
       loveState: "banned" as const,
@@ -61,6 +66,44 @@ describe("library presentation", () => {
       loveState: "banned",
       tagSyncState: "pendingImport",
       canUndoTagEdit: true,
+    });
+    expect(applyTrackTagProjection(current, staleUpdate)).toMatchObject({
+      title: current.title,
+      displayArtist: current.displayArtist,
+      originalYear: current.originalYear,
+      publisher: current.publisher,
+    });
+  });
+
+  it("applies complete editable metadata only for a full-editor result", () => {
+    const current = { ...tracks[0], id: "fresh-id", albumId: "fresh-album" };
+    const update = {
+      ...tracks[0],
+      id: "old-id",
+      albumId: "old-album",
+      title: "Svefn-g-englar",
+      artist: "Sigur Rós & Friends",
+      displayArtist: null,
+      album: "Ágætis byrjun",
+      originalYear: null,
+      publisher: null,
+      trackNumber: 1,
+      trackTotal: 10,
+      discNumber: 1,
+      discTotal: 1,
+    };
+
+    expect(applyEditableTrackTagProjection(current, update)).toMatchObject({
+      id: "fresh-id",
+      albumId: "fresh-album",
+      title: "Svefn-g-englar",
+      artist: "Sigur Rós & Friends",
+      displayArtist: null,
+      album: "Ágætis byrjun",
+      originalYear: null,
+      publisher: null,
+      trackTotal: 10,
+      discTotal: 1,
     });
   });
 
@@ -123,7 +166,7 @@ describe("library presentation", () => {
 
     const albumPage = await exploreAlbums({ artist: "M83", sort: "releaseYearDesc" });
     expect(albumPage.items).toHaveLength(1);
-    expect(albumPage.items[0]).toMatchObject({ title: "Hurry Up, We're Dreaming", totalTracks: 1 });
+    expect(albumPage.items[0]).toMatchObject({ title: "Hurry Up, We're Dreaming", totalTracks: 2 });
     expect(albumPage.totalCount).toBe(1);
 
     const artistPage = await exploreArtists({ genre: "Soundtrack", sort: "nameAsc" });

@@ -25,7 +25,7 @@ export interface Track {
   albumId: string | null;
   title: string;
   artist: string;
-  displayArtist?: string;
+  displayArtist?: string | null;
   album: string;
   releaseYear: number | null;
   originalYear?: number | null;
@@ -38,6 +38,10 @@ export interface Track {
   durationSeconds: number | null;
   genre: string | null;
   playCount: number | null;
+  trackNumber?: number | null;
+  trackTotal?: number | null;
+  discNumber?: number | null;
+  discTotal?: number | null;
 }
 
 export function catalogRefreshIsConsistent(
@@ -57,6 +61,23 @@ export function applyTrackTagProjection(current: Track, updated: Track): Track {
     releaseYear: updated.releaseYear,
     tagSyncState: updated.tagSyncState,
     canUndoTagEdit: updated.canUndoTagEdit,
+  };
+}
+
+export function applyEditableTrackTagProjection(current: Track, updated: Track): Track {
+  return {
+    ...applyTrackTagProjection(current, updated),
+    title: updated.title,
+    artist: updated.artist,
+    displayArtist: updated.displayArtist,
+    album: updated.album,
+    originalYear: updated.originalYear ?? null,
+    publisher: updated.publisher ?? null,
+    genre: updated.genre,
+    trackNumber: updated.trackNumber ?? null,
+    trackTotal: updated.trackTotal ?? null,
+    discNumber: updated.discNumber ?? null,
+    discTotal: updated.discTotal ?? null,
   };
 }
 
@@ -228,7 +249,8 @@ export const browserPreview: LibrarySnapshot = {
     { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755 },
   ],
   tracks: [
-    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186 }),
+    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186, trackNumber: 2, trackTotal: 11, discNumber: 1, discTotal: 2 }),
+    previewTrack({ id: "preview-8", albumId: "preview-hurry-up", title: "Wait", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", rating: 4.5, loved: false, durationSeconds: 343, genre: "Electronic", playCount: 174, trackNumber: 5, trackTotal: 11, discNumber: 1, discTotal: 2 }),
     previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", album: "Drive", originalYear: 2011, releaseYear: 2011, publisher: "Lakeshore Records", rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
     previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, publisher: "Record Makers", rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
     previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", originalYear: 2009, releaseYear: 2009, publisher: "Young", rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),

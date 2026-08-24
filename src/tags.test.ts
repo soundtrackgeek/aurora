@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { browserPreview, exploreTracks, type Track } from "./library";
 import {
+  aggregateEditableTagValues,
+  editableTagValuesForTrack,
   readTrackTagState,
   reconcilePendingTags,
   tagValuesForTrack,
@@ -8,6 +10,8 @@ import {
   trackWithTagValues,
   undoTrackTagEdit,
   updateTrackTags,
+  type EditableTagValues,
+  type TagEditorTrackState,
 } from "./tags";
 
 function track(id: string): Track {
@@ -119,5 +123,67 @@ describe("tag editing preview boundary", () => {
     });
 
     await undoTrackTagEdit(saved.track);
+  });
+});
+
+function editableValues(overrides: Partial<EditableTagValues> = {}): EditableTagValues {
+  return {
+    albumArtist: "Five for Fighting",
+    artist: "Five for Fighting",
+    album: "America Town",
+    title: "Superman",
+    genre: "Pop Rock",
+    publisher: "Aware Records",
+    rating: 4.5,
+    year: 2000,
+    releaseYear: 2000,
+    trackNumber: 1,
+    trackTotal: 12,
+    discNumber: 1,
+    discTotal: 1,
+    ...overrides,
+  };
+}
+
+function editorTrack(trackId: string, values: EditableTagValues): TagEditorTrackState {
+  return { trackId, trackKey: `c:/music/${trackId}.mp3`, revision: `revision-${trackId}`, values };
+}
+
+describe("multi-file tag aggregation", () => {
+  it("keeps shared values and marks different values as mixed", () => {
+    const aggregated = aggregateEditableTagValues([
+      editorTrack("one", editableValues()),
+      editorTrack("two", editableValues({ title: "Easy Tonight", trackNumber: 2 })),
+    ]);
+
+    expect(aggregated.album).toEqual({ value: "America Town", mixed: false });
+    expect(aggregated.genre).toEqual({ value: "Pop Rock", mixed: false });
+    expect(aggregated.title).toEqual({ value: "Superman", mixed: true });
+    expect(aggregated.trackNumber).toEqual({ value: 1, mixed: true });
+  });
+
+  it("projects every editable browser-preview field without changing inline tag helpers", () => {
+    const previewTrack = {
+      ...track("editable-projection"),
+      displayArtist: "Guest vocalist",
+      originalYear: 1999,
+      publisher: "Aware Records",
+      trackNumber: 3,
+      trackTotal: 12,
+      discNumber: 1,
+      discTotal: 2,
+    };
+
+    expect(editableTagValuesForTrack(previewTrack)).toMatchObject({
+      albumArtist: "Test artist",
+      artist: "Guest vocalist",
+      publisher: "Aware Records",
+      year: 1999,
+      trackNumber: 3,
+      trackTotal: 12,
+      discNumber: 1,
+      discTotal: 2,
+    });
+    expect(tagValuesForTrack(previewTrack)).toEqual({ rating: 3.5, loveState: "neutral", releaseYear: 2001 });
   });
 });

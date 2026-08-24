@@ -1,74 +1,254 @@
-import { Ban, Heart, RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import type { Track } from "../library";
 import {
-  readTrackTagState,
-  tagValuesForTrack,
-  undoTrackTagEdit,
-  updateTrackTags,
-  type LoveState,
-  type TagValues,
-  type TrackTagSnapshot,
+  aggregateEditableTagValues,
+  EDITABLE_TAG_FIELDS,
+  readTagEditorState,
+  updateTagEditor,
+  type EditableTagAggregation,
+  type EditableTagField,
+  type EditableTagValues,
+  type TagEditorSnapshot,
+  type TagEditorTarget,
 } from "../tags";
 
 interface TagEditorProps {
-  track: Track;
-  onTrackChange: (track: Track) => void;
+  target: TagEditorTarget;
+  onTracksChange: (tracks: Track[]) => void;
 }
 
 type EditorPhase = "loading" | "ready" | "saving" | "saved" | "error";
+type DraftText = Record<EditableTagField, string>;
+type FieldKind = "text" | "rating" | "year" | "position";
+
+interface FieldDefinition {
+  field: EditableTagField;
+  label: string;
+  kind: FieldKind;
+}
+
+const primaryFields: FieldDefinition[] = [
+  { field: "albumArtist", label: "Album artist", kind: "text" },
+  { field: "artist", label: "Artist", kind: "text" },
+  { field: "album", label: "Album", kind: "text" },
+  { field: "title", label: "Track title", kind: "text" },
+  { field: "genre", label: "Genre", kind: "text" },
+  { field: "publisher", label: "Publisher", kind: "text" },
+  { field: "rating", label: "Track rating", kind: "rating" },
+  { field: "year", label: "Year", kind: "year" },
+  { field: "releaseYear", label: "Release year", kind: "year" },
+];
+
+const positionFields: FieldDefinition[] = [
+  { field: "trackNumber", label: "Track", kind: "position" },
+  { field: "trackTotal", label: "Track total", kind: "position" },
+  { field: "discNumber", label: "Disc", kind: "position" },
+  { field: "discTotal", label: "Disc total", kind: "position" },
+];
 
 const ratingOptions = Array.from({ length: 10 }, (_, index) => (index + 1) / 2);
+const requiredTagFields = new Set<EditableTagField>(["albumArtist", "album", "title"]);
 
-export function TagEditor({ track, onTrackChange }: TagEditorProps) {
-  const [confirmed, setConfirmed] = useState<TagValues>(() => tagValuesForTrack(track));
-  const [draft, setDraft] = useState<TagValues>(() => tagValuesForTrack(track));
-  const [yearText, setYearText] = useState(track.releaseYear?.toString() ?? "");
+function emptyDraft(): DraftText {
+  return Object.fromEntries(EDITABLE_TAG_FIELDS.map((field) => [field, ""])) as DraftText;
+}
+
+function draftForSnapshot(snapshot: TagEditorSnapshot): DraftText {
+  const aggregate = aggregateEditableTagValues(snapshot.tracks);
+  return Object.fromEntries(EDITABLE_TAG_FIELDS.map((field) => [
+    field,
+    aggregate[field].mixed || aggregate[field].value === null ? "" : String(aggregate[field].value),
+  ])) as DraftText;
+}
+
+function nullableDraftText(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function nullableDraftNumber(value: string): number | null {
+  return value.trim() ? Number(value) : null;
+}
+
+function valuesForDraft(draft: DraftText): EditableTagValues {
+  return {
+    albumArtist: nullableDraftText(draft.albumArtist),
+    artist: nullableDraftText(draft.artist),
+    album: nullableDraftText(draft.album),
+    title: nullableDraftText(draft.title),
+    genre: nullableDraftText(draft.genre),
+    publisher: nullableDraftText(draft.publisher),
+    rating: nullableDraftNumber(draft.rating),
+    year: nullableDraftNumber(draft.year),
+    releaseYear: nullableDraftNumber(draft.releaseYear),
+    trackNumber: nullableDraftNumber(draft.trackNumber),
+    trackTotal: nullableDraftNumber(draft.trackTotal),
+    discNumber: nullableDraftNumber(draft.discNumber),
+    discTotal: nullableDraftNumber(draft.discTotal),
+  };
+}
+
+function validateField(field: EditableTagField, text: string): string | null {
+  if (!text.trim()) {
+    return requiredTagFields.has(field)
+      ? "Music Library requires this field; enter a value or leave it unchecked."
+      : null;
+  }
+  if (!["rating", "year", "releaseYear", "trackNumber", "trackTotal", "discNumber", "discTotal"].includes(field)) {
+    return null;
+  }
+  const value = Number(text);
+  if (!Number.isFinite(value)) return "Enter a number or leave the field blank to clear it.";
+  if (field === "rating" && (!Number.isInteger(value * 2) || value < 0.5 || value > 5)) {
+    return "Rating must be between 0.5 and 5 in half-star steps.";
+  }
+  if ((field === "year" || field === "releaseYear") && (!Number.isInteger(value) || value < 1000 || value > 2999)) {
+    return "Years must be four digits from 1000 to 2999.";
+  }
+  if (["trackNumber", "trackTotal", "discNumber", "discTotal"].includes(field)
+    && (!Number.isInteger(value) || value < 1 || value > 9999)) {
+    return "Track and disc values must be whole numbers from 1 to 9999.";
+  }
+  return null;
+}
+
+interface TagFieldProps {
+  definition: FieldDefinition;
+  aggregate: EditableTagAggregation[EditableTagField];
+  checked: boolean;
+  value: string;
+  disabled: boolean;
+  error: string | null;
+  onCheck: (field: EditableTagField, checked: boolean) => void;
+  onChange: (field: EditableTagField, value: string) => void;
+}
+
+function TagField({ definition, aggregate, checked, value, disabled, error, onCheck, onChange }: TagFieldProps) {
+  const { field, label, kind } = definition;
+  const placeholder = aggregate.mixed && !checked
+    ? "Mixed"
+    : checked && requiredTagFields.has(field)
+      ? "Required"
+      : checked
+        ? "Clear on save"
+        : "Blank";
+  const controlProps = {
+    id: `tag-editor-${field}`,
+    "aria-label": label,
+    "aria-invalid": error ? true : undefined,
+    disabled,
+    value,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => onChange(field, event.target.value),
+  };
+
+  return (
+    <div className={`tag-field${checked ? " is-selected" : ""}`}>
+      <div className="tag-field__toggle">
+        <input
+          id={`tag-editor-write-${field}`}
+          type="checkbox"
+          aria-label={`Write ${label}`}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onCheck(field, event.target.checked)}
+        />
+        <span aria-hidden="true">{label}</span>
+        {aggregate.mixed && !checked ? <small>Mixed</small> : null}
+      </div>
+      {kind === "rating" ? (
+        <select {...controlProps}>
+          <option value="">{aggregate.mixed && !checked ? "Mixed" : "Unrated"}</option>
+          {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
+        </select>
+      ) : (
+        <input
+          {...controlProps}
+          type={kind === "text" ? "text" : "number"}
+          inputMode={kind === "text" ? undefined : "numeric"}
+          min={kind === "year" ? 1000 : kind === "position" ? 1 : undefined}
+          max={kind === "year" ? 2999 : kind === "position" ? 9999 : undefined}
+          step={kind === "text" ? undefined : 1}
+          placeholder={placeholder}
+        />
+      )}
+      {error ? <small className="tag-field__error">{error}</small> : null}
+    </div>
+  );
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+export function TagEditor({ target, onTracksChange }: TagEditorProps) {
+  const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
+  const [draft, setDraft] = useState<DraftText>(emptyDraft);
+  const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
   const [phase, setPhase] = useState<EditorPhase>("loading");
   const [message, setMessage] = useState<string | null>(null);
-  const [canUndo, setCanUndo] = useState(track.canUndoTagEdit);
-  const [syncState, setSyncState] = useState(track.tagSyncState);
   const requestRef = useRef(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef(true);
+  const targetKind = target.kind;
+  const targetAlbumId = target.kind === "album" ? target.albumId : null;
+  const targetTrackId = target.kind === "track" ? target.trackId : null;
+  const targetTrackKey = target.kind === "track" ? target.trackKey : null;
+  const targetLabel = target.label;
+  const requestTarget = useMemo<TagEditorTarget>(() => targetKind === "album"
+    ? { kind: "album", albumId: targetAlbumId!, label: targetLabel }
+    : { kind: "track", trackId: targetTrackId!, trackKey: targetTrackKey!, label: targetLabel }, [
+    targetAlbumId,
+    targetKind,
+    targetLabel,
+    targetTrackId,
+    targetTrackKey,
+  ]);
 
-  function applySnapshot(snapshot: TrackTagSnapshot, nextPhase: EditorPhase) {
-    setConfirmed(snapshot.tagState.values);
-    setDraft(snapshot.tagState.values);
-    setYearText(snapshot.tagState.values.releaseYear?.toString() ?? "");
-    setCanUndo(snapshot.tagState.canUndo);
-    setSyncState(snapshot.tagState.syncState);
+  const acceptSnapshot = useCallback((next: TagEditorSnapshot, nextPhase: EditorPhase) => {
+    setSnapshot(next);
+    setDraft(draftForSnapshot(next));
+    setSelectedFields(new Set());
     setPhase(nextPhase);
-    onTrackChange(snapshot.track);
-  }
+  }, []);
 
-  // The parent keys this editor by stable file identity, so import-time ID churn keeps drafts mounted.
+  const loadState = useCallback(async (showLoading: boolean) => {
+    const requestId = ++requestRef.current;
+    await Promise.resolve();
+    if (requestId !== requestRef.current) return;
+    if (showLoading) setPhase("loading");
+    setMessage(null);
+    try {
+      const next = await readTagEditorState(requestTarget);
+      if (requestId !== requestRef.current) return;
+      if (!showLoading && dirtyRef.current) return;
+      acceptSnapshot(next, "ready");
+    } catch (error) {
+      if (requestId !== requestRef.current) return;
+      if (!showLoading && dirtyRef.current) return;
+      setPhase("error");
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [acceptSnapshot, requestTarget]);
+
   useEffect(() => {
     const requestId = ++requestRef.current;
-    void readTrackTagState(track)
-      .then((snapshot) => {
+    void readTagEditorState(requestTarget)
+      .then((next) => {
         if (requestId !== requestRef.current) return;
-        applySnapshot(snapshot, "ready");
+        acceptSnapshot(next, "ready");
       })
       .catch((error: unknown) => {
         if (requestId !== requestRef.current) return;
         setPhase("error");
         setMessage(error instanceof Error ? error.message : String(error));
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { requestRef.current += 1; };
+  }, [acceptSnapshot, requestTarget]);
 
-  const parsedYear = useMemo(() => {
-    if (!yearText.trim()) return null;
-    const year = Number(yearText);
-    return Number.isInteger(year) && year >= 1000 && year <= 2999 ? year : Number.NaN;
-  }, [yearText]);
-  const desired = useMemo<TagValues>(
-    () => ({ ...draft, releaseYear: Number.isNaN(parsedYear) ? null : parsedYear }),
-    [draft, parsedYear],
-  );
-  const isDirty = JSON.stringify(desired) !== JSON.stringify(confirmed) || Number.isNaN(parsedYear);
   const isWorking = phase === "loading" || phase === "saving";
+  const isDirty = selectedFields.size > 0;
 
   useEffect(() => {
     dirtyRef.current = isDirty;
@@ -78,123 +258,168 @@ export function TagEditor({ track, onTrackChange }: TagEditorProps) {
   useEffect(() => {
     function refreshExternalTags() {
       if (dirtyRef.current || workingRef.current) return;
-      const requestId = ++requestRef.current;
-      void readTrackTagState(track)
-        .then((snapshot) => {
-          if (requestId !== requestRef.current) return;
-          applySnapshot(snapshot, "ready");
-        })
-        .catch((error: unknown) => {
-          if (requestId !== requestRef.current) return;
-          setPhase("error");
-          setMessage(error instanceof Error ? error.message : String(error));
-        });
+      void loadState(false);
     }
     window.addEventListener("focus", refreshExternalTags);
     return () => window.removeEventListener("focus", refreshExternalTags);
-    // This editor is keyed by track identity; a new track gets a new component lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadState]);
 
-  async function save() {
-    if (Number.isNaN(parsedYear)) {
-      setPhase("error");
-      setMessage("Release Year must be blank or a four-digit year from 1000 to 2999.");
-      return;
-    }
-    setPhase("saving");
-    setMessage(null);
-    try {
-      const snapshot = await updateTrackTags(track, confirmed, desired);
-      applySnapshot(snapshot, "saved");
-      setMessage("Verified in the MP3. Music Library will catch up when this album folder is synced.");
-    } catch (error) {
-      setPhase("error");
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
+  const aggregate = useMemo(
+    () => aggregateEditableTagValues(snapshot?.tracks ?? []),
+    [snapshot],
+  );
+  const selectedInOrder = useMemo(
+    () => EDITABLE_TAG_FIELDS.filter((field) => selectedFields.has(field)),
+    [selectedFields],
+  );
+  const validation = useMemo(() => Object.fromEntries(EDITABLE_TAG_FIELDS.map((field) => [
+    field,
+    selectedFields.has(field) ? validateField(field, draft[field]) : null,
+  ])) as Record<EditableTagField, string | null>, [draft, selectedFields]);
+  const validationMessage = selectedInOrder.map((field) => validation[field]).find(Boolean) ?? null;
+  const trackCount = snapshot?.tracks.length ?? 0;
 
-  async function undo() {
-    setPhase("saving");
-    setMessage(null);
-    try {
-      const snapshot = await undoTrackTagEdit(track);
-      applySnapshot(snapshot, "saved");
-      setMessage("The retained MP3 backup was restored and verified.");
-    } catch (error) {
-      setPhase("error");
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  function chooseLove(loveState: LoveState) {
-    setDraft((value) => ({ ...value, loveState }));
+  function checkField(field: EditableTagField, checked: boolean) {
+    setSelectedFields((current) => {
+      const next = new Set(current);
+      if (checked) next.add(field);
+      else next.delete(field);
+      return next;
+    });
     setPhase("ready");
     setMessage(null);
   }
 
-  if (phase === "loading") {
+  function editField(field: EditableTagField, value: string) {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setSelectedFields((current) => new Set(current).add(field));
+    setPhase("ready");
+    setMessage(null);
+  }
+
+  function resetDraft() {
+    if (!snapshot) return;
+    setDraft(draftForSnapshot(snapshot));
+    setSelectedFields(new Set());
+    setPhase("ready");
+    setMessage(null);
+  }
+
+  async function save() {
+    if (!snapshot || !selectedInOrder.length || validationMessage) return;
+    const savingCount = snapshot.tracks.length;
+    const fieldCount = selectedInOrder.length;
+    setPhase("saving");
+    setMessage(null);
+    try {
+      const result = await updateTagEditor(requestTarget, snapshot, selectedInOrder, valuesForDraft(draft));
+      acceptSnapshot(result.state, "saved");
+      onTracksChange(result.tracks);
+      const savedFiles = `Saved ${countLabel(fieldCount, "field")} directly to ${countLabel(savingCount, "MP3", "MP3s")}.`;
+      if (result.catalogSync?.status === "synced") {
+        setMessage(`${savedFiles} Aurora's catalog is synchronized.`);
+      } else if (result.catalogSync?.status === "pending") {
+        setMessage(`${savedFiles} ${result.catalogSync.message ?? "The MP3 write is verified; catalog sync is pending."}`);
+      } else {
+        setMessage(savedFiles);
+      }
+    } catch (error) {
+      setPhase("error");
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (!snapshot && phase === "loading") {
     return (
       <section className="tag-editor tag-editor--loading" aria-live="polite">
         <RefreshCw className="is-spinning" aria-hidden="true" />
-        <span>Reading MusicBee tags from the MP3…</span>
+        <span>Reading tags from the MP3 {target.kind === "album" ? "files" : "file"}…</span>
+      </section>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <section className="tag-editor" aria-labelledby="tag-editor-heading">
+        <div className="tag-editor__heading">
+          <div><p className="eyebrow">Tag editor</p><h3 id="tag-editor-heading">Could not read tags</h3></div>
+        </div>
+        {message ? <p className="tag-message tag-message--error" role="alert">{message}</p> : null}
+        <button type="button" className="tag-editor__retry" onClick={() => void loadState(true)}>
+          <RefreshCw aria-hidden="true" /> Retry
+        </button>
       </section>
     );
   }
 
   return (
-    <section className="tag-editor" aria-labelledby="tag-editor-title">
+    <section className="tag-editor" aria-labelledby="tag-editor-heading" aria-busy={isWorking}>
       <div className="tag-editor__heading">
-        <div><p className="eyebrow">File metadata</p><h3 id="tag-editor-title">MusicBee tags</h3></div>
-        {syncState === "pendingImport" && <span className="sync-badge">Pending library sync</span>}
+        <div>
+          <p className="eyebrow">{target.kind === "album" ? "Album selection" : "Track selection"}</p>
+          <h3 id="tag-editor-heading">{target.label}</h3>
+          <span>{countLabel(trackCount, "MP3", "MP3s")}</span>
+        </div>
+        <button
+          type="button"
+          className="tag-editor__refresh"
+          aria-label="Refresh tags from MP3 files"
+          title={isDirty ? "Reset the draft before refreshing" : "Refresh tags from MP3 files"}
+          disabled={isWorking || isDirty}
+          onClick={() => void loadState(false)}
+        >
+          <RefreshCw className={phase === "loading" ? "is-spinning" : undefined} aria-hidden="true" />
+        </button>
       </div>
 
-      <label className="tag-field">
-        <span>Rating</span>
-        <select
-          value={draft.rating ?? ""}
-          onChange={(event) => {
-            setDraft((value) => ({ ...value, rating: event.target.value ? Number(event.target.value) : null }));
-            setPhase("ready");
-            setMessage(null);
-          }}
-          disabled={isWorking}
-        >
-          <option value="">Unrated</option>
-          {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
-        </select>
-      </label>
-
-      <fieldset className="tag-field tag-love" disabled={isWorking}>
-        <legend>Love rating</legend>
-        <div>
-          <button type="button" className={draft.loveState === "neutral" ? "is-active" : undefined} aria-pressed={draft.loveState === "neutral"} onClick={() => chooseLove("neutral")}>Neutral</button>
-          <button type="button" className={draft.loveState === "loved" ? "is-active is-loved" : undefined} aria-pressed={draft.loveState === "loved"} onClick={() => chooseLove("loved")}><Heart aria-hidden="true" /> Love</button>
-          <button type="button" className={draft.loveState === "banned" ? "is-active is-banned" : undefined} aria-pressed={draft.loveState === "banned"} onClick={() => chooseLove("banned")}><Ban aria-hidden="true" /> Ban</button>
+      <div className="tag-editor__fields">
+        {primaryFields.map((definition) => (
+          <TagField
+            key={definition.field}
+            definition={definition}
+            aggregate={aggregate[definition.field]}
+            checked={selectedFields.has(definition.field)}
+            value={draft[definition.field]}
+            disabled={isWorking}
+            error={validation[definition.field]}
+            onCheck={checkField}
+            onChange={editField}
+          />
+        ))}
+        <div className="tag-editor__position-fields">
+          {positionFields.map((definition) => (
+            <TagField
+              key={definition.field}
+              definition={definition}
+              aggregate={aggregate[definition.field]}
+              checked={selectedFields.has(definition.field)}
+              value={draft[definition.field]}
+              disabled={isWorking}
+              error={validation[definition.field]}
+              onCheck={checkField}
+              onChange={editField}
+            />
+          ))}
         </div>
-      </fieldset>
+      </div>
 
-      <label className="tag-field">
-        <span>Release Year</span>
-        <input
-          type="number"
-          min="1000"
-          max="2999"
-          inputMode="numeric"
-          placeholder="Unknown"
-          value={yearText}
-          onChange={(event) => { setYearText(event.target.value); setPhase("ready"); setMessage(null); }}
-          disabled={isWorking}
-        />
-      </label>
-
-      {message && <p className={`tag-message tag-message--${phase}`} role={phase === "error" ? "alert" : "status"}>{message}</p>}
+      {validationMessage ? <p className="tag-message tag-message--error" role="alert">{validationMessage}</p> : null}
+      {message ? <p className={`tag-message tag-message--${phase}`} role={phase === "error" ? "alert" : "status"}>{message}</p> : null}
 
       <div className="tag-editor__actions">
-        <button type="button" className="tag-undo" onClick={() => void undo()} disabled={isWorking || !canUndo}><RotateCcw aria-hidden="true" /> Undo last write</button>
-        <button type="button" className="tag-save" onClick={() => void save()} disabled={isWorking || !isDirty || Number.isNaN(parsedYear)}>
+        <button type="button" className="tag-reset" onClick={resetDraft} disabled={isWorking || !isDirty}>
+          <RotateCcw aria-hidden="true" /> Reset draft
+        </button>
+        <button
+          type="button"
+          className="tag-save"
+          onClick={() => void save()}
+          disabled={isWorking || !isDirty || Boolean(validationMessage)}
+        >
           {phase === "saving" ? <RefreshCw className="is-spinning" aria-hidden="true" /> : phase === "saved" ? <ShieldCheck aria-hidden="true" /> : <Save aria-hidden="true" />}
-          {phase === "saving" ? "Verifying…" : "Save to MP3"}
+          {phase === "saving"
+            ? `Saving ${countLabel(trackCount, "MP3", "MP3s")}…`
+            : `Save ${countLabel(selectedFields.size, "field")} to ${countLabel(trackCount, "MP3", "MP3s")}`}
         </button>
       </div>
     </section>

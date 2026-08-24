@@ -1,5 +1,6 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -17,7 +18,9 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 const CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(30);
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const SYNC_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const MAX_SYNC_FOLDERS: usize = 32;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -48,6 +51,8 @@ pub struct LibraryBridgeSupports {
     pub batch_folders: bool,
     pub cross_volume_copy: bool,
     pub preview_required: bool,
+    #[serde(default)]
+    pub sync_existing_folders: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,6 +198,42 @@ struct ApplyPayload<'a> {
     session_id: i64,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncExistingFoldersPayload<'a> {
+    folder_paths: &'a [String],
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum LibraryFolderSyncStatus {
+    Updated,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct LibraryFolderSyncReceipt {
+    folder_path: String,
+    status: LibraryFolderSyncStatus,
+    changed_tracks: i64,
+    changed_albums: i64,
+    import_run_id: Option<i64>,
+    backup_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LibraryExistingFoldersSyncResult {
+    synced_folder_count: usize,
+    updated_folder_count: usize,
+    changed_tracks: i64,
+    changed_albums: i64,
+    import_run_ids: Vec<i64>,
+    backup_paths: Vec<String>,
+    folders: Vec<LibraryFolderSyncReceipt>,
+}
+
 struct ExchangeFiles {
     request_path: PathBuf,
     response_path: PathBuf,
@@ -330,6 +371,23 @@ pub async fn apply_library_intake_batch(
     .map_err(|error| format!("The album import worker stopped unexpectedly: {error}"))?
 }
 
+pub(crate) fn sync_existing_library_folders(
+    app: &AppHandle,
+    folder_paths: Vec<String>,
+) -> Result<LibraryExistingFoldersSyncResult, String> {
+    let folder_paths = validate_sync_folder_paths(folder_paths)?;
+    let result = invoke_bridge::<_, LibraryExistingFoldersSyncResult>(
+        app,
+        "syncExistingFolders",
+        SyncExistingFoldersPayload {
+            folder_paths: &folder_paths,
+        },
+        SYNC_TIMEOUT,
+    )?;
+    validate_sync_result(&result, &folder_paths)?;
+    Ok(result)
+}
+
 fn validate_source_path(source_path: &str) -> Result<String, String> {
     let source_path = source_path.trim();
     if source_path.is_empty() {
@@ -350,6 +408,115 @@ fn validate_apply_request(request: &LibraryIntakeApplyRequest) -> Result<(), Str
     }
     if request.session_id <= 0 {
         return Err("The album import preview is invalid. Preview the folder again.".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_sync_folder_paths(folder_paths: Vec<String>) -> Result<Vec<String>, String> {
+    if folder_paths.is_empty() || folder_paths.len() > MAX_SYNC_FOLDERS {
+        return Err(format!(
+            "Aurora can synchronize between 1 and {MAX_SYNC_FOLDERS} album folders at a time."
+        ));
+    }
+
+    let mut normalized = Vec::with_capacity(folder_paths.len());
+    let mut seen = HashSet::with_capacity(folder_paths.len());
+    for raw_path in folder_paths {
+        let raw_path = raw_path.trim();
+        if raw_path.is_empty() {
+            return Err("Aurora cannot synchronize an empty album folder path.".to_owned());
+        }
+        let folder = Path::new(raw_path);
+        if !folder.is_absolute() || !folder.is_dir() {
+            return Err(format!(
+                "Aurora cannot synchronize a missing or invalid album folder: {}.",
+                folder.display()
+            ));
+        }
+        let key = raw_path.replace('/', "\\").to_lowercase();
+        if seen.insert(key) {
+            normalized.push(raw_path.to_owned());
+        }
+    }
+    if normalized.is_empty() {
+        return Err("Aurora could not identify an album folder to synchronize.".to_owned());
+    }
+    Ok(normalized)
+}
+
+fn validate_sync_result(
+    result: &LibraryExistingFoldersSyncResult,
+    requested_folders: &[String],
+) -> Result<(), String> {
+    let updated_receipts = result
+        .folders
+        .iter()
+        .filter(|folder| folder.status == LibraryFolderSyncStatus::Updated)
+        .count();
+    let changed_tracks = result
+        .folders
+        .iter()
+        .map(|folder| folder.changed_tracks)
+        .sum::<i64>();
+    let changed_albums = result
+        .folders
+        .iter()
+        .map(|folder| folder.changed_albums)
+        .sum::<i64>();
+    let receipt_import_run_ids = result
+        .folders
+        .iter()
+        .filter_map(|folder| folder.import_run_id)
+        .collect::<Vec<_>>();
+    let receipt_backup_paths = result
+        .folders
+        .iter()
+        .filter_map(|folder| folder.backup_path.clone())
+        .collect::<Vec<_>>();
+
+    let invalid_receipt = result.folders.iter().any(|folder| {
+        folder.folder_path.trim().is_empty()
+            || folder.changed_tracks < 0
+            || folder.changed_albums < 0
+            || folder.import_run_id.is_some_and(|id| id <= 0)
+            || (folder.status == LibraryFolderSyncStatus::Unchanged
+                && (folder.changed_tracks != 0
+                    || folder.changed_albums != 0
+                    || folder.import_run_id.is_some()
+                    || folder.backup_path.is_some()))
+            || (folder.status == LibraryFolderSyncStatus::Updated && folder.import_run_id.is_none())
+    });
+    let unique_run_ids = result
+        .import_run_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let unique_folders = result
+        .folders
+        .iter()
+        .map(|folder| folder.folder_path.replace('/', "\\").to_lowercase())
+        .collect::<HashSet<_>>();
+    let requested_folder_keys = requested_folders
+        .iter()
+        .map(|folder| folder.replace('/', "\\").to_lowercase())
+        .collect::<HashSet<_>>();
+
+    if result.synced_folder_count != requested_folders.len()
+        || result.synced_folder_count != result.folders.len()
+        || result.updated_folder_count != updated_receipts
+        || result.changed_tracks != changed_tracks
+        || result.changed_albums != changed_albums
+        || result.import_run_ids != receipt_import_run_ids
+        || result.backup_paths != receipt_backup_paths
+        || unique_run_ids.len() != result.import_run_ids.len()
+        || unique_folders.len() != result.folders.len()
+        || unique_folders != requested_folder_keys
+        || result.import_run_ids.iter().any(|id| *id <= 0)
+        || invalid_receipt
+    {
+        return Err(update_music_library_message(
+            "Music Library returned an invalid tag-sync receipt.".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -627,7 +794,9 @@ fn protocol_error_message(operation: &str, error: ProtocolError) -> String {
 }
 
 fn update_music_library_message(detail: String) -> String {
-    format!("Music Library must be updated before Aurora can add albums. {detail}")
+    format!(
+        "Music Library must be updated (or installed if missing) before Aurora can add albums or synchronize edited tags. {detail}"
+    )
 }
 
 fn discover_music_library_executable() -> Result<PathBuf, String> {
@@ -789,6 +958,103 @@ mod tests {
             read_protocol_response(&response_path, "capabilities").expect("capabilities");
         validate_capabilities(&capabilities).expect("valid capabilities");
         assert_eq!(capabilities.categories.len(), 3);
+        assert!(!capabilities.supports.sync_existing_folders);
+    }
+
+    #[test]
+    fn protocol_request_uses_the_exact_existing_folder_sync_shape() {
+        let folder_paths = vec![r"D:\Scores\Album".to_owned()];
+        let request = ProtocolRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: "syncExistingFolders",
+            payload: SyncExistingFoldersPayload {
+                folder_paths: &folder_paths,
+            },
+        };
+        let value = serde_json::to_value(request).expect("request");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "protocolVersion": 1,
+                "operation": "syncExistingFolders",
+                "payload": {"folderPaths": [r"D:\Scores\Album"]}
+            })
+        );
+    }
+
+    #[test]
+    fn protocol_response_deserializes_and_validates_existing_folder_sync() {
+        let directory = TempDir::new().expect("temp directory");
+        let response_path = directory.path().join("response.json");
+        write_response(
+            &response_path,
+            serde_json::json!({
+                "protocolVersion": 1,
+                "ok": true,
+                "result": {
+                    "syncedFolderCount": 2,
+                    "updatedFolderCount": 1,
+                    "changedTracks": 12,
+                    "changedAlbums": 1,
+                    "importRunIds": [91],
+                    "backupPaths": [r"C:\Backups\sync.sqlite3"],
+                    "folders": [
+                        {
+                            "folderPath": r"D:\Scores\Album One",
+                            "status": "updated",
+                            "changedTracks": 12,
+                            "changedAlbums": 1,
+                            "importRunId": 91,
+                            "backupPath": r"C:\Backups\sync.sqlite3"
+                        },
+                        {
+                            "folderPath": r"D:\Scores\Album Two",
+                            "status": "unchanged",
+                            "changedTracks": 0,
+                            "changedAlbums": 0,
+                            "importRunId": null,
+                            "backupPath": null
+                        }
+                    ]
+                }
+            }),
+        );
+
+        let receipt: LibraryExistingFoldersSyncResult =
+            read_protocol_response(&response_path, "syncExistingFolders").expect("sync receipt");
+        validate_sync_result(
+            &receipt,
+            &[
+                r"D:\Scores\Album One".to_owned(),
+                r"D:\Scores\Album Two".to_owned(),
+            ],
+        )
+        .expect("valid sync receipt");
+        assert_eq!(receipt.updated_folder_count, 1);
+    }
+
+    #[test]
+    fn existing_folder_sync_receipt_must_name_the_requested_folders() {
+        let receipt = LibraryExistingFoldersSyncResult {
+            synced_folder_count: 1,
+            updated_folder_count: 0,
+            changed_tracks: 0,
+            changed_albums: 0,
+            import_run_ids: Vec::new(),
+            backup_paths: Vec::new(),
+            folders: vec![LibraryFolderSyncReceipt {
+                folder_path: r"D:\Scores\Different Album".to_owned(),
+                status: LibraryFolderSyncStatus::Unchanged,
+                changed_tracks: 0,
+                changed_albums: 0,
+                import_run_id: None,
+                backup_path: None,
+            }],
+        };
+
+        assert!(
+            validate_sync_result(&receipt, &[r"D:\Scores\Requested Album".to_owned()]).is_err()
+        );
     }
 
     #[test]

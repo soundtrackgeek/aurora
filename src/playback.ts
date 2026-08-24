@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { previewAudioSnapshot, type ReplayGainMode } from "./audio";
-import { applyTrackTagProjection, isTauriRuntime, type Track } from "./library";
+import {
+  applyEditableTrackTagProjection,
+  applyTrackTagProjection,
+  isTauriRuntime,
+  type Track,
+} from "./library";
 
 export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
 export type RepeatMode = "off" | "all" | "one";
@@ -351,26 +356,29 @@ export function usePlayback() {
 
   const visibleError = commandError ?? state.error;
 
-  const refreshTrack = useCallback((updated: Track) => {
+  const refreshTrack = useCallback((updated: Track, includeEditableMetadata = false) => {
+    const project = includeEditableMetadata
+      ? applyEditableTrackTagProjection
+      : applyTrackTagProjection;
     if (!isTauriRuntime()) {
       const queue = browserPlayback.queue.map((track) => track.trackKey === updated.trackKey
-        ? applyTrackTagProjection(track, updated)
+        ? project(track, updated)
         : track);
       browserPlayback = {
         ...browserPlayback,
         queue,
         currentTrack: browserPlayback.currentTrack?.trackKey === updated.trackKey
-          ? applyTrackTagProjection(browserPlayback.currentTrack, updated)
+          ? project(browserPlayback.currentTrack, updated)
           : browserPlayback.currentTrack,
       };
     }
     setState((current) => ({
       ...current,
       queue: current.queue.map((track) => track.trackKey === updated.trackKey
-        ? applyTrackTagProjection(track, updated)
+        ? project(track, updated)
         : track),
       currentTrack: current.currentTrack?.trackKey === updated.trackKey
-        ? applyTrackTagProjection(current.currentTrack, updated)
+        ? project(current.currentTrack, updated)
         : current.currentTrack,
     }));
   }, []);
