@@ -4,6 +4,23 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.7] - 2026-08-24
+
+### Added
+
+- Windows System Media Transport Controls now handle physical Play, Pause, Stop, Previous, and Next keys through the Windows media-session arbitration layer and publish Aurora's playback status and track metadata.
+
+### Fixed
+
+- Native audio output again opens with Rodio/CPAL's driver-compatible shared-mode configuration instead of forcing the MP3 sample rate and a synthetic 100 ms buffer, reversing the 0.17.5 output-path regression while retaining bounded encoded MP3 read-ahead.
+- Playback snapshots now run every two seconds on a blocking worker, while the bottom progress line advances locally every 250 ms and waveform analysis waits 1.5 seconds after a track change. Ratings refreshes preserve the visible page instead of blanking it.
+- Verified tag edits return before the potentially long Music Library companion process; the durable exact-file/folder journal drives the existing focused background retry and catalog refresh.
+- Listening-history and saved-position checkpoints now use 30-second buckets, and OneDrive history publication no longer runs while Aurora holds the playback runtime lock.
+
+### Changed
+
+- Aurora is explicit that physical media keys are independent of shared/exclusive audio mode; configurable `Ctrl+Alt` shortcuts remain separate from the Windows media session.
+
 ## [0.17.6] - 2026-08-24
 
 ### Fixed

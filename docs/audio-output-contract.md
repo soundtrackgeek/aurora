@@ -1,6 +1,6 @@
 # Audio output contract
 
-Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.5 adds playback-deadline safeguards. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
+Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.7 retains bounded encoded read-ahead but restores Rodio/CPAL's driver-compatible shared Windows output after the forced 0.17.5 configuration caused a playback regression. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
 
 ## Windows output selection
 
@@ -15,11 +15,11 @@ Aurora 0.10.0 added a device-local output and loudness layer without expanding t
 
 - Before constructing a decoder, Aurora sequentially reads an ordinary MP3 into a signature-checked, two-entry encoded-media cache. The current track and prepared successor can then seek and read without routine filesystem I/O on the device callback.
 - Cache admission is capped at 96 MiB per file. A larger file or failed memory reservation uses a 1 MiB `BufReader`, preserving playback instead of failing under memory pressure. Size and modification time are checked again after preload; files without a reliable modification timestamp are not reused.
-- Stream creation first requests the source sample rate and a fixed power-of-two buffer nearest the 100 ms stability target. This is 4,096 frames at both 44.1 kHz (about 93 ms) and 48 kHz (about 85 ms).
-- If that exact request fails, Aurora tries the endpoint's reported configurations while preserving the rate-scaled fixed-buffer policy. Failure to enumerate or open those alternatives still reaches Rodio's driver-compatible fallback.
-- The stream records the source rate it was configured for. An explicit load at a different rate rebuilds the stream. An already-appended mixed-rate successor stays on the existing stream to preserve the queue handoff and may therefore use Rodio conversion until the next explicit load.
+- Stream creation uses Rodio/CPAL's driver-compatible configuration for the selected endpoint. On Windows, CPAL's WASAPI backend opens this as a shared-mode stream, allowing the Windows audio engine to select and mix the endpoint format.
+- Aurora does not force the encoded MP3 sample rate or a synthetic buffer size. The selected device configuration may still report a fixed buffer because that is the compatible configuration chosen by the driver/backend.
+- Mixed-rate tracks remain on the same output stream for queue handoff and use Rodio conversion when their source rate differs from the selected output configuration.
 
-The device callback still performs MP3 decoding. Version 0.17.5 removes routine storage latency and adds substantially more scheduling headroom; it is not a background PCM ring buffer and Windows/CPAL does not expose a reliable per-underrun counter here.
+The device callback still performs MP3 decoding. Encoded read-ahead removes routine storage latency, but this is not a background PCM ring buffer and Windows/CPAL does not expose a reliable per-underrun counter here.
 
 ## Device-local persistence
 
@@ -55,7 +55,7 @@ ReplayGain is read-only playback metadata. Aurora does not calculate, add, remov
 
 - While a known-duration track is playing, Aurora resolves the authoritative next index from shuffle and repeat state during the final 15 seconds.
 - The next track is resolved again through catalog ID plus stable path key, its file is opened, its MP3 decoder is initialized with gapless trimming, and its ReplayGain multiplier is applied.
-- That source is appended to the same Rodio player. The audio thread consumes it immediately after the current source; React's 500 ms polling updates metadata but does not start the next audio stream.
+- That source is appended to the same Rodio player. The audio thread consumes it immediately after the current source; React's two-second polling updates metadata but does not start the next audio stream.
 - When the native source count crosses the prepared boundary, Aurora finalizes the previous listening-history session, advances the current queue index, starts the next history session at zero, and reconciles its observed position.
 - Transport and global-shortcut actions perform the same boundary reconciliation before resolving the current track.
 - A shuffle/repeat/queue change invalidates an already prepared source and rebuilds the current source at its observed position so the new queue contract remains authoritative.

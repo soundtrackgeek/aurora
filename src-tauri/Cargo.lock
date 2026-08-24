@@ -115,7 +115,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "aurora"
-version = "0.17.6"
+version = "0.17.7"
 dependencies = [
  "cpal",
  "id3",
@@ -134,6 +134,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "thiserror 2.0.20",
+ "windows",
 ]
 
 [[package]]

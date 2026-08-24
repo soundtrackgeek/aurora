@@ -11,6 +11,7 @@ mod history;
 mod laptop_mode;
 mod library_bridge;
 mod library_sync;
+mod media_controls;
 mod musicbrainz;
 mod playback;
 mod publishers;
@@ -54,7 +55,7 @@ use tag_model::{
     TagEditorUpdateResult,
 };
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 use waveform::{FileSignature, WaveformSnapshot, WaveformStore, WaveformWorkCoordinator};
 use years::{YearDetail, YearOverview, YearQueueRequest, YearSelection};
 
@@ -64,14 +65,29 @@ type LaptopState = Mutex<LaptopModeRuntime>;
 type WaveformState = Mutex<WaveformStore>;
 type GlobalShortcutState = Mutex<shortcuts::GlobalShortcutRuntime>;
 
-fn with_playback<T>(
-    state: State<'_, PlaybackState>,
-    operation: impl FnOnce(&mut PlaybackRuntime) -> Result<T, String>,
+async fn with_playback<T: Send + 'static>(
+    app: AppHandle,
+    operation: impl FnOnce(&mut PlaybackRuntime) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    let mut runtime = state
-        .lock()
-        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-    operation(&mut runtime)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<PlaybackState>();
+        let mut runtime = state
+            .lock()
+            .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+        operation(&mut runtime)
+    })
+    .await
+    .map_err(|error| format!("Aurora's playback worker stopped unexpectedly: {error}"))?
+}
+
+async fn with_playback_snapshot(
+    app: AppHandle,
+    operation: impl FnOnce(&mut PlaybackRuntime) -> Result<PlaybackSnapshot, String> + Send + 'static,
+) -> Result<PlaybackSnapshot, String> {
+    let publish_app = app.clone();
+    let snapshot = with_playback(app, operation).await?;
+    media_controls::publish(&publish_app, &snapshot);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -399,103 +415,101 @@ async fn export_musicbrainz_curation(app: AppHandle) -> Result<CurationExportRes
 }
 
 #[tauri::command]
-fn playback_state(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| Ok(runtime.snapshot()))
+async fn playback_state(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, |runtime| Ok(runtime.snapshot())).await
 }
 
 #[tauri::command]
-fn playback_rebind_catalog(
-    state: State<'_, PlaybackState>,
-) -> Result<PlaybackCatalogRebind, String> {
-    with_playback(state, PlaybackRuntime::rebind_catalog)
+async fn playback_rebind_catalog(app: AppHandle) -> Result<PlaybackCatalogRebind, String> {
+    let publish_app = app.clone();
+    let rebind = with_playback(app, PlaybackRuntime::rebind_catalog).await?;
+    media_controls::publish(&publish_app, &rebind.playback);
+    Ok(rebind)
 }
 
 #[tauri::command]
-fn playback_replace_queue(
-    state: State<'_, PlaybackState>,
+async fn playback_replace_queue(
+    app: AppHandle,
     track_references: Vec<TrackReference>,
     start_track_key: String,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| {
+    with_playback_snapshot(app, move |runtime| {
         runtime.replace_queue(track_references, start_track_key)
     })
+    .await
 }
 
 #[tauri::command]
-fn playback_append_queue(
-    state: State<'_, PlaybackState>,
+async fn playback_append_queue(
+    app: AppHandle,
     track_references: Vec<TrackReference>,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.append_queue(track_references))
+    with_playback_snapshot(app, move |runtime| runtime.append_queue(track_references)).await
 }
 
 #[tauri::command]
-fn playback_toggle(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, PlaybackRuntime::toggle)
+async fn playback_toggle(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, PlaybackRuntime::toggle).await
 }
 
 #[tauri::command]
-fn playback_next(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, PlaybackRuntime::next)
+async fn playback_next(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, PlaybackRuntime::next).await
 }
 
 #[tauri::command]
-fn playback_previous(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, PlaybackRuntime::previous)
+async fn playback_previous(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, PlaybackRuntime::previous).await
 }
 
 #[tauri::command]
-fn playback_seek(
-    state: State<'_, PlaybackState>,
-    position_seconds: f64,
-) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.seek(position_seconds))
+async fn playback_stop(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, PlaybackRuntime::stop).await
 }
 
 #[tauri::command]
-fn playback_set_volume(
-    state: State<'_, PlaybackState>,
-    volume: f32,
-) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.set_volume(volume))
+async fn playback_seek(app: AppHandle, position_seconds: f64) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, move |runtime| runtime.seek(position_seconds)).await
 }
 
 #[tauri::command]
-fn playback_set_shuffle(
-    state: State<'_, PlaybackState>,
-    enabled: bool,
-) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.set_shuffle(enabled))
+async fn playback_set_volume(app: AppHandle, volume: f32) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, move |runtime| runtime.set_volume(volume)).await
 }
 
 #[tauri::command]
-fn playback_set_repeat_mode(
-    state: State<'_, PlaybackState>,
+async fn playback_set_shuffle(app: AppHandle, enabled: bool) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, move |runtime| runtime.set_shuffle(enabled)).await
+}
+
+#[tauri::command]
+async fn playback_set_repeat_mode(
+    app: AppHandle,
     repeat_mode: RepeatMode,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.set_repeat_mode(repeat_mode))
+    with_playback_snapshot(app, move |runtime| runtime.set_repeat_mode(repeat_mode)).await
 }
 
 #[tauri::command]
-fn playback_remove_queue_item(
-    state: State<'_, PlaybackState>,
+async fn playback_remove_queue_item(
+    app: AppHandle,
     index: usize,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.remove_queue_item(index))
+    with_playback_snapshot(app, move |runtime| runtime.remove_queue_item(index)).await
 }
 
 #[tauri::command]
-fn playback_move_queue_item(
-    state: State<'_, PlaybackState>,
+async fn playback_move_queue_item(
+    app: AppHandle,
     from: usize,
     to: usize,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, |runtime| runtime.move_queue_item(from, to))
+    with_playback_snapshot(app, move |runtime| runtime.move_queue_item(from, to)).await
 }
 
 #[tauri::command]
-fn playback_clear_queue(state: State<'_, PlaybackState>) -> Result<PlaybackSnapshot, String> {
-    with_playback(state, PlaybackRuntime::clear_queue)
+async fn playback_clear_queue(app: AppHandle) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, PlaybackRuntime::clear_queue).await
 }
 
 #[tauri::command]
@@ -595,7 +609,7 @@ async fn update_track_tags(
             };
             refresh_playback_track(&app, &result.track);
             let directory = result.track.directory.clone();
-            let sync = coordinator.sync_after_edit(&app, std::slice::from_ref(&directory));
+            let sync = coordinator.queue_after_edit(&app, std::slice::from_ref(&directory));
             if sync.completed(&directory) {
                 result.track.tag_sync_state = None;
                 result.tag_state.sync_state = None;
@@ -655,7 +669,7 @@ async fn update_tag_editor(
                 .filter(|track| track.tag_sync_state.is_some())
                 .map(|track| track.directory.clone())
                 .collect::<Vec<_>>();
-            let sync = coordinator.sync_after_edit(&app, &directories);
+            let sync = coordinator.queue_after_edit(&app, &directories);
             for track in &mut result.tracks {
                 if sync.completed(&track.directory) {
                     track.tag_sync_state = None;
@@ -695,7 +709,7 @@ async fn undo_track_tag_edit(
             };
             refresh_playback_track(&app, &result.track);
             let directory = result.track.directory.clone();
-            let sync = coordinator.sync_after_edit(&app, std::slice::from_ref(&directory));
+            let sync = coordinator.queue_after_edit(&app, std::slice::from_ref(&directory));
             if sync.completed(&directory) {
                 result.track.tag_sync_state = None;
                 result.tag_state.sync_state = None;
@@ -822,16 +836,16 @@ fn global_shortcut_settings(app: AppHandle) -> Result<shortcuts::GlobalShortcutS
 }
 
 #[tauri::command]
-fn audio_settings(state: State<'_, PlaybackState>) -> Result<AudioSettingsStatus, String> {
-    with_playback(state, |runtime| Ok(runtime.audio_settings_status()))
+async fn audio_settings(app: AppHandle) -> Result<AudioSettingsStatus, String> {
+    with_playback(app, |runtime| Ok(runtime.audio_settings_status())).await
 }
 
 #[tauri::command]
-fn update_audio_settings(
-    state: State<'_, PlaybackState>,
+async fn update_audio_settings(
+    app: AppHandle,
     request: AudioSettingsRequest,
 ) -> Result<AudioSettingsStatus, String> {
-    with_playback(state, |runtime| runtime.update_audio_settings(request))
+    with_playback(app, |runtime| runtime.update_audio_settings(request)).await
 }
 
 #[tauri::command]
@@ -907,8 +921,9 @@ pub fn run() {
             )
             .map_err(std::io::Error::other)?;
             let audio_store = AudioSettingsStore::load(state_directory.join("aurora-audio.json"));
-            let runtime = PlaybackRuntime::new(store.clone(), history.clone(), audio_store)
+            let mut runtime = PlaybackRuntime::new(store.clone(), history.clone(), audio_store)
                 .map_err(std::io::Error::other)?;
+            let initial_playback = runtime.snapshot();
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
             let _ = laptop_runtime.status(true);
             app.manage(store);
@@ -925,11 +940,15 @@ pub fn run() {
             if let Ok(mut shortcut_runtime) = app.state::<GlobalShortcutState>().lock() {
                 shortcut_runtime.initialize(app.handle());
             }
+            if let Err(error) = media_controls::initialize(app.handle(), &initial_playback) {
+                eprintln!("{error}");
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 release_global_shortcuts(window.app_handle());
+                media_controls::release(window.app_handle());
                 let state = window.state::<PlaybackState>();
                 if let Ok(mut runtime) = state.lock() {
                     let _ = runtime.persist_for_shutdown();
@@ -980,6 +999,7 @@ pub fn run() {
             playback_toggle,
             playback_next,
             playback_previous,
+            playback_stop,
             playback_seek,
             playback_set_volume,
             playback_set_shuffle,
@@ -1013,6 +1033,7 @@ pub fn run() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 release_global_shortcuts(app);
+                media_controls::release(app);
             }
         });
 }

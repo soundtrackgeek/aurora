@@ -2,6 +2,8 @@
 
 Aurora 0.9.0 registers configurable Windows-wide controls while the native process is running. The implementation deliberately keeps shortcut registration, playback targeting, and MP3 mutation in Rust so a hidden or unfocused WebView cannot retarget an action.
 
+Aurora 0.17.7 separately registers a Windows System Media Transport Controls session for physical Play/Pause, Stop, Previous, and Next keyboard buttons. Windows arbitrates those media-session commands between players and Aurora publishes its playback status plus current title, artist, and album. These buttons are not configurable global hotkeys and have no relationship to WASAPI shared or exclusive output mode.
+
 ## Defaults and meaning
 
 | Action | Default | Behavior |
@@ -36,6 +38,7 @@ The rating and Love handler snapshots the native now-playing track, derives the 
 1. Writes and verifies the MusicBee MP3 frames.
 2. Records the operation journal and optimistic overlay in `aurora-state.sqlite3`.
 3. Refreshes playback metadata and emits a result event for visible Aurora surfaces.
+4. Leaves the durable exact-file/folder synchronization journal for the focused background Music Library retry, so a slow companion process cannot delay the shortcut result.
 
 The shared Music Library catalog remains read-only. A later tagged-album folder sync, or a legacy MusicBee TSV import, updates that catalog; Aurora reconciliation then clears an overlay that has caught up. External file-tag edits can still become visible through the existing bounded reconciliation path.
 

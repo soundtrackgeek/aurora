@@ -7,8 +7,7 @@ use crate::{
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
-use cpal::BufferSize;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
@@ -20,9 +19,7 @@ use std::{
 };
 
 const PRELOAD_WINDOW_SECONDS: f64 = 15.0;
-const OUTPUT_BUFFER_TARGET_MS: u32 = 100;
-const MIN_OUTPUT_BUFFER_FRAMES: u32 = 2_048;
-const MAX_OUTPUT_BUFFER_FRAMES: u32 = 16_384;
+const PLAYBACK_STATE_CHECKPOINT_SECONDS: f64 = 30.0;
 const PLAYBACK_FILE_BUFFER_BYTES: usize = 1024 * 1024;
 const MAX_CACHED_TRACK_BYTES: u64 = 96 * 1024 * 1024;
 const CACHED_TRACK_LIMIT: usize = 2;
@@ -30,7 +27,7 @@ const MAX_PLAYBACK_QUEUE: usize = 200;
 const MAX_QUEUE_APPEND_BATCH: usize = 100;
 const RETAINED_QUEUE_HISTORY: usize = 20;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PlaybackStatus {
     Stopped,
@@ -316,7 +313,6 @@ pub(crate) struct PlaybackRuntime {
     active_device_label: Option<String>,
     using_device_fallback: bool,
     audio_message: Option<String>,
-    configured_source_rate: Option<SampleRate>,
     stream_error: Arc<Mutex<Option<String>>>,
     current_gain: ReplayGainAdjustment,
     media_cache: PlaybackMediaCache,
@@ -394,7 +390,6 @@ impl PlaybackRuntime {
             active_device_label: None,
             using_device_fallback: false,
             audio_message: None,
-            configured_source_rate: None,
             stream_error: Arc::new(Mutex::new(None)),
             current_gain: ReplayGainAdjustment {
                 linear: 1.0,
@@ -406,7 +401,8 @@ impl PlaybackRuntime {
             store,
             history,
             history_session: None,
-            last_saved_position_bucket: (position_seconds / 10.0).floor() as u64,
+            last_saved_position_bucket: (position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS)
+                .floor() as u64,
         })
     }
 
@@ -417,19 +413,14 @@ impl PlaybackRuntime {
     fn close_output(&mut self) {
         self.player = None;
         self.output = None;
-        self.configured_source_rate = None;
         self.active_device_id = None;
         self.active_device_label = None;
         self.using_device_fallback = false;
         self.audio_message = None;
     }
 
-    fn ensure_player(
-        &mut self,
-        force_system_default: bool,
-        preferred_sample_rate: SampleRate,
-    ) -> Result<(), String> {
-        if self.player.is_some() && self.configured_source_rate == Some(preferred_sample_rate) {
+    fn ensure_player(&mut self, force_system_default: bool) -> Result<(), String> {
+        if self.player.is_some() {
             return Ok(());
         }
         self.close_output();
@@ -437,7 +428,7 @@ impl PlaybackRuntime {
             &self.audio_store.settings().output_device_id,
             force_system_default,
         )?;
-        let output = match open_output_sink(&selected, &self.stream_error, preferred_sample_rate) {
+        let output = match open_output_sink(&selected, &self.stream_error) {
             Ok(output) => output,
             Err(primary_error)
                 if !selected.using_fallback
@@ -448,7 +439,7 @@ impl PlaybackRuntime {
                     &self.audio_store.settings().output_device_id,
                     true,
                 )?;
-                open_output_sink(&selected, &self.stream_error, preferred_sample_rate).map_err(|fallback_error| {
+                open_output_sink(&selected, &self.stream_error).map_err(|fallback_error| {
                     format!(
                         "Aurora could not open the selected output ({primary_error}) or the Windows default ({fallback_error})."
                     )
@@ -462,7 +453,6 @@ impl PlaybackRuntime {
         self.active_device_label = Some(selected.label);
         self.using_device_fallback = selected.using_fallback;
         self.audio_message = selected.message;
-        self.configured_source_rate = Some(preferred_sample_rate);
         self.output = Some(output);
         self.player = Some(player);
         Ok(())
@@ -471,7 +461,7 @@ impl PlaybackRuntime {
     fn build_source_for_index(
         &mut self,
         index: usize,
-    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment, SampleRate), String> {
+    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment), String> {
         let (track_id, track_key) = self
             .queue
             .get(index)
@@ -487,12 +477,11 @@ impl PlaybackRuntime {
             .with_gapless(true)
             .build()
             .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
-        let sample_rate = decoder.sample_rate();
         let gain = replay_gain::adjustment_for_path(
             &audio_path,
             self.audio_store.settings().replay_gain_mode,
         );
-        Ok((Box::new(decoder.amplify(gain.linear)), gain, sample_rate))
+        Ok((Box::new(decoder.amplify(gain.linear)), gain))
     }
 
     fn load_current_on_device(
@@ -504,8 +493,8 @@ impl PlaybackRuntime {
         let index = self
             .current_index
             .ok_or_else(|| "The playback queue has no current track.".to_owned())?;
-        let (source, gain, sample_rate) = self.build_source_for_index(index)?;
-        self.ensure_player(force_system_default, sample_rate)?;
+        let (source, gain) = self.build_source_for_index(index)?;
+        self.ensure_player(force_system_default)?;
         let volume = self.volume;
         let player = self.player.as_ref().expect("player initialized");
         player.stop();
@@ -718,7 +707,7 @@ impl PlaybackRuntime {
             return;
         };
         self.preparation_attempted = true;
-        let Ok((source, gain, _)) = self.build_source_for_index(next_index) else {
+        let Ok((source, gain)) = self.build_source_for_index(next_index) else {
             return;
         };
         let Some(player) = self.player.as_ref() else {
@@ -814,7 +803,7 @@ impl PlaybackRuntime {
                 self.prepare_next_if_due();
             }
         }
-        let bucket = (self.position_seconds / 10.0).floor() as u64;
+        let bucket = (self.position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS).floor() as u64;
         if bucket != self.last_saved_position_bucket {
             self.last_saved_position_bucket = bucket;
             let _ = self.persist();
@@ -1015,6 +1004,24 @@ impl PlaybackRuntime {
         Ok(self.snapshot())
     }
 
+    pub(crate) fn play(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.synchronize_audio_runtime();
+        if self.status == PlaybackStatus::Playing {
+            Ok(self.snapshot())
+        } else {
+            self.toggle()
+        }
+    }
+
+    pub(crate) fn pause(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.synchronize_audio_runtime();
+        if self.status == PlaybackStatus::Playing {
+            self.toggle()
+        } else {
+            Ok(self.snapshot())
+        }
+    }
+
     pub(crate) fn next(&mut self) -> Result<PlaybackSnapshot, String> {
         self.synchronize_audio_runtime();
         let next = self
@@ -1057,6 +1064,25 @@ impl PlaybackRuntime {
             return Err(error);
         }
         self.begin_history();
+        self.persist()?;
+        Ok(self.snapshot())
+    }
+
+    pub(crate) fn stop(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.synchronize_audio_runtime();
+        if self.current_index.is_none() {
+            return Ok(self.snapshot());
+        }
+        self.capture_position();
+        self.observe_history();
+        self.finish_history("interrupted");
+        if let Some(player) = &self.player {
+            player.stop();
+        }
+        self.status = PlaybackStatus::Stopped;
+        self.position_seconds = 0.0;
+        self.prepared_next = None;
+        self.preparation_attempted = false;
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -1293,70 +1319,20 @@ impl PlaybackRuntime {
     }
 }
 
-fn stability_buffer_frames(sample_rate: u32) -> u32 {
-    let target = (u64::from(sample_rate) * u64::from(OUTPUT_BUFFER_TARGET_MS) / 1_000)
-        .clamp(1, u64::from(MAX_OUTPUT_BUFFER_FRAMES)) as u32;
-    let upper = target.next_power_of_two();
-    let lower = (upper / 2).max(1);
-    let nearest = if target - lower <= upper - target {
-        lower
-    } else {
-        upper
-    };
-    nearest.clamp(MIN_OUTPUT_BUFFER_FRAMES, MAX_OUTPUT_BUFFER_FRAMES)
-}
-
 fn open_output_sink(
     selected: &audio_settings::SelectedOutputDevice,
     stream_error: &Arc<Mutex<Option<String>>>,
-    preferred_sample_rate: SampleRate,
 ) -> Result<MixerDeviceSink, String> {
-    let callback = {
-        let stream_error = Arc::clone(stream_error);
-        move |error: cpal::StreamError| {
+    let stream_error = Arc::clone(stream_error);
+    DeviceSinkBuilder::from_device(selected.device.clone())
+        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
+        .with_error_callback(move |error| {
             if let Ok(mut slot) = stream_error.lock() {
                 *slot = Some(error.to_string());
             }
-        }
-    };
-    let preferred_frames = stability_buffer_frames(preferred_sample_rate.get());
-    let primary = DeviceSinkBuilder::from_device(selected.device.clone())
-        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
-        .with_sample_rate(preferred_sample_rate)
-        .with_buffer_size(BufferSize::Fixed(preferred_frames))
-        .with_error_callback(callback.clone())
-        .open_stream();
-    let primary_error = match primary {
-        Ok(output) => return Ok(output),
-        Err(error) => error,
-    };
-
-    if let Ok(configs) = rodio::stream::supported_output_configs(&selected.device) {
-        let mut alternatives = configs.collect::<Vec<_>>();
-        alternatives.sort_by_key(|config| config.sample_rate() != preferred_sample_rate.get());
-        for config in alternatives {
-            let frames = stability_buffer_frames(config.sample_rate());
-            if let Ok(output) = DeviceSinkBuilder::default()
-                .with_device(selected.device.clone())
-                .with_supported_config(&config)
-                .with_buffer_size(BufferSize::Fixed(frames))
-                .with_error_callback(callback.clone())
-                .open_stream()
-            {
-                return Ok(output);
-            }
-        }
-    }
-
-    DeviceSinkBuilder::from_device(selected.device.clone())
-        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
-        .with_error_callback(callback)
-        .open_sink_or_fallback()
-        .map_err(|fallback_error| {
-            format!(
-                "Aurora could not open this audio output with its stable buffer ({primary_error}) or its compatibility fallback ({fallback_error})."
-            )
         })
+        .open_sink_or_fallback()
+        .map_err(|error| format!("Aurora could not open this audio output: {error}"))
 }
 
 fn resume_position(
@@ -1427,14 +1403,6 @@ mod tests {
             resume_position(PlaybackStatus::Stopped, 120.0, Some(243)),
             120.0
         );
-    }
-
-    #[test]
-    fn output_buffer_policy_prefers_music_playback_stability() {
-        assert_eq!(stability_buffer_frames(44_100), 4_096);
-        assert_eq!(stability_buffer_frames(48_000), 4_096);
-        assert_eq!(stability_buffer_frames(96_000), 8_192);
-        assert_eq!(stability_buffer_frames(384_000), MAX_OUTPUT_BUFFER_FRAMES);
     }
 
     #[test]
@@ -1572,14 +1540,8 @@ mod tests {
             audio_settings::select_output_device(audio_settings::SYSTEM_DEFAULT_DEVICE_ID, false)
                 .expect("select Windows default output");
         let stream_error = Arc::new(Mutex::new(None));
-        let preferred_sample_rate = SampleRate::new(44_100).expect("valid sample rate");
-        let output = open_output_sink(&selected, &stream_error, preferred_sample_rate)
-            .expect("open Windows output");
+        let output = open_output_sink(&selected, &stream_error).expect("open Windows output");
         eprintln!("Aurora test output config: {:?}", output.config());
-        assert_eq!(output.config().sample_rate(), preferred_sample_rate);
-        assert_eq!(
-            output.config().buffer_size(),
-            &BufferSize::Fixed(stability_buffer_frames(preferred_sample_rate.get()))
-        );
+        assert!(output.config().sample_rate().get() > 0);
     }
 }

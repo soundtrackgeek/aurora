@@ -15,6 +15,7 @@ use std::{
 
 const HISTORY_SCHEMA_VERSION: i64 = 1;
 const DEFAULT_PLAY_THRESHOLD_SECONDS: u32 = 30;
+const HISTORY_CHECKPOINT_SECONDS: f64 = 30.0;
 const MIN_PLAY_THRESHOLD_SECONDS: u32 = 1;
 const MAX_PLAY_THRESHOLD_SECONDS: u32 = 3_600;
 const HISTORY_SYNC_INTERVAL_MS: i64 = 60_000;
@@ -506,7 +507,7 @@ impl HistoryStore {
         if became_played {
             active.registered_play = true;
         }
-        let bucket = (active.listened_seconds / 10.0).floor() as u64;
+        let bucket = (active.listened_seconds / HISTORY_CHECKPOINT_SECONDS).floor() as u64;
         if !became_played && bucket == active.checkpoint_bucket {
             return Ok(());
         }
@@ -548,7 +549,7 @@ impl HistoryStore {
             .commit()
             .map_err(|error| format!("Could not commit Aurora's listening progress: {error}"))?;
         if became_played {
-            let _ = self.publish_if_due(false);
+            self.publish_in_background();
         }
         Ok(())
     }
@@ -661,9 +662,16 @@ impl HistoryStore {
             .commit()
             .map_err(|error| format!("Could not commit Aurora's listening outcome: {error}"))?;
         if updated == 1 {
-            let _ = self.publish_if_due(false);
+            self.publish_in_background();
         }
         Ok(())
+    }
+
+    fn publish_in_background(&self) {
+        let store = self.clone();
+        std::thread::spawn(move || {
+            let _ = store.publish_if_due(false);
+        });
     }
 
     pub(crate) fn record_error(&self, error: String) {

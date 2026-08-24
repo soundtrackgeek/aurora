@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.17.6"
+version = "0.17.7"
 description = "A fast, local-first explorer for a personal music universe"
 authors = ["Jørn Tillnes"]
 edition = "2024"
@@ -33,6 +33,14 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 percent-encoding = "2.3.2"
 id3 = "1.17.0"
 sha2 = "0.10.9"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = [
+  "Foundation",
+  "Media",
+  "Win32_Foundation",
+  "Win32_System_WinRT",
+] }
 
 [dev-dependencies]
 tempfile = "3"

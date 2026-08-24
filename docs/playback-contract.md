@@ -1,6 +1,6 @@
 # Playback contract
 
-Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; version 0.10.0 adds the [audio-output contract](audio-output-contract.md); version 0.11.0 adds bounded append/refill behavior for [Genre Atlas](genre-atlas-contract.md); version 0.15.20 adds live queue rebinding after a completed Music Library import; and version 0.17.5 adds encoded read-ahead plus contention controls for the audio and waveform paths.
+Aurora owns playback and queue state without claiming write ownership of the imported catalog. Version 0.8.0 also feeds playback transitions into the separate [listening-history contract](listening-history-contract.md); version 0.8.2 adds bounded, catalog-resolved waveform extraction; version 0.8.3 makes seek command ordering explicit; version 0.10.0 adds the [audio-output contract](audio-output-contract.md); version 0.11.0 adds bounded append/refill behavior for [Genre Atlas](genre-atlas-contract.md); version 0.15.20 adds live queue rebinding after a completed Music Library import; version 0.17.5 adds encoded read-ahead; and version 0.17.7 restores driver-compatible output, moves native snapshot work off the Tauri command thread, and adds Windows media-session controls.
 
 ## Trust boundary
 
@@ -21,9 +21,9 @@ Aurora owns playback and queue state without claiming write ownership of the imp
 - Optional ReplayGain is applied per source before the independent player-volume multiplier. See the audio-output contract for tag precedence and peak limiting.
 - A stopped track positioned at its natural end restarts from zero when Play is pressed; an explicitly paused track resumes from its paused position.
 - Range input displays a local draft only while its exact seek command is pending. The most recently issued command owns the resulting snapshot, older overlapping responses are ignored, and polling resumes after all active commands finish.
-- The 500 ms playback poll admits only one native snapshot request at a time. A poll that overlaps a newer transport command cannot replace that command's snapshot when it returns.
+- The two-second playback poll admits only one native snapshot request at a time and executes native snapshot work on a blocking worker. A poll that overlaps a newer transport command cannot replace that command's snapshot when it returns. The bottom progress line interpolates locally every 250 ms, so a delayed snapshot does not visually freeze the playhead.
 - Native playback—not React polling—is responsible for beginning, observing, seeking, and finalizing listening-history sessions.
-- The player waveform samples 64 evenly spaced windows from the decoded MP3 stream and reduces them to 320 normalized peaks. It does not fully decode a song just to draw the timeline. Cache misses use one decode slot, cancel superseded generations at preload/seek/decode checkpoints, and sequentially buffer MP3s up to 96 MiB before window seeking.
+- The player waveform waits 1.5 seconds after a track change, then samples 64 evenly spaced windows from the decoded MP3 stream and reduces them to 320 normalized peaks. It does not fully decode a song just to draw the timeline. Cache misses use one decode slot, cancel superseded generations at preload/seek/decode checkpoints, and sequentially buffer MP3s up to 96 MiB before window seeking.
 - Waveform requests contain only catalog ID plus stable track key. Rust performs the same identity and path validation as playback before opening the MP3.
 - Player rating and Love controls use the tag-editing boundary; they do not mutate the imported catalog directly.
 - When a new completed import revision appears, Rust re-resolves every live queue entry inside one SQLite read transaction, preserving queue order by stable track key and replacing catalog metadata and transient row IDs. An exact indexed lookup is preferred, followed by canonical filesystem spelling and normalized slash/case matching. Missing identities may be dropped, but busy, I/O, schema, and decode failures abort the rebind without pruning or persisting the queue.
@@ -41,7 +41,7 @@ Aurora writes its own `aurora-state.sqlite3` under the Tauri application-data di
 - repeat mode.
 - a normalized path key plus the exact indexed directory and filename for every queue entry.
 
-Position is checkpointed in roughly ten-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them. Stable path re-resolution keeps queues valid when a full catalog import replaces source track IDs; unavailable entries are skipped without discarding surviving tracks.
+Position is checkpointed in 30-second buckets and once more during window shutdown. Queue and control changes are transactional. Restored sessions remain paused until the user explicitly resumes them. Stable path re-resolution keeps queues valid when a full catalog import replaces source track IDs; unavailable entries are skipped without discarding surviving tracks.
 
 Decoded peaks are derived data in device-local `aurora-waveforms.sqlite3`. A cache row is reused only while MP3 size and modification time still match, is capped to the 2,000 most recently accessed tracks, and is not copied to OneDrive or included in Aurora's shared-state lineage.
 

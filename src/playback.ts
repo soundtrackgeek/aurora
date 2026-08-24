@@ -332,7 +332,7 @@ export function usePlayback() {
 
   useEffect(() => {
     const firstRefresh = window.setTimeout(() => void refresh(), 0);
-    const timer = window.setInterval(() => void refresh(), 500);
+    const timer = window.setInterval(() => void refresh(), 2_000);
     return () => {
       window.clearTimeout(firstRefresh);
       window.clearInterval(timer);

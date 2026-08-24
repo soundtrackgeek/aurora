@@ -23,7 +23,7 @@ The default played threshold is 30 seconds and can be configured per installatio
 3. A track shorter than the configured threshold registers when its natural duration is reached.
 4. Registration is monotonic for a session. Raising the threshold cannot retract a play that already registered; lowering it can register the active session immediately when its accumulated time already qualifies.
 
-Aurora checkpoints accumulated time in ten-second buckets and when a play first registers. Normal completion, next/previous, queue replacement, removal, clearing, and clean shutdown finalize the current session. A session left active after an abnormal exit is marked interrupted on the next startup.
+Aurora checkpoints accumulated time in 30-second buckets and when a play first registers. Normal completion, next/previous, queue replacement, removal, clearing, and clean shutdown finalize the current session. A session left active after an abnormal exit is marked interrupted on the next startup.
 
 Outcomes describe how a session ended, independently of whether it crossed the played threshold:
 
@@ -34,7 +34,7 @@ Outcomes describe how a session ended, independently of whether it crossed the p
 
 ## Cross-device snapshots
 
-Aurora uses SQLite's consistent-copy mechanism, validates schema ownership and `quick_check`, then atomically replaces only this device's OneDrive snapshot. It publishes at most once per minute during playback and forces a final snapshot on clean shutdown.
+Aurora uses SQLite's consistent-copy mechanism, validates schema ownership and `quick_check`, then atomically replaces only this device's OneDrive snapshot. It publishes at most once per minute during playback on a background thread, outside the playback runtime lock, and forces a final snapshot on clean shutdown.
 
 History queries open the local database and up to 16 named peer snapshots read-only, skip corrupt or unsupported peers, de-duplicate this device's own remote snapshot, and combine bounded results in memory. The timeline returns at most 100 sessions per request and uses a keyset cursor for earlier pages. Catalog resolution is bounded to the returned sessions and top tracks; a missing catalog file remains visible as unavailable history rather than being discarded.
 

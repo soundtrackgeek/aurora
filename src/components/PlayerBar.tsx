@@ -74,6 +74,11 @@ export function PlayerBar({
 }) {
   const [seekDraft, setSeekDraft] = useState<{ trackKey: string; value: number } | null>(null);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
+  const [clockSample, setClockSample] = useState<{
+    trackKey: string | null;
+    basePosition: number;
+    elapsed: number;
+  }>({ trackKey: null, basePosition: 0, elapsed: 0 });
   const seekCommitIdRef = useRef(0);
   const volumeCommitIdRef = useRef(0);
   const [showRemaining, setShowRemaining] = useState(false);
@@ -88,23 +93,44 @@ export function PlayerBar({
   const waveform = waveformResult?.trackKey === trackKey ? waveformResult.waveform : null;
   const waveformFailed = waveformResult?.trackKey === trackKey && waveformResult.failed;
   const duration = Math.max(track?.durationSeconds ?? 0, 0);
+  const clockPosition = playback.status === "playing"
+    && clockSample.trackKey === trackKey
+    && clockSample.basePosition === playback.positionSeconds
+    ? playback.positionSeconds + clockSample.elapsed
+    : playback.positionSeconds;
   const position = Math.min(
-    seekDraft?.trackKey === trackKey ? seekDraft.value : playback.positionSeconds,
+    seekDraft?.trackKey === trackKey ? seekDraft.value : clockPosition,
     duration,
   );
   const volume = volumeDraft ?? playback.volume;
 
   useEffect(() => {
+    const basePosition = playback.positionSeconds;
+    if (playback.status !== "playing") return undefined;
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      const elapsed = (performance.now() - startedAt) / 1_000;
+      setClockSample({ trackKey, basePosition, elapsed });
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [playback.positionSeconds, playback.status, trackKey]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!trackId || !trackKey) return () => { cancelled = true; };
-    void loadTrackWaveform({ id: trackId, trackKey })
-      .then((next) => {
-        if (!cancelled) setWaveformResult({ trackKey, waveform: next, failed: false });
-      })
-      .catch(() => {
-        if (!cancelled) setWaveformResult({ trackKey, waveform: null, failed: true });
-      });
-    return () => { cancelled = true; };
+    const timer = window.setTimeout(() => {
+      void loadTrackWaveform({ id: trackId, trackKey })
+        .then((next) => {
+          if (!cancelled) setWaveformResult({ trackKey, waveform: next, failed: false });
+        })
+        .catch(() => {
+          if (!cancelled) setWaveformResult({ trackKey, waveform: null, failed: true });
+        });
+    }, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [trackId, trackKey]);
 
   function changeSeekDraft(value: number) {

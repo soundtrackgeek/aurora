@@ -104,6 +104,24 @@ describe("PlayerBar", () => {
     expect(screen.getByRole("button", { name: "Show total track length" })).toHaveTextContent("−2:59");
   });
 
+  it("keeps the playback position moving between native snapshots", () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      render(<PlayerBar {...props()} />);
+      const timeline = screen.getByRole("slider", { name: "Playback position" });
+      expect(timeline).toHaveValue("60");
+
+      now = 1_250;
+      act(() => vi.advanceTimersByTime(1_250));
+      expect(timeline).toHaveValue("61.25");
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("routes rating clears and Love through instant player callbacks", () => {
     const playerProps = props();
     const player = render(<PlayerBar {...playerProps} />);

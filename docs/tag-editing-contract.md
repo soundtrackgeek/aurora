@@ -1,6 +1,6 @@
 # Tag editing contract
 
-Aurora 0.17.6 edits MusicBee-compatible metadata in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
+Aurora 0.17.7 edits MusicBee-compatible metadata in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
 
 ## Selection and write intent
 
@@ -48,11 +48,11 @@ Track/album selection
         ↓
 verified MP3 write + durable exact-file/folder queue
         ↓
-Music Library guarded existing-folder sync
+focused background Music Library guarded existing-folder sync
         ↓
 explicit receipt + completed import revision → Aurora refreshes catalog-backed views
 ```
 
-Music Library requires every target to remain inside a configured library root, rejects linked/reparse paths, preserves album identity, and refuses any preview that would add or remove tracks or albums. Aurora durably queues each affected folder and, when unambiguous, its exact filename in the same state transaction that verifies the MP3 write or undo. Multiple different pending files in one folder deliberately collapse to a complete-folder request. Calls are serialized, the newly edited folder is prioritized, and receipts are token-checked so an older response cannot erase newer queued work.
+Music Library requires every target to remain inside a configured library root, rejects linked/reparse paths, preserves album identity, and refuses any preview that would add or remove tracks or albums. Aurora durably queues each affected folder and, when unambiguous, its exact filename in the same state transaction that verifies the MP3 write or undo. The verified edit returns before the companion process starts. Multiple different pending files in one folder deliberately collapse to a complete-folder request. Background calls are serialized, and receipts are token-checked so an older response cannot erase newer queued work.
 
 If the companion is missing, outdated, or rejects the sync, the already-verified MP3 save remains successful and Aurora reports Music Library synchronization as pending. Startup and focus retry one folder, and a focused Aurora retries remaining work every five seconds. Successful receipts trigger an immediate revision-backed view refresh; the periodic revision check remains a fallback. Tag edits and external-tag reconciliation share one projection order so a delayed response cannot overwrite newer visible tag state.

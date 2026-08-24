@@ -89,8 +89,8 @@ impl Default for LibrarySyncCoordinator {
 }
 
 impl LibrarySyncCoordinator {
-    /// Keeps the authoritative MP3 write, bridge receipt, and native playback projection in one
-    /// order. The returned token lets the frontend reject an older response delivered late.
+    /// Keeps the authoritative MP3 write, durable queue receipt, and native playback projection in
+    /// one order. The returned token lets the frontend reject an older response delivered late.
     pub(crate) fn serialize_tag_edit<T>(&self, operation: impl FnOnce() -> T) -> (T, u64) {
         self.serialize_projection_epoch(operation)
     }
@@ -110,12 +110,52 @@ impl LibrarySyncCoordinator {
         (result, token)
     }
 
-    pub(crate) fn sync_after_edit(
+    pub(crate) fn queue_after_edit(
         &self,
         app: &AppHandle,
         directories: &[String],
     ) -> LibrarySyncReport {
-        self.run(app, directories)
+        let store = app.state::<StateStore>();
+        let priorities = unique_directories(directories);
+        let targets = match store.pending_library_folder_sync_for_paths(&priorities) {
+            Ok(targets) => targets,
+            Err(error) => {
+                return LibrarySyncReport {
+                    catalog_sync: CatalogSync::pending(priorities.len().max(1), Some(error)),
+                    completed_directories: HashSet::new(),
+                };
+            }
+        };
+        let target_keys = targets
+            .iter()
+            .map(|target| normalized_directory(&target.directory))
+            .collect::<HashSet<_>>();
+        let completed_directories = priorities
+            .iter()
+            .map(|directory| normalized_directory(directory))
+            .filter(|directory| !target_keys.contains(directory))
+            .collect::<HashSet<_>>();
+        let pending_folder_count = match store.pending_library_folder_sync_count() {
+            Ok(count) => count,
+            Err(error) => {
+                return LibrarySyncReport {
+                    catalog_sync: CatalogSync::pending(1, Some(error)),
+                    completed_directories,
+                };
+            }
+        };
+        let catalog_sync = if targets.is_empty() {
+            CatalogSync::synced(pending_folder_count)
+        } else {
+            CatalogSync::pending(
+                pending_folder_count.max(targets.len()),
+                Some("The verified MP3 edit is queued for Music Library.".to_owned()),
+            )
+        };
+        LibrarySyncReport {
+            catalog_sync,
+            completed_directories,
+        }
     }
 
     pub(crate) fn retry_one(&self, app: &AppHandle) -> LibrarySyncReport {

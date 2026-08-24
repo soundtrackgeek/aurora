@@ -1217,9 +1217,11 @@ function App() {
     const preserveSelection = ratingsLoadedTokenRef.current >= 0;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      setRatingsLoadState("loading");
-      setRatingsPageState("loading");
-      setRatingsPage(null);
+      if (!preserveSelection) {
+        setRatingsLoadState("loading");
+        setRatingsPageState("loading");
+        setRatingsPage(null);
+      }
       setRatingsError(null);
       setRatingsPageError(null);
       setRatingsQueueMessage(null);
@@ -1254,7 +1256,7 @@ function App() {
     const preserveSelection = ratingsPreserveInspectorTokenRef.current === ratingsReloadToken;
     const previousAlbumId = preserveSelection ? selectedRatingAlbumRef.current?.id ?? null : null;
     let cancelled = false;
-    setRatingsPageState("loading");
+    if (!preserveSelection) setRatingsPageState("loading");
     setRatingsPageError(null);
     const request = ratingsCompletion === "almostComplete"
       ? Promise.resolve(ratingsOverview.initialPage)
@@ -2594,7 +2596,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

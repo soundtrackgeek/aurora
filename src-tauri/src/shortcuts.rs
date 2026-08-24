@@ -575,7 +575,7 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                     playback.refresh_track_metadata(&updated.track);
                 }
                 let directory = updated.track.directory.clone();
-                let sync = coordinator.sync_after_edit(app, std::slice::from_ref(&directory));
+                let sync = coordinator.queue_after_edit(app, std::slice::from_ref(&directory));
                 if sync.completed(&directory) {
                     updated.track.tag_sync_state = None;
                     updated.tag_state.sync_state = None;
