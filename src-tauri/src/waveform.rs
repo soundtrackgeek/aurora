@@ -12,17 +12,15 @@ use symphonia::core::{
     audio::SampleBuffer,
     codecs::DecoderOptions,
     errors::Error as SymphoniaError,
-    formats::{FormatOptions, SeekMode, SeekTo},
+    formats::FormatOptions,
     io::{MediaSource, MediaSourceStream},
     meta::MetadataOptions,
     probe::Hint,
-    units::Time,
 };
 
-pub(crate) const PEAK_COUNT: usize = 320;
+pub(crate) const PEAK_COUNT: usize = 640;
 const MAX_CACHE_ENTRIES: i64 = 2_000;
-const SAMPLE_WINDOWS: usize = 64;
-const BINS_PER_WINDOW: usize = PEAK_COUNT / SAMPLE_WINDOWS;
+const ANALYSIS_WINDOW_FRAMES: usize = 512;
 const MAX_BUFFERED_MP3_BYTES: u64 = 96 * 1024 * 1024;
 const MP3_READ_BUFFER_BYTES: usize = 1024 * 1024;
 const SUPERSEDED_WORK_ERROR: &str = "Aurora stopped an outdated waveform request.";
@@ -396,7 +394,7 @@ fn open_waveform_media(
 pub(crate) fn decode_mp3_waveform(
     path: &Path,
     track_key: &str,
-    duration_seconds: Option<i64>,
+    _duration_seconds: Option<i64>,
     cancellation: &WaveformCancellation<'_>,
 ) -> Result<WaveformSnapshot, String> {
     let media = open_waveform_media(path, MAX_BUFFERED_MP3_BYTES, cancellation)?;
@@ -422,141 +420,58 @@ pub(crate) fn decode_mp3_waveform(
     let channels = codec_params
         .channels
         .and_then(|channels| u16::try_from(channels.count()).ok());
-    let estimated_frames = codec_params.n_frames.or_else(|| {
-        sample_rate
-            .zip(duration_seconds.and_then(|seconds| u64::try_from(seconds).ok()))
-            .map(|(rate, seconds)| u64::from(rate).saturating_mul(seconds))
-    });
-    let stream_duration = codec_params
-        .n_frames
-        .zip(sample_rate)
-        .map(|(frames, rate)| frames as f64 / f64::from(rate))
-        .or_else(|| duration_seconds.map(|seconds| seconds as f64));
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())
         .map_err(|error| format!("Could not create the MP3 waveform decoder: {error}"))?;
     cancellation.checkpoint()?;
-    let mut raw_peaks = vec![0.0_f32; PEAK_COUNT];
+    let mut peak_collector = WaveformPeakCollector::default();
     let mut decoded_frames = 0_u64;
     let mut sample_buffer: Option<SampleBuffer<f32>> = None;
 
-    if let Some(stream_duration) = stream_duration.filter(|duration| *duration > 0.0) {
-        for window in 0..SAMPLE_WINDOWS {
-            cancellation.checkpoint()?;
-            if window > 0 {
-                let target = stream_duration * window as f64 / SAMPLE_WINDOWS as f64;
-                let time = Time::new(target.floor() as u64, target.fract());
-                if format
-                    .seek(
-                        SeekMode::Coarse,
-                        SeekTo::Time {
-                            time,
-                            track_id: Some(track_id),
-                        },
-                    )
-                    .is_err()
-                {
-                    continue;
-                }
-                decoder.reset();
-            }
-
-            let mut attempts = 0;
-            while attempts < 6 {
-                cancellation.checkpoint()?;
-                attempts += 1;
-                let packet = match format.next_packet() {
-                    Ok(packet) => packet,
-                    Err(_) => break,
-                };
-                if packet.track_id() != track_id {
-                    continue;
-                }
-                let decoded = match decoder.decode(&packet) {
-                    Ok(decoded) => decoded,
-                    Err(SymphoniaError::DecodeError(_)) => continue,
-                    Err(_) => break,
-                };
-                let spec = *decoded.spec();
-                let channel_count = spec.channels.count().max(1);
-                if sample_buffer
-                    .as_ref()
-                    .is_none_or(|buffer| buffer.capacity() < decoded.capacity())
-                {
-                    sample_buffer = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
-                }
-                let buffer = sample_buffer
-                    .as_mut()
-                    .ok_or_else(|| "Could not allocate the MP3 waveform buffer.".to_owned())?;
-                buffer.copy_interleaved_ref(decoded);
-                let frames = buffer.samples().len() / channel_count;
-                if frames == 0 {
-                    continue;
-                }
-                for (frame_index, frame) in buffer.samples().chunks(channel_count).enumerate() {
-                    let amplitude = frame
-                        .iter()
-                        .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
-                    let local_bin =
-                        (frame_index * BINS_PER_WINDOW / frames).min(BINS_PER_WINDOW - 1);
-                    let bin = window * BINS_PER_WINDOW + local_bin;
-                    raw_peaks[bin] = raw_peaks[bin].max(amplitude);
-                    decoded_frames = decoded_frames.saturating_add(1);
-                }
+    loop {
+        cancellation.checkpoint()?;
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(SymphoniaError::IoError(error))
+                if error.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
                 break;
             }
+            Err(error) => {
+                return Err(format!("Could not read the MP3 waveform stream: {error}"));
+            }
+        };
+        if packet.track_id() != track_id {
+            continue;
         }
-    } else {
-        loop {
-            cancellation.checkpoint()?;
-            let packet = match format.next_packet() {
-                Ok(packet) => packet,
-                Err(SymphoniaError::IoError(error))
-                    if error.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    break;
-                }
-                Err(error) => {
-                    return Err(format!("Could not read the MP3 waveform stream: {error}"));
-                }
-            };
-            if packet.track_id() != track_id {
-                continue;
-            }
-            let decoded = match decoder.decode(&packet) {
-                Ok(decoded) => decoded,
-                Err(SymphoniaError::DecodeError(_)) => continue,
-                Err(SymphoniaError::IoError(error))
-                    if error.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    break;
-                }
-                Err(error) => return Err(format!("Could not decode the MP3 waveform: {error}")),
-            };
-            let spec = *decoded.spec();
-            let channel_count = spec.channels.count().max(1);
-            if sample_buffer
-                .as_ref()
-                .is_none_or(|buffer| buffer.capacity() < decoded.capacity())
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(SymphoniaError::IoError(error))
+                if error.kind() == std::io::ErrorKind::UnexpectedEof =>
             {
-                sample_buffer = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+                break;
             }
-            let buffer = sample_buffer
-                .as_mut()
-                .ok_or_else(|| "Could not allocate the MP3 waveform buffer.".to_owned())?;
-            buffer.copy_interleaved_ref(decoded);
-            for frame in buffer.samples().chunks(channel_count) {
-                let amplitude = frame
-                    .iter()
-                    .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
-                let total = estimated_frames
-                    .unwrap_or(decoded_frames.saturating_add(1))
-                    .max(1);
-                let bin = ((decoded_frames.saturating_mul(PEAK_COUNT as u64)) / total)
-                    .min((PEAK_COUNT - 1) as u64) as usize;
-                raw_peaks[bin] = raw_peaks[bin].max(amplitude);
-                decoded_frames = decoded_frames.saturating_add(1);
-            }
+            Err(error) => return Err(format!("Could not decode the MP3 waveform: {error}")),
+        };
+        let spec = *decoded.spec();
+        let channel_count = spec.channels.count().max(1);
+        if sample_buffer
+            .as_ref()
+            .is_none_or(|buffer| buffer.capacity() < decoded.capacity())
+        {
+            sample_buffer = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+        }
+        let buffer = sample_buffer
+            .as_mut()
+            .ok_or_else(|| "Could not allocate the MP3 waveform buffer.".to_owned())?;
+        buffer.copy_interleaved_ref(decoded);
+        for frame in buffer.samples().chunks(channel_count) {
+            let amplitude = frame
+                .iter()
+                .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+            peak_collector.push(amplitude);
+            decoded_frames = decoded_frames.saturating_add(1);
         }
     }
 
@@ -566,11 +481,70 @@ pub(crate) fn decode_mp3_waveform(
     cancellation.checkpoint()?;
     Ok(WaveformSnapshot {
         track_key: track_key.to_owned(),
-        peaks: shape_peaks(raw_peaks),
+        peaks: shape_peaks(peak_collector.finish(PEAK_COUNT)),
         sample_rate,
         channels,
         source: WaveformSource::Decoded,
     })
+}
+
+#[derive(Default)]
+struct WaveformPeakCollector {
+    source_peaks: Vec<f32>,
+    window_peak: f32,
+    window_frames: usize,
+}
+
+impl WaveformPeakCollector {
+    fn push(&mut self, amplitude: f32) {
+        self.window_peak = self.window_peak.max(amplitude);
+        self.window_frames += 1;
+        if self.window_frames == ANALYSIS_WINDOW_FRAMES {
+            self.flush_window();
+        }
+    }
+
+    fn flush_window(&mut self) {
+        if self.window_frames == 0 {
+            return;
+        }
+        self.source_peaks.push(self.window_peak);
+        self.window_peak = 0.0;
+        self.window_frames = 0;
+    }
+
+    fn finish(mut self, peak_count: usize) -> Vec<f32> {
+        self.flush_window();
+        resample_peaks(&self.source_peaks, peak_count)
+    }
+}
+
+fn resample_peaks(source: &[f32], peak_count: usize) -> Vec<f32> {
+    if source.is_empty() || peak_count == 0 {
+        return vec![0.0; peak_count];
+    }
+    if source.len() < peak_count {
+        if source.len() == 1 {
+            return vec![source[0]; peak_count];
+        }
+        return (0..peak_count)
+            .map(|index| {
+                let position =
+                    index as f32 * (source.len() - 1) as f32 / (peak_count - 1).max(1) as f32;
+                let left = position.floor() as usize;
+                let right = position.ceil() as usize;
+                let fraction = position - left as f32;
+                source[left] + (source[right] - source[left]) * fraction
+            })
+            .collect();
+    }
+    (0..peak_count)
+        .map(|index| {
+            let start = index * source.len() / peak_count;
+            let end = ((index + 1) * source.len()).div_ceil(peak_count);
+            source[start..end].iter().copied().fold(0.0_f32, f32::max)
+        })
+        .collect()
 }
 
 fn shape_peaks(raw: Vec<f32>) -> Vec<f32> {
@@ -774,6 +748,18 @@ mod tests {
         assert!(valid_peaks(&shaped));
         assert!(shaped[160] > shaped[10]);
         assert!(shaped[159] > shaped[10]);
+    }
+
+    #[test]
+    fn full_track_collector_preserves_each_decoded_section() {
+        let mut collector = WaveformPeakCollector::default();
+        for amplitude in [0.05_f32, 0.9, 0.2] {
+            for _ in 0..ANALYSIS_WINDOW_FRAMES {
+                collector.push(amplitude);
+            }
+        }
+        let peaks = collector.finish(3);
+        assert_eq!(peaks, vec![0.05, 0.9, 0.2]);
     }
 
     #[test]

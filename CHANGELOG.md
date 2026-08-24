@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.11] - 2026-08-24
+
+### Changed
+
+- The bottom player now draws a continuous, directly seekable purple-to-cyan waveform from all decoded frames in the active MP3. Aurora reduces the complete song to 640 peaks, visibly separates played from upcoming audio, and automatically replaces the previous sparse 64-window cache entries.
+
 ## [0.17.10] - 2026-08-24
 
 ### Fixed

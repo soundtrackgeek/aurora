@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime, type Track } from "./library";
 
-export const WAVEFORM_PEAK_COUNT = 320;
+export const WAVEFORM_PEAK_COUNT = 640;
 
 export interface TrackWaveform {
   trackKey: string;

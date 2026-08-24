@@ -43,24 +43,50 @@ export function WaveformTimeline({
         context.fillRect(0, height / 2, width, 1);
         return;
       }
+      const drawingContext = context;
+      const peaks = waveform.peaks;
 
-      const gradient = context.createLinearGradient(0, 0, width, 0);
+      const gradient = drawingContext.createLinearGradient(0, 0, width, 0);
       gradient.addColorStop(0, "#d946ef");
       gradient.addColorStop(0.38, "#a855f7");
       gradient.addColorStop(0.68, "#2787ff");
       gradient.addColorStop(1, "#22d3ee");
-      const count = waveform.peaks.length;
-      const stride = width / count;
-      const barWidth = Math.max(1, Math.min(2.2, stride * 0.62));
       const progress = duration > 0 ? Math.min(Math.max(position / duration, 0), 1) : 0;
+
+      function traceWaveform() {
+        const middle = height / 2;
+        const amplitude = Math.max((height - 4) / 2, 1);
+        const denominator = Math.max(peaks.length - 1, 1);
+        drawingContext.beginPath();
+        drawingContext.moveTo(0, middle);
+        peaks.forEach((peak, index) => {
+          drawingContext.lineTo(index / denominator * width, middle - peak * amplitude);
+        });
+        for (let index = peaks.length - 1; index >= 0; index -= 1) {
+          drawingContext.lineTo(index / denominator * width, middle + peaks[index] * amplitude);
+        }
+        drawingContext.closePath();
+      }
+
       context.fillStyle = gradient;
-      waveform.peaks.forEach((peak, index) => {
-        const x = index * stride + (stride - barWidth) / 2;
-        const barHeight = Math.max(1.5, peak * (height - 6));
-        context.globalAlpha = x / width <= progress ? 0.98 : 0.68;
-        context.fillRect(x, (height - barHeight) / 2, barWidth, barHeight);
-      });
+      context.globalAlpha = 0.38;
+      traceWaveform();
+      context.fill();
+
+      if (progress > 0) {
+        context.save();
+        context.beginPath();
+        context.rect(0, 0, progress * width, height);
+        context.clip();
+        context.globalAlpha = 0.98;
+        traceWaveform();
+        context.fill();
+        context.restore();
+      }
+
       context.globalAlpha = 1;
+      context.fillStyle = "rgba(154, 164, 181, 0.15)";
+      context.fillRect(0, Math.floor(height / 2), width, 1);
       if (progress > 0) {
         const x = Math.min(width - 1, progress * width);
         context.fillStyle = "rgba(233, 231, 255, 0.82)";
