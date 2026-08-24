@@ -78,7 +78,7 @@ describe("browser playback adapter", () => {
     const playing = await playTrackQueue(tracks, tracks[1].id);
     const rebound = await rebindPlaybackCatalog();
 
-    expect(rebound.catalogRevision).toBe(0);
+    expect(rebound.catalogRevision).toBe("0:0:");
     expect(rebound.playback.status).toBe(playing.status);
     expect(rebound.playback.currentTrack?.trackKey).toBe(tracks[1].trackKey);
     expect(rebound.playback.queue.map((track) => track.trackKey)).toEqual(

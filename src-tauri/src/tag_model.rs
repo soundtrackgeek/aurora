@@ -1,3 +1,4 @@
+use crate::library_sync::CatalogSync;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -287,38 +288,7 @@ pub(crate) struct TagEditorUpdateResult {
     pub(crate) state: TagEditorSnapshot,
     pub(crate) tracks: Vec<crate::catalog::TrackSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) catalog_sync: Option<TagEditorCatalogSync>,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum TagEditorCatalogSyncStatus {
-    Synced,
-    Pending,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TagEditorCatalogSync {
-    pub(crate) status: TagEditorCatalogSyncStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) message: Option<String>,
-}
-
-impl TagEditorCatalogSync {
-    pub(crate) fn synced() -> Self {
-        Self {
-            status: TagEditorCatalogSyncStatus::Synced,
-            message: None,
-        }
-    }
-
-    pub(crate) fn pending(message: String) -> Self {
-        Self {
-            status: TagEditorCatalogSyncStatus::Pending,
-            message: Some(message),
-        }
-    }
+    pub(crate) catalog_sync: Option<CatalogSync>,
 }
 
 #[cfg(test)]

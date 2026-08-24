@@ -1,6 +1,7 @@
 use crate::{
     GlobalShortcutState, PlaybackState, TagState,
     catalog::TrackSummary,
+    library_sync::{CatalogSync, LibrarySyncCoordinator},
     state_sync,
     tag_model::{LoveState, TagEditRequest, TagValues},
 };
@@ -150,6 +151,7 @@ pub(crate) struct GlobalShortcutResult {
     message: String,
     track: Option<TrackSummary>,
     previous_track: Option<TrackSummary>,
+    catalog_sync: Option<CatalogSync>,
 }
 
 pub(crate) struct GlobalShortcutRuntime {
@@ -497,6 +499,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                 message,
                 track: None,
                 previous_track: None,
+                catalog_sync: None,
             },
         };
         let _ = app.emit(RESULT_EVENT, result);
@@ -529,61 +532,88 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                 message: message.to_owned(),
                 track: snapshot.current_track,
                 previous_track: None,
+                catalog_sync: None,
             })
         }
         ShortcutAction::Rating(_) | ShortcutAction::Love => {
-            let track = {
-                let state = app.state::<PlaybackState>();
-                let mut playback = state
-                    .lock()
-                    .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                playback.snapshot().current_track.ok_or_else(|| {
-                    "Start a track in Aurora before using rating or Love shortcuts.".to_owned()
-                })?
-            };
-            let expected = track.catalog_tag_values();
-            let desired = desired_tag_values(&track, action)
-                .ok_or_else(|| "This shortcut does not edit track tags.".to_owned())?;
-            let previous_track = track.clone();
-            let updated = {
-                let state = app.state::<TagState>();
-                let service = state
-                    .lock()
-                    .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-                service.update(TagEditRequest {
-                    track_id: track.id,
-                    track_key: track.track_key,
-                    expected,
-                    desired,
-                })?
-            };
-            {
-                let state = app.state::<PlaybackState>();
-                let mut playback = state
-                    .lock()
-                    .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                playback.refresh_track_metadata(&updated.track);
+            let coordinator = app.state::<LibrarySyncCoordinator>();
+            let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+                let (previous_track, mut updated) = {
+                    let state = app.state::<TagState>();
+                    let service = state
+                        .lock()
+                        .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+                    let playback_track = {
+                        let state = app.state::<PlaybackState>();
+                        let mut playback = state.lock().map_err(|_| {
+                            "Aurora's playback engine stopped unexpectedly.".to_owned()
+                        })?;
+                        playback.snapshot().current_track.ok_or_else(|| {
+                            "Start a track in Aurora before using rating or Love shortcuts."
+                                .to_owned()
+                        })?
+                    };
+                    let track = service
+                        .inspect(&playback_track.id, &playback_track.track_key)?
+                        .track;
+                    let expected = track.catalog_tag_values();
+                    let desired = desired_tag_values(&track, action)
+                        .ok_or_else(|| "This shortcut does not edit track tags.".to_owned())?;
+                    let updated = service.update(TagEditRequest {
+                        track_id: track.id.clone(),
+                        track_key: track.track_key.clone(),
+                        expected,
+                        desired,
+                    })?;
+                    (track, updated)
+                };
+                {
+                    let state = app.state::<PlaybackState>();
+                    let mut playback = state
+                        .lock()
+                        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+                    playback.refresh_track_metadata(&updated.track);
+                }
+                let directory = updated.track.directory.clone();
+                let sync = coordinator.sync_after_edit(app, std::slice::from_ref(&directory));
+                if sync.completed(&directory) {
+                    updated.track.tag_sync_state = None;
+                    updated.tag_state.sync_state = None;
+                }
+                {
+                    let state = app.state::<PlaybackState>();
+                    let mut playback = state
+                        .lock()
+                        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+                    playback.refresh_track_metadata(&updated.track);
+                }
+                let message = match action {
+                    ShortcutAction::Rating(0) => {
+                        format!("Cleared rating for {}", updated.track.title)
+                    }
+                    ShortcutAction::Rating(rating) => {
+                        format!("Rated {} {} stars", updated.track.title, rating)
+                    }
+                    ShortcutAction::Love if updated.track.love_state == LoveState::Loved => {
+                        format!("Loved {}", updated.track.title)
+                    }
+                    ShortcutAction::Love => format!("Removed Love from {}", updated.track.title),
+                    _ => unreachable!(),
+                };
+                Ok::<GlobalShortcutResult, String>(GlobalShortcutResult {
+                    action: action_name(action).to_owned(),
+                    success: true,
+                    message,
+                    track: Some(updated.track),
+                    previous_track: Some(previous_track),
+                    catalog_sync: Some(sync.catalog_sync),
+                })
+            });
+            let mut result = result?;
+            if let Some(sync) = &mut result.catalog_sync {
+                sync.projection_token = Some(projection_token);
             }
-            let message = match action {
-                ShortcutAction::Rating(0) => {
-                    format!("Cleared rating for {}", updated.track.title)
-                }
-                ShortcutAction::Rating(rating) => {
-                    format!("Rated {} {} stars", updated.track.title, rating)
-                }
-                ShortcutAction::Love if updated.track.love_state == LoveState::Loved => {
-                    format!("Loved {}", updated.track.title)
-                }
-                ShortcutAction::Love => format!("Removed Love from {}", updated.track.title),
-                _ => unreachable!(),
-            };
-            Ok(GlobalShortcutResult {
-                action: action_name(action).to_owned(),
-                success: true,
-                message,
-                track: Some(updated.track),
-                previous_track: Some(previous_track),
-            })
+            Ok(result)
         }
     }
 }

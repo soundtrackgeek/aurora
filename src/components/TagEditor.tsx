@@ -7,6 +7,7 @@ import {
   EDITABLE_TAG_FIELDS,
   readTagEditorState,
   updateTagEditor,
+  type CatalogSync,
   type EditableTagAggregation,
   type EditableTagField,
   type EditableTagValues,
@@ -16,7 +17,8 @@ import {
 
 interface TagEditorProps {
   target: TagEditorTarget;
-  onTracksChange: (tracks: Track[]) => void;
+  onTracksChange: (tracks: Track[], catalogSync?: CatalogSync) => void | boolean;
+  onCatalogSync?: (sync: CatalogSync) => void | Promise<void>;
 }
 
 type EditorPhase = "loading" | "ready" | "saving" | "saved" | "error";
@@ -182,7 +184,7 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-export function TagEditor({ target, onTracksChange }: TagEditorProps) {
+export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorProps) {
   const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
   const [draft, setDraft] = useState<DraftText>(emptyDraft);
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
@@ -313,15 +315,31 @@ export function TagEditor({ target, onTracksChange }: TagEditorProps) {
     setMessage(null);
     try {
       const result = await updateTagEditor(requestTarget, snapshot, selectedInOrder, valuesForDraft(draft));
+      const projectionAccepted = result.catalogSync
+        ? onTracksChange(result.tracks, result.catalogSync)
+        : onTracksChange(result.tracks);
+      if (projectionAccepted === false) {
+        await loadState(true);
+        return;
+      }
       acceptSnapshot(result.state, "saved");
-      onTracksChange(result.tracks);
       const savedFiles = `Saved ${countLabel(fieldCount, "field")} directly to ${countLabel(savingCount, "MP3", "MP3s")}.`;
       if (result.catalogSync?.status === "synced") {
-        setMessage(`${savedFiles} Aurora's catalog is synchronized.`);
+        const remaining = result.catalogSync.pendingFolderCount > 0
+          ? ` ${countLabel(result.catalogSync.pendingFolderCount, "other folder")} still pending; Aurora is retrying automatically.`
+          : "";
+        setMessage(`${savedFiles} Music Library updated.${remaining}`);
       } else if (result.catalogSync?.status === "pending") {
         setMessage(`${savedFiles} ${result.catalogSync.message ?? "The MP3 write is verified; catalog sync is pending."}`);
       } else {
         setMessage(savedFiles);
+      }
+      if (result.catalogSync && onCatalogSync) {
+        try {
+          await onCatalogSync(result.catalogSync);
+        } catch (error) {
+          console.warn("Music Library updated, but Aurora could not refresh its catalog views yet", error);
+        }
       }
     } catch (error) {
       setPhase("error");

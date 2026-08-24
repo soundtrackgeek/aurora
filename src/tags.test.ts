@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { browserPreview, exploreTracks, type Track } from "./library";
 import {
+  advanceCatalogProjectionToken,
+  advanceCatalogTrackProjectionTokens,
   aggregateEditableTagValues,
   editableTagValuesForTrack,
   readTrackTagState,
@@ -13,6 +15,51 @@ import {
   type EditableTagValues,
   type TagEditorTrackState,
 } from "./tags";
+
+describe("catalog projection ordering", () => {
+  it("rejects an older edit result delivered after a newer one", () => {
+    const newer = advanceCatalogProjectionToken(0, 2);
+    const older = advanceCatalogProjectionToken(newer.latestToken, 1);
+
+    expect(newer).toEqual({ accepted: true, latestToken: 2 });
+    expect(older).toEqual({ accepted: false, latestToken: 2 });
+  });
+
+  it("rejects a reconciliation response delivered after a newer serialized edit", () => {
+    const edit = advanceCatalogProjectionToken(0, 8);
+    const staleReconciliation = advanceCatalogProjectionToken(edit.latestToken, 7);
+
+    expect(edit).toEqual({ accepted: true, latestToken: 8 });
+    expect(staleReconciliation).toEqual({ accepted: false, latestToken: 8 });
+  });
+
+  it("accepts an older response for a track not touched by the newer response", () => {
+    const newer = advanceCatalogTrackProjectionTokens(0, new Map(), 2, ["track-b"]);
+    const olderUnrelated = advanceCatalogTrackProjectionTokens(
+      newer.latestToken,
+      newer.latestTrackTokens,
+      1,
+      ["track-a"],
+    );
+
+    expect(olderUnrelated.acceptedTrackKeys).toEqual(new Set(["track-a"]));
+    expect(olderUnrelated.complete).toBe(true);
+    expect(olderUnrelated.latestToken).toBe(2);
+  });
+
+  it("filters only tracks already superseded by a newer response", () => {
+    const newer = advanceCatalogTrackProjectionTokens(0, new Map(), 4, ["track-b"]);
+    const mixedOlder = advanceCatalogTrackProjectionTokens(
+      newer.latestToken,
+      newer.latestTrackTokens,
+      3,
+      ["track-a", "track-b"],
+    );
+
+    expect(mixedOlder.acceptedTrackKeys).toEqual(new Set(["track-a"]));
+    expect(mixedOlder.complete).toBe(false);
+  });
+});
 
 function track(id: string): Track {
   return {
@@ -106,7 +153,12 @@ describe("tag editing preview boundary", () => {
   });
 
   it("does no filesystem reconciliation in browser preview", async () => {
-    await expect(reconcilePendingTags()).resolves.toMatchObject({ processed: 0, changes: [], hasMore: false });
+    await expect(reconcilePendingTags()).resolves.toMatchObject({
+      projectionToken: null,
+      processed: 0,
+      changes: [],
+      hasMore: false,
+    });
   });
 
   it("keeps a saved inline edit when the browser Explorer reloads", async () => {

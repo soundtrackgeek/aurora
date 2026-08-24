@@ -24,6 +24,85 @@ export interface TrackTagState {
 export interface TrackTagSnapshot {
   track: Track;
   tagState: TrackTagState;
+  catalogSync?: CatalogSync;
+}
+
+export interface CatalogSync {
+  status: "synced" | "pending";
+  message?: string | null;
+  pendingFolderCount: number;
+  projectionToken?: number | null;
+}
+
+export interface CatalogProjectionDecision {
+  accepted: boolean;
+  latestToken: number;
+}
+
+export interface CatalogTrackProjectionDecision {
+  acceptedTrackKeys: ReadonlySet<string>;
+  complete: boolean;
+  latestToken: number;
+  latestTrackTokens: ReadonlyMap<string, number>;
+}
+
+export function isCatalogProjectionToken(
+  token: number | null | undefined,
+): token is number {
+  return Number.isSafeInteger(token) && (token ?? 0) > 0;
+}
+
+export function advanceCatalogProjectionToken(
+  latestToken: number,
+  incomingToken: number | null | undefined,
+): CatalogProjectionDecision {
+  if (incomingToken === null || incomingToken === undefined) {
+    return { accepted: true, latestToken };
+  }
+  if (!isCatalogProjectionToken(incomingToken) || incomingToken <= latestToken) {
+    return { accepted: false, latestToken };
+  }
+  return { accepted: true, latestToken: incomingToken };
+}
+
+export function advanceCatalogTrackProjectionTokens(
+  latestToken: number,
+  latestTrackTokens: ReadonlyMap<string, number>,
+  incomingToken: number | null | undefined,
+  trackKeys: readonly string[],
+): CatalogTrackProjectionDecision {
+  const uniqueTrackKeys = [...new Set(trackKeys)];
+  if (incomingToken === null || incomingToken === undefined) {
+    return {
+      acceptedTrackKeys: new Set(uniqueTrackKeys),
+      complete: true,
+      latestToken,
+      latestTrackTokens,
+    };
+  }
+  if (!isCatalogProjectionToken(incomingToken)) {
+    return {
+      acceptedTrackKeys: new Set(),
+      complete: false,
+      latestToken,
+      latestTrackTokens,
+    };
+  }
+
+  const acceptedTrackKeys = new Set<string>();
+  const nextTrackTokens = new Map(latestTrackTokens);
+  for (const trackKey of uniqueTrackKeys) {
+    const previousToken = nextTrackTokens.get(trackKey) ?? 0;
+    if (incomingToken <= previousToken) continue;
+    nextTrackTokens.set(trackKey, incomingToken);
+    acceptedTrackKeys.add(trackKey);
+  }
+  return {
+    acceptedTrackKeys,
+    complete: acceptedTrackKeys.size === uniqueTrackKeys.length,
+    latestToken: Math.max(latestToken, incomingToken),
+    latestTrackTokens: nextTrackTokens,
+  };
 }
 
 export interface TagReconciliationChange {
@@ -38,6 +117,7 @@ export interface TagReconciliationIssue {
 }
 
 export interface TagReconciliationReport {
+  projectionToken: number | null;
   processed: number;
   reconciled: number;
   externalChanges: number;
@@ -49,6 +129,7 @@ export interface TagReconciliationReport {
   hasMore: boolean;
   changes: TagReconciliationChange[];
   issues: TagReconciliationIssue[];
+  catalogSync?: CatalogSync;
 }
 
 export type TagEditorTarget =
@@ -103,10 +184,7 @@ export interface TagEditorSnapshot {
 export interface TagEditorUpdateResult {
   state: TagEditorSnapshot;
   tracks: Track[];
-  catalogSync?: {
-    status: "synced" | "pending";
-    message?: string | null;
-  };
+  catalogSync?: CatalogSync;
 }
 
 export type EditableTagAggregation = {
@@ -265,7 +343,7 @@ export async function updateTagEditor(
     return {
       state: browserTagEditorSnapshot(target),
       tracks: updatedTracks,
-      catalogSync: { status: "synced" },
+      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
     };
   }
   return invoke<TagEditorUpdateResult>("update_tag_editor", {
@@ -337,7 +415,10 @@ export async function updateTrackTags(
     syncInlineBrowserValues(updated);
     bumpBrowserRevision(track.id);
     updateBrowserPreviewTrack(updated);
-    return browserSnapshot(updated);
+    return {
+      ...browserSnapshot(updated),
+      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
+    };
   }
   return invoke<TrackTagSnapshot>("update_track_tags", {
     request: { trackId: track.id, trackKey: track.trackKey, expected, desired },
@@ -354,7 +435,10 @@ export async function undoTrackTagEdit(track: Track): Promise<TrackTagSnapshot> 
     syncInlineBrowserValues(restored);
     bumpBrowserRevision(track.id);
     updateBrowserPreviewTrack(restored);
-    return browserSnapshot(restored);
+    return {
+      ...browserSnapshot(restored),
+      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
+    };
   }
   return invoke<TrackTagSnapshot>("undo_track_tag_edit", { trackId: track.id, trackKey: track.trackKey });
 }
@@ -373,6 +457,8 @@ export async function reconcilePendingTags(): Promise<TagReconciliationReport> {
       hasMore: false,
       changes: [],
       issues: [],
+      projectionToken: null,
+      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
     };
   }
   return invoke<TagReconciliationReport>("refresh_external_tag_changes");

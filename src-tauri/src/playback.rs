@@ -89,7 +89,7 @@ pub(crate) struct PlaybackSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PlaybackCatalogRebind {
     pub(crate) playback: PlaybackSnapshot,
-    pub(crate) catalog_revision: i64,
+    pub(crate) catalog_revision: String,
 }
 
 struct PreparedTrack {
@@ -336,7 +336,7 @@ impl PlaybackRuntime {
     ) -> Result<Self, String> {
         let stored = store.load()?;
         let queue_result = if stored.queue.is_empty() {
-            Ok((Vec::new(), 0, 0))
+            Ok((Vec::new(), 0, String::new()))
         } else {
             catalog::load_tracks_by_references(&stored.queue, &store)
         };

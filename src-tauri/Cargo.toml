@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.17.5"
+version = "0.17.6"
 description = "A fast, local-first explorer for a personal music universe"
 authors = ["Jørn Tillnes"]
 edition = "2024"

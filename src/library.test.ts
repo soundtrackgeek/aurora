@@ -36,9 +36,21 @@ const yearRangeTracks: Track[] = [
 
 describe("library presentation", () => {
   it("acknowledges a catalog refresh only when every read used one revision", () => {
-    expect(catalogRefreshIsConsistent(52, 52, 52)).toBe(true);
-    expect(catalogRefreshIsConsistent(52, 51, 52)).toBe(false);
-    expect(catalogRefreshIsConsistent(52, 52, 53)).toBe(false);
+    expect(catalogRefreshIsConsistent(
+      "1:52:2026-08-24T10:01:00Z",
+      "1:52:2026-08-24T10:01:00Z",
+      "1:52:2026-08-24T10:01:00Z",
+    )).toBe(true);
+    expect(catalogRefreshIsConsistent(
+      "1:52:2026-08-24T10:01:00Z",
+      "1:51:2026-08-24T10:00:00Z",
+      "1:52:2026-08-24T10:01:00Z",
+    )).toBe(false);
+    expect(catalogRefreshIsConsistent(
+      "2:53:2026-08-24T10:03:00Z",
+      "1:53:2026-08-24T10:02:00Z",
+      "2:53:2026-08-24T10:03:00Z",
+    )).toBe(false);
   });
 
   it("applies tag state without restoring stale catalog identity", () => {

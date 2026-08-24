@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.5 hardens native playback against audible crackles and brief dropouts by removing routine MP3 storage reads from the audio callback, increasing output-buffer headroom, avoiding Rodio's linear sample-rate conversion when the Windows endpoint accepts the track rate, and preventing waveform work from piling up during rapid track changes.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.6 sends every verified tag edit to Music Library immediately, shows whether the catalog receipt completed or remains durably queued, and refreshes the visible catalog as soon as a successful receipt arrives.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.5 slice
+## Current 0.17.6 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -13,12 +13,13 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Track and album selection semantics model MusicBee's vertical editor: common values are shown once, differing values are labelled **Mixed**, and only checked or edited fields are written. A checked blank value is an explicit clear except for Album Artist, Album, and Track Title, which Music Library requires for safe catalog identity.
 - Artist edits MusicBee's `DISPLAY ARTIST` override while preserving the underlying multi-value performer credits; Album Artist retains semicolon-separated multi-value `TPE2` credits.
 - Album saves preflight every selected MP3 and its revision before the first write. Aurora then performs verified same-folder atomic writes, rolls back earlier completed files if a later file fails, and retains recovery evidence for ambiguous Windows replacement failures.
-- Aurora invokes Music Library `0.144.0` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
-- After a verified tag save, Music Library safely reimports only the already-cataloged album folders, requires a zero add/remove delta and stable album identity, and advances the catalog revision that Aurora already watches. Aurora durably queues affected folders with the verified write or undo; if the companion is unavailable or outdated, the MP3 save remains successful and startup, focus, or a later save retries the pending synchronization.
+- Aurora invokes Music Library `0.144.1` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
+- After a verified inline, inspector, global-shortcut, or undo tag edit, Aurora durably queues the exact MP3 and starts Music Library synchronization immediately. Music Library `0.144.1` scans only that file for an ordinary rating, Love/Ban, or Release Year edit, then applies a guarded album-only transaction; broader identity or text edits and multiple pending files in one album retain the safe complete-folder/full-catalog fallback. Aurora keeps the verified MP3 result visible and distinguishes **Music Library updated** from a durable **update pending** state.
+- Folder synchronization is serialized and token-protected: one invalid old folder cannot poison a new edit, an older receipt cannot erase a newer edit queued for the same folder, and neither a delayed edit response nor external-tag reconciliation can project over newer tag state. Pending overlays are reconciled per live track, so a targeted album import does not hide edits still awaiting synchronization in another album. While Aurora is focused it retries one pending folder every five seconds and refreshes all revision-backed views immediately after each successful receipt.
 - Album intake and tag editing deliberately assume that files have already been manually identified, tagged, and named as intended; Aurora does not add an automatic MusicBrainz, Discogs, or fingerprint-matching step.
 - Native folder selection, strict bridge/category/receipt validation, bounded helper timeouts, and clear update guidance when the installed Music Library does not yet support album intake. Source paths are passed in private request files rather than command-line arguments.
 - Truthful batch completion distinguishes fully moved albums from verified catalog copies whose source cleanup needs attention. A successful import triggers Aurora's existing revision check, stable queue rebind, and bounded view refresh immediately.
-- A lightweight completed-import revision check every five seconds and whenever Aurora regains focus. Queue rebinding and the base view each use one consistent SQLite read snapshot, and Aurora refreshes only after their reported revisions match the detected completed import. Stable normalized path keys keep replaced catalog row IDs from becoming playback identity.
+- A lightweight completed-import revision check every five seconds and whenever Aurora regains focus remains as a fallback. Its opaque completion-order token changes even when imports finish out of ID order. Successful edit and recovery receipts request the same guarded catalog refresh immediately. Queue rebinding and the base view each use one consistent SQLite read snapshot, and Aurora refreshes only after their reported revisions match the detected completed import. Stable normalized path keys keep replaced catalog row IDs from becoming playback identity.
 - Catalog refreshes preserve the playing source, current track, and preloaded successor when stable queue order is unchanged. Removed queue entries are dropped; a removed current track stops safely and selects the next surviving entry in a paused state.
 - Import-time rating/tag completions update only tag fields on the freshly rebound queue row, selected tracks follow their stable file key, and an unsaved inspector draft remains mounted across transient catalog-ID changes.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
@@ -124,7 +125,7 @@ The album-cover archive at `C:\_code\music_backup_v5\AlbumCovers` contains 76,32
 - Node.js 22+
 - Rust stable with the MSVC target and Windows C++ build tools
 - The music catalog at the default `%APPDATA%` path above
-- Music Library `0.144.0` or newer installed at `%LOCALAPPDATA%\Music Library\music-library.exe` for album intake and immediate post-edit catalog synchronization
+- Music Library `0.144.1` or newer installed at `%LOCALAPPDATA%\Music Library\music-library.exe` for album intake and immediate post-edit catalog synchronization
 - The referenced MP3 files and album-cover archive mounted at their cataloged paths for playback and real artwork
 - For Laptop Mode, the equivalent library roots mounted at `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`
 - A locally available `%USERPROFILE%\OneDrive\_musicbackup` directory for Aurora state and per-device history mirroring; catalog browsing and local history still work and report a sync warning when it is unavailable

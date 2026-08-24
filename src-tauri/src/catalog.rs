@@ -130,7 +130,7 @@ pub(crate) struct LibrarySnapshot {
     pub(crate) source_state: &'static str,
     pub(crate) source_label: &'static str,
     pub(crate) source_path: String,
-    pub(crate) catalog_revision: i64,
+    pub(crate) catalog_revision: String,
     pub(crate) summary: LibrarySummary,
     pub(crate) artists: Vec<ArtistSummary>,
     pub(crate) tracks: Vec<TrackSummary>,
@@ -162,17 +162,30 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
     Ok(connection)
 }
 
-fn completed_import_revision_for_connection(connection: &Connection) -> Result<i64, String> {
-    connection
+fn completed_import_revision_for_connection(connection: &Connection) -> Result<String, String> {
+    let (completed_count, maximum_id, latest_completion): (i64, i64, String) = connection
         .query_row(
-            "SELECT COALESCE(MAX(id), 0) FROM import_runs WHERE status = 'completed'",
+            r#"
+            WITH completed AS (
+              SELECT id, started_at, completed_at
+              FROM import_runs
+              WHERE status = 'completed'
+            )
+            SELECT COUNT(*),
+                   COALESCE(MAX(id), 0),
+                   COALESCE(MAX(COALESCE(completed_at, started_at)), '')
+            FROM completed
+            "#,
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .map_err(|error| format!("Could not identify the current library import: {error}"))
+        .map_err(|error| format!("Could not identify the current library import: {error}"))?;
+    Ok(format!(
+        "{completed_count}:{maximum_id}:{latest_completion}"
+    ))
 }
 
-pub(crate) fn completed_import_revision() -> Result<i64, String> {
+pub(crate) fn completed_import_revision() -> Result<String, String> {
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
     completed_import_revision_for_connection(&connection)
@@ -272,24 +285,32 @@ pub(crate) fn apply_overlays(
         let catalog_values = track.catalog_tag_values();
         track.can_undo_tag_edit = undoable.contains(&track.track_key);
         if let Some(overlay) = overlays.get(&track.track_key) {
-            store.upsert_overlay(
-                &track.track_key,
-                &track.directory,
-                &track.filename,
+            let values = if store.reconcile_overlay_if_current(
+                overlay,
                 &catalog_values,
-                &overlay.values,
                 track.catalog_import_run_id,
-                overlay.last_operation_id,
-            )?;
-            if overlay.values != catalog_values {
-                track.apply_tag_values(&overlay.values, true);
+            )? {
+                overlay.values.clone()
+            } else {
+                store
+                    .overlays_for_keys(std::slice::from_ref(&track.track_key))?
+                    .into_iter()
+                    .next()
+                    .map(|current| current.values)
+                    .unwrap_or_else(|| catalog_values.clone())
+            };
+            if values != catalog_values {
+                track.apply_tag_values(&values, true);
             }
         }
     }
     Ok(())
 }
 
-fn reconcile_all_overlays(connection: &Connection, store: &StateStore) -> Result<(), String> {
+fn reconcile_all_overlays(
+    connection: &Connection,
+    store: &StateStore,
+) -> Result<(i64, i64), String> {
     let mut statement = connection
         .prepare_cached(
             r#"
@@ -304,6 +325,8 @@ fn reconcile_all_overlays(connection: &Connection, store: &StateStore) -> Result
             "#,
         )
         .map_err(|error| format!("Could not prepare tag-overlay reconciliation: {error}"))?;
+    let mut loved_delta = 0;
+    let mut rated_delta = 0;
     for overlay in store.all_overlays()? {
         let catalog = statement
             .query_row(params![overlay.directory, overlay.filename], |row| {
@@ -321,18 +344,23 @@ fn reconcile_all_overlays(connection: &Connection, store: &StateStore) -> Result
             .optional()
             .map_err(|error| format!("Could not reconcile a pending MP3 edit: {error}"))?;
         if let Some((catalog_values, import_run_id)) = catalog {
-            store.upsert_overlay(
-                &overlay.track_key,
-                &overlay.directory,
-                &overlay.filename,
-                &catalog_values,
-                &overlay.values,
-                import_run_id,
-                overlay.last_operation_id,
-            )?;
+            let values =
+                if store.reconcile_overlay_if_current(&overlay, &catalog_values, import_run_id)? {
+                    overlay.values
+                } else {
+                    store
+                        .overlays_for_keys(std::slice::from_ref(&overlay.track_key))?
+                        .into_iter()
+                        .next()
+                        .map(|current| current.values)
+                        .unwrap_or_else(|| catalog_values.clone())
+                };
+            loved_delta += (values.love_state == LoveState::Loved) as i64
+                - (catalog_values.love_state == LoveState::Loved) as i64;
+            rated_delta += values.rating.is_some() as i64 - catalog_values.rating.is_some() as i64;
         }
     }
-    Ok(())
+    Ok((loved_delta, rated_delta))
 }
 
 pub(crate) fn query_snapshot(
@@ -344,10 +372,11 @@ pub(crate) fn query_snapshot(
         .unchecked_transaction()
         .map_err(|error| format!("Could not start a consistent catalog snapshot: {error}"))?;
     let connection = &*transaction;
-    let current_import_run_id = completed_import_revision_for_connection(connection)?;
-    if let Some(store) = store {
-        reconcile_all_overlays(connection, store)?;
-    }
+    let catalog_revision = completed_import_revision_for_connection(connection)?;
+    let overlay_summary_deltas = store
+        .map(|store| reconcile_all_overlays(connection, store))
+        .transpose()?
+        .unwrap_or_default();
     let mut summary = connection
         .query_row(
             r#"
@@ -441,8 +470,8 @@ pub(crate) fn query_snapshot(
         store,
     )?;
 
-    if let Some(store) = store {
-        let (loved_delta, rated_delta) = store.overlay_summary_deltas(current_import_run_id)?;
+    if store.is_some() {
+        let (loved_delta, rated_delta) = overlay_summary_deltas;
         summary.loved = (summary.loved + loved_delta).max(0);
         summary.rated = (summary.rated + rated_delta).max(0);
     }
@@ -451,7 +480,7 @@ pub(crate) fn query_snapshot(
         source_state: "connected",
         source_label: "Live catalog · file-tag overlay",
         source_path,
-        catalog_revision: current_import_run_id,
+        catalog_revision,
         summary,
         artists,
         tracks,
@@ -1253,7 +1282,7 @@ pub(crate) fn load_tracks_by_ids(
 pub(crate) fn load_tracks_by_references(
     references: &[StoredQueueEntry],
     store: &StateStore,
-) -> Result<(Vec<TrackSummary>, usize, i64), String> {
+) -> Result<(Vec<TrackSummary>, usize, String), String> {
     if references.is_empty() || references.len() > 200 {
         return Err("A playback queue must contain between 1 and 200 tracks.".to_owned());
     }
@@ -1792,13 +1821,23 @@ mod tests {
                 CREATE TABLE albums (
                   album_artist_display TEXT, canonical_genre TEXT, total_tracks INTEGER NOT NULL
                 );
-                CREATE TABLE import_runs (id INTEGER PRIMARY KEY, status TEXT NOT NULL);
+                CREATE TABLE import_runs (
+                  id INTEGER PRIMARY KEY,
+                  started_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  status TEXT NOT NULL
+                );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER,
                   PRIMARY KEY (artist_key, track_key)
                 );
                 INSERT INTO albums VALUES ('Sigur Rós', 'Post-rock', 2);
-                INSERT INTO import_runs VALUES (52, 'completed');
+                INSERT INTO import_runs VALUES (
+                  52,
+                  '2026-08-24T10:00:00Z',
+                  '2026-08-24T10:01:00Z',
+                  'completed'
+                );
                 INSERT INTO tracks VALUES (7, 'album-7', 'Sæglópur', 'Sigur Rós', 'Jónsi', 'Takk...', 2005, 100, '5', 'L', 473, 'Post-rock', 'H:\Music\Sigur Rós', '01 Sæglópur.mp3', 52);
                 INSERT INTO tracks VALUES (8, 'album-7', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 2005, NULL, '4.5', NULL, 268, 'Post-rock', 'H:\Music\Sigur Rós', '02 Hoppípolla.mp3', 52);
                 INSERT INTO lastfm_track_popularity VALUES ('sigur rós', 'sæglópur', 42);
@@ -1823,7 +1862,7 @@ mod tests {
             "h:\\music\\sigur rós\\01 sæglópur.mp3"
         );
         assert!(verify_track_identity(snapshot.tracks[0].clone(), "wrong-track-key").is_err());
-        assert_eq!(snapshot.catalog_revision, 52);
+        assert_eq!(snapshot.catalog_revision, "1:52:2026-08-24T10:01:00Z");
         let stable_track = load_track_by_stable_key(&connection, &snapshot.tracks[0].track_key)
             .expect("stable-key lookup");
         assert_eq!(stable_track.id, "7");
@@ -1855,23 +1894,232 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_counts_pending_overlay_from_untouched_folder_after_targeted_import() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks (
+                  id INTEGER PRIMARY KEY, album_id TEXT, title TEXT, album_artist_display TEXT,
+                  display_artist TEXT, album TEXT, release_year INTEGER, normalized_rating INTEGER,
+                  rating_raw TEXT, love TEXT, time_seconds INTEGER, canonical_genre TEXT,
+                  file_path TEXT, filename TEXT, import_run_id INTEGER NOT NULL
+                );
+                CREATE TABLE albums (
+                  album_artist_display TEXT, canonical_genre TEXT, total_tracks INTEGER NOT NULL
+                );
+                CREATE TABLE import_runs (
+                  id INTEGER PRIMARY KEY,
+                  started_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  status TEXT NOT NULL
+                );
+                CREATE TABLE lastfm_track_popularity (
+                  artist_key TEXT, track_key TEXT, play_count INTEGER,
+                  PRIMARY KEY (artist_key, track_key)
+                );
+
+                INSERT INTO albums VALUES ('Artist A', 'Pop', 1);
+                INSERT INTO albums VALUES ('Artist B', 'Rock', 1);
+                INSERT INTO import_runs VALUES (
+                  52, '2026-08-24T10:00:00Z', '2026-08-24T10:01:00Z', 'completed'
+                );
+                INSERT INTO import_runs VALUES (
+                  53, '2026-08-24T10:02:00Z', '2026-08-24T10:03:00Z', 'completed'
+                );
+                INSERT INTO tracks VALUES (
+                  1, 'album-a', 'Track A', 'Artist A', 'Artist A', 'Album A', 2020,
+                  NULL, NULL, NULL, 180, 'Pop', 'H:\Music\Artist A\Album A', 'Track A.mp3', 52
+                );
+                INSERT INTO tracks VALUES (
+                  2, 'album-b', 'Track B', 'Artist B', 'Artist B', 'Album B', 2021,
+                  NULL, NULL, NULL, 190, 'Rock', 'H:\Music\Artist B\Album B', 'Track B.mp3', 53
+                );
+                "#,
+            )
+            .expect("fixture schema");
+
+        let state_path = std::env::temp_dir().join(format!(
+            "aurora-targeted-import-overlay-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos(),
+        ));
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let directory = r"H:\Music\Artist A\Album A";
+        let filename = "Track A.mp3";
+        let track_key = normalize_track_key(directory, filename);
+        let catalog_values = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: Some(2020),
+        };
+        let desired_values = TagValues {
+            rating: Some(4.5),
+            love_state: LoveState::Loved,
+            release_year: Some(2020),
+        };
+        store
+            .upsert_overlay(
+                &track_key,
+                directory,
+                filename,
+                &catalog_values,
+                &desired_values,
+                52,
+                Some(1),
+            )
+            .expect("pending edit for untouched folder");
+
+        let snapshot = query_snapshot(&connection, "fixture.sqlite3".to_owned(), Some(&store))
+            .expect("snapshot after targeted import");
+
+        assert_eq!(snapshot.catalog_revision, "2:53:2026-08-24T10:03:00Z");
+        assert_eq!(snapshot.summary.loved, 1);
+        assert_eq!(snapshot.summary.rated, 1);
+        let overlays = store
+            .overlays_for_keys(std::slice::from_ref(&track_key))
+            .expect("remaining overlay");
+        assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].catalog_import_run_id, 52);
+
+        drop(store);
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn reconciliation_excludes_overlay_when_catalog_track_is_missing() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks (
+                  normalized_rating INTEGER, rating_raw TEXT, love TEXT, release_year INTEGER,
+                  import_run_id INTEGER NOT NULL, file_path TEXT, filename TEXT
+                );
+                "#,
+            )
+            .expect("fixture schema");
+        let state_path = std::env::temp_dir().join(format!(
+            "aurora-missing-track-overlay-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos(),
+        ));
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let track_key = r"h:\music\missing\track.mp3";
+        store
+            .upsert_overlay(
+                track_key,
+                r"H:\Music\Missing",
+                "Track.mp3",
+                &TagValues {
+                    rating: None,
+                    love_state: LoveState::Neutral,
+                    release_year: Some(2020),
+                },
+                &TagValues {
+                    rating: Some(4.5),
+                    love_state: LoveState::Loved,
+                    release_year: Some(2020),
+                },
+                52,
+                Some(1),
+            )
+            .expect("pending edit for missing track");
+
+        assert_eq!(
+            reconcile_all_overlays(&connection, &store).expect("reconcile missing track"),
+            (0, 0)
+        );
+        assert_eq!(
+            store
+                .overlays_for_keys(&[track_key.to_owned()])
+                .expect("preserved missing-track overlay")
+                .len(),
+            1
+        );
+
+        drop(store);
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
     fn completed_import_revision_ignores_unfinished_runs() {
         let connection = Connection::open_in_memory().expect("in-memory database");
         connection
             .execute_batch(
                 r#"
-                CREATE TABLE import_runs (id INTEGER PRIMARY KEY, status TEXT NOT NULL);
-                INSERT INTO import_runs VALUES (51, 'failed');
-                INSERT INTO import_runs VALUES (52, 'completed');
-                INSERT INTO import_runs VALUES (53, 'running');
+                CREATE TABLE import_runs (
+                  id INTEGER PRIMARY KEY,
+                  started_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  status TEXT NOT NULL
+                );
+                INSERT INTO import_runs VALUES (
+                  51, '2026-08-24T09:59:00Z', NULL, 'failed'
+                );
+                INSERT INTO import_runs VALUES (
+                  52, '2026-08-24T10:00:00Z', '2026-08-24T10:01:00Z', 'completed'
+                );
+                INSERT INTO import_runs VALUES (
+                  53, '2026-08-24T10:02:00Z', NULL, 'running'
+                );
+                INSERT INTO import_runs VALUES (
+                  50, '2026-08-24T10:03:00Z', NULL, 'completed'
+                );
                 "#,
             )
             .expect("fixture schema");
 
         assert_eq!(
             completed_import_revision_for_connection(&connection).expect("completed revision"),
-            52
+            "2:52:2026-08-24T10:03:00Z"
         );
+    }
+
+    #[test]
+    fn completed_import_revision_changes_when_imports_finish_out_of_id_order() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE import_runs (
+                  id INTEGER PRIMARY KEY,
+                  started_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  status TEXT NOT NULL
+                );
+                INSERT INTO import_runs VALUES (
+                  52, '2026-08-24T10:00:00Z', NULL, 'running'
+                );
+                INSERT INTO import_runs VALUES (
+                  53, '2026-08-24T10:01:00Z', '2026-08-24T10:02:00Z', 'completed'
+                );
+                "#,
+            )
+            .expect("fixture schema");
+
+        let revision_after_newer = completed_import_revision_for_connection(&connection)
+            .expect("newer completion revision");
+
+        connection
+            .execute(
+                "UPDATE import_runs
+                 SET status = 'completed', completed_at = '2026-08-24T10:03:00Z'
+                 WHERE id = 52",
+                [],
+            )
+            .expect("complete older import last");
+
+        let revision_after_older = completed_import_revision_for_connection(&connection)
+            .expect("older completion revision");
+        assert_ne!(revision_after_older, revision_after_newer);
+        assert_eq!(revision_after_older, "2:53:2026-08-24T10:03:00Z");
     }
 
     #[test]

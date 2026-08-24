@@ -49,9 +49,9 @@ export function displayTrackArtist(track: Track): string {
 }
 
 export function catalogRefreshIsConsistent(
-  detectedRevision: number,
-  reboundRevision: number,
-  snapshotRevision: number,
+  detectedRevision: string,
+  reboundRevision: string,
+  snapshotRevision: string,
 ): boolean {
   return detectedRevision === reboundRevision && detectedRevision === snapshotRevision;
 }
@@ -101,7 +101,7 @@ export interface LibrarySnapshot {
   sourceState: SourceState;
   sourceLabel: string;
   sourcePath: string | null;
-  catalogRevision: number;
+  catalogRevision: string;
   summary: LibrarySummary;
   artists: Artist[];
   tracks: Track[];
@@ -233,7 +233,7 @@ export const browserPreview: LibrarySnapshot = {
   sourceState: "browser-preview",
   sourceLabel: "Browser preview data",
   sourcePath: null,
-  catalogRevision: 0,
+  catalogRevision: "0:0:",
   summary: {
     songs: 12_846,
     albums: 1_208,
@@ -298,9 +298,9 @@ export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {
   return invoke<LibrarySnapshot>("library_snapshot");
 }
 
-export async function loadCatalogRevision(): Promise<number> {
+export async function loadCatalogRevision(): Promise<string> {
   if (!isTauriRuntime()) return browserPreview.catalogRevision;
-  return invoke<number>("catalog_revision");
+  return invoke<string>("catalog_revision");
 }
 
 export function updateBrowserPreviewTrack(updated: Track): void {

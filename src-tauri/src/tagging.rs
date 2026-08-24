@@ -1,5 +1,6 @@
 use crate::{
     catalog::{self, ResolvedTrack, TrackSummary},
+    library_sync::CatalogSync,
     state_store::{StateStore, TagOperation, TagOverlay},
     tag_model::{
         EditableTagField, EditableTagValues, LoveState, TagEditRequest, TagEditorSnapshot,
@@ -49,6 +50,8 @@ const MUSICBEE_RATINGS: [(f64, u8); 10] = [
 pub(crate) struct TrackTagSnapshot {
     pub(crate) track: TrackSummary,
     pub(crate) tag_state: TrackTagState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) catalog_sync: Option<CatalogSync>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,6 +83,8 @@ pub(crate) struct TagReconciliationReport {
     pub(crate) has_more: bool,
     pub(crate) changes: Vec<TagReconciliationChange>,
     pub(crate) issues: Vec<TagReconciliationIssue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) catalog_sync: Option<CatalogSync>,
 }
 
 impl TagReconciliationReport {
@@ -96,6 +101,7 @@ impl TagReconciliationReport {
             has_more,
             changes: Vec::new(),
             issues: Vec::new(),
+            catalog_sync: None,
         }
     }
 
@@ -1065,6 +1071,7 @@ impl TagService {
                 sync_state: pending_import.then_some(TagSyncState::PendingImport),
                 can_undo,
             },
+            catalog_sync: None,
         })
     }
 
@@ -3142,6 +3149,7 @@ mod tests {
                 sync_state: None,
                 can_undo: false,
             },
+            catalog_sync: None,
         };
         let restored = EditableTagValues {
             album_artist: Some("Restored Album Artist".to_owned()),

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime, type Track } from "./library";
+import type { CatalogSync } from "./tags";
 
 export interface ShortcutBinding {
   action: string;
@@ -29,6 +30,7 @@ export interface GlobalShortcutResult {
   message: string;
   track: Track | null;
   previousTrack: Track | null;
+  catalogSync: CatalogSync | null;
 }
 
 export const defaultShortcutBindings: ShortcutBinding[] = [

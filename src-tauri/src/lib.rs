@@ -10,6 +10,7 @@ mod genres;
 mod history;
 mod laptop_mode;
 mod library_bridge;
+mod library_sync;
 mod musicbrainz;
 mod playback;
 mod publishers;
@@ -36,8 +37,9 @@ use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
-    select_library_intake_folder, sync_existing_library_folders,
+    select_library_intake_folder,
 };
+use library_sync::LibrarySyncCoordinator;
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackCatalogRebind, PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use publishers::{PublisherDetail, PublisherOverview, PublisherQueueRequest};
@@ -48,8 +50,8 @@ use ratings::{
 use state_store::StateStore;
 use std::sync::Mutex;
 use tag_model::{
-    TagEditRequest, TagEditorCatalogSync, TagEditorSnapshot, TagEditorTarget,
-    TagEditorUpdateRequest, TagEditorUpdateResult,
+    TagEditRequest, TagEditorSnapshot, TagEditorTarget, TagEditorUpdateRequest,
+    TagEditorUpdateResult,
 };
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager, State};
@@ -61,39 +63,6 @@ type TagState = Mutex<TagService>;
 type LaptopState = Mutex<LaptopModeRuntime>;
 type WaveformState = Mutex<WaveformStore>;
 type GlobalShortcutState = Mutex<shortcuts::GlobalShortcutRuntime>;
-
-const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
-
-fn sync_pending_library_folders(app: &AppHandle) -> Result<bool, String> {
-    let folder_paths = app
-        .state::<StateStore>()
-        .pending_library_folder_sync(MAX_PENDING_LIBRARY_FOLDER_SYNCS)?;
-    if folder_paths.is_empty() {
-        return Ok(true);
-    }
-
-    match sync_existing_library_folders(app, folder_paths.clone()) {
-        Ok(_) => {
-            app.state::<StateStore>()
-                .complete_library_folder_sync(&folder_paths)?;
-            Ok(app
-                .state::<StateStore>()
-                .pending_library_folder_sync(1)?
-                .is_empty())
-        }
-        Err(sync_error) => {
-            if let Err(state_error) = app
-                .state::<StateStore>()
-                .defer_library_folder_sync(&folder_paths, &sync_error)
-            {
-                return Err(format!(
-                    "{sync_error} Aurora also could not retain the catalog-sync retry state: {state_error}"
-                ));
-            }
-            Err(sync_error)
-        }
-    }
-}
 
 fn with_playback<T>(
     state: State<'_, PlaybackState>,
@@ -116,7 +85,7 @@ async fn library_snapshot(app: AppHandle) -> Result<LibrarySnapshot, String> {
 }
 
 #[tauri::command]
-async fn catalog_revision() -> Result<i64, String> {
+async fn catalog_revision() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(catalog::completed_import_revision)
         .await
         .map_err(|error| format!("The catalog revision worker stopped unexpectedly: {error}"))?
@@ -615,18 +584,30 @@ async fn update_track_tags(
     request: TagEditRequest,
 ) -> Result<TrackTagSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut result = {
-            let state = app.state::<TagState>();
-            let service = state
-                .lock()
-                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-            service.update(request)?
-        };
-        if matches!(sync_pending_library_folders(&app), Ok(true)) {
-            result.track.tag_sync_state = None;
-            result.tag_state.sync_state = None;
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            let mut result = {
+                let state = app.state::<TagState>();
+                let service = state
+                    .lock()
+                    .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+                service.update(request)?
+            };
+            refresh_playback_track(&app, &result.track);
+            let directory = result.track.directory.clone();
+            let sync = coordinator.sync_after_edit(&app, std::slice::from_ref(&directory));
+            if sync.completed(&directory) {
+                result.track.tag_sync_state = None;
+                result.tag_state.sync_state = None;
+            }
+            result.catalog_sync = Some(sync.catalog_sync);
+            refresh_playback_track(&app, &result.track);
+            Ok::<TrackTagSnapshot, String>(result)
+        });
+        let mut result = result?;
+        if let Some(sync) = &mut result.catalog_sync {
+            sync.projection_token = Some(projection_token);
         }
-        refresh_playback_track(&app, &result.track);
         Ok(result)
     })
     .await
@@ -655,35 +636,40 @@ async fn update_tag_editor(
     request: TagEditorUpdateRequest,
 ) -> Result<TagEditorUpdateResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut result = {
-            let state = app.state::<TagState>();
-            let service = state
-                .lock()
-                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-            service.update_editor(request)?
-        };
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            let mut result = {
+                let state = app.state::<TagState>();
+                let service = state
+                    .lock()
+                    .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+                service.update_editor(request)?
+            };
 
-        match sync_pending_library_folders(&app) {
-            Ok(true) => {
-                for track in &mut result.tracks {
+            for track in &result.tracks {
+                refresh_playback_track(&app, track);
+            }
+            let directories = result
+                .tracks
+                .iter()
+                .filter(|track| track.tag_sync_state.is_some())
+                .map(|track| track.directory.clone())
+                .collect::<Vec<_>>();
+            let sync = coordinator.sync_after_edit(&app, &directories);
+            for track in &mut result.tracks {
+                if sync.completed(&track.directory) {
                     track.tag_sync_state = None;
                 }
-                result.catalog_sync = Some(TagEditorCatalogSync::synced());
             }
-            Ok(false) => {
-                result.catalog_sync = Some(TagEditorCatalogSync::pending(
-                    "The MP3 write is verified. Additional queued album folders still need Music Library synchronization and will be retried."
-                        .to_owned(),
-                ));
+            result.catalog_sync = Some(sync.catalog_sync);
+            for track in &result.tracks {
+                refresh_playback_track(&app, track);
             }
-            Err(error) => {
-                result.catalog_sync = Some(TagEditorCatalogSync::pending(format!(
-                    "The MP3 write is verified, but Music Library catalog sync is pending and will be retried: {error}"
-                )));
-            }
-        }
-        for track in &result.tracks {
-            refresh_playback_track(&app, track);
+            Ok::<TagEditorUpdateResult, String>(result)
+        });
+        let mut result = result?;
+        if let Some(sync) = &mut result.catalog_sync {
+            sync.projection_token = Some(projection_token);
         }
         Ok(result)
     })
@@ -698,33 +684,64 @@ async fn undo_track_tag_edit(
     track_key: String,
 ) -> Result<TrackTagSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut result = {
-            let state = app.state::<TagState>();
-            let service = state
-                .lock()
-                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-            service.undo(&track_id, &track_key)?
-        };
-        if matches!(sync_pending_library_folders(&app), Ok(true)) {
-            result.track.tag_sync_state = None;
-            result.tag_state.sync_state = None;
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            let mut result = {
+                let state = app.state::<TagState>();
+                let service = state
+                    .lock()
+                    .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+                service.undo(&track_id, &track_key)?
+            };
+            refresh_playback_track(&app, &result.track);
+            let directory = result.track.directory.clone();
+            let sync = coordinator.sync_after_edit(&app, std::slice::from_ref(&directory));
+            if sync.completed(&directory) {
+                result.track.tag_sync_state = None;
+                result.tag_state.sync_state = None;
+            }
+            result.catalog_sync = Some(sync.catalog_sync);
+            refresh_playback_track(&app, &result.track);
+            Ok::<TrackTagSnapshot, String>(result)
+        });
+        let mut result = result?;
+        if let Some(sync) = &mut result.catalog_sync {
+            sync.projection_token = Some(projection_token);
         }
-        refresh_playback_track(&app, &result.track);
         Ok(result)
     })
     .await
     .map_err(|error| format!("The tag undo worker stopped unexpectedly: {error}"))?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TagReconciliationProjection {
+    #[serde(flatten)]
+    report: TagReconciliationReport,
+    projection_token: u64,
+}
+
 #[tauri::command]
-async fn refresh_external_tag_changes(app: AppHandle) -> Result<TagReconciliationReport, String> {
+async fn refresh_external_tag_changes(
+    app: AppHandle,
+) -> Result<TagReconciliationProjection, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _ = sync_pending_library_folders(&app);
-        let state = app.state::<TagState>();
-        let service = state
-            .lock()
-            .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
-        service.reconcile_pending_overlays(100)
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (report, projection_token) = coordinator.serialize_reconciliation(|| {
+            let sync = coordinator.retry_one(&app);
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
+            let mut report = service.reconcile_pending_overlays(100)?;
+            report.catalog_sync = Some(sync.catalog_sync);
+            Ok::<TagReconciliationReport, String>(report)
+        });
+        Ok(TagReconciliationProjection {
+            report: report?,
+            projection_token,
+        })
     })
     .await
     .map_err(|error| format!("The external-tag refresh stopped unexpectedly: {error}"))?
@@ -901,6 +918,7 @@ pub fn run() {
             app.manage(Mutex::new(laptop_runtime));
             app.manage(Mutex::new(waveform_store));
             app.manage(WaveformWorkCoordinator::default());
+            app.manage(LibrarySyncCoordinator::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
                 state_directory.join("aurora-shortcuts.json"),
             )));

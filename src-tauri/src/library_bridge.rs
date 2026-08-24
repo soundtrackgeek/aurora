@@ -202,6 +202,8 @@ struct ApplyPayload<'a> {
 #[serde(rename_all = "camelCase")]
 struct SyncExistingFoldersPayload<'a> {
     folder_paths: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_file_paths: Option<&'a [String]>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -374,18 +376,51 @@ pub async fn apply_library_intake_batch(
 pub(crate) fn sync_existing_library_folders(
     app: &AppHandle,
     folder_paths: Vec<String>,
+    changed_file_paths: Vec<String>,
 ) -> Result<LibraryExistingFoldersSyncResult, String> {
     let folder_paths = validate_sync_folder_paths(folder_paths)?;
+    let changed_file_paths = validate_sync_file_paths(changed_file_paths)?;
     let result = invoke_bridge::<_, LibraryExistingFoldersSyncResult>(
         app,
         "syncExistingFolders",
         SyncExistingFoldersPayload {
             folder_paths: &folder_paths,
+            changed_file_paths: (!changed_file_paths.is_empty())
+                .then_some(changed_file_paths.as_slice()),
         },
         SYNC_TIMEOUT,
     )?;
     validate_sync_result(&result, &folder_paths)?;
     Ok(result)
+}
+
+fn validate_sync_file_paths(file_paths: Vec<String>) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::with_capacity(file_paths.len());
+    let mut seen = HashSet::with_capacity(file_paths.len());
+    for raw_path in file_paths {
+        let raw_path = raw_path.trim();
+        let file = Path::new(raw_path);
+        if raw_path.is_empty()
+            || !file.is_absolute()
+            || !file
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"))
+        {
+            return Err(format!(
+                "Aurora cannot synchronize a missing or invalid MP3: {}.",
+                file.display()
+            ));
+        }
+        if !file.is_file() {
+            return Ok(Vec::new());
+        }
+        let key = raw_path.replace('/', "\\").to_lowercase();
+        if seen.insert(key) {
+            normalized.push(raw_path.to_owned());
+        }
+    }
+    Ok(normalized)
 }
 
 fn validate_source_path(source_path: &str) -> Result<String, String> {
@@ -964,11 +999,13 @@ mod tests {
     #[test]
     fn protocol_request_uses_the_exact_existing_folder_sync_shape() {
         let folder_paths = vec![r"D:\Scores\Album".to_owned()];
+        let changed_file_paths = vec![r"D:\Scores\Album\Track.mp3".to_owned()];
         let request = ProtocolRequest {
             protocol_version: PROTOCOL_VERSION,
             operation: "syncExistingFolders",
             payload: SyncExistingFoldersPayload {
                 folder_paths: &folder_paths,
+                changed_file_paths: Some(&changed_file_paths),
             },
         };
         let value = serde_json::to_value(request).expect("request");
@@ -977,8 +1014,45 @@ mod tests {
             serde_json::json!({
                 "protocolVersion": 1,
                 "operation": "syncExistingFolders",
+                "payload": {
+                    "folderPaths": [r"D:\Scores\Album"],
+                    "changedFilePaths": [r"D:\Scores\Album\Track.mp3"]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn protocol_request_omits_exact_files_for_safe_full_folder_fallback() {
+        let folder_paths = vec![r"D:\Scores\Album".to_owned()];
+        let request = ProtocolRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: "syncExistingFolders",
+            payload: SyncExistingFoldersPayload {
+                folder_paths: &folder_paths,
+                changed_file_paths: None,
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).expect("request"),
+            serde_json::json!({
+                "protocolVersion": 1,
+                "operation": "syncExistingFolders",
                 "payload": {"folderPaths": [r"D:\Scores\Album"]}
             })
+        );
+    }
+
+    #[test]
+    fn missing_exact_file_downgrades_to_safe_full_folder_sync() {
+        let directory = TempDir::new().expect("temp directory");
+        let missing = directory.path().join("Missing.mp3");
+
+        assert!(
+            validate_sync_file_paths(vec![missing.to_string_lossy().into_owned()])
+                .expect("missing exact target falls back")
+                .is_empty()
         );
     }
 

@@ -31,7 +31,7 @@ export interface PlaybackSnapshot {
 
 export interface PlaybackCatalogRebind {
   playback: PlaybackSnapshot;
-  catalogRevision: number;
+  catalogRevision: string;
 }
 
 const emptyPlayback: PlaybackSnapshot = {
@@ -124,7 +124,7 @@ export async function rebindPlaybackCatalog(): Promise<PlaybackCatalogRebind> {
   refreshBrowserClock();
   return {
     playback: cloneBrowserPlayback(),
-    catalogRevision: 0,
+    catalogRevision: "0:0:",
   };
 }
 

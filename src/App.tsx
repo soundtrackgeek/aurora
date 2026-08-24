@@ -150,11 +150,14 @@ import {
   type DisplayViewKey,
 } from "./displayPreferences";
 import {
+  advanceCatalogProjectionToken,
+  advanceCatalogTrackProjectionTokens,
   reconcilePendingTags,
   tagValuesForTrack,
   trackWithReconciledTags,
   trackWithTagValues,
   updateTrackTags,
+  type CatalogSync,
   type TagReconciliationChange,
   type TagValues,
 } from "./tags";
@@ -232,6 +235,21 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
 };
 
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const catalogSyncRetryIntervalMs = 5_000;
+
+function catalogSyncNeedsRetry(sync: CatalogSync | null): boolean {
+  return Boolean(sync && (sync.status === "pending" || sync.pendingFolderCount > 0));
+}
+
+function catalogSyncMessage(sync: CatalogSync): string {
+  if (sync.status === "synced" && sync.pendingFolderCount > 0) {
+    return `Music Library updated this edit · ${formatCount(sync.pendingFolderCount)} other ${sync.pendingFolderCount === 1 ? "folder is" : "folders are"} pending; retrying automatically`;
+  }
+  if (sync.status === "pending") {
+    return `MP3 changes are saved · ${sync.message?.trim() || "Music Library update pending; retrying automatically."}`;
+  }
+  return sync.message?.trim() || "Music Library updated.";
+}
 
 function genreSummaryWithTrackChange(
   summary: GenreSummary,
@@ -470,6 +488,8 @@ function App() {
   const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [catalogSyncNotice, setCatalogSyncNotice] = useState<CatalogSync | null>(null);
+  const [reconciliationHasMore, setReconciliationHasMore] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [addFolderOpen, setAddFolderOpen] = useState(false);
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
@@ -578,7 +598,12 @@ function App() {
   const selectedRatingAlbumRef = useRef<RatingAlbum | null>(selectedRatingAlbum);
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
-  const catalogRevisionRef = useRef<number | null>(null);
+  const catalogSyncNoticeRef = useRef<CatalogSync | null>(null);
+  const latestTagProjectionTokenRef = useRef(0);
+  const latestTrackProjectionTokensRef = useRef<ReadonlyMap<string, number>>(new Map());
+  const latestCatalogSyncTokenRef = useRef(0);
+  const appFocusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
+  const catalogRevisionRef = useRef<string | null>(null);
   const catalogRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const catalogRefreshRequestedRef = useRef(false);
   const appMountedRef = useRef(true);
@@ -707,7 +732,7 @@ function App() {
         if (cancelled) return;
         if (
           catalogRevisionRef.current !== null
-          && nextSnapshot.catalogRevision < catalogRevisionRef.current
+          && nextSnapshot.catalogRevision !== catalogRevisionRef.current
         ) return;
         catalogRevisionRef.current ??= nextSnapshot.catalogRevision;
         setSnapshot(nextSnapshot);
@@ -764,6 +789,7 @@ function App() {
 
     const refreshOnce = async (): Promise<boolean> => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        const projectionTokenAtStart = latestTagProjectionTokenRef.current;
         const revision = await loadCatalogRevision();
         if (!shouldContinue()) return false;
         const previousRevision = catalogRevisionRef.current;
@@ -785,6 +811,11 @@ function App() {
         )) {
           if (attempt === 0) continue;
           throw new Error("The Music Library catalog changed again during Aurora's refresh.");
+        }
+        if (latestTagProjectionTokenRef.current !== projectionTokenAtStart) {
+          if (attempt === 0) continue;
+          catalogRefreshRequestedRef.current = true;
+          return false;
         }
 
         const rebound = reboundResult.playback;
@@ -834,6 +865,48 @@ function App() {
     catalogRefreshPromiseRef.current = refreshTask;
     return refreshTask;
   }, [rebindPlaybackCatalog]);
+
+  const handleCatalogSync = useCallback(async (
+    sync: CatalogSync | null | undefined,
+    announceSuccess = false,
+  ): Promise<void> => {
+    if (!sync) return;
+    const syncDecision = advanceCatalogProjectionToken(
+      latestCatalogSyncTokenRef.current,
+      sync.projectionToken,
+    );
+    if (!syncDecision.accepted) return;
+    latestCatalogSyncTokenRef.current = syncDecision.latestToken;
+    const previous = catalogSyncNoticeRef.current;
+    const wasPending = catalogSyncNeedsRetry(previous);
+    const needsRetry = catalogSyncNeedsRetry(sync);
+    if (needsRetry || announceSuccess || wasPending) {
+      catalogSyncNoticeRef.current = sync;
+      setCatalogSyncNotice(sync);
+    } else if (!previous) {
+      catalogSyncNoticeRef.current = sync;
+    }
+    try {
+      await refreshCatalogIfChanged();
+    } catch (error) {
+      console.warn("Aurora could not check Music Library for partial sync updates yet", error);
+    }
+  }, [refreshCatalogIfChanged]);
+
+  const acceptTrackProjectionKeys = useCallback((
+    trackKeys: readonly string[],
+    projectionToken: number | null | undefined,
+  ) => {
+    const decision = advanceCatalogTrackProjectionTokens(
+      latestTagProjectionTokenRef.current,
+      latestTrackProjectionTokensRef.current,
+      projectionToken,
+      trackKeys,
+    );
+    latestTagProjectionTokenRef.current = decision.latestToken;
+    latestTrackProjectionTokensRef.current = decision.latestTrackTokens;
+    return decision;
+  }, []);
 
   useEffect(() => {
     if (!libraryReady) return;
@@ -1339,6 +1412,13 @@ function App() {
     };
     setExplorerTracks((current) => current.map(reconcile));
     setAlbumTracks((current) => current.map(reconcile));
+    setYearAlbumTracks((current) => current.map(reconcile));
+    setRatingAlbumTracks((current) => current.map(reconcile));
+    setPublisherAlbumTracks((current) => current.map(reconcile));
+    setGenreDetail((current) => current ? {
+      ...current,
+      highlights: current.highlights.map(reconcile),
+    } : current);
     setSelectedTrack((current) => current ? reconcile(current) : current);
     setSnapshot((current) => current ? { ...current, tracks: current.tracks.map(reconcile) } : current);
   }, []);
@@ -1346,47 +1426,77 @@ function App() {
   const refreshExternalTagChanges = useCallback(async () => {
     if (reconciliationRunningRef.current) return;
     reconciliationRunningRef.current = true;
-    let totalChanges = 0;
-    let totalIssues = 0;
-    let hasMore = false;
-    let firstIssue: string | null = null;
     try {
-      for (let batch = 0; batch < 10; batch += 1) {
-        const report = await reconcilePendingTags();
-        applyReconciliationChanges(report.changes);
-        totalChanges += report.externalChanges;
-        totalIssues += report.issues.length;
-        firstIssue ??= report.issues[0]?.message ?? null;
-        hasMore = report.hasMore;
-        if (!report.hasMore || report.processed === 0) break;
-      }
-      if (totalChanges > 0) {
-        setSyncMessage(`Refreshed ${formatCount(totalChanges)} external tag ${totalChanges === 1 ? "change" : "changes"}`);
-      } else if (totalIssues > 0 || hasMore) {
-        setSyncMessage(totalIssues === 1 && firstIssue
-          ? firstIssue
-          : `${formatCount(totalIssues)} tag ${totalIssues === 1 ? "item needs" : "items need"} attention`);
-      } else {
+      const report = await reconcilePendingTags();
+      setReconciliationHasMore(report.hasMore);
+      const projection = acceptTrackProjectionKeys(
+        report.changes.map((change) => change.trackKey),
+        report.projectionToken,
+      );
+      applyReconciliationChanges(report.changes.filter((change) => (
+        projection.acceptedTrackKeys.has(change.trackKey)
+      )));
+      await handleCatalogSync(report.catalogSync ? {
+        ...report.catalogSync,
+        projectionToken: report.projectionToken,
+      } : undefined);
+      if (report.externalChanges > 0) {
+        setSyncMessage(`Refreshed ${formatCount(report.externalChanges)} external tag ${report.externalChanges === 1 ? "change" : "changes"}`);
+      } else if (report.issues.length > 0 || report.hasMore) {
+        setSyncMessage(report.issues.length === 1 && report.issues[0]?.message
+          ? report.issues[0].message
+          : `${formatCount(report.issues.length)} tag ${report.issues.length === 1 ? "item needs" : "items need"} attention`);
+      } else if (!catalogSyncNeedsRetry(report.catalogSync ?? catalogSyncNoticeRef.current)) {
         setSyncMessage(null);
       }
     } catch (error) {
       console.warn("Aurora could not reconcile pending tags", error);
-      setSyncMessage("Tag refresh will retry when Aurora regains focus");
+      setReconciliationHasMore(true);
+      setSyncMessage("Tag and Music Library refresh will retry automatically");
     } finally {
       reconciliationRunningRef.current = false;
     }
-  }, [applyReconciliationChanges]);
+  }, [acceptTrackProjectionKeys, applyReconciliationChanges, handleCatalogSync]);
 
   useEffect(() => {
     if (!libraryReady) return;
     const initialRefresh = window.setTimeout(() => void refreshExternalTagChanges(), 0);
-    const refreshOnFocus = () => void refreshExternalTagChanges();
+    const refreshOnFocus = () => {
+      appFocusedRef.current = true;
+      void refreshExternalTagChanges();
+    };
+    const pauseOnBlur = () => {
+      appFocusedRef.current = false;
+    };
+    appFocusedRef.current = document.hasFocus();
     window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("blur", pauseOnBlur);
     return () => {
       window.clearTimeout(initialRefresh);
       window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("blur", pauseOnBlur);
     };
   }, [libraryReady, reloadToken, refreshExternalTagChanges]);
+
+  const catalogSyncRetryPending = catalogSyncNeedsRetry(catalogSyncNotice) || reconciliationHasMore;
+  useEffect(() => {
+    if (!libraryReady || !catalogSyncRetryPending) return;
+    const interval = window.setInterval(() => {
+      if (appFocusedRef.current) void refreshExternalTagChanges();
+    }, catalogSyncRetryIntervalMs);
+    return () => window.clearInterval(interval);
+  }, [catalogSyncRetryPending, libraryReady, refreshExternalTagChanges]);
+
+  useEffect(() => {
+    if (!catalogSyncNotice || catalogSyncNeedsRetry(catalogSyncNotice)) return;
+    const settledNotice = catalogSyncNotice;
+    const timeout = window.setTimeout(() => {
+      if (catalogSyncNoticeRef.current !== settledNotice) return;
+      catalogSyncNoticeRef.current = null;
+      setCatalogSyncNotice(null);
+    }, 6_000);
+    return () => window.clearTimeout(timeout);
+  }, [catalogSyncNotice]);
 
   function playTrack(
     track: Track,
@@ -1785,9 +1895,16 @@ function App() {
     if (inspectorViewRef.current !== "tags") setInspectorView("track");
   }
 
-  function applyTrackChanges(updatedTracks: Track[]) {
-    if (updatedTracks.length === 0) return;
-    const updatedByKey = new Map(updatedTracks.map((track) => [track.trackKey, track]));
+  function applyTrackChanges(updatedTracks: Track[], sync?: CatalogSync): boolean {
+    const projection = acceptTrackProjectionKeys(
+      updatedTracks.map((track) => track.trackKey),
+      sync?.projectionToken,
+    );
+    const acceptedTracks = updatedTracks.filter((track) => (
+      projection.acceptedTrackKeys.has(track.trackKey)
+    ));
+    if (acceptedTracks.length === 0) return projection.complete;
+    const updatedByKey = new Map(acceptedTracks.map((track) => [track.trackKey, track]));
     const project = (track: Track) => {
       const updated = updatedByKey.get(track.trackKey);
       return updated ? applyEditableTrackTagProjection(track, updated) : track;
@@ -1811,20 +1928,20 @@ function App() {
     setPublisherAlbumTracks((current) => current.map(project));
     setGenreDetail((current) => {
       if (!current) return current;
-      const summary = updatedTracks.reduce((next, updated) => {
+      const summary = acceptedTracks.reduce((next, updated) => {
         const baseline = baselines.get(updated.trackKey);
         return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
       }, current.summary);
       return { ...current, summary, highlights: current.highlights.map(project) };
     });
-    setGenreAtlasGenres((current) => current.map((summary) => updatedTracks.reduce((next, updated) => {
+    setGenreAtlasGenres((current) => current.map((summary) => acceptedTracks.reduce((next, updated) => {
       const baseline = baselines.get(updated.trackKey);
       return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
     }, summary)));
-    updatedTracks.forEach((track) => playback.refreshTrack(track, true));
+    acceptedTracks.forEach((track) => playback.refreshTrack(track, true));
     setSnapshot((current) => {
       if (!current) return current;
-      const deltas = updatedTracks.reduce((totals, updated) => {
+      const deltas = acceptedTracks.reduce((totals, updated) => {
         const baseline = baselines.get(updated.trackKey);
         if (!baseline) return totals;
         totals.loved += Number(updated.loved) - Number(baseline.loved);
@@ -1841,6 +1958,7 @@ function App() {
         tracks: current.tracks.map(project),
       };
     });
+    return projection.complete;
   }
 
   function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
@@ -1885,8 +2003,18 @@ function App() {
   }
 
   shortcutResultHandlerRef.current = (result) => {
+    const projection = result.success && result.catalogSync
+      ? acceptTrackProjectionKeys(
+        result.track ? [result.track.trackKey] : [],
+        result.catalogSync.projectionToken,
+      )
+      : null;
+    if (result.track && projection && !projection.acceptedTrackKeys.has(result.track.trackKey)) return;
     setSyncMessage(result.success ? result.message : `Shortcut failed: ${result.message}`);
     if (result.track) applyTrackChange(result.track, result.previousTrack ?? undefined);
+    if (result.success && result.catalogSync) {
+      void handleCatalogSync(result.catalogSync, true);
+    }
   };
 
   async function saveGlobalShortcuts(request: GlobalShortcutSettingsRequest) {
@@ -1930,10 +2058,17 @@ function App() {
     setSyncMessage(null);
 
     const optimistic = trackWithTagValues(track, desired);
+    const projectionTokenAtStart = latestTrackProjectionTokensRef.current.get(track.trackKey) ?? 0;
     applyTrackChange(optimistic, track, false);
     try {
       const snapshot = await updateTrackTags(track, expected, desired);
+      const projection = acceptTrackProjectionKeys(
+        [snapshot.track.trackKey],
+        snapshot.catalogSync?.projectionToken,
+      );
+      if (!projection.acceptedTrackKeys.has(snapshot.track.trackKey)) return;
       applyTrackChange(snapshot.track, optimistic);
+      await handleCatalogSync(snapshot.catalogSync, true);
       setInlineTagRevisions((current) => ({
         ...current,
         [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
@@ -1960,7 +2095,9 @@ function App() {
         }
       }
     } catch (error) {
-      applyTrackChange(track, optimistic, false);
+      if ((latestTrackProjectionTokensRef.current.get(track.trackKey) ?? 0) === projectionTokenAtStart) {
+        applyTrackChange(track, optimistic, false);
+      }
       const message = error instanceof Error ? error.message : String(error);
       setSyncMessage(`Could not save ${track.title}: ${message}`);
     } finally {
@@ -2421,6 +2558,7 @@ function App() {
     : PanelRightOpen;
   const activeDisplayView = displayViewByDestination[activeNav];
   const activeDisplayPreferences = effectiveDisplayPreferences(displayPreferences, activeDisplayView);
+  const catalogNoticeMessage = catalogSyncNotice ? catalogSyncMessage(catalogSyncNotice) : null;
 
   return (
     <div
@@ -2456,7 +2594,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.5</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.6</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2504,6 +2642,14 @@ function App() {
         <div className="topbar__actions">
           <button type="button" className="add-music-action" onClick={() => setAddFolderOpen(true)}><FolderPlus aria-hidden="true" /><span>Add music</span></button>
           {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+          {catalogNoticeMessage && (
+            <span
+              className="tag-sync-message"
+              data-sync-status={catalogSyncNotice?.status}
+              role="status"
+              title={catalogNoticeMessage}
+            >{catalogNoticeMessage}</span>
+          )}
           <LaptopModeButton
             status={laptopModeStatus}
             busy={laptopModeBusy}
@@ -2792,6 +2938,7 @@ function App() {
                 : `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`}
               target={tagEditorTarget}
               onTracksChange={applyTrackChanges}
+              onCatalogSync={(sync) => handleCatalogSync(sync, true)}
             />
           </div>
         ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (

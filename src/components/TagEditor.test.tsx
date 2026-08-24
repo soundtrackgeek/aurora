@@ -121,6 +121,100 @@ describe("TagEditor", () => {
     expect(tagMocks.update.mock.calls[0][3].genre).toBeNull();
   });
 
+  it("notifies App and names Music Library after a successful catalog sync", async () => {
+    const onCatalogSync = vi.fn().mockResolvedValue(undefined);
+    tagMocks.update.mockResolvedValue({
+      state: snapshot(),
+      tracks: updatedTracks(),
+      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
+    });
+    render(
+      <TagEditor
+        target={target}
+        onTracksChange={vi.fn()}
+        onCatalogSync={onCatalogSync}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Genre"), { target: { value: "Pop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByText(/Saved 1 field directly to 2 MP3s\. Music Library updated\./)).toBeInTheDocument();
+    await waitFor(() => expect(onCatalogSync).toHaveBeenCalledWith({
+      status: "synced",
+      message: "Music Library updated.",
+      pendingFolderCount: 0,
+    }));
+  });
+
+  it("keeps a verified MP3 save candid when Music Library sync is pending", async () => {
+    const onCatalogSync = vi.fn().mockResolvedValue(undefined);
+    tagMocks.update.mockResolvedValue({
+      state: snapshot(),
+      tracks: updatedTracks(),
+      catalogSync: {
+        status: "pending",
+        message: "Music Library update pending; Aurora will retry automatically.",
+        pendingFolderCount: 1,
+      },
+    });
+    render(
+      <TagEditor
+        target={target}
+        onTracksChange={vi.fn()}
+        onCatalogSync={onCatalogSync}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Genre"), { target: { value: "Pop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByText(
+      "Saved 1 field directly to 2 MP3s. Music Library update pending; Aurora will retry automatically.",
+    )).toBeInTheDocument();
+    await waitFor(() => expect(onCatalogSync).toHaveBeenCalledWith(expect.objectContaining({
+      status: "pending",
+      pendingFolderCount: 1,
+    })));
+  });
+
+  it("reloads authoritative tags instead of projecting a stale edit result", async () => {
+    const authoritative = snapshot();
+    authoritative.tracks = authoritative.tracks.map((track) => ({
+      ...track,
+      values: { ...track.values, album: "America Town Newer" },
+    }));
+    tagMocks.read
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(authoritative);
+    tagMocks.update.mockResolvedValue({
+      state: snapshot(),
+      tracks: updatedTracks(),
+      catalogSync: {
+        status: "synced",
+        message: "Music Library updated.",
+        pendingFolderCount: 0,
+        projectionToken: 1,
+      },
+    });
+    const onTracksChange = vi.fn().mockReturnValue(false);
+    const onCatalogSync = vi.fn();
+    render(
+      <TagEditor
+        target={target}
+        onTracksChange={onTracksChange}
+        onCatalogSync={onCatalogSync}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Genre"), { target: { value: "Pop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByDisplayValue("America Town Newer")).toBeInTheDocument();
+    expect(tagMocks.read).toHaveBeenCalledTimes(2);
+    expect(onCatalogSync).not.toHaveBeenCalled();
+  });
+
   it("refuses to clear Music Library identity fields", async () => {
     render(<TagEditor target={target} onTracksChange={vi.fn()} />);
     const album = await screen.findByLabelText("Album");

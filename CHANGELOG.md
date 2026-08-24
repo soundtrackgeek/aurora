@@ -4,6 +4,26 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.6] - 2026-08-24
+
+### Fixed
+
+- Inline edits, inspector saves, global rating/Love shortcuts, undo, startup recovery, and focused-window retry now share one explicit Music Library `synced` or durable `pending` receipt instead of silently dropping bridge failures or omitting shortcut synchronization.
+- The newly edited album folder is attempted ahead of old backlog, folders are synchronized independently behind one process gate, and token-checked completion prevents an older bridge receipt from deleting a newer edit of the same folder.
+- Successful receipts refresh every revision-backed catalog view immediately; pending status remains visible and retries one folder every five seconds while Aurora is focused.
+- Playback metadata is projected before the potentially long companion import, so rapid consecutive shortcuts and edits compare against the latest verified MP3 values.
+- Global rating and Love shortcuts now re-read the serialized, authoritative MP3 tag state before deriving each edit, so rapid shortcuts or a concurrent inspector save cannot discard the later action.
+- The complete tag write, Music Library receipt, and native playback projection now run in one edit order, while monotonic projection tokens prevent a delayed inline, inspector, or shortcut result from overwriting a newer edit in the frontend.
+- External-tag reconciliation shares that same projection order, and pending overlay totals are evaluated against each live catalog track so targeted imports cannot hide edits from untouched albums or count tracks no longer in the catalog.
+- Repeated successful sync receipts restart the transient success notice correctly, and a partially successful multi-folder pass refreshes committed folders immediately even while another folder remains queued.
+- Aurora durably carries the exact edited filename into Music Library so ordinary one-track rating, Love/Ban, and Release Year changes scan only that MP3; multiple pending files in one album deliberately collapse to the complete-folder safety path.
+- Catalog refresh uses an opaque completion-order token and the actual last-completed import ID, so an older import that finishes after a newer one still refreshes snapshots, playback queues, and tag overlays consistently.
+
+### Changed
+
+- Aurora now requires Music Library `0.144.1` for the legacy half-star repair, single rollback-backup path, and prompt discarded-staging cleanup used by existing-folder synchronization.
+- Added the permanent developer-workflow requirement to run `cargo clean` from `src-tauri` after Rust or Tauri verification.
+
 ## [0.17.5] - 2026-08-24
 
 ### Fixed
