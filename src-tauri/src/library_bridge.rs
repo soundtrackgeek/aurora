@@ -53,6 +53,8 @@ pub struct LibraryBridgeSupports {
     pub preview_required: bool,
     #[serde(default)]
     pub sync_existing_folders: bool,
+    #[serde(default)]
+    pub default_popm_rating_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -380,6 +382,14 @@ pub(crate) fn sync_existing_library_folders(
 ) -> Result<LibraryExistingFoldersSyncResult, String> {
     let folder_paths = validate_sync_folder_paths(folder_paths)?;
     let changed_file_paths = validate_sync_file_paths(changed_file_paths)?;
+    let capabilities = invoke_bridge::<_, LibraryBridgeCapabilities>(
+        app,
+        "capabilities",
+        EmptyPayload {},
+        CAPABILITIES_TIMEOUT,
+    )?;
+    validate_capabilities(&capabilities)?;
+    validate_tag_sync_capabilities(&capabilities)?;
     let result = invoke_bridge::<_, LibraryExistingFoldersSyncResult>(
         app,
         "syncExistingFolders",
@@ -599,6 +609,15 @@ fn validate_capabilities(result: &LibraryBridgeCapabilities) -> Result<(), Strin
     {
         return Err(update_music_library_message(
             "Music Library reported an invalid destination folder.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_tag_sync_capabilities(result: &LibraryBridgeCapabilities) -> Result<(), String> {
+    if !result.supports.sync_existing_folders || !result.supports.default_popm_rating_fallback {
+        return Err(update_music_library_message(
+            "Aurora needs Music Library 0.144.2 or newer for safe tag synchronization.".to_owned(),
         ));
     }
     Ok(())
@@ -994,6 +1013,26 @@ mod tests {
         validate_capabilities(&capabilities).expect("valid capabilities");
         assert_eq!(capabilities.categories.len(), 3);
         assert!(!capabilities.supports.sync_existing_folders);
+        assert!(!capabilities.supports.default_popm_rating_fallback);
+        assert!(validate_tag_sync_capabilities(&capabilities).is_err());
+    }
+
+    #[test]
+    fn tag_sync_requires_the_default_popm_preservation_capability() {
+        let capabilities = LibraryBridgeCapabilities {
+            bridge_version: PROTOCOL_VERSION,
+            categories: Vec::new(),
+            supports: LibraryBridgeSupports {
+                single_album: true,
+                batch_folders: true,
+                cross_volume_copy: true,
+                preview_required: true,
+                sync_existing_folders: true,
+                default_popm_rating_fallback: true,
+            },
+        };
+
+        validate_tag_sync_capabilities(&capabilities).expect("safe tag-sync capability");
     }
 
     #[test]

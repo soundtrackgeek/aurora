@@ -25,6 +25,7 @@ use std::{
 };
 
 const MUSICBEE_POPM_OWNER: &str = "MusicBee";
+const LEGACY_DEFAULT_POPM_OWNER: &str = "Default";
 const LOVE_RATING_DESCRIPTION: &str = "LOVE RATING";
 const RELEASE_TIME_DESCRIPTION: &str = "TDRL";
 const DISPLAY_ARTIST_DESCRIPTION: &str = "DISPLAY ARTIST";
@@ -44,6 +45,8 @@ const MUSICBEE_RATINGS: [(f64, u8); 10] = [
     (4.5, 242),
     (5.0, 255),
 ];
+const LEGACY_DEFAULT_RATINGS: [(f64, u8); 5] =
+    [(1.0, 51), (2.0, 102), (3.0, 153), (4.0, 204), (5.0, 255)];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1707,7 +1710,7 @@ fn set_musicbee_rating(tag: &mut Tag, version: Version, rating: Option<f64>) -> 
             frame
                 .content()
                 .popularimeter()
-                .is_none_or(|value| value.user != MUSICBEE_POPM_OWNER)
+                .is_none_or(|value| !is_musicbee_rating_owner(&value.user))
         })
         .collect::<Vec<_>>();
     for frame in preserved {
@@ -1782,7 +1785,7 @@ fn is_editor_target_frame(frame: &Frame, fields: &[EditableTagField]) -> bool {
                 && frame
                     .content()
                     .popularimeter()
-                    .is_some_and(|value| value.user == MUSICBEE_POPM_OWNER)
+                    .is_some_and(|value| is_musicbee_rating_owner(&value.user))
         }
         "TXXX" => frame.content().extended_text().is_some_and(|value| {
             (fields.contains(&EditableTagField::ReleaseYear)
@@ -1876,23 +1879,7 @@ fn read_tag_values_from_path(path: &Path) -> Result<TagValues, String> {
 }
 
 fn read_tag_values(tag: &Tag) -> Result<TagValues, String> {
-    let musicbee_ratings = tag
-        .frames()
-        .filter(|frame| frame.id() == "POPM")
-        .filter_map(|frame| frame.content().popularimeter())
-        .filter(|popularimeter| popularimeter.user == MUSICBEE_POPM_OWNER)
-        .map(|popularimeter| popularimeter.rating)
-        .collect::<Vec<_>>();
-    if musicbee_ratings.len() > 1 {
-        return Err(
-            "This MP3 has duplicate MusicBee rating frames; Aurora left it untouched.".to_owned(),
-        );
-    }
-    let rating = musicbee_ratings
-        .first()
-        .filter(|byte| **byte != 0)
-        .map(|byte| rating_from_byte(*byte))
-        .transpose()?;
+    let rating = effective_musicbee_rating(tag)?;
 
     let love_value = unique_extended_text_value(tag, LOVE_RATING_DESCRIPTION, "MusicBee Love")?;
     let love_state = match love_value.as_deref() {
@@ -1922,6 +1909,48 @@ fn read_tag_values(tag: &Tag) -> Result<TagValues, String> {
     })
 }
 
+fn is_musicbee_rating_owner(owner: &str) -> bool {
+    owner == MUSICBEE_POPM_OWNER || owner == LEGACY_DEFAULT_POPM_OWNER
+}
+
+fn effective_musicbee_rating(tag: &Tag) -> Result<Option<f64>, String> {
+    let ratings_for = |owner: &str| {
+        tag.frames()
+            .filter(|frame| frame.id() == "POPM")
+            .filter_map(|frame| frame.content().popularimeter())
+            .filter(|popularimeter| popularimeter.user == owner)
+            .map(|popularimeter| popularimeter.rating)
+            .collect::<Vec<_>>()
+    };
+    let musicbee = ratings_for(MUSICBEE_POPM_OWNER);
+    let legacy_default = ratings_for(LEGACY_DEFAULT_POPM_OWNER);
+    if musicbee.len() > 1 || legacy_default.len() > 1 {
+        return Err(
+            "This MP3 has duplicate MusicBee-compatible rating frames; Aurora left it untouched."
+                .to_owned(),
+        );
+    }
+
+    if let Some(byte) = musicbee.first().copied() {
+        return (byte != 0).then(|| rating_from_byte(byte)).transpose();
+    }
+    let Some(byte) = legacy_default.first().copied() else {
+        return Ok(None);
+    };
+    if byte == 0 {
+        return Ok(None);
+    }
+    LEGACY_DEFAULT_RATINGS
+        .iter()
+        .find(|(_, candidate)| *candidate == byte)
+        .map(|(rating, _)| Some(*rating))
+        .ok_or_else(|| {
+            format!(
+                "This MP3 uses unsupported legacy Default rating byte {byte}; Aurora left it untouched."
+            )
+        })
+}
+
 fn apply_tag_changes(
     tag: &mut Tag,
     version: Version,
@@ -1929,31 +1958,7 @@ fn apply_tag_changes(
     after: &TagValues,
 ) -> Result<(), String> {
     if before.rating != after.rating {
-        let preserved = tag
-            .remove("POPM")
-            .into_iter()
-            .filter(|frame| {
-                frame
-                    .content()
-                    .popularimeter()
-                    .is_none_or(|value| value.user != MUSICBEE_POPM_OWNER)
-            })
-            .collect::<Vec<_>>();
-        for frame in preserved {
-            tag.add_frame(frame);
-        }
-        if let Some(rating) = after.rating {
-            let byte = rating_to_byte(rating)?;
-            let mut data = Vec::with_capacity(MUSICBEE_POPM_OWNER.len() + 6);
-            data.extend_from_slice(MUSICBEE_POPM_OWNER.as_bytes());
-            data.push(0);
-            data.push(byte);
-            data.extend_from_slice(&[0, 0, 0, 0]);
-            tag.add_frame(Frame::with_content(
-                "POPM",
-                Content::Unknown(Unknown { data, version }),
-            ));
-        }
+        set_musicbee_rating(tag, version, after.rating)?;
     }
 
     if before.love_state != after.love_state {
@@ -2031,7 +2036,7 @@ fn is_target_frame(frame: &Frame) -> bool {
         "POPM" => frame
             .content()
             .popularimeter()
-            .is_some_and(|value| value.user == MUSICBEE_POPM_OWNER),
+            .is_some_and(|value| is_musicbee_rating_owner(&value.user)),
         "TXXX" => frame.content().extended_text().is_some_and(|value| {
             value
                 .description
@@ -3045,6 +3050,85 @@ mod tests {
                 .expect("read editable unrated POPM")
                 .rating,
             None
+        );
+    }
+
+    #[test]
+    fn legacy_default_popm_is_read_then_replaced_or_cleared_as_one_rating() {
+        let path = fixture_path("legacy-default-rating");
+        write_fixture(&path, Version::Id3v23);
+        let (mut tag, version) = read_tag_for_write(&path).expect("read fixture");
+        tag.add_frame(Popularimeter {
+            user: LEGACY_DEFAULT_POPM_OWNER.to_owned(),
+            rating: 204,
+            counter: 0,
+        });
+        tag.write_to_path(&path, version)
+            .expect("seed legacy rating");
+
+        let (mut tag, version) = read_tag_for_write(&path).expect("read legacy rating");
+        let before = read_tag_values(&tag).expect("read legacy Default rating");
+        assert_eq!(before.rating, Some(4.0));
+
+        let rated = TagValues {
+            rating: Some(4.5),
+            ..before.clone()
+        };
+        apply_tag_changes(&mut tag, Version::Id3v23, &before, &rated)
+            .expect("replace legacy rating");
+        tag.write_to_path(&path, version)
+            .expect("write replacement");
+        let (mut tag, version) = read_tag_for_write(&path).expect("read replacement");
+        let popm = tag
+            .frames()
+            .filter_map(|frame| frame.content().popularimeter())
+            .map(|value| (value.user.as_str(), value.rating, value.counter))
+            .collect::<Vec<_>>();
+        assert!(popm.contains(&(MUSICBEE_POPM_OWNER, 242, 0)));
+        assert!(popm.contains(&("other-player", 77, 42)));
+        assert!(
+            !popm
+                .iter()
+                .any(|value| value.0 == LEGACY_DEFAULT_POPM_OWNER)
+        );
+
+        let cleared = TagValues {
+            rating: None,
+            ..rated.clone()
+        };
+        apply_tag_changes(&mut tag, version, &rated, &cleared).expect("clear compatible ratings");
+        tag.write_to_path(&path, version)
+            .expect("write cleared rating");
+        let (tag, _) = read_tag_for_write(&path).expect("read cleared rating");
+        assert_eq!(
+            read_tag_values(&tag).expect("read cleared rating").rating,
+            None
+        );
+        assert!(
+            tag.frames()
+                .filter_map(|frame| frame.content().popularimeter())
+                .all(|value| !is_musicbee_rating_owner(&value.user))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn explicit_musicbee_popm_takes_precedence_over_legacy_default() {
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.add_frame(Popularimeter {
+            user: LEGACY_DEFAULT_POPM_OWNER.to_owned(),
+            rating: 255,
+            counter: 0,
+        });
+        tag.add_frame(Popularimeter {
+            user: MUSICBEE_POPM_OWNER.to_owned(),
+            rating: 128,
+            counter: 0,
+        });
+
+        assert_eq!(
+            read_tag_values(&tag).expect("read preferred rating").rating,
+            Some(3.0)
         );
     }
 

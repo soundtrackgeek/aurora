@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.10] - 2026-08-24
+
+### Fixed
+
+- Aurora now reads the verified legacy `Default` POPM whole-star byte scale as a MusicBee-compatible rating. Editing or clearing that rating removes both recognized owner variants, writes at most one canonical `MusicBee` frame, and preserves unrelated POPM owners.
+- Background catalog synchronization now preflights Music Library's explicit legacy-rating preservation capability. Music Library older than `0.144.2` leaves the verified MP3 edit durably pending instead of risking a fallback album scan that can misclassify intact `Default` ratings as removed.
+
+### Changed
+
+- Aurora now requires Music Library `0.144.2` or newer for post-edit tag synchronization.
+
 ## [0.17.9] - 2026-08-24
 
 ### Added
