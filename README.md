@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.3 shows each track's own Artist credit in the playbar and track inspector, and opens that same Artist in the artist inspector while preserving Album Artist for album-level browsing.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.4 carries each track's own Artist credit from the native catalog into the playbar and track inspector, and opens that same Artist in the artist inspector while preserving Album Artist for album-level browsing.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.3 slice
+## Current 0.17.4 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.

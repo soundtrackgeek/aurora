@@ -26,7 +26,7 @@ const TRACK_COLUMNS: &str = r#"t.id, t.title, t.album_artist_display, t.album, t
       WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
     t.love, t.time_seconds, t.canonical_genre, l.play_count,
     t.album_id, t.file_path, t.filename, t.import_run_id, t.year AS original_year,
-    t.publisher AS publisher"#;
+    t.publisher AS publisher, t.display_artist AS display_artist"#;
 
 const TRACK_RATING_EXPRESSION: &str = r#"COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
       WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -668,7 +668,7 @@ fn track_page_from_connection(
         mapped.push((
             map_track_row(row)
                 .map_err(|error| format!("Could not decode the track explorer: {error}"))?,
-            row.get(16)
+            row.get(17)
                 .map_err(|error| format!("Could not decode the track cursor: {error}"))?,
         ));
     }
@@ -1433,6 +1433,7 @@ mod tests {
 
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].title, "Sæglópur");
+        assert_eq!(page.items[0].display_artist.as_deref(), Some("Jónsi"));
         assert_eq!(page.items[0].original_year, Some(1999));
         assert_eq!(page.items[0].release_year, Some(2005));
 
@@ -1709,6 +1710,7 @@ mod tests {
         let detail = album_detail_from_connection(&connection, "a1", None).expect("album detail");
         assert_eq!(detail.tracks.len(), 2);
         assert_eq!(detail.tracks[0].title, "Sæglópur");
+        assert_eq!(detail.tracks[0].display_artist.as_deref(), Some("Jónsi"));
         assert!(!detail.tracks_truncated);
     }
 

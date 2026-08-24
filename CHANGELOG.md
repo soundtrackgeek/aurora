@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-08-24
+
+### Fixed
+
+- Native track explorer, album-detail, playback-queue, and stable queue-restore payloads now carry Music Library's per-track `display_artist`, so the 0.17.3 Artist presentation fix works with the live catalog instead of falling back to Album Artist.
+
 ## [0.17.3] - 2026-08-24
 
 ### Fixed
