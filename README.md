@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.4 carries each track's own Artist credit from the native catalog into the playbar and track inspector, and opens that same Artist in the artist inspector while preserving Album Artist for album-level browsing.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.5 hardens native playback against audible crackles and brief dropouts by removing routine MP3 storage reads from the audio callback, increasing output-buffer headroom, avoiding Rodio's linear sample-rate conversion when the Windows endpoint accepts the track rate, and preventing waveform work from piling up during rapid track changes.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.4 slice
+## Current 0.17.5 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -22,6 +22,8 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Catalog refreshes preserve the playing source, current track, and preloaded successor when stable queue order is unchanged. Removed queue entries are dropped; a removed current track stops safely and selects the next surviving entry in a paused state.
 - Import-time rating/tag completions update only tag fields on the freshly rebound queue row, selected tracks follow their stable file key, and an unsaved inspector draft remains mounted across transient catalog-ID changes.
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
+- Stability-oriented native output setup first requests the MP3's sample rate and a fixed power-of-two buffer near 100 ms (4,096 frames for 44.1/48 kHz), tries explicit supported configurations with the same buffer policy, and retains a driver-compatible fallback.
+- A two-entry, signature-checked encoded-MP3 read-ahead cache loads ordinary current and prepared-next tracks sequentially before the real-time callback can request them. Files above the 96 MiB admission cap or allocation failures retain a 1 MiB buffered-file fallback.
 - ReplayGain Off, Track, and Album modes based on MusicBee-compatible `REPLAYGAIN_*` ID3 text frames. Album mode falls back to Track tags, positive gain is capped by the tagged peak, and MP3 files are never modified.
 - Gapless-capable queue transitions: Aurora opens and appends the next resolved MP3 to the same native player during the final 15 seconds, so audio handoff does not wait for React polling. Missing, invalid, or unknown-duration files retain the safe ordinary transition.
 - An Audio Settings tab beside Global Shortcuts, atomic per-computer persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-audio.json`, and a compact player readout for the active output and applied gain.
@@ -90,7 +92,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A vertical multi-file inspector tag editor plus existing inline half-star rating and Love/Neutral/Ban controls, with read-only duration and optional Last.fm popularity in the Track view.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.
-- A real MP3-derived, purple-to-cyan waveform timeline. Native builds sample 64 evenly spaced decoded windows into 320 peaks, cache them in device-local `aurora-waveforms.sqlite3`, and never accept an arbitrary WebView path.
+- A real MP3-derived, purple-to-cyan waveform timeline. Native builds sample 64 evenly spaced decoded windows into 320 peaks, caches them in device-local `aurora-waveforms.sqlite3`, and never accepts an arbitrary WebView path. Cache misses use one cancellable decode slot and sequentially buffer ordinary MP3s before the 64 seeks, so rapid skips do not multiply competing random-access jobs.
 - Race-safe seeking: the exact released range value is committed, older overlapping seek responses cannot replace newer state, and the live playback clock retakes the playhead after the latest seek finishes.
 - Bottom-player half-star rating (including clear-to-unrated) and Love controls that reuse Aurora's verified instant MP3 tag-write and optimistic state-overlay workflow.
 - A clickable end-time readout that toggles between total duration and a live negative remaining-time display.

@@ -53,7 +53,7 @@ use tag_model::{
 };
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager, State};
-use waveform::{FileSignature, WaveformSnapshot, WaveformStore};
+use waveform::{FileSignature, WaveformSnapshot, WaveformStore, WaveformWorkCoordinator};
 use years::{YearDetail, YearOverview, YearQueueRequest, YearSelection};
 
 type PlaybackState = Mutex<PlaybackRuntime>;
@@ -535,38 +535,50 @@ async fn track_waveform(
     track_id: String,
     track_key: String,
 ) -> Result<WaveformSnapshot, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let resolved = {
-            let store = app.state::<StateStore>();
-            catalog::resolve_track(&track_id, &track_key, &store)?
-        };
-        let signature = FileSignature::read(&resolved.audio_path)?;
-        if let Some(cached) = {
-            let cache = app.state::<WaveformState>();
-            let store = cache
-                .lock()
-                .map_err(|_| "Aurora's waveform cache stopped unexpectedly.".to_owned())?;
-            store.load(&resolved.summary.track_key, signature)?
-        } {
-            return Ok(cached);
-        }
+    let generation = app.state::<WaveformWorkCoordinator>().begin();
+    let worker_app = app.clone();
+    let work = app.state::<WaveformWorkCoordinator>();
+    work.run_serialized(generation, || async move {
+        tauri::async_runtime::spawn_blocking(move || {
+            let work = worker_app.state::<WaveformWorkCoordinator>();
+            let cancellation = work.cancellation(generation)?;
+            let resolved = {
+                let store = worker_app.state::<StateStore>();
+                catalog::resolve_track(&track_id, &track_key, &store)?
+            };
+            cancellation.checkpoint()?;
+            let signature = FileSignature::read(&resolved.audio_path)?;
+            if let Some(cached) = {
+                let cache = worker_app.state::<WaveformState>();
+                let store = cache
+                    .lock()
+                    .map_err(|_| "Aurora's waveform cache stopped unexpectedly.".to_owned())?;
+                store.load(&resolved.summary.track_key, signature)?
+            } {
+                cancellation.checkpoint()?;
+                return Ok(cached);
+            }
 
-        let snapshot = waveform::decode_mp3_waveform(
-            &resolved.audio_path,
-            &resolved.summary.track_key,
-            resolved.summary.duration_seconds,
-        )?;
-        {
-            let cache = app.state::<WaveformState>();
+            let snapshot = waveform::decode_mp3_waveform(
+                &resolved.audio_path,
+                &resolved.summary.track_key,
+                resolved.summary.duration_seconds,
+                &cancellation,
+            )?;
+            cancellation.checkpoint()?;
+            let cache = worker_app.state::<WaveformState>();
             let store = cache
                 .lock()
                 .map_err(|_| "Aurora's waveform cache stopped unexpectedly.".to_owned())?;
+            signature.verify_unchanged(&resolved.audio_path)?;
+            cancellation.checkpoint()?;
             store.save(&snapshot, signature)?;
-        }
-        Ok(snapshot)
+            Ok(snapshot)
+        })
+        .await
+        .map_err(|error| format!("The waveform worker stopped unexpectedly: {error}"))?
     })
     .await
-    .map_err(|error| format!("The waveform worker stopped unexpectedly: {error}"))?
 }
 
 fn refresh_playback_track(app: &AppHandle, track: &TrackSummary) {
@@ -888,6 +900,7 @@ pub fn run() {
             app.manage(Mutex::new(tag_service));
             app.manage(Mutex::new(laptop_runtime));
             app.manage(Mutex::new(waveform_store));
+            app.manage(WaveformWorkCoordinator::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
                 state_directory.join("aurora-shortcuts.json"),
             )));

@@ -7,16 +7,25 @@ use crate::{
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use cpal::BufferSize;
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     fs::File,
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const PRELOAD_WINDOW_SECONDS: f64 = 15.0;
+const OUTPUT_BUFFER_TARGET_MS: u32 = 100;
+const MIN_OUTPUT_BUFFER_FRAMES: u32 = 2_048;
+const MAX_OUTPUT_BUFFER_FRAMES: u32 = 16_384;
+const PLAYBACK_FILE_BUFFER_BYTES: usize = 1024 * 1024;
+const MAX_CACHED_TRACK_BYTES: u64 = 96 * 1024 * 1024;
+const CACHED_TRACK_LIMIT: usize = 2;
 const MAX_PLAYBACK_QUEUE: usize = 200;
 const MAX_QUEUE_APPEND_BATCH: usize = 100;
 const RETAINED_QUEUE_HISTORY: usize = 20;
@@ -86,6 +95,121 @@ pub(crate) struct PlaybackCatalogRebind {
 struct PreparedTrack {
     index: usize,
     gain: ReplayGainAdjustment,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PlaybackFileSignature {
+    byte_len: u64,
+    modified: Option<SystemTime>,
+}
+
+struct CachedPlaybackMedia {
+    path: PathBuf,
+    signature: PlaybackFileSignature,
+    bytes: Arc<[u8]>,
+}
+
+#[derive(Default)]
+struct PlaybackMediaCache {
+    entries: VecDeque<CachedPlaybackMedia>,
+}
+
+enum PlaybackMedia {
+    Memory(Cursor<Arc<[u8]>>),
+    File(BufReader<File>),
+}
+
+impl Read for PlaybackMedia {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Memory(reader) => reader.read(buffer),
+            Self::File(reader) => reader.read(buffer),
+        }
+    }
+}
+
+impl Seek for PlaybackMedia {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        match self {
+            Self::Memory(reader) => reader.seek(position),
+            Self::File(reader) => reader.seek(position),
+        }
+    }
+}
+
+impl PlaybackMediaCache {
+    fn open(&mut self, path: &Path) -> Result<(PlaybackMedia, u64), String> {
+        let file =
+            File::open(path).map_err(|error| format!("Aurora could not open this MP3: {error}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("Aurora could not inspect this MP3: {error}"))?;
+        let byte_len = metadata.len();
+        if byte_len > MAX_CACHED_TRACK_BYTES {
+            return Ok((
+                PlaybackMedia::File(BufReader::with_capacity(PLAYBACK_FILE_BUFFER_BYTES, file)),
+                byte_len,
+            ));
+        }
+
+        let signature = PlaybackFileSignature {
+            byte_len,
+            modified: metadata.modified().ok(),
+        };
+        if let Some(index) = signature.modified.and_then(|_| {
+            self.entries
+                .iter()
+                .position(|entry| entry.path == path && entry.signature == signature)
+        }) {
+            let entry = self.entries.remove(index).expect("cached entry exists");
+            let bytes = Arc::clone(&entry.bytes);
+            self.entries.push_back(entry);
+            return Ok((PlaybackMedia::Memory(Cursor::new(bytes)), byte_len));
+        }
+
+        let expected_len = usize::try_from(byte_len)
+            .map_err(|_| "This MP3 is too large to prepare safely for playback.".to_owned())?;
+        let mut bytes = Vec::new();
+        if bytes.try_reserve_exact(expected_len).is_err() {
+            return Ok((
+                PlaybackMedia::File(BufReader::with_capacity(PLAYBACK_FILE_BUFFER_BYTES, file)),
+                byte_len,
+            ));
+        }
+        let mut reader = BufReader::with_capacity(PLAYBACK_FILE_BUFFER_BYTES, file);
+        reader
+            .by_ref()
+            .take(byte_len.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("Aurora could not preload this MP3: {error}"))?;
+        if bytes.len() as u64 != byte_len {
+            return Err("This MP3 changed while Aurora was preparing it for playback.".to_owned());
+        }
+
+        let final_metadata = std::fs::metadata(path)
+            .map_err(|error| format!("Aurora could not recheck this MP3: {error}"))?;
+        let final_signature = PlaybackFileSignature {
+            byte_len: final_metadata.len(),
+            modified: final_metadata.modified().ok(),
+        };
+        if final_signature != signature {
+            return Err("This MP3 changed while Aurora was preparing it for playback.".to_owned());
+        }
+
+        let bytes: Arc<[u8]> = bytes.into();
+        if signature.modified.is_some() {
+            self.entries.retain(|entry| entry.path != path);
+            self.entries.push_back(CachedPlaybackMedia {
+                path: path.to_path_buf(),
+                signature,
+                bytes: Arc::clone(&bytes),
+            });
+            while self.entries.len() > CACHED_TRACK_LIMIT {
+                self.entries.pop_front();
+            }
+        }
+        Ok((PlaybackMedia::Memory(Cursor::new(bytes)), byte_len))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -192,8 +316,10 @@ pub(crate) struct PlaybackRuntime {
     active_device_label: Option<String>,
     using_device_fallback: bool,
     audio_message: Option<String>,
+    configured_source_rate: Option<SampleRate>,
     stream_error: Arc<Mutex<Option<String>>>,
     current_gain: ReplayGainAdjustment,
+    media_cache: PlaybackMediaCache,
     prepared_next: Option<PreparedTrack>,
     preparation_attempted: bool,
     store: StateStore,
@@ -268,11 +394,13 @@ impl PlaybackRuntime {
             active_device_label: None,
             using_device_fallback: false,
             audio_message: None,
+            configured_source_rate: None,
             stream_error: Arc::new(Mutex::new(None)),
             current_gain: ReplayGainAdjustment {
                 linear: 1.0,
                 ..Default::default()
             },
+            media_cache: PlaybackMediaCache::default(),
             prepared_next: None,
             preparation_attempted: false,
             store,
@@ -286,15 +414,30 @@ impl PlaybackRuntime {
         self.current_index.and_then(|index| self.queue.get(index))
     }
 
-    fn ensure_player(&mut self, force_system_default: bool) -> Result<(), String> {
-        if self.player.is_some() {
+    fn close_output(&mut self) {
+        self.player = None;
+        self.output = None;
+        self.configured_source_rate = None;
+        self.active_device_id = None;
+        self.active_device_label = None;
+        self.using_device_fallback = false;
+        self.audio_message = None;
+    }
+
+    fn ensure_player(
+        &mut self,
+        force_system_default: bool,
+        preferred_sample_rate: SampleRate,
+    ) -> Result<(), String> {
+        if self.player.is_some() && self.configured_source_rate == Some(preferred_sample_rate) {
             return Ok(());
         }
+        self.close_output();
         let mut selected = audio_settings::select_output_device(
             &self.audio_store.settings().output_device_id,
             force_system_default,
         )?;
-        let output = match open_output_sink(&selected, &self.stream_error) {
+        let output = match open_output_sink(&selected, &self.stream_error, preferred_sample_rate) {
             Ok(output) => output,
             Err(primary_error)
                 if !selected.using_fallback
@@ -305,7 +448,7 @@ impl PlaybackRuntime {
                     &self.audio_store.settings().output_device_id,
                     true,
                 )?;
-                open_output_sink(&selected, &self.stream_error).map_err(|fallback_error| {
+                open_output_sink(&selected, &self.stream_error, preferred_sample_rate).map_err(|fallback_error| {
                     format!(
                         "Aurora could not open the selected output ({primary_error}) or the Windows default ({fallback_error})."
                     )
@@ -319,39 +462,37 @@ impl PlaybackRuntime {
         self.active_device_label = Some(selected.label);
         self.using_device_fallback = selected.using_fallback;
         self.audio_message = selected.message;
+        self.configured_source_rate = Some(preferred_sample_rate);
         self.output = Some(output);
         self.player = Some(player);
         Ok(())
     }
 
     fn build_source_for_index(
-        &self,
+        &mut self,
         index: usize,
-    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment), String> {
-        let track = self
+    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment, SampleRate), String> {
+        let (track_id, track_key) = self
             .queue
             .get(index)
+            .map(|track| (track.id.clone(), track.track_key.clone()))
             .ok_or_else(|| "The playback queue no longer contains this track.".to_owned())?;
-        let audio_path = catalog::resolve_audio_path(&track.id, &track.track_key, &self.store)?;
-        let file = File::open(&audio_path)
-            .map_err(|error| format!("Aurora could not open this MP3: {error}"))?;
-        let byte_len = file
-            .metadata()
-            .map_err(|error| format!("Aurora could not inspect this MP3: {error}"))?
-            .len();
+        let audio_path = catalog::resolve_audio_path(&track_id, &track_key, &self.store)?;
+        let (media, byte_len) = self.media_cache.open(&audio_path)?;
         let decoder = Decoder::builder()
-            .with_data(file)
+            .with_data(media)
             .with_byte_len(byte_len)
             .with_hint("mp3")
             .with_seekable(true)
             .with_gapless(true)
             .build()
             .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
+        let sample_rate = decoder.sample_rate();
         let gain = replay_gain::adjustment_for_path(
             &audio_path,
             self.audio_store.settings().replay_gain_mode,
         );
-        Ok((Box::new(decoder.amplify(gain.linear)), gain))
+        Ok((Box::new(decoder.amplify(gain.linear)), gain, sample_rate))
     }
 
     fn load_current_on_device(
@@ -363,8 +504,8 @@ impl PlaybackRuntime {
         let index = self
             .current_index
             .ok_or_else(|| "The playback queue has no current track.".to_owned())?;
-        let (source, gain) = self.build_source_for_index(index)?;
-        self.ensure_player(force_system_default)?;
+        let (source, gain, sample_rate) = self.build_source_for_index(index)?;
+        self.ensure_player(force_system_default, sample_rate)?;
         let volume = self.volume;
         let player = self.player.as_ref().expect("player initialized");
         player.stop();
@@ -464,8 +605,7 @@ impl PlaybackRuntime {
         self.observe_history();
         let position = self.position_seconds;
         let should_play = self.status == PlaybackStatus::Playing;
-        self.player = None;
-        self.output = None;
+        self.close_output();
         self.prepared_next = None;
         if let Err(error) = self.load_current_on_device(should_play, position, true) {
             self.set_error(format!(
@@ -578,7 +718,7 @@ impl PlaybackRuntime {
             return;
         };
         self.preparation_attempted = true;
-        let Ok((source, gain)) = self.build_source_for_index(next_index) else {
+        let Ok((source, gain, _)) = self.build_source_for_index(next_index) else {
             return;
         };
         let Some(player) = self.player.as_ref() else {
@@ -1005,9 +1145,7 @@ impl PlaybackRuntime {
         self.queue.remove(index);
         self.preparation_attempted = false;
         if self.queue.is_empty() {
-            if let Some(player) = &self.player {
-                player.stop();
-            }
+            self.close_output();
             self.current_index = None;
             self.position_seconds = 0.0;
             self.status = PlaybackStatus::Stopped;
@@ -1058,9 +1196,7 @@ impl PlaybackRuntime {
         self.capture_position();
         self.observe_history();
         self.finish_history("skipped");
-        if let Some(player) = &self.player {
-            player.stop();
-        }
+        self.close_output();
         self.queue.clear();
         self.current_index = None;
         self.position_seconds = 0.0;
@@ -1131,13 +1267,8 @@ impl PlaybackRuntime {
         let should_play = self.status == PlaybackStatus::Playing;
         let had_player = self.player.is_some();
         self.audio_store.update(request)?;
-        self.player = None;
-        self.output = None;
+        self.close_output();
         let _ = self.take_stream_error();
-        self.active_device_id = None;
-        self.active_device_label = None;
-        self.using_device_fallback = false;
-        self.audio_message = None;
         self.prepared_next = None;
         self.preparation_attempted = false;
         if had_player && self.current_index.is_some() {
@@ -1162,20 +1293,70 @@ impl PlaybackRuntime {
     }
 }
 
+fn stability_buffer_frames(sample_rate: u32) -> u32 {
+    let target = (u64::from(sample_rate) * u64::from(OUTPUT_BUFFER_TARGET_MS) / 1_000)
+        .clamp(1, u64::from(MAX_OUTPUT_BUFFER_FRAMES)) as u32;
+    let upper = target.next_power_of_two();
+    let lower = (upper / 2).max(1);
+    let nearest = if target - lower <= upper - target {
+        lower
+    } else {
+        upper
+    };
+    nearest.clamp(MIN_OUTPUT_BUFFER_FRAMES, MAX_OUTPUT_BUFFER_FRAMES)
+}
+
 fn open_output_sink(
     selected: &audio_settings::SelectedOutputDevice,
     stream_error: &Arc<Mutex<Option<String>>>,
+    preferred_sample_rate: SampleRate,
 ) -> Result<MixerDeviceSink, String> {
-    let stream_error = Arc::clone(stream_error);
-    DeviceSinkBuilder::from_device(selected.device.clone())
-        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
-        .with_error_callback(move |error| {
+    let callback = {
+        let stream_error = Arc::clone(stream_error);
+        move |error: cpal::StreamError| {
             if let Ok(mut slot) = stream_error.lock() {
                 *slot = Some(error.to_string());
             }
-        })
+        }
+    };
+    let preferred_frames = stability_buffer_frames(preferred_sample_rate.get());
+    let primary = DeviceSinkBuilder::from_device(selected.device.clone())
+        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
+        .with_sample_rate(preferred_sample_rate)
+        .with_buffer_size(BufferSize::Fixed(preferred_frames))
+        .with_error_callback(callback.clone())
+        .open_stream();
+    let primary_error = match primary {
+        Ok(output) => return Ok(output),
+        Err(error) => error,
+    };
+
+    if let Ok(configs) = rodio::stream::supported_output_configs(&selected.device) {
+        let mut alternatives = configs.collect::<Vec<_>>();
+        alternatives.sort_by_key(|config| config.sample_rate() != preferred_sample_rate.get());
+        for config in alternatives {
+            let frames = stability_buffer_frames(config.sample_rate());
+            if let Ok(output) = DeviceSinkBuilder::default()
+                .with_device(selected.device.clone())
+                .with_supported_config(&config)
+                .with_buffer_size(BufferSize::Fixed(frames))
+                .with_error_callback(callback.clone())
+                .open_stream()
+            {
+                return Ok(output);
+            }
+        }
+    }
+
+    DeviceSinkBuilder::from_device(selected.device.clone())
+        .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
+        .with_error_callback(callback)
         .open_sink_or_fallback()
-        .map_err(|error| format!("Aurora could not open this audio output: {error}"))
+        .map_err(|fallback_error| {
+            format!(
+                "Aurora could not open this audio output with its stable buffer ({primary_error}) or its compatibility fallback ({fallback_error})."
+            )
+        })
 }
 
 fn resume_position(
@@ -1246,6 +1427,63 @@ mod tests {
             resume_position(PlaybackStatus::Stopped, 120.0, Some(243)),
             120.0
         );
+    }
+
+    #[test]
+    fn output_buffer_policy_prefers_music_playback_stability() {
+        assert_eq!(stability_buffer_frames(44_100), 4_096);
+        assert_eq!(stability_buffer_frames(48_000), 4_096);
+        assert_eq!(stability_buffer_frames(96_000), 8_192);
+        assert_eq!(stability_buffer_frames(384_000), MAX_OUTPUT_BUFFER_FRAMES);
+    }
+
+    #[test]
+    fn playback_media_cache_removes_later_disk_reads_and_invalidates_changes() {
+        let directory = tempfile::tempdir().expect("temporary media cache directory");
+        let path = directory.path().join("track.mp3");
+        std::fs::write(&path, b"first encoded track").expect("write first track");
+        let mut cache = PlaybackMediaCache::default();
+
+        let (mut first, first_len) = cache.open(&path).expect("preload first track");
+        let first_bytes = match &first {
+            PlaybackMedia::Memory(reader) => Arc::clone(reader.get_ref()),
+            PlaybackMedia::File(_) => panic!("small tracks should be held in memory"),
+        };
+        let mut decoded_input = Vec::new();
+        first
+            .read_to_end(&mut decoded_input)
+            .expect("read cached track");
+        assert_eq!(first_len, decoded_input.len() as u64);
+        assert_eq!(decoded_input, b"first encoded track");
+        first.seek(SeekFrom::Start(6)).expect("seek cached track");
+        let mut tail = Vec::new();
+        first.read_to_end(&mut tail).expect("read cached tail");
+        assert_eq!(tail, b"encoded track");
+
+        let (second, _) = cache.open(&path).expect("reuse cached track");
+        let second_bytes = match second {
+            PlaybackMedia::Memory(reader) => reader.into_inner(),
+            PlaybackMedia::File(_) => panic!("small tracks should be held in memory"),
+        };
+        assert!(Arc::ptr_eq(&first_bytes, &second_bytes));
+
+        std::thread::sleep(Duration::from_millis(2));
+        std::fs::write(&path, b"other encoded track").expect("replace track at same length");
+        let (replacement, _) = cache.open(&path).expect("load replacement track");
+        let replacement_bytes = match replacement {
+            PlaybackMedia::Memory(reader) => reader.into_inner(),
+            PlaybackMedia::File(_) => panic!("small tracks should be held in memory"),
+        };
+        assert!(!Arc::ptr_eq(&first_bytes, &replacement_bytes));
+        assert_eq!(&*replacement_bytes, b"other encoded track");
+
+        let oversized_path = directory.path().join("oversized.mp3");
+        File::create(&oversized_path)
+            .and_then(|file| file.set_len(MAX_CACHED_TRACK_BYTES + 1))
+            .expect("create sparse oversized track");
+        let (oversized, oversized_len) = cache.open(&oversized_path).expect("open oversized track");
+        assert_eq!(oversized_len, MAX_CACHED_TRACK_BYTES + 1);
+        assert!(matches!(oversized, PlaybackMedia::File(_)));
     }
 
     #[test]
@@ -1334,7 +1572,14 @@ mod tests {
             audio_settings::select_output_device(audio_settings::SYSTEM_DEFAULT_DEVICE_ID, false)
                 .expect("select Windows default output");
         let stream_error = Arc::new(Mutex::new(None));
-        let output = open_output_sink(&selected, &stream_error).expect("open Windows output");
-        assert!(output.config().sample_rate().get() > 0);
+        let preferred_sample_rate = SampleRate::new(44_100).expect("valid sample rate");
+        let output = open_output_sink(&selected, &stream_error, preferred_sample_rate)
+            .expect("open Windows output");
+        eprintln!("Aurora test output config: {:?}", output.config());
+        assert_eq!(output.config().sample_rate(), preferred_sample_rate);
+        assert_eq!(
+            output.config().buffer_size(),
+            &BufferSize::Fixed(stability_buffer_frames(preferred_sample_rate.get()))
+        );
     }
 }

@@ -1,6 +1,6 @@
 # Audio output contract
 
-Aurora 0.10.0 adds a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
+Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.5 adds playback-deadline safeguards. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
 
 ## Windows output selection
 
@@ -10,6 +10,16 @@ Aurora 0.10.0 adds a device-local output and loudness layer without expanding th
 - If the requested endpoint is absent or fails while opening, Aurora uses the current Windows default and keeps the requested preference unchanged.
 - Rodio's stream-error callback records a disconnect or output failure. The next playback-state reconciliation reopens the current MP3 at its observed position on the Windows default.
 - Aurora does not jump back to a recovered preferred endpoint during a track. It retries the preference the next time the output stream is created, including after a saved audio-setting change or process restart.
+
+## Playback deadline resilience
+
+- Before constructing a decoder, Aurora sequentially reads an ordinary MP3 into a signature-checked, two-entry encoded-media cache. The current track and prepared successor can then seek and read without routine filesystem I/O on the device callback.
+- Cache admission is capped at 96 MiB per file. A larger file or failed memory reservation uses a 1 MiB `BufReader`, preserving playback instead of failing under memory pressure. Size and modification time are checked again after preload; files without a reliable modification timestamp are not reused.
+- Stream creation first requests the source sample rate and a fixed power-of-two buffer nearest the 100 ms stability target. This is 4,096 frames at both 44.1 kHz (about 93 ms) and 48 kHz (about 85 ms).
+- If that exact request fails, Aurora tries the endpoint's reported configurations while preserving the rate-scaled fixed-buffer policy. Failure to enumerate or open those alternatives still reaches Rodio's driver-compatible fallback.
+- The stream records the source rate it was configured for. An explicit load at a different rate rebuilds the stream. An already-appended mixed-rate successor stays on the existing stream to preserve the queue handoff and may therefore use Rodio conversion until the next explicit load.
+
+The device callback still performs MP3 decoding. Version 0.17.5 removes routine storage latency and adds substantially more scheduling headroom; it is not a background PCM ring buffer and Windows/CPAL does not expose a reliable per-underrun counter here.
 
 ## Device-local persistence
 

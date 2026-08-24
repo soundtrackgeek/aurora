@@ -308,13 +308,25 @@ export function usePlayback() {
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const activeCommandCountRef = useRef(0);
   const commandSequenceRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (activeCommandCountRef.current > 0) return;
+    if (activeCommandCountRef.current > 0 || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    const commandSequence = commandSequenceRef.current;
     try {
-      setState(await getPlaybackSnapshot());
+      const next = await getPlaybackSnapshot();
+      if (
+        activeCommandCountRef.current === 0
+        && commandSequenceRef.current === commandSequence
+      ) setState(next);
     } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error));
+      if (
+        activeCommandCountRef.current === 0
+        && commandSequenceRef.current === commandSequence
+      ) setCommandError(error instanceof Error ? error.message : String(error));
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, []);
 

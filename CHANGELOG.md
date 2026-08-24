@@ -4,6 +4,19 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.5] - 2026-08-24
+
+### Fixed
+
+- Native playback now preloads ordinary encoded MP3s before Rodio's real-time callback consumes them and uses a larger fixed output buffer, removing two verified deadline risks that can cause short dropouts.
+- Output creation first matches the source sample rate, avoiding Rodio's linear converter on compatible Windows endpoints; explicit alternative configurations retain the same stability buffer, with the driver-compatible default kept as a final fallback.
+- Waveform cache misses are serialized and generation-cancelled during rapid track changes, with sequential MP3 buffering replacing repeated storage seeks for ordinary files.
+- Playback snapshot polling no longer overlaps itself or lets an older poll overwrite a newer transport-command result.
+
+### Changed
+
+- Encoded playback read-ahead admits at most two files of up to 96 MiB each and revalidates file size and modification time before reuse; larger files and memory-pressure cases use a 1 MiB buffered-file fallback.
+
 ## [0.17.4] - 2026-08-24
 
 ### Fixed
