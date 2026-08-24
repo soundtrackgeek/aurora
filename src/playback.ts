@@ -27,6 +27,8 @@ export interface PlaybackSnapshot {
   replayGainDb: number | null;
   replayGainSource: ReplayGainMode | null;
   clippingPrevented: boolean;
+  audioUnderrunCount: number;
+  realtimeSchedulingDenied: boolean;
 }
 
 export interface PlaybackCatalogRebind {
@@ -50,6 +52,8 @@ const emptyPlayback: PlaybackSnapshot = {
   replayGainDb: null,
   replayGainSource: null,
   clippingPrevented: false,
+  audioUnderrunCount: 0,
+  realtimeSchedulingDenied: false,
 };
 
 let browserPlayback: PlaybackSnapshot = { ...emptyPlayback };

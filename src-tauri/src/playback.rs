@@ -7,19 +7,26 @@ use crate::{
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source};
+use rodio::{
+    Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source,
+    conversions::ResampleConfig,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const PRELOAD_WINDOW_SECONDS: f64 = 15.0;
 const PLAYBACK_STATE_CHECKPOINT_SECONDS: f64 = 30.0;
+const OUTPUT_BUFFER_FRAMES: u32 = 4_096;
 const PLAYBACK_FILE_BUFFER_BYTES: usize = 1024 * 1024;
 const MAX_CACHED_TRACK_BYTES: u64 = 96 * 1024 * 1024;
 const CACHED_TRACK_LIMIT: usize = 2;
@@ -80,6 +87,8 @@ pub(crate) struct PlaybackSnapshot {
     pub(crate) replay_gain_db: Option<f32>,
     pub(crate) replay_gain_source: Option<ReplayGainMode>,
     pub(crate) clipping_prevented: bool,
+    pub(crate) audio_underrun_count: u64,
+    pub(crate) realtime_scheduling_denied: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -313,8 +322,9 @@ pub(crate) struct PlaybackRuntime {
     active_device_label: Option<String>,
     using_device_fallback: bool,
     audio_message: Option<String>,
-    requested_source_rate: Option<SampleRate>,
     stream_error: Arc<Mutex<Option<String>>>,
+    audio_underrun_count: Arc<AtomicU64>,
+    realtime_scheduling_denied: Arc<AtomicBool>,
     current_gain: ReplayGainAdjustment,
     media_cache: PlaybackMediaCache,
     prepared_next: Option<PreparedTrack>,
@@ -391,8 +401,9 @@ impl PlaybackRuntime {
             active_device_label: None,
             using_device_fallback: false,
             audio_message: None,
-            requested_source_rate: None,
             stream_error: Arc::new(Mutex::new(None)),
+            audio_underrun_count: Arc::new(AtomicU64::new(0)),
+            realtime_scheduling_denied: Arc::new(AtomicBool::new(false)),
             current_gain: ReplayGainAdjustment {
                 linear: 1.0,
                 ..Default::default()
@@ -415,19 +426,14 @@ impl PlaybackRuntime {
     fn close_output(&mut self) {
         self.player = None;
         self.output = None;
-        self.requested_source_rate = None;
         self.active_device_id = None;
         self.active_device_label = None;
         self.using_device_fallback = false;
         self.audio_message = None;
     }
 
-    fn ensure_player(
-        &mut self,
-        force_system_default: bool,
-        preferred_sample_rate: SampleRate,
-    ) -> Result<(), String> {
-        if self.player.is_some() && self.requested_source_rate == Some(preferred_sample_rate) {
+    fn ensure_player(&mut self, force_system_default: bool) -> Result<(), String> {
+        if self.player.is_some() {
             return Ok(());
         }
         self.close_output();
@@ -435,7 +441,12 @@ impl PlaybackRuntime {
             &self.audio_store.settings().output_device_id,
             force_system_default,
         )?;
-        let output = match open_output_sink(&selected, &self.stream_error, preferred_sample_rate) {
+        let output = match open_output_sink(
+            &selected,
+            &self.stream_error,
+            &self.audio_underrun_count,
+            &self.realtime_scheduling_denied,
+        ) {
             Ok(output) => output,
             Err(primary_error)
                 if !selected.using_fallback
@@ -446,7 +457,12 @@ impl PlaybackRuntime {
                     &self.audio_store.settings().output_device_id,
                     true,
                 )?;
-                open_output_sink(&selected, &self.stream_error, preferred_sample_rate).map_err(|fallback_error| {
+                open_output_sink(
+                    &selected,
+                    &self.stream_error,
+                    &self.audio_underrun_count,
+                    &self.realtime_scheduling_denied,
+                ).map_err(|fallback_error| {
                     format!(
                         "Aurora could not open the selected output ({primary_error}) or the Windows default ({fallback_error})."
                     )
@@ -456,7 +472,6 @@ impl PlaybackRuntime {
         };
         let player = Player::connect_new(output.mixer());
         player.set_volume(self.volume);
-        self.requested_source_rate = Some(preferred_sample_rate);
         self.active_device_id = Some(selected.id);
         self.active_device_label = Some(selected.label);
         self.using_device_fallback = selected.using_fallback;
@@ -469,7 +484,8 @@ impl PlaybackRuntime {
     fn build_source_for_index(
         &mut self,
         index: usize,
-    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment, SampleRate), String> {
+        target_sample_rate: SampleRate,
+    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment), String> {
         let (track_id, track_key) = self
             .queue
             .get(index)
@@ -485,12 +501,14 @@ impl PlaybackRuntime {
             .with_gapless(true)
             .build()
             .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
-        let sample_rate = decoder.sample_rate();
         let gain = replay_gain::adjustment_for_path(
             &audio_path,
             self.audio_store.settings().replay_gain_mode,
         );
-        Ok((Box::new(decoder.amplify(gain.linear)), gain, sample_rate))
+        let source = decoder
+            .amplify(gain.linear)
+            .resample(target_sample_rate, ResampleConfig::balanced());
+        Ok((Box::new(source), gain))
     }
 
     fn load_current_on_device(
@@ -502,8 +520,14 @@ impl PlaybackRuntime {
         let index = self
             .current_index
             .ok_or_else(|| "The playback queue has no current track.".to_owned())?;
-        let (source, gain, sample_rate) = self.build_source_for_index(index)?;
-        self.ensure_player(force_system_default, sample_rate)?;
+        self.ensure_player(force_system_default)?;
+        let target_sample_rate = self
+            .output
+            .as_ref()
+            .expect("output initialized")
+            .config()
+            .sample_rate();
+        let (source, gain) = self.build_source_for_index(index, target_sample_rate)?;
         let volume = self.volume;
         let player = self.player.as_ref().expect("player initialized");
         player.stop();
@@ -715,8 +739,15 @@ impl PlaybackRuntime {
         let Some(next_index) = self.intended_next_index() else {
             return;
         };
+        let Some(target_sample_rate) = self
+            .output
+            .as_ref()
+            .map(|output| output.config().sample_rate())
+        else {
+            return;
+        };
         self.preparation_attempted = true;
-        let Ok((source, gain, _)) = self.build_source_for_index(next_index) else {
+        let Ok((source, gain)) = self.build_source_for_index(next_index, target_sample_rate) else {
             return;
         };
         let Some(player) = self.player.as_ref() else {
@@ -833,6 +864,8 @@ impl PlaybackRuntime {
             replay_gain_db: self.current_gain.applied_db,
             replay_gain_source: self.current_gain.source,
             clipping_prevented: self.current_gain.clipping_prevented,
+            audio_underrun_count: self.audio_underrun_count.load(Ordering::Relaxed),
+            realtime_scheduling_denied: self.realtime_scheduling_denied.load(Ordering::Relaxed),
         }
     }
 
@@ -1331,15 +1364,27 @@ impl PlaybackRuntime {
 fn open_output_sink(
     selected: &audio_settings::SelectedOutputDevice,
     stream_error: &Arc<Mutex<Option<String>>>,
-    preferred_sample_rate: SampleRate,
+    audio_underrun_count: &Arc<AtomicU64>,
+    realtime_scheduling_denied: &Arc<AtomicBool>,
 ) -> Result<MixerDeviceSink, String> {
     let stream_error = Arc::clone(stream_error);
+    let audio_underrun_count = Arc::clone(audio_underrun_count);
+    let realtime_scheduling_denied = Arc::clone(realtime_scheduling_denied);
     DeviceSinkBuilder::from_device(selected.device.clone())
         .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
-        .with_sample_rate(preferred_sample_rate)
-        .with_error_callback(move |error| {
-            if let Ok(mut slot) = stream_error.lock() {
-                *slot = Some(error.to_string());
+        .with_buffer_size(cpal::BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
+        .with_error_callback(move |error| match error.kind() {
+            cpal::ErrorKind::Xrun => {
+                audio_underrun_count.fetch_add(1, Ordering::Relaxed);
+            }
+            cpal::ErrorKind::RealtimeDenied => {
+                realtime_scheduling_denied.store(true, Ordering::Relaxed);
+            }
+            cpal::ErrorKind::DeviceChanged => {}
+            _ => {
+                if let Ok(mut slot) = stream_error.lock() {
+                    *slot = Some(error.to_string());
+                }
             }
         })
         .open_sink_or_fallback()
@@ -1551,10 +1596,11 @@ mod tests {
             audio_settings::select_output_device(audio_settings::SYSTEM_DEFAULT_DEVICE_ID, false)
                 .expect("select Windows default output");
         let stream_error = Arc::new(Mutex::new(None));
-        let source_rate = SampleRate::new(44_100).expect("valid source rate");
-        let output = open_output_sink(&selected, &stream_error, source_rate)
-            .expect("open Windows output at source rate");
+        let underruns = Arc::new(AtomicU64::new(0));
+        let realtime_denied = Arc::new(AtomicBool::new(false));
+        let output = open_output_sink(&selected, &stream_error, &underruns, &realtime_denied)
+            .expect("open Windows output");
         eprintln!("Aurora test output config: {:?}", output.config());
-        assert_eq!(output.config().sample_rate(), source_rate);
+        assert!(output.config().sample_rate().get() > 0);
     }
 }

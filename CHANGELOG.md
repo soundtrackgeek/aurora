@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.13] - 2026-08-24
+
+### Fixed
+
+- Native playback now keeps one stable endpoint-format WASAPI stream across mixed-rate tracks, explicitly uses Rodio's balanced Rubato sinc/FFT resampler instead of its previous linear conversion, raises the CPAL callback thread to real-time priority on Windows, and requests a stability-focused 4,096-frame output buffer.
+- Debug builds now optimize audio dependencies, reducing codec and resampler deadline pressure during development playback.
+- CPAL underruns and denied real-time scheduling are counted without incorrectly treating those non-fatal notifications as device disconnects; the player output readout exposes either condition when observed.
+
 ## [0.17.12] - 2026-08-24
 
 ### Fixed

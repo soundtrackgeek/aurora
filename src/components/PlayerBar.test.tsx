@@ -52,6 +52,8 @@ function snapshot(positionSeconds: number, currentTrack = track): PlaybackSnapsh
     replayGainDb: -6.4,
     replayGainSource: "track",
     clippingPrevented: false,
+    audioUnderrunCount: 0,
+    realtimeSchedulingDenied: false,
   };
 }
 
@@ -137,6 +139,17 @@ describe("PlayerBar", () => {
     const audio = screen.getByRole("button", { name: /Open audio settings.*Speakers.*−?6\.4 dB/i });
     fireEvent.click(audio);
     expect(playerProps.onOpenAudioSettings).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces native audio health diagnostics in the output readout", () => {
+    const playback = {
+      ...snapshot(60),
+      audioUnderrunCount: 2,
+      realtimeSchedulingDenied: true,
+    };
+    render(<PlayerBar {...props()} playback={playback} />);
+
+    expect(screen.getByRole("button", { name: /2 audio underruns/i })).toBeInTheDocument();
   });
 
   it("releases the seek draft after the committed seek finishes", async () => {

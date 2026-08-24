@@ -164,7 +164,12 @@ export function PlayerBar({
     : playback.replayGainDb === null
       ? `${playback.replayGainMode === "album" ? "Album" : "Track"} untagged`
       : `${playback.replayGainDb > 0 ? "+" : ""}${playback.replayGainDb.toFixed(1)} dB${playback.clippingPrevented ? " protected" : ""}`;
-  const audioLabel = `${playback.outputDeviceLabel ?? "Output opens on play"} · ${gainLabel}`;
+  const healthLabel = playback.audioUnderrunCount > 0
+    ? ` · ${playback.audioUnderrunCount} audio underrun${playback.audioUnderrunCount === 1 ? "" : "s"}`
+    : playback.realtimeSchedulingDenied
+      ? " · real-time scheduling unavailable"
+      : "";
+  const audioLabel = `${playback.outputDeviceLabel ?? "Output opens on play"} · ${gainLabel}${healthLabel}`;
 
   return (
     <>

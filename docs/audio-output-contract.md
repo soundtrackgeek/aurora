@@ -1,6 +1,6 @@
 # Audio output contract
 
-Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.7 retained bounded encoded read-ahead and restored Rodio/CPAL's driver-selected buffer after the forced 0.17.5 buffer caused a playback regression. Version 0.17.8 requests the active MP3's native sample rate so ordinary playback bypasses Rodio's linear converter. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
+Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.13 keeps one endpoint-format output stream, adopts CPAL's Windows real-time scheduling and Rodio's Rubato resampler, and adds stability-focused output headroom. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
 
 ## Windows output selection
 
@@ -15,11 +15,12 @@ Aurora 0.10.0 added a device-local output and loudness layer without expanding t
 
 - Before constructing a decoder, Aurora sequentially reads an ordinary MP3 into a signature-checked, two-entry encoded-media cache. The current track and prepared successor can then seek and read without routine filesystem I/O on the device callback.
 - Cache admission is capped at 96 MiB per file. A larger file or failed memory reservation uses a 1 MiB `BufReader`, preserving playback instead of failing under memory pressure. Size and modification time are checked again after preload; files without a reliable modification timestamp are not reused.
-- Stream creation starts with the selected endpoint's Rodio/CPAL configuration, replaces only its sample rate with the active MP3's decoded rate, and retains the driver-selected buffer and sample format. On Windows, CPAL opens the stream in shared mode with its default-quality automatic conversion flags, so Windows mixes a source-rate stream into the endpoint format.
-- Matching the stream and source rates bypasses Rodio's linear sample-rate converter during ordinary playback. This matters because Rodio documents that converter as capable of audible distortion, and its open higher-quality-resampler issue specifically describes high-frequency noise.
-- Explicitly loading a track at a different rate rebuilds the output stream. A differently rated successor already appended for gapless handoff remains on the existing stream and uses Rodio conversion; preserving an uninterrupted handoff is the bounded compatibility exception.
+- Stream creation uses the selected endpoint's default shared-mode sample rate and format, requests a 4,096-frame stability buffer, and remains open across source-rate changes. A fallback configuration is still allowed when an endpoint rejects the preferred buffer.
+- CPAL's `realtime` feature promotes the Windows output callback thread; if promotion is denied, playback continues and the player reports the condition instead of reopening the device.
+- Aurora explicitly selects Rodio's balanced sinc configuration to convert MP3s into the stable stream format through Rubato, including mixed-rate gapless successors. The FFT path is enabled for efficient fixed-ratio conversions; the mixer therefore receives sources already matching its output rate and does not fall back to its default linear policy.
+- CPAL xrun notifications increment an atomic underrun counter. Xruns, real-time denial, and automatic route-change notices are non-fatal; actual invalidation, device loss, or backend failures retain Aurora's Windows-default recovery path.
 
-The device callback still performs MP3 decoding. Encoded read-ahead removes routine storage latency, but this is not a background PCM ring buffer and Windows/CPAL does not expose a reliable per-underrun counter here.
+The device callback still performs MP3 decoding. Encoded read-ahead, optimized development dependencies, real-time scheduling, and the larger output buffer reduce deadline risk, but this is not a background PCM ring buffer. CPAL exposes xrun notifications where the Windows backend can detect them; a zero count is not proof that no glitch occurred.
 
 ## Device-local persistence
 
@@ -65,5 +66,5 @@ The handoff is capability-based, not an unconditional guarantee. Missing files, 
 ## Verification
 
 - Browser interaction covers Audio/Shortcuts navigation, device and ReplayGain draft/save behavior, and the compact player readout.
-- Native Windows-only tests enumerate non-empty output endpoints, round-trip their stable IDs, identify the current default, and verify that its shared stream accepts a 44.1 kHz source-rate configuration without replacing the driver-selected buffer.
+- Native Windows-only tests enumerate non-empty output endpoints, round-trip their stable IDs, identify the current default, and verify that Aurora can open its stable shared output configuration.
 - Unit tests cover the observed numeric formats, negative gain, positive-gain peak limiting, safe defaults, and invalid endpoint IDs.
