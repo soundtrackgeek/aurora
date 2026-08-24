@@ -7,7 +7,7 @@ use crate::{
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
@@ -313,6 +313,7 @@ pub(crate) struct PlaybackRuntime {
     active_device_label: Option<String>,
     using_device_fallback: bool,
     audio_message: Option<String>,
+    requested_source_rate: Option<SampleRate>,
     stream_error: Arc<Mutex<Option<String>>>,
     current_gain: ReplayGainAdjustment,
     media_cache: PlaybackMediaCache,
@@ -390,6 +391,7 @@ impl PlaybackRuntime {
             active_device_label: None,
             using_device_fallback: false,
             audio_message: None,
+            requested_source_rate: None,
             stream_error: Arc::new(Mutex::new(None)),
             current_gain: ReplayGainAdjustment {
                 linear: 1.0,
@@ -413,14 +415,19 @@ impl PlaybackRuntime {
     fn close_output(&mut self) {
         self.player = None;
         self.output = None;
+        self.requested_source_rate = None;
         self.active_device_id = None;
         self.active_device_label = None;
         self.using_device_fallback = false;
         self.audio_message = None;
     }
 
-    fn ensure_player(&mut self, force_system_default: bool) -> Result<(), String> {
-        if self.player.is_some() {
+    fn ensure_player(
+        &mut self,
+        force_system_default: bool,
+        preferred_sample_rate: SampleRate,
+    ) -> Result<(), String> {
+        if self.player.is_some() && self.requested_source_rate == Some(preferred_sample_rate) {
             return Ok(());
         }
         self.close_output();
@@ -428,7 +435,7 @@ impl PlaybackRuntime {
             &self.audio_store.settings().output_device_id,
             force_system_default,
         )?;
-        let output = match open_output_sink(&selected, &self.stream_error) {
+        let output = match open_output_sink(&selected, &self.stream_error, preferred_sample_rate) {
             Ok(output) => output,
             Err(primary_error)
                 if !selected.using_fallback
@@ -439,7 +446,7 @@ impl PlaybackRuntime {
                     &self.audio_store.settings().output_device_id,
                     true,
                 )?;
-                open_output_sink(&selected, &self.stream_error).map_err(|fallback_error| {
+                open_output_sink(&selected, &self.stream_error, preferred_sample_rate).map_err(|fallback_error| {
                     format!(
                         "Aurora could not open the selected output ({primary_error}) or the Windows default ({fallback_error})."
                     )
@@ -449,6 +456,7 @@ impl PlaybackRuntime {
         };
         let player = Player::connect_new(output.mixer());
         player.set_volume(self.volume);
+        self.requested_source_rate = Some(preferred_sample_rate);
         self.active_device_id = Some(selected.id);
         self.active_device_label = Some(selected.label);
         self.using_device_fallback = selected.using_fallback;
@@ -461,7 +469,7 @@ impl PlaybackRuntime {
     fn build_source_for_index(
         &mut self,
         index: usize,
-    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment), String> {
+    ) -> Result<(Box<dyn Source + Send>, ReplayGainAdjustment, SampleRate), String> {
         let (track_id, track_key) = self
             .queue
             .get(index)
@@ -477,11 +485,12 @@ impl PlaybackRuntime {
             .with_gapless(true)
             .build()
             .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
+        let sample_rate = decoder.sample_rate();
         let gain = replay_gain::adjustment_for_path(
             &audio_path,
             self.audio_store.settings().replay_gain_mode,
         );
-        Ok((Box::new(decoder.amplify(gain.linear)), gain))
+        Ok((Box::new(decoder.amplify(gain.linear)), gain, sample_rate))
     }
 
     fn load_current_on_device(
@@ -493,8 +502,8 @@ impl PlaybackRuntime {
         let index = self
             .current_index
             .ok_or_else(|| "The playback queue has no current track.".to_owned())?;
-        let (source, gain) = self.build_source_for_index(index)?;
-        self.ensure_player(force_system_default)?;
+        let (source, gain, sample_rate) = self.build_source_for_index(index)?;
+        self.ensure_player(force_system_default, sample_rate)?;
         let volume = self.volume;
         let player = self.player.as_ref().expect("player initialized");
         player.stop();
@@ -707,7 +716,7 @@ impl PlaybackRuntime {
             return;
         };
         self.preparation_attempted = true;
-        let Ok((source, gain)) = self.build_source_for_index(next_index) else {
+        let Ok((source, gain, _)) = self.build_source_for_index(next_index) else {
             return;
         };
         let Some(player) = self.player.as_ref() else {
@@ -1322,10 +1331,12 @@ impl PlaybackRuntime {
 fn open_output_sink(
     selected: &audio_settings::SelectedOutputDevice,
     stream_error: &Arc<Mutex<Option<String>>>,
+    preferred_sample_rate: SampleRate,
 ) -> Result<MixerDeviceSink, String> {
     let stream_error = Arc::clone(stream_error);
     DeviceSinkBuilder::from_device(selected.device.clone())
         .map_err(|error| format!("Aurora could not configure this audio output: {error}"))?
+        .with_sample_rate(preferred_sample_rate)
         .with_error_callback(move |error| {
             if let Ok(mut slot) = stream_error.lock() {
                 *slot = Some(error.to_string());
@@ -1540,8 +1551,10 @@ mod tests {
             audio_settings::select_output_device(audio_settings::SYSTEM_DEFAULT_DEVICE_ID, false)
                 .expect("select Windows default output");
         let stream_error = Arc::new(Mutex::new(None));
-        let output = open_output_sink(&selected, &stream_error).expect("open Windows output");
+        let source_rate = SampleRate::new(44_100).expect("valid source rate");
+        let output = open_output_sink(&selected, &stream_error, source_rate)
+            .expect("open Windows output at source rate");
         eprintln!("Aurora test output config: {:?}", output.config());
-        assert!(output.config().sample_rate().get() > 0);
+        assert_eq!(output.config().sample_rate(), source_rate);
     }
 }

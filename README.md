@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.7 restores driver-compatible shared Windows audio, adds a proper Windows media session for physical keyboard controls, and moves catalog/history work away from playback-sensitive interaction paths.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.8 keeps shared Windows audio at the active MP3's native sample rate, avoiding Rodio's low-quality linear conversion during ordinary playback while preserving the Windows media session and playback responsiveness work from 0.17.7.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.7 slice
+## Current 0.17.8 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -25,7 +25,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
 - A two-entry, signature-checked encoded-MP3 read-ahead cache loads ordinary current and prepared-next tracks sequentially before the real-time callback can request them. Files above the 96 MiB admission cap or allocation failures retain a 1 MiB buffered-file fallback.
 - ReplayGain Off, Track, and Album modes based on MusicBee-compatible `REPLAYGAIN_*` ID3 text frames. Album mode falls back to Track tags, positive gain is capped by the tagged peak, and MP3 files are never modified.
-- Driver-compatible shared Windows output through Rodio/CPAL, matching the normal Windows audio-engine path used by shared-mode players. Aurora keeps bounded encoded MP3 read-ahead but does not force an MP3 sample rate or synthetic output buffer over the endpoint's selected configuration.
+- Shared Windows output through Rodio/CPAL at the active MP3's native sample rate, allowing Windows' shared audio engine to perform any endpoint-rate conversion instead of Rodio's linear converter. Aurora keeps bounded encoded MP3 read-ahead and Rodio's driver-selected output buffer.
 - Gapless-capable queue transitions: Aurora opens and appends the next resolved MP3 to the same native player during the final 15 seconds, so audio handoff does not wait for React polling. Missing, invalid, or unknown-duration files retain the safe ordinary transition.
 - An Audio Settings tab beside Global Shortcuts, atomic per-computer persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-audio.json`, and a compact player readout for the active output and applied gain.
 - A Windows media session for physical Play/Pause, Stop, Previous, and Next keyboard buttons, with native now-playing metadata and Windows arbitration between active players. This is independent of audio shared/exclusive mode.

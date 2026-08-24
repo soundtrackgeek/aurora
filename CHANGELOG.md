@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.8] - 2026-08-24
+
+### Fixed
+
+- Playback now requests the active MP3's native sample rate from the shared WASAPI stream while retaining Rodio's driver-selected buffer. This bypasses Rodio's documented linear sample-rate converter for ordinary playback and leaves any endpoint-rate conversion to Windows' shared audio engine.
+- Explicitly loading a track with a different native rate rebuilds the output stream at that rate. A mixed-rate source already prepared for gapless handoff keeps the existing stream and remains the compatibility case.
+
 ## [0.17.7] - 2026-08-24
 
 ### Added
