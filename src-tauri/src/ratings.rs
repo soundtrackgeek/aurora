@@ -721,7 +721,9 @@ pub(crate) fn load_rating_collection(
         WITH page AS MATERIALIZED (
           SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
                  {TRACK_RATING_SQL} AS rating_value, t.love, t.time_seconds,
-                 t.canonical_genre, t.album_id, t.file_path, t.filename, t.import_run_id
+                 t.canonical_genre, t.album_id, t.file_path, t.filename, t.import_run_id,
+                 t.year AS original_year, t.publisher AS publisher,
+                 t.display_artist AS display_artist
           FROM tracks AS t
           LEFT JOIN albums AS a ON a.id = t.album_id
           WHERE {predicate}
@@ -730,7 +732,8 @@ pub(crate) fn load_rating_collection(
         )
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+               l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+               p.original_year, p.publisher, p.display_artist AS display_artist
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -771,7 +774,9 @@ pub(crate) fn load_rating_album_queue(
         r#"
         SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
                {TRACK_RATING_SQL}, t.love, t.time_seconds, t.canonical_genre,
-               l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id
+               l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
+               t.year AS original_year, t.publisher AS publisher,
+               t.display_artist AS display_artist
         FROM tracks AS t
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(t.album_artist_display))
@@ -818,19 +823,20 @@ mod tests {
                   id INTEGER PRIMARY KEY, album_id TEXT, title TEXT, album_artist_display TEXT,
                   album TEXT, release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT,
                   love TEXT, time_seconds INTEGER, canonical_genre TEXT, file_path TEXT,
-                  filename TEXT, import_run_id INTEGER NOT NULL, disc_number INTEGER, track_number INTEGER
+                  filename TEXT, import_run_id INTEGER NOT NULL, disc_number INTEGER, track_number INTEGER,
+                  year INTEGER, publisher TEXT, display_artist TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (artist_key TEXT, track_key TEXT, play_count INTEGER);
                 INSERT INTO albums VALUES
                   ('almost', 'Almost', 'Artist', 2000, 2000, 'Rock', 4, 3, .75, 1, 400, NULL, NULL, NULL, NULL, 'Aurora Records'),
                   ('complete', 'Complete', 'Artist', 2001, 2001, 'Rock', 2, 2, 1, 1, 240, NULL, 90, 90, 110, 'Aurora Records');
                 INSERT INTO tracks VALUES
-                  (1, 'almost', 'One', 'Artist', 'Almost', 2000, 100, NULL, 'L', 100, 'Rock', 'D:\\Music', 'one.mp3', 1, 1, 1),
-                  (2, 'almost', 'Two', 'Artist', 'Almost', 2000, 80, NULL, NULL, 100, 'Rock', 'D:\\Music', 'two.mp3', 1, 1, 2),
-                  (3, 'almost', 'Three', 'Artist', 'Almost', 2000, 60, NULL, NULL, 100, 'Rock', 'D:\\Music', 'three.mp3', 1, 1, 3),
-                  (4, 'almost', 'Four', 'Artist', 'Almost', 2000, NULL, NULL, NULL, 100, 'Rock', 'D:\\Music', 'four.mp3', 1, 1, 4),
-                  (5, 'complete', 'Five', 'Artist', 'Complete', 2001, 100, NULL, 'L', 120, 'Rock', 'D:\\Music', 'five.mp3', 1, 1, 1),
-                  (6, 'complete', 'Six', 'Artist', 'Complete', 2001, 80, NULL, NULL, 120, 'Rock', 'D:\\Music', 'six.mp3', 1, 1, 2);
+                  (1, 'almost', 'One', 'Artist', 'Almost', 2000, 100, NULL, 'L', 100, 'Rock', 'D:\\Music', 'one.mp3', 1, 1, 1, 2000, 'Aurora Records', 'Artist; Guest'),
+                  (2, 'almost', 'Two', 'Artist', 'Almost', 2000, 80, NULL, NULL, 100, 'Rock', 'D:\\Music', 'two.mp3', 1, 1, 2, 2000, 'Aurora Records', 'Artist'),
+                  (3, 'almost', 'Three', 'Artist', 'Almost', 2000, 60, NULL, NULL, 100, 'Rock', 'D:\\Music', 'three.mp3', 1, 1, 3, 2000, 'Aurora Records', 'Artist'),
+                  (4, 'almost', 'Four', 'Artist', 'Almost', 2000, NULL, NULL, NULL, 100, 'Rock', 'D:\\Music', 'four.mp3', 1, 1, 4, 2000, 'Aurora Records', 'Artist'),
+                  (5, 'complete', 'Five', 'Artist', 'Complete', 2001, 100, NULL, 'L', 120, 'Rock', 'D:\\Music', 'five.mp3', 1, 1, 1, 2001, 'Aurora Records', 'Artist'),
+                  (6, 'complete', 'Six', 'Artist', 'Complete', 2001, 80, NULL, NULL, 120, 'Rock', 'D:\\Music', 'six.mp3', 1, 1, 2, 2001, 'Aurora Records', 'Artist');
                 "#,
             )
             .expect("seed rating fixture");
@@ -892,6 +898,31 @@ mod tests {
         assert_eq!(overview.completion.almost_complete, 1);
         assert_eq!(overview.rated_albums, 1);
         assert_eq!(overview.track_bands.last().expect("five stars").count, 2);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rating_queue_keeps_track_artist_and_publisher_metadata() {
+        let (connection, store, path) = fixture();
+        let sql = format!(
+            r#"
+            SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
+                   {TRACK_RATING_SQL}, t.love, t.time_seconds, t.canonical_genre,
+                   l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
+                   t.year AS original_year, t.publisher AS publisher,
+                   t.display_artist AS display_artist
+            FROM tracks AS t
+            LEFT JOIN lastfm_track_popularity AS l
+              ON l.artist_key = lower(trim(t.album_artist_display))
+             AND l.track_key = lower(trim(t.title))
+            WHERE t.id = 1
+            "#
+        );
+        let tracks = catalog::query_tracks(&connection, &sql, [], "rating metadata", Some(&store))
+            .expect("rating track metadata");
+        assert_eq!(tracks[0].display_artist.as_deref(), Some("Artist; Guest"));
+        assert_eq!(tracks[0].publisher.as_deref(), Some("Aurora Records"));
         drop(store);
         let _ = fs::remove_file(path);
     }

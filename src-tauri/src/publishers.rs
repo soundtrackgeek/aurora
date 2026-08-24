@@ -314,7 +314,7 @@ fn query_queue(
                    WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                  t.love, t.time_seconds, t.canonical_genre, t.album_id,
                  t.file_path, t.filename, t.import_run_id, t.year AS original_year,
-                 t.publisher AS publisher
+                 t.publisher AS publisher, t.display_artist AS display_artist
           FROM tracks AS t
           WHERE lower(trim(t.publisher)) = lower(trim(:publisher))
           ORDER BY (t.love = 'L') DESC, rating_value DESC,
@@ -325,7 +325,7 @@ fn query_queue(
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
                l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
-               p.original_year, p.publisher
+               p.original_year, p.publisher, p.display_artist AS display_artist
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -378,7 +378,7 @@ mod tests {
               year INTEGER, release_year INTEGER, publisher TEXT, normalized_rating INTEGER,
               rating_raw TEXT, love TEXT, time_seconds INTEGER, canonical_genre TEXT,
               album_id TEXT, file_path TEXT, filename TEXT, import_run_id INTEGER,
-              disc_number INTEGER, track_number INTEGER
+              disc_number INTEGER, track_number INTEGER, display_artist TEXT
             );
             CREATE TABLE lastfm_track_popularity (artist_key TEXT, track_key TEXT, play_count INTEGER);
             INSERT INTO albums VALUES
@@ -386,9 +386,9 @@ mod tests {
               ('a2','OK Computer','Radiohead',1997,1997,'PARLOPHONE',12,12,7,3213,'Alternative Rock',870,100),
               ('a3','Blue Train','John Coltrane',1957,1957,'Blue Note',5,5,3,2570,'Jazz',780,90);
             INSERT INTO tracks VALUES
-              (1,'Taxman','The Beatles','Revolver',1966,1966,'Parlophone',100,NULL,'L',159,'Rock','a1','C:\\Music','01.mp3',1,1,1),
-              (2,'Airbag','Radiohead','OK Computer',1997,1997,'PARLOPHONE',100,NULL,'L',284,'Alternative Rock','a2','C:\\Music','02.mp3',1,1,1),
-              (3,'Blue Train','John Coltrane','Blue Train',1957,1957,'Blue Note',90,NULL,'L',640,'Jazz','a3','C:\\Music','03.mp3',1,1,1);
+              (1,'Taxman','The Beatles','Revolver',1966,1966,'Parlophone',100,NULL,'L',159,'Rock','a1','C:\\Music','01.mp3',1,1,1,'The Beatles'),
+              (2,'Airbag','Radiohead','OK Computer',1997,1997,'PARLOPHONE',100,NULL,'L',284,'Alternative Rock','a2','C:\\Music','02.mp3',1,1,1,'Radiohead; DJ Shadow'),
+              (3,'Blue Train','John Coltrane','Blue Train',1957,1957,'Blue Note',90,NULL,'L',640,'Jazz','a3','C:\\Music','03.mp3',1,1,1,'John Coltrane');
             "#,
         ).expect("publisher fixture schema");
         connection
@@ -434,5 +434,10 @@ mod tests {
                 .as_deref()
                 .is_some_and(|publisher| publisher.eq_ignore_ascii_case("Parlophone"))
         }));
+        assert!(
+            tracks
+                .iter()
+                .any(|track| { track.display_artist.as_deref() == Some("Radiohead; DJ Shadow") })
+        );
     }
 }

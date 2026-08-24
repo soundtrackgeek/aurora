@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.12] - 2026-08-24
+
+### Fixed
+
+- The Track inspector now keeps the selected or playing track's Artist credit and Publisher value instead of falling back to Album Artist and `Unknown` when the track arrived through the initial library snapshot, a restored queue, or the Genres, Publishers, Years, Ratings, or Charts routes.
+
 ## [0.17.11] - 2026-08-24
 
 ### Changed

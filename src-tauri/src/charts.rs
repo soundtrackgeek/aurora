@@ -907,7 +907,8 @@ fn track_select_sql() -> &'static str {
              WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
            t.love, t.time_seconds, t.canonical_genre,
            l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-           t.display_artist AS display_artist
+           t.display_artist AS display_artist, t.year AS original_year,
+           t.publisher AS publisher
     FROM tracks AS t
     LEFT JOIN lastfm_track_popularity AS l
       ON l.artist_key = lower(trim(t.album_artist_display))

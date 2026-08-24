@@ -452,7 +452,7 @@ fn query_highlights(
         connection,
         r#"
         WITH page AS MATERIALIZED (
-          SELECT id, title, album_artist_display, album, release_year,
+          SELECT id, title, album_artist_display, display_artist, album, release_year,
                  COALESCE(normalized_rating, CASE trim(rating_raw)
                    WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
                    WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
@@ -470,7 +470,7 @@ fn query_highlights(
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
                l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
-               p.original_year, p.publisher
+               p.original_year, p.publisher, p.display_artist AS display_artist
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -499,7 +499,8 @@ fn query_highlights(
                  WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                t.love, t.time_seconds, t.canonical_genre,
                l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-               t.year AS original_year, t.publisher AS publisher
+               t.year AS original_year, t.publisher AS publisher,
+               t.display_artist AS display_artist
         FROM tracks AS t
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(t.album_artist_display))
@@ -571,7 +572,9 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                        WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                        WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                      t.love, t.time_seconds, t.canonical_genre, t.album_id,
-                     t.file_path, t.filename, t.import_run_id
+                     t.file_path, t.filename, t.import_run_id,
+                     t.year AS original_year, t.publisher AS publisher,
+                     t.display_artist AS display_artist
               FROM chosen_albums AS chosen
               JOIN tracks AS t ON t.album_id = chosen.id
               WHERE (:unrated = 0 OR (t.normalized_rating IS NULL AND NULLIF(TRIM(t.rating_raw), '') IS NULL))
@@ -586,7 +589,8 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
             )
             SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                    p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+                   p.original_year, p.publisher, p.display_artist AS display_artist
             FROM page AS p
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(p.album_artist_display))
@@ -604,7 +608,9 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                        WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                        WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                      t.love, t.time_seconds, t.canonical_genre, t.album_id,
-                     t.file_path, t.filename, t.import_run_id
+                     t.file_path, t.filename, t.import_run_id,
+                     t.year AS original_year, t.publisher AS publisher,
+                     t.display_artist AS display_artist
               FROM tracks AS t
               WHERE t.canonical_genre = :genre AND t.love = 'L'
                 AND :radio IN (0, 1) AND :unrated IN (0, 1)
@@ -613,7 +619,8 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
             )
             SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                    p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+                   p.original_year, p.publisher, p.display_artist AS display_artist
             FROM page AS p
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(p.album_artist_display))
@@ -631,7 +638,9 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                        WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                        WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                      t.love, t.time_seconds, t.canonical_genre, t.album_id,
-                     t.file_path, t.filename, t.import_run_id
+                     t.file_path, t.filename, t.import_run_id,
+                     t.year AS original_year, t.publisher AS publisher,
+                     t.display_artist AS display_artist
               FROM tracks AS t
               WHERE t.canonical_genre = :genre
                 AND (t.normalized_rating IS NOT NULL OR NULLIF(TRIM(t.rating_raw), '') IS NOT NULL)
@@ -641,7 +650,8 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
             )
             SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                    p.rating_value, p.love, p.time_seconds, p.canonical_genre,
-                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id
+                   l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
+                   p.original_year, p.publisher, p.display_artist AS display_artist
             FROM page AS p
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(p.album_artist_display))
@@ -751,7 +761,7 @@ mod tests {
                   release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT, love TEXT,
                   time_seconds INTEGER, canonical_genre TEXT, album_id TEXT, file_path TEXT,
                   filename TEXT, import_run_id INTEGER, disc_number INTEGER, track_number INTEGER,
-                  year INTEGER, publisher TEXT
+                  year INTEGER, publisher TEXT, display_artist TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER
@@ -761,10 +771,10 @@ mod tests {
                   ('s2', 'After Dark', 'M83', 'Synthwave', 1, 1, 0, 240, 2015, 1999, 80, 80, 80, 85, 'Mute Records'),
                   ('e1', 'Electric Sky', 'M83', 'Electronic', 1, 1, 0, 200, 2011, 2011, 100, 100, 100, 99, 'Mute Records');
                 INSERT INTO tracks VALUES
-                  (1, 'A Real Hero', 'College', 'Neon Nights', 2012, 100, '5', 'L', 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'hero.mp3', 1, 1, 1, 1985, 'Valerie Records'),
-                  (2, 'Night Drive', 'College', 'Neon Nights', 2012, 80, '4', NULL, 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'drive.mp3', 1, 1, 2, 1985, 'Valerie Records'),
-                  (3, 'Midnight', 'M83', 'After Dark', 2015, 80, '4', NULL, 240, 'Synthwave', 's2', 'D:\MUSIC\M83', 'midnight.mp3', 1, 1, 1, 1999, 'Mute Records'),
-                  (4, 'Electric', 'M83', 'Electric Sky', 2011, 100, '5', NULL, 200, 'Electronic', 'e1', 'D:\MUSIC\M83', 'electric.mp3', 1, 1, 1, 2011, 'Mute Records');
+                  (1, 'A Real Hero', 'College', 'Neon Nights', 2012, 100, '5', 'L', 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'hero.mp3', 1, 1, 1, 1985, 'Valerie Records', 'College; Electric Youth'),
+                  (2, 'Night Drive', 'College', 'Neon Nights', 2012, 80, '4', NULL, 240, 'Synthwave', 's1', 'D:\MUSIC\College', 'drive.mp3', 1, 1, 2, 1985, 'Valerie Records', 'College'),
+                  (3, 'Midnight', 'M83', 'After Dark', 2015, 80, '4', NULL, 240, 'Synthwave', 's2', 'D:\MUSIC\M83', 'midnight.mp3', 1, 1, 1, 1999, 'Mute Records', 'M83'),
+                  (4, 'Electric', 'M83', 'Electric Sky', 2011, 100, '5', NULL, 200, 'Electronic', 'e1', 'D:\MUSIC\M83', 'electric.mp3', 1, 1, 1, 2011, 'Mute Records', 'M83');
                 "#,
             )
             .expect("seed fixture");
@@ -815,6 +825,11 @@ mod tests {
         assert_eq!(detail.related_genres[0].name, "Electronic");
         assert_eq!(detail.related_genres[0].shared_artists, 1);
         assert_eq!(detail.highlights.len(), 3);
+        assert!(detail.highlights.iter().any(|track| {
+            track.title == "A Real Hero"
+                && track.display_artist.as_deref() == Some("College; Electric Youth")
+                && track.publisher.as_deref() == Some("Valerie Records")
+        }));
     }
 
     #[test]

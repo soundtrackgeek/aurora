@@ -432,7 +432,7 @@ fn query_year_queue(
                    WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                  t.love, t.time_seconds, t.canonical_genre, t.album_id,
                  t.file_path, t.filename, t.import_run_id, t.year AS original_year,
-                 chosen.publisher AS publisher
+                 chosen.publisher AS publisher, t.display_artist AS display_artist
           FROM tracks AS t
           JOIN chosen_albums AS chosen ON chosen.id = t.album_id
           ORDER BY (t.love = 'L') DESC, rating_value DESC, t.album_id, t.disc_number, t.track_number, t.id
@@ -441,7 +441,7 @@ fn query_year_queue(
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
                l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
-               p.original_year, p.publisher
+               p.original_year, p.publisher, p.display_artist AS display_artist
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -504,7 +504,7 @@ mod tests {
                   album_artist_display TEXT, album TEXT, year INTEGER, release_year INTEGER,
                   normalized_rating INTEGER, rating_raw TEXT, love TEXT, time_seconds INTEGER,
                   canonical_genre TEXT, file_path TEXT, filename TEXT, import_run_id INTEGER NOT NULL,
-                  disc_number INTEGER, track_number INTEGER
+                  disc_number INTEGER, track_number INTEGER, display_artist TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (
                   artist_key TEXT, track_key TEXT, play_count INTEGER
@@ -516,13 +516,13 @@ mod tests {
                   ('missing-original', 'Unknown Origin', 'Artist', NULL, 2025, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1, NULL),
                   ('missing-release', 'Unknown Release', 'Artist', 1982, NULL, 1, 0, 0, 200, 'Ambient', NULL, NULL, NULL, 1, NULL);
                 INSERT INTO tracks VALUES
-                  (1, 'original', 'One', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, 'L', 200, 'Electronic', 'D:\\Music', 'one.mp3', 1, 1, 1),
-                  (2, 'original', 'Two', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'two.mp3', 1, 1, 2),
-                  (3, 'reissue', 'Three', 'Artist', 'Later Edition', 1982, 2025, 80, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'three.mp3', 1, 1, 1),
-                  (4, 'reissue', 'Four', 'Artist', 'Later Edition', 1982, 2025, 80, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'four.mp3', 1, 1, 2),
-                  (5, 'archive', 'Five', 'Artist', 'Archive Edition', 1969, 2025, NULL, NULL, NULL, 200, 'Rock', 'D:\\Music', 'five.mp3', 1, 1, 1),
-                  (6, 'missing-original', 'Six', 'Artist', 'Unknown Origin', NULL, 2025, NULL, NULL, NULL, 200, 'Ambient', 'D:\\Music', 'six.mp3', 1, 1, 1),
-                  (7, 'missing-release', 'Seven', 'Artist', 'Unknown Release', 1982, NULL, NULL, NULL, NULL, 200, 'Ambient', 'D:\\Music', 'seven.mp3', 1, 1, 1);
+                  (1, 'original', 'One', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, 'L', 200, 'Electronic', 'D:\\Music', 'one.mp3', 1, 1, 1, 'Artist; Guest'),
+                  (2, 'original', 'Two', 'Artist', 'Original Edition', 1982, 1982, 100, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'two.mp3', 1, 1, 2, 'Artist'),
+                  (3, 'reissue', 'Three', 'Artist', 'Later Edition', 1982, 2025, 80, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'three.mp3', 1, 1, 1, 'Artist'),
+                  (4, 'reissue', 'Four', 'Artist', 'Later Edition', 1982, 2025, 80, NULL, NULL, 200, 'Electronic', 'D:\\Music', 'four.mp3', 1, 1, 2, 'Artist'),
+                  (5, 'archive', 'Five', 'Artist', 'Archive Edition', 1969, 2025, NULL, NULL, NULL, 200, 'Rock', 'D:\\Music', 'five.mp3', 1, 1, 1, 'Artist'),
+                  (6, 'missing-original', 'Six', 'Artist', 'Unknown Origin', NULL, 2025, NULL, NULL, NULL, 200, 'Ambient', 'D:\\Music', 'six.mp3', 1, 1, 1, 'Artist'),
+                  (7, 'missing-release', 'Seven', 'Artist', 'Unknown Release', 1982, NULL, NULL, NULL, NULL, 200, 'Ambient', 'D:\\Music', 'seven.mp3', 1, 1, 1, 'Artist');
                 "#,
             )
             .expect("seed fixture");
@@ -640,6 +640,10 @@ mod tests {
         )
         .expect("year queue");
         assert_eq!(tracks.len(), 2);
+        assert!(tracks.iter().any(|track| {
+            track.display_artist.as_deref() == Some("Artist; Guest")
+                && track.publisher.as_deref() == Some("Aurora Records")
+        }));
         assert!(
             query_year_queue(
                 &connection,

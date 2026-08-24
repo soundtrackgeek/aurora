@@ -442,6 +442,7 @@ pub(crate) fn query_snapshot(
         r#"
         WITH page AS MATERIALIZED (
           SELECT id, title, album_artist_display, display_artist, album, release_year,
+                 year, publisher,
                  COALESCE(normalized_rating, CASE trim(rating_raw)
                    WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
                    WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
@@ -458,7 +459,8 @@ pub(crate) fn query_snapshot(
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
                l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
-               p.display_artist AS display_artist
+               p.display_artist AS display_artist, p.year AS original_year,
+               p.publisher AS publisher
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -535,6 +537,7 @@ pub(crate) fn load_artist_tracks(
         r#"
         WITH page AS MATERIALIZED (
           SELECT id, title, album_artist_display, display_artist, album, release_year,
+                 year, publisher,
                  COALESCE(normalized_rating, CASE trim(rating_raw)
                    WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
                    WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
@@ -551,7 +554,8 @@ pub(crate) fn load_artist_tracks(
         SELECT p.id, p.title, p.album_artist_display, p.album, p.release_year,
                p.rating_value, p.love, p.time_seconds, p.canonical_genre,
                l.play_count, p.album_id, p.file_path, p.filename, p.import_run_id,
-               p.display_artist AS display_artist
+               p.display_artist AS display_artist, p.year AS original_year,
+               p.publisher AS publisher
         FROM page AS p
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(p.album_artist_display))
@@ -1190,7 +1194,8 @@ pub(crate) fn load_search_tracks(
                  WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                t.love, t.time_seconds, t.canonical_genre,
                l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-               t.display_artist AS display_artist
+               t.display_artist AS display_artist, t.year AS original_year,
+               t.publisher AS publisher
         FROM tracks AS t
         "#,
     );
@@ -1250,7 +1255,8 @@ pub(crate) fn load_tracks_by_ids(
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1304,7 +1310,8 @@ pub(crate) fn load_tracks_by_references(
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1325,7 +1332,8 @@ pub(crate) fn load_tracks_by_references(
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1462,7 +1470,8 @@ fn load_catalog_track_by_id(track_id: &str, track_key: &str) -> Result<TrackSumm
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1526,7 +1535,8 @@ fn lookup_track_by_stable_key(
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1574,7 +1584,8 @@ fn lookup_track_by_stable_key(
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END),
                    t.love, t.time_seconds, t.canonical_genre,
                    l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
-                   t.display_artist AS display_artist
+                   t.display_artist AS display_artist, t.year AS original_year,
+                   t.publisher AS publisher
             FROM tracks AS t
             LEFT JOIN lastfm_track_popularity AS l
               ON l.artist_key = lower(trim(t.album_artist_display))
@@ -1816,7 +1827,7 @@ mod tests {
                   display_artist TEXT, album TEXT, release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT,
                   love TEXT,
                   time_seconds INTEGER, canonical_genre TEXT, file_path TEXT, filename TEXT,
-                  import_run_id INTEGER NOT NULL
+                  import_run_id INTEGER NOT NULL, year INTEGER, publisher TEXT
                 );
                 CREATE TABLE albums (
                   album_artist_display TEXT, canonical_genre TEXT, total_tracks INTEGER NOT NULL
@@ -1838,8 +1849,8 @@ mod tests {
                   '2026-08-24T10:01:00Z',
                   'completed'
                 );
-                INSERT INTO tracks VALUES (7, 'album-7', 'Sæglópur', 'Sigur Rós', 'Jónsi', 'Takk...', 2005, 100, '5', 'L', 473, 'Post-rock', 'H:\Music\Sigur Rós', '01 Sæglópur.mp3', 52);
-                INSERT INTO tracks VALUES (8, 'album-7', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 2005, NULL, '4.5', NULL, 268, 'Post-rock', 'H:\Music\Sigur Rós', '02 Hoppípolla.mp3', 52);
+                INSERT INTO tracks VALUES (7, 'album-7', 'Sæglópur', 'Sigur Rós', 'Jónsi', 'Takk...', 2005, 100, '5', 'L', 473, 'Post-rock', 'H:\Music\Sigur Rós', '01 Sæglópur.mp3', 52, 2005, 'EMI');
+                INSERT INTO tracks VALUES (8, 'album-7', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 2005, NULL, '4.5', NULL, 268, 'Post-rock', 'H:\Music\Sigur Rós', '02 Hoppípolla.mp3', 52, 2005, 'EMI');
                 INSERT INTO lastfm_track_popularity VALUES ('sigur rós', 'sæglópur', 42);
                 "#,
             )
@@ -1854,6 +1865,7 @@ mod tests {
         assert_eq!(snapshot.artists[0].name, "Sigur Rós");
         assert_eq!(snapshot.tracks[0].album_id.as_deref(), Some("album-7"));
         assert_eq!(snapshot.tracks[0].display_artist.as_deref(), Some("Jónsi"));
+        assert_eq!(snapshot.tracks[0].publisher.as_deref(), Some("EMI"));
         assert_eq!(snapshot.tracks[0].rating, Some(5.0));
         assert!(snapshot.tracks[0].loved);
         assert_eq!(snapshot.tracks[0].play_count, Some(42));
@@ -1903,7 +1915,8 @@ mod tests {
                   id INTEGER PRIMARY KEY, album_id TEXT, title TEXT, album_artist_display TEXT,
                   display_artist TEXT, album TEXT, release_year INTEGER, normalized_rating INTEGER,
                   rating_raw TEXT, love TEXT, time_seconds INTEGER, canonical_genre TEXT,
-                  file_path TEXT, filename TEXT, import_run_id INTEGER NOT NULL
+                  file_path TEXT, filename TEXT, import_run_id INTEGER NOT NULL,
+                  year INTEGER, publisher TEXT
                 );
                 CREATE TABLE albums (
                   album_artist_display TEXT, canonical_genre TEXT, total_tracks INTEGER NOT NULL
@@ -1929,11 +1942,13 @@ mod tests {
                 );
                 INSERT INTO tracks VALUES (
                   1, 'album-a', 'Track A', 'Artist A', 'Artist A', 'Album A', 2020,
-                  NULL, NULL, NULL, 180, 'Pop', 'H:\Music\Artist A\Album A', 'Track A.mp3', 52
+                  NULL, NULL, NULL, 180, 'Pop', 'H:\Music\Artist A\Album A', 'Track A.mp3', 52,
+                  2020, 'Publisher A'
                 );
                 INSERT INTO tracks VALUES (
                   2, 'album-b', 'Track B', 'Artist B', 'Artist B', 'Album B', 2021,
-                  NULL, NULL, NULL, 190, 'Rock', 'H:\Music\Artist B\Album B', 'Track B.mp3', 53
+                  NULL, NULL, NULL, 190, 'Rock', 'H:\Music\Artist B\Album B', 'Track B.mp3', 53,
+                  2021, 'Publisher B'
                 );
                 "#,
             )
