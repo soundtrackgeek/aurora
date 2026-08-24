@@ -77,6 +77,7 @@ import {
   exploreAlbums,
   exploreArtists,
   exploreTracks,
+  displayTrackArtist,
   formatCount,
   formatDuration,
   catalogRefreshIsConsistent,
@@ -2316,7 +2317,7 @@ function App() {
     || (activeNav === "Charts" && chartSelection?.kind === "albums"),
   );
   const inspectorArtistCandidate = explorerAlbumInspectorContext?.artistName
-    ?? inspectorTrack?.artist
+    ?? (inspectorTrack ? displayTrackArtist(inspectorTrack) : null)
     ?? inspectorArtistName;
   const albumTagTarget = explorerAlbumInspectorContext
     ? { kind: "album" as const, albumId: explorerAlbumInspectorContext.album.id, label: explorerAlbumInspectorContext.album.title }
@@ -2455,7 +2456,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.3</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2775,7 +2776,9 @@ function App() {
             aria-selected={inspectorView === "artist"}
             disabled={!inspectorArtistCandidate}
             onClick={() => {
-              const artistName = explorerAlbumInspectorContext?.artistName ?? inspectorTrack?.artist ?? inspectorArtistName;
+              const artistName = explorerAlbumInspectorContext?.artistName
+                ?? (inspectorTrack ? displayTrackArtist(inspectorTrack) : null)
+                ?? inspectorArtistName;
               if (artistName) openArtistInspector(artistName);
             }}
           >Artist</button>
@@ -2844,7 +2847,7 @@ function App() {
           <div className="inspector-scroll">
             <Artwork track={inspectorTrack} size="large" />
             <div className="track-hero-copy">
-              <div><h2>{inspectorTrack.title}</h2><p>{inspectorTrack.artist}</p><span>{inspectorTrack.album}</span></div>
+              <div><h2>{inspectorTrack.title}</h2><p>{displayTrackArtist(inspectorTrack)}</p><span>{inspectorTrack.album}</span></div>
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">

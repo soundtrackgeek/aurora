@@ -1,4 +1,4 @@
-import type { Track } from "../../library";
+import { displayTrackArtist, type Track } from "../../library";
 
 interface InspectorAlbum {
   id: string;
@@ -22,5 +22,5 @@ export function resolveExplorerAlbumInspectorContext<TAlbum extends InspectorAlb
   const track = albumTracks.find((candidate) => candidate.id === selectedTrack?.id)
     ?? albumTracks[0]
     ?? null;
-  return { album, track, artistName: album.artist };
+  return { album, track, artistName: track ? displayTrackArtist(track) : album.artist };
 }

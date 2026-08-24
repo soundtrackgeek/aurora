@@ -44,6 +44,10 @@ export interface Track {
   discTotal?: number | null;
 }
 
+export function displayTrackArtist(track: Track): string {
+  return track.displayArtist?.trim() || track.artist;
+}
+
 export function catalogRefreshIsConsistent(
   detectedRevision: number,
   reboundRevision: number,

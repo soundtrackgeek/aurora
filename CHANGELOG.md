@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-08-24
+
+### Fixed
+
+- The bottom playbar and Track inspector now show the track's Artist credit instead of substituting Album Artist.
+- Opening the Artist inspector from a selected track now follows that track's Artist credit, including soundtrack and compilation tracks whose performer differs from the album artist.
+
 ## [0.17.2] - 2026-08-24
 
 ### Added

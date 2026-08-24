@@ -35,11 +35,11 @@ const track: Track = {
   playCount: 10,
 };
 
-function snapshot(positionSeconds: number): PlaybackSnapshot {
+function snapshot(positionSeconds: number, currentTrack = track): PlaybackSnapshot {
   return {
-    queue: [track],
+    queue: [currentTrack],
     currentIndex: 0,
-    currentTrack: track,
+    currentTrack,
     status: "playing",
     positionSeconds,
     volume: 0.7,
@@ -78,6 +78,20 @@ function props(positionSeconds = 60) {
 }
 
 describe("PlayerBar", () => {
+  it("shows the track artist instead of the album artist", () => {
+    const soundtrackTrack: Track = {
+      ...track,
+      title: "Miracles",
+      artist: "Alexandre Desplat",
+      displayArtist: "Coldplay",
+      album: "Unbroken",
+    };
+    render(<PlayerBar {...props()} playback={snapshot(60, soundtrackTrack)} />);
+
+    expect(screen.getByText("Coldplay · Unbroken")).toBeInTheDocument();
+    expect(screen.queryByText("Alexandre Desplat · Unbroken")).not.toBeInTheDocument();
+  });
+
   it("toggles total time to a live remaining-time readout", () => {
     const initial = props();
     const { rerender } = render(<PlayerBar {...initial} />);

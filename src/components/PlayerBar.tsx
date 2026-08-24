@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { formatDuration, type Track } from "../library";
+import { displayTrackArtist, formatDuration, type Track } from "../library";
 import type { PlaybackSnapshot, RepeatMode } from "../playback";
 import type { LoveState } from "../tags";
 import { loadTrackWaveform, type TrackWaveform } from "../waveform";
@@ -162,7 +162,7 @@ export function PlayerBar({
                   onLoveChange={(loveState) => onLoveChange(track, loveState)}
                 />
               </div>
-              <span>{track.artist} · {track.album}</span>
+              <span>{displayTrackArtist(track)} · {track.album}</span>
               <div className="now-playing__details">
                 <div className="now-playing__technical">
                   <small>{technicalSummary(waveform, waveformFailed)}</small>

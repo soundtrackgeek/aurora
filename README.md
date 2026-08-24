@@ -1,14 +1,15 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.2 keeps album browsing spatially stable with MusicBee-style inline track expansion, a distinct current-playback marker, and album rating plus Album Score on every album card.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.3 shows each track's own Artist credit in the playbar and track inspector, and opens that same Artist in the artist inspector while preserving Album Artist for album-level browsing.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.2 slice
+## Current 0.17.3 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
 - A dedicated **Tags** tab in the right inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- The playbar and Track inspector prefer the selected track's Artist credit, and the Artist tab follows that credit instead of the album-level Album Artist.
 - Track and album selection semantics model MusicBee's vertical editor: common values are shown once, differing values are labelled **Mixed**, and only checked or edited fields are written. A checked blank value is an explicit clear except for Album Artist, Album, and Track Title, which Music Library requires for safe catalog identity.
 - Artist edits MusicBee's `DISPLAY ARTIST` override while preserving the underlying multi-value performer credits; Album Artist retains semicolon-separated multi-value `TPE2` credits.
 - Album saves preflight every selected MP3 and its revision before the first write. Aurora then performs verified same-folder atomic writes, rolls back earlier completed files if a later file fails, and retains recovery evidence for ambiguous Windows replacement failures.

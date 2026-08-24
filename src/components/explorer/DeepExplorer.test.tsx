@@ -129,6 +129,26 @@ describe("DeepExplorer", () => {
     });
   });
 
+  it("uses the selected track artist for the Artist inspector", () => {
+    const soundtrackTrack: Track = {
+      ...tracks[1],
+      artist: "Mark Mancina",
+      displayArtist: "Billy Idol",
+      album: "Speed",
+    };
+
+    expect(resolveExplorerAlbumInspectorContext(
+      albums,
+      "album-1",
+      [tracks[0], soundtrackTrack],
+      soundtrackTrack,
+    )).toEqual({
+      album: albums[0],
+      track: soundtrackTrack,
+      artistName: "Billy Idol",
+    });
+  });
+
   it.each(["tracks", "albums", "artists"] as const)("keeps only Sort and Reset in the %s filter bar", (view) => {
     const onClearFilters = vi.fn();
     render(<DeepExplorer {...explorerProps({ view, onClearFilters })} />);
