@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.14] - 2026-08-24
+
+### Fixed
+
+- MP3 decoding, ReplayGain, and sample-rate conversion now run on dedicated producer threads that prefill bounded lock-free PCM ring buffers. The Windows audio callback only consumes ready endpoint-format samples instead of decoding or resampling under its real-time deadline.
+- Current and gapless-prepared tracks each keep at most three seconds of PCM, prefill up to 500 ms before becoming playable, preserve seeking by invalidating stale generations, and count buffer starvation through the existing audio-underrun diagnostic.
+
 ## [0.17.13] - 2026-08-24
 
 ### Fixed

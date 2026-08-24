@@ -13,6 +13,7 @@ mod library_bridge;
 mod library_sync;
 mod media_controls;
 mod musicbrainz;
+mod pcm_buffer;
 mod playback;
 mod publishers;
 mod ratings;

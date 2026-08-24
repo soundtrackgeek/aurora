@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.13 hardens native playback with a stable endpoint-format stream, real-time Windows callback scheduling, high-quality resampling, and additional output headroom.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.14 moves MP3 decoding, ReplayGain, and high-quality resampling off the real-time Windows audio callback into bounded lock-free PCM buffers.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.13 slice
+## Current 0.17.14 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -25,7 +25,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Device-local Windows output selection using stable endpoint IDs, with automatic continuation on the Windows default when the preferred device is missing, cannot open, or disconnects.
 - A two-entry, signature-checked encoded-MP3 read-ahead cache loads ordinary current and prepared-next tracks sequentially before the real-time callback can request them. Files above the 96 MiB admission cap or allocation failures retain a 1 MiB buffered-file fallback.
 - ReplayGain Off, Track, and Album modes based on MusicBee-compatible `REPLAYGAIN_*` ID3 text frames. Album mode falls back to Track tags, positive gain is capped by the tagged peak, and MP3 files are never modified.
-- One stable shared Windows output stream at the endpoint format, with CPAL real-time callback scheduling, a stability-focused 4,096-frame buffer, and Rodio's balanced Rubato sinc/FFT resampler for mixed-rate MP3s. Aurora keeps bounded encoded MP3 read-ahead and reports observed underruns or denied real-time scheduling in the player output readout.
+- One stable shared Windows output stream at the endpoint format, with CPAL real-time callback scheduling and a stability-focused 4,096-frame device buffer. Dedicated producer threads decode, apply ReplayGain, and run Rodio's balanced Rubato sinc/FFT resampler into per-track lock-free PCM rings holding at most three seconds; playback pre-fills up to 500 ms and reports observed starvation, device underruns, or denied real-time scheduling in the player output readout.
 - Gapless-capable queue transitions: Aurora opens and appends the next resolved MP3 to the same native player during the final 15 seconds, so audio handoff does not wait for React polling. Missing, invalid, or unknown-duration files retain the safe ordinary transition.
 - An Audio Settings tab beside Global Shortcuts, atomic per-computer persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-audio.json`, and a compact player readout for the active output and applied gain.
 - A Windows media session for physical Play/Pause, Stop, Previous, and Next keyboard buttons, with native now-playing metadata and Windows arbitration between active players. This is independent of audio shared/exclusive mode.

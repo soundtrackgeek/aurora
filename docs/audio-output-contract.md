@@ -1,6 +1,6 @@
 # Audio output contract
 
-Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.13 keeps one endpoint-format output stream, adopts CPAL's Windows real-time scheduling and Rodio's Rubato resampler, and adds stability-focused output headroom. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
+Aurora 0.10.0 added a device-local output and loudness layer without expanding the catalog or MP3 write boundaries. Version 0.17.14 keeps one endpoint-format output stream and moves decoding, gain, and resampling into bounded background PCM producers. Rust owns endpoint discovery, stream creation, ReplayGain parsing, clipping prevention, encoded and PCM read-ahead, and queue preparation. React displays native status and submits only a selected endpoint ID plus ReplayGain mode.
 
 ## Windows output selection
 
@@ -18,9 +18,12 @@ Aurora 0.10.0 added a device-local output and loudness layer without expanding t
 - Stream creation uses the selected endpoint's default shared-mode sample rate and format, requests a 4,096-frame stability buffer, and remains open across source-rate changes. A fallback configuration is still allowed when an endpoint rejects the preferred buffer.
 - CPAL's `realtime` feature promotes the Windows output callback thread; if promotion is denied, playback continues and the player reports the condition instead of reopening the device.
 - Aurora explicitly selects Rodio's balanced sinc configuration to convert MP3s into the stable stream format through Rubato, including mixed-rate gapless successors. The FFT path is enabled for efficient fixed-ratio conversions; the mixer therefore receives sources already matching its output rate and does not fall back to its default linear policy.
+- Each current or prepared-next track receives a dedicated producer thread and bounded lock-free single-producer/single-consumer PCM ring. The producer decodes, applies ReplayGain, and resamples up to three seconds ahead; track loading waits for up to 500 ms of endpoint-format PCM before appending the source to Rodio.
+- The real-time consumer never reads MP3 bytes, decodes frames, resamples, allocates, or takes the producer's lock. It performs a non-blocking ring read. A temporarily empty live ring emits silence and increments the underrun count once per starvation interval rather than ending the track.
+- Seeking assigns a new buffer generation, discards queued samples, asks the producer to seek the decoder, and refills before the audio callback resumes. Samples produced by the old generation are rejected, preventing stale pre-seek audio.
 - CPAL xrun notifications increment an atomic underrun counter. Xruns, real-time denial, and automatic route-change notices are non-fatal; actual invalidation, device loss, or backend failures retain Aurora's Windows-default recovery path.
 
-The device callback still performs MP3 decoding. Encoded read-ahead, optimized development dependencies, real-time scheduling, and the larger output buffer reduce deadline risk, but this is not a background PCM ring buffer. CPAL exposes xrun notifications where the Windows backend can detect them; a zero count is not proof that no glitch occurred.
+The count combines detectable CPAL xruns with Aurora PCM-ring starvation. A zero count is still not proof that no hardware, driver, or downstream Windows audio glitch occurred.
 
 ## Device-local persistence
 

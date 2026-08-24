@@ -4,6 +4,7 @@ use crate::{
     },
     catalog::{self, TrackReference, TrackSummary},
     history::{ActiveHistorySession, HistoryStore},
+    pcm_buffer::PcmBufferSource,
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
@@ -508,6 +509,8 @@ impl PlaybackRuntime {
         let source = decoder
             .amplify(gain.linear)
             .resample(target_sample_rate, ResampleConfig::balanced());
+        let source =
+            PcmBufferSource::spawn(Box::new(source), Arc::clone(&self.audio_underrun_count))?;
         Ok((Box::new(source), gain))
     }
 
@@ -1602,5 +1605,24 @@ mod tests {
             .expect("open Windows output");
         eprintln!("Aurora test output config: {:?}", output.config());
         assert!(output.config().sample_rate().get() > 0);
+        let config = output.config();
+        let silent_samples =
+            config.sample_rate().get() as usize / 10 * config.channel_count().get() as usize;
+        let silence = rodio::source::Zero::new_samples(
+            config.channel_count(),
+            config.sample_rate(),
+            silent_samples,
+        )
+        .expect("frame-aligned silence");
+        let buffered = PcmBufferSource::spawn(Box::new(silence), Arc::clone(&underruns))
+            .expect("prefill native PCM buffer");
+        let player = Player::connect_new(output.mixer());
+        player.append(buffered);
+        player.play();
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(
+            player.empty(),
+            "buffered silence should finish on the device"
+        );
     }
 }
