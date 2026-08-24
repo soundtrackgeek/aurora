@@ -836,7 +836,6 @@ function App() {
         setGenreDetailReloadToken((value) => value + 1);
         setPublisherReloadToken((value) => value + 1);
         setYearReloadToken((value) => value + 1);
-        setRatingsReloadToken((value) => value + 1);
         setChartReloadToken((value) => value + 1);
         setSyncMessage("Music Library import detected · refreshed Aurora");
         const artistName = inspectorArtistNameRef.current;
@@ -2075,9 +2074,6 @@ function App() {
         ...current,
         [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
       }));
-      if (activeNav === "Ratings") {
-        setRatingsReloadToken((value) => value + 1);
-      }
       if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumId) {
         const albumId = snapshot.track.albumId;
         const requestId = ++albumRequestRef.current;
@@ -2596,7 +2592,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.8</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.9</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2832,6 +2828,7 @@ function App() {
                 onPlayCollection={(mode, rating) => void playRatingCollection(mode, rating)}
                 onExploreCollection={exploreRatingCollection}
                 onPlayUnrated={(album) => void playRatingAlbumUnrated(album)}
+                onRefresh={() => setRatingsReloadToken((value) => value + 1)}
                 onRetry={() => setRatingsReloadToken((value) => value + 1)}
                 onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
               />

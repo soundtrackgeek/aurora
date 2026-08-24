@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.9] - 2026-08-24
+
+### Added
+
+- The **Finish what you love** workspace now has an explicit Refresh action that reloads its completion candidates and the Ratings overview on demand.
+
+### Fixed
+
+- Rating and Love edits, including their later catalog synchronization, no longer replace the visible completion candidates automatically. The shelf stays stable until Refresh is selected.
+- The decorative cover pyramids no longer capture pointer input where the tallest 5-star artwork overflows into the header, so Track ratings and Album ratings remain clickable.
+
 ## [0.17.8] - 2026-08-24
 
 ### Fixed

@@ -46,6 +46,7 @@ interface RatingsStudioProps {
   onPlayCollection: (mode: RatingMode, rating: number | null) => void;
   onExploreCollection: (mode: RatingMode, rating: number | null) => void;
   onPlayUnrated: (album: RatingAlbum) => void;
+  onRefresh: () => void;
   onRetry: () => void;
   onRetryPage: () => void;
 }
@@ -196,14 +197,19 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
         <p className="eyebrow">Album completion studio</p>
         <h2 id="completion-heading">Finish what you love.</h2>
       </div>
-      <div role="tablist" aria-label="Album completion state">
-        {completionTabs.map((tab) => <button
-          type="button"
-          role="tab"
-          aria-selected={page?.kind === tab.kind}
-          onClick={() => props.onCompletionChange(tab.kind)}
-          key={tab.kind}
-        >{tab.label} <span>{formatCount(overview.completion[tab.kind])}</span></button>)}
+      <div className="completion-tabs__controls">
+        <div role="tablist" aria-label="Album completion state">
+          {completionTabs.map((tab) => <button
+            type="button"
+            role="tab"
+            aria-selected={page?.kind === tab.kind}
+            onClick={() => props.onCompletionChange(tab.kind)}
+            key={tab.kind}
+          >{tab.label} <span>{formatCount(overview.completion[tab.kind])}</span></button>)}
+        </div>
+        <button type="button" className="button button--quiet completion-refresh" onClick={props.onRefresh}>
+          <RefreshCw aria-hidden="true" /> Refresh
+        </button>
       </div>
     </header>
     {props.pageState !== "ready" || !page ? <Feedback detail error={props.pageError} onRetry={props.onRetryPage} /> : <>

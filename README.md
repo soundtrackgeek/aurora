@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.8 keeps shared Windows audio at the active MP3's native sample rate, avoiding Rodio's low-quality linear conversion during ordinary playback while preserving the Windows media session and playback responsiveness work from 0.17.7.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.9 keeps the Ratings completion shelf stable while you work, refreshes it only on request, and restores reliable access to the Track and Album rating tabs.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.8 slice
+## Current 0.17.9 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -15,7 +15,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Album saves preflight every selected MP3 and its revision before the first write. Aurora then performs verified same-folder atomic writes, rolls back earlier completed files if a later file fails, and retains recovery evidence for ambiguous Windows replacement failures.
 - Aurora invokes Music Library `0.144.1` or newer through a versioned, file-based local bridge. Music Library remains the sole filesystem mover and catalog writer; Aurora never opens the shared catalog for writes.
 - After a verified inline, inspector, global-shortcut, or undo tag edit, Aurora durably queues the exact MP3 and returns the interaction result without waiting for Music Library. The focused background retry asks Music Library `0.144.1` to scan only that file for an ordinary rating, Love/Ban, or Release Year edit, then applies a guarded album-only transaction; broader identity or text edits and multiple pending files in one album retain the safe complete-folder/full-catalog fallback. Aurora keeps the verified MP3 result visible and distinguishes **Music Library updated** from a durable **update pending** state.
-- Folder synchronization is serialized and token-protected: one invalid old folder cannot poison a new edit, an older receipt cannot erase a newer edit queued for the same folder, and neither a delayed edit response nor external-tag reconciliation can project over newer tag state. Pending overlays are reconciled per live track, so a targeted album import does not hide edits still awaiting synchronization in another album. While Aurora is focused it retries one pending folder every five seconds and refreshes all revision-backed views immediately after each successful receipt.
+- Folder synchronization is serialized and token-protected: one invalid old folder cannot poison a new edit, an older receipt cannot erase a newer edit queued for the same folder, and neither a delayed edit response nor external-tag reconciliation can project over newer tag state. Pending overlays are reconciled per live track, so a targeted album import does not hide edits still awaiting synchronization in another album. While Aurora is focused it retries one pending folder every five seconds and refreshes revision-backed views after each successful receipt; the Ratings completion shelf deliberately waits for its explicit Refresh action.
 - Album intake and tag editing deliberately assume that files have already been manually identified, tagged, and named as intended; Aurora does not add an automatic MusicBrainz, Discogs, or fingerprint-matching step.
 - Native folder selection, strict bridge/category/receipt validation, bounded helper timeouts, and clear update guidance when the installed Music Library does not yet support album intake. Source paths are passed in private request files rather than command-line arguments, and post-edit bridge work never blocks the rating or tag interaction that queued it.
 - Truthful batch completion distinguishes fully moved albums from verified catalog copies whose source cleanup needs attention. A successful import triggers Aurora's existing revision check, stable queue rebind, and bounded view refresh immediately.
@@ -57,7 +57,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Calculated period charts rank by number of #1 finishes, then #2 finishes, then each lower position in order; chart points and appearances provide deterministic final tie-breaks.
 - A first-class Aurora Album Score chart and year shelf reuse Music Library's exact numeric formula without converting it to stars, use `Year` by default, and can switch explicitly to `Release Year`.
 - Library-matched chart entries expose real cover art, rating, Love, movement, peak, source history, direct playback, chart-queue playback, and handoff into the ordinary library inspector. Requests and playback queues remain capped at 100 items.
-- Instant Ratings Studio star and Love controls reuse the verified MP3 transaction and Aurora overlay, then refresh only the affected bounded UI. Switching completion lanes does not rerun the full ratings overview.
+- Instant Ratings Studio star and Love controls reuse the verified MP3 transaction and Aurora overlay while keeping the visible completion candidates stable. The explicit Refresh action reloads the Ratings overview and completion shelf when the rating pass is finished; switching completion lanes still avoids rerunning the full overview.
 - Persistent icon-only device mode: a monitor identifies Desktop Mode, a laptop identifies Laptop Mode, and each computer remembers its own choice in `aurora-device.json` outside the shared state database.
 - Exact runtime-only drive translation from `D:\MUSIC`, `G:\_BACKUP\SCORES`, and `H:\Synthwave` to `Y:\MUSIC`, `V:\_BACKUP\SCORES`, and `U:\Synthwave`; the catalog and stable track identities remain unchanged.
 - Verified SQLite state snapshots at `%USERPROFILE%\OneDrive\_musicbackup\aurora-state.sqlite3`, published at most once per minute and once more on clean shutdown.
