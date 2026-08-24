@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-08-24
+
+### Added
+
+- A validated device-local last-view snapshot that restores Aurora's active destination, explorer mode, exact query and filters, sort direction, right-inspector section, tag target kind, and selected album context on startup.
+
+### Changed
+
+- Last-view state is now independent of the existing sidebar layout and display-size preferences; malformed or incompatible stored state falls back safely to the Universe view.
+
 ## [0.17.0] - 2026-08-24
 
 ### Added

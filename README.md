@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.0 adds a MusicBee-style vertical tag editor that writes selected fields directly to one MP3 or every MP3 in a selected album, then synchronizes the existing Music Library catalog automatically.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.1 restores the last active view—including its search, filters, sort, inspector section, and selected album context—when Aurora starts again.
 
 ![Aurora design reference](Aurora.png)
 
@@ -33,6 +33,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Device-local shortcut persistence in `%APPDATA%\com.soundtrackgeek.aurora\aurora-shortcuts.json`; these Windows bindings are intentionally excluded from Laptop Mode and OneDrive state synchronization.
 - Aurora unregisters all active shortcuts during both window close and application exit. Another running app must still retry or restart if its own registration previously failed while Aurora owned the same binding.
 - A persistent left-sidebar cycle with expanded, icon-only, and fully collapsed modes, plus an independently collapsible right inspector. Layout choices stay local to each computer and restore before the first rendered frame.
+- A separate device-local **last view** snapshot restores the active destination, explorer mode, exact search and filter expression, sort direction, right-inspector section, and selected album context after quitting and reopening Aurora. Invalid or obsolete snapshots fall back safely to Universe.
 - A collapsible Library tree containing Songs, Albums, Artists, Publishers, Genres, Years, Ratings, and Tags. Opening a closed Library enters Songs by default; Library and Playlists disclosure choices persist per computer.
 - A dedicated Publisher Signal Timeline with bounded case-insensitive catalog rollups, Release activity, Original-year activity, and Catalog share lenses, publisher search, selected-publisher metrics, decade highlights, publisher playback, and exact handoff into a publisher-filtered Albums collection. Every signal uses its activity years on the same responsive axis, including the final 2026 interval.
 - Publisher metadata in Songs, Albums, Genre, Years, Ratings, Publishers, and the right-side track or album inspector. Album-level views read `albums.publisher`; track views retain `tracks.publisher` without schema mutation.

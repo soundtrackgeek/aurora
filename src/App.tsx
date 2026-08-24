@@ -39,7 +39,6 @@ import {
   type ExplorerAlbum,
   type ExplorerFilters,
   type ExplorerLoadState,
-  type ExplorerSort,
   type ExplorerView,
 } from "./components/explorer/DeepExplorer";
 import { resolveExplorerAlbumInspectorContext } from "./components/explorer/inspectorContext";
@@ -137,6 +136,13 @@ import {
   saveLayoutPreferences,
 } from "./layoutPreferences";
 import {
+  defaultExplorerFilters,
+  defaultExplorerSort,
+  explorerSorts,
+  loadViewPreferences,
+  saveViewPreferences,
+} from "./viewPreferences";
+import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
   saveDisplayPreferences,
@@ -224,32 +230,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   History: "history",
 };
 
-const defaultExplorerFilters: ExplorerFilters = {
-  query: "",
-  rating: "all",
-  love: "all",
-  yearFrom: null,
-  yearTo: null,
-  yearBasis: "original",
-  yearMissing: false,
-  genre: null,
-  artist: null,
-  sort: "newest",
-};
-
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
-
-const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
-  tracks: ["newest", "oldest", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "albumAsc", "albumDesc", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "ratingAsc", "ratingDesc"],
-  albums: ["yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
-  artists: ["artistAsc", "artistDesc", "trackCountAsc", "trackCountDesc"],
-};
-
-const defaultSort: Record<ExplorerView, ExplorerSort> = {
-  tracks: "newest",
-  albums: "yearDesc",
-  artists: "artistAsc",
-};
 
 function genreSummaryWithTrackChange(
   summary: GenreSummary,
@@ -444,12 +425,13 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
 }
 
 function App() {
+  const [initialViewPreferences] = useState(loadViewPreferences);
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight } | null>(null);
-  const [inspectorView, setInspectorView] = useState<"track" | "album" | "artist" | "tags">("track");
-  const [tagSelectionKind, setTagSelectionKind] = useState<"track" | "album">("track");
+  const [inspectorView, setInspectorView] = useState(initialViewPreferences.inspectorView);
+  const [tagSelectionKind, setTagSelectionKind] = useState(initialViewPreferences.tagSelectionKind);
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
@@ -466,12 +448,12 @@ function App() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
-  const [activeNav, setActiveNav] = useState<SidebarDestination>("Universe");
+  const [activeNav, setActiveNav] = useState<SidebarDestination>(initialViewPreferences.activeNav);
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const [reloadToken, setReloadToken] = useState(0);
-  const [explorerView, setExplorerView] = useState<ExplorerView>("tracks");
-  const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(defaultExplorerFilters);
+  const [explorerView, setExplorerView] = useState<ExplorerView>(initialViewPreferences.explorerView);
+  const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(initialViewPreferences.explorerFilters);
   const [explorerTracks, setExplorerTracks] = useState<Track[]>([]);
   const [explorerAlbums, setExplorerAlbums] = useState<AlbumSummary[]>([]);
   const [explorerArtists, setExplorerArtists] = useState<Artist[]>([]);
@@ -481,7 +463,7 @@ function App() {
   const [explorerError, setExplorerError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [explorerReloadToken, setExplorerReloadToken] = useState(0);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(initialViewPreferences.selectedAlbumId);
   const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
   const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
   const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
@@ -600,6 +582,7 @@ function App() {
   const catalogRefreshRequestedRef = useRef(false);
   const appMountedRef = useRef(true);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
+  const explorerRestorationPendingRef = useRef(true);
   const inspectorViewRef = useRef(inspectorView);
   const inspectorArtistNameRef = useRef(inspectorArtistName);
   const openArtistInspectorRef = useRef<(artistName: string) => void>(() => undefined);
@@ -634,6 +617,17 @@ function App() {
   useEffect(() => {
     saveDisplayPreferences(displayPreferences);
   }, [displayPreferences]);
+
+  useEffect(() => {
+    saveViewPreferences({
+      activeNav,
+      explorerView,
+      explorerFilters,
+      inspectorView,
+      tagSelectionKind,
+      selectedAlbumId,
+    });
+  }, [activeNav, explorerFilters, explorerView, inspectorView, selectedAlbumId, tagSelectionKind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -900,13 +894,17 @@ function App() {
       || activeNav === "Years"
       || activeNav === "Ratings"
     ) return;
+    const restoringStoredView = explorerRestorationPendingRef.current;
+    const restoredAlbumId = restoringStoredView && explorerView === "albums"
+      ? initialViewPreferences.selectedAlbumId
+      : null;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
     const clearDetailTimer = window.setTimeout(() => {
       if (cancelled) return;
       setIsLoadingMore(false);
-      setSelectedAlbumId(null);
+      if (!restoredAlbumId) setSelectedAlbumId(null);
       setAlbumTracks([]);
       setAlbumTracksTruncated(false);
     }, 0);
@@ -923,9 +921,32 @@ function App() {
           setExplorerCursor(page.nextCursor);
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
+          if (restoredAlbumId && page.albums.some((album) => album.id === restoredAlbumId)) {
+            const albumDetailRequestId = ++albumRequestRef.current;
+            setSelectedAlbumId(restoredAlbumId);
+            setAlbumDetailState("loading");
+            void loadAlbumDetail(restoredAlbumId)
+              .then((detail) => {
+                if (albumDetailRequestId !== albumRequestRef.current) return;
+                setExplorerAlbums((current) => current.map((album) => album.id === detail.album.id ? detail.album : album));
+                setAlbumTracks(detail.tracks);
+                setAlbumTracksTruncated(detail.tracksTruncated);
+                setSelectedTrack(detail.tracks[0] ?? null);
+                setAlbumDetailState("ready");
+              })
+              .catch((error: unknown) => {
+                if (albumDetailRequestId !== albumRequestRef.current) return;
+                console.warn("Aurora could not restore album details", error);
+                setAlbumDetailState("error");
+              });
+          } else if (restoringStoredView) {
+            setSelectedAlbumId(null);
+          }
+          explorerRestorationPendingRef.current = false;
         })
         .catch((error: unknown) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
+          explorerRestorationPendingRef.current = false;
           setExplorerError(error instanceof Error ? error.message : String(error));
           setExplorerLoadState("error");
         });
@@ -935,7 +956,14 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken]);
+  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId]);
+
+  useEffect(() => {
+    if (
+      libraryReady
+      && ["Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
+    ) explorerRestorationPendingRef.current = false;
+  }, [activeNav, libraryReady]);
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Genres") return;
@@ -1930,7 +1958,7 @@ function App() {
     setExplorerView(view);
     setExplorerFilters((current) => ({
       ...current,
-      sort: explorerSorts[view].includes(current.sort) ? current.sort : defaultSort[view],
+      sort: explorerSorts[view].includes(current.sort) ? current.sort : defaultExplorerSort[view],
     }));
     if (view !== "albums") setSelectedAlbumId(null);
   }
@@ -1957,7 +1985,7 @@ function App() {
     setActiveNav(destination === "albums" ? "Albums" : "Artists");
     expandLibraryNavigation();
     setExplorerView(destination);
-    setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: defaultSort[destination] }));
+    setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: defaultExplorerSort[destination] }));
     if (destination === "albums") setSelectedAlbumId(null);
     openArtistInspector(artist.name);
   }
@@ -2409,7 +2437,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2697,7 +2725,7 @@ function App() {
                     setExplorerReloadToken((value) => value + 1);
                   }
                 }}
-                onClearFilters={() => setExplorerFilters({ ...defaultExplorerFilters, sort: defaultSort[explorerView] })}
+                onClearFilters={() => setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] })}
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
               />
