@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-08-24
+
+### Added
+
+- Five-star Album Rating with half-star presentation and numeric Album Score on one compact line in every album card and expanded album detail.
+- A dedicated current-playback signal in track rows, distinct from the row selected for inspection or tag editing.
+
+### Changed
+
+- Album covers now open their bounded track panel directly beneath the selected cover row. Clicking the same cover or the close control collapses the panel with a short slide, preserving the album-grid position.
+- Successful inline track-rating edits refresh the selected album summary from the existing overlay-aware catalog calculation, while Music Library remains the sole writer of the stored album rating and Album Score.
+
 ## [0.17.1] - 2026-08-24
 
 ### Added

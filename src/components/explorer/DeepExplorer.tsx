@@ -16,7 +16,17 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { albumCoverUrl, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
@@ -86,6 +96,8 @@ export interface DeepExplorerProps {
   albums: readonly ExplorerAlbum[];
   artists: readonly Artist[];
   selectedTrackId: string | null;
+  currentTrackKey?: string | null;
+  playbackActive?: boolean;
   selectedAlbumId: string | null;
   selectedArtistId: string | null;
   albumTracks: readonly Track[];
@@ -319,9 +331,34 @@ function StaticRating({ rating }: { rating: number | null }) {
   );
 }
 
+function AlbumRatingStars({ rating }: { rating: number | null }) {
+  const visualRating = rating === null ? 0 : Math.round(rating * 2) / 2;
+  return (
+    <span
+      className={`deep-explorer-album-rating${rating === null ? " is-unrated" : ""}`}
+      aria-label={rating === null ? "Album unrated" : `Album rating ${rating.toFixed(1)} out of 5 stars`}
+    >
+      <span className="deep-explorer-album-rating__stars" aria-hidden="true">
+        {[1, 2, 3, 4, 5].map((star) => {
+          const fill = visualRating >= star ? "is-full" : visualRating === star - 0.5 ? "is-half" : "";
+          return (
+            <span className={`deep-explorer-album-rating__star ${fill}`} key={star}>
+              <Star className="deep-explorer-album-rating__empty" />
+              {fill ? <Star className="deep-explorer-album-rating__fill" /> : null}
+            </span>
+          );
+        })}
+      </span>
+      <span>{rating === null ? "—" : rating.toFixed(1)}</span>
+    </span>
+  );
+}
+
 function TrackTable({
   tracks,
   selectedTrackId,
+  currentTrackKey,
+  playbackActive,
   busyTrackKeys,
   onSelectTrack,
   onActivateTrack,
@@ -331,6 +368,8 @@ function TrackTable({
 }: {
   tracks: readonly Track[];
   selectedTrackId: string | null;
+  currentTrackKey?: string | null;
+  playbackActive?: boolean;
   busyTrackKeys: ReadonlySet<string>;
   onSelectTrack: (track: Track) => void;
   onActivateTrack?: (track: Track) => void;
@@ -384,6 +423,7 @@ function TrackTable({
         <tbody>
           {tracks.map((track, index) => {
             const selected = track.id === selectedTrackId;
+            const current = track.trackKey === currentTrackKey;
             const busy = busyTrackKeys.has(track.trackKey);
             return (
               <tr
@@ -392,8 +432,9 @@ function TrackTable({
                   if (node) rowRefs.current.set(track.id, node);
                   else rowRefs.current.delete(track.id);
                 }}
-                className={selected ? "is-selected" : undefined}
+                className={`${selected ? "is-selected" : ""}${current ? " is-current-track" : ""}${current && playbackActive ? " is-playing" : ""}`.trim() || undefined}
                 aria-selected={selected}
+                aria-current={current ? "true" : undefined}
                 tabIndex={selected || (!selectionIsVisible && index === 0) ? 0 : -1}
                 onClick={() => onSelectTrack(track)}
                 onDoubleClick={() => onActivateTrack?.(track)}
@@ -401,6 +442,7 @@ function TrackTable({
               >
                 <td className="deep-explorer-table__signal">
                   <span aria-hidden="true" />
+                  {current ? <span className="sr-only">{playbackActive ? "Currently playing" : "Current playback track"}</span> : null}
                 </td>
                 <td>
                   <span className="deep-explorer-track-title">
@@ -497,29 +539,84 @@ function AlbumGrid({
   albums,
   selectedAlbumId,
   onSelectAlbum,
+  detailAlbumId,
+  detail,
 }: {
   albums: readonly ExplorerAlbum[];
   selectedAlbumId: string | null;
   onSelectAlbum: (album: ExplorerAlbum | null) => void;
+  detailAlbumId: string | null;
+  detail: ReactNode;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [columnCount, setColumnCount] = useState(1);
+
+  const updateColumnCount = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const styles = getComputedStyle(root);
+    const horizontalPadding = (Number.parseFloat(styles.paddingLeft) || 0) + (Number.parseFloat(styles.paddingRight) || 0);
+    const gap = Number.parseFloat(styles.columnGap) || 1;
+    const minimum = Number.parseFloat(styles.getPropertyValue("--aurora-album-grid-min")) || 145;
+    const available = Math.max(0, root.clientWidth - horizontalPadding);
+    const next = Math.max(1, Math.floor((available + gap) / (minimum + gap)));
+    setColumnCount((current) => current === next ? current : next);
+  }, []);
+
+  useLayoutEffect(() => updateColumnCount());
+  useEffect(() => {
+    if (!rootRef.current || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(updateColumnCount);
+    observer.observe(rootRef.current);
+    return () => observer.disconnect();
+  }, [updateColumnCount]);
+
+  const rows = useMemo(() => {
+    const next: ExplorerAlbum[][] = [];
+    for (let index = 0; index < albums.length; index += columnCount) {
+      next.push(albums.slice(index, index + columnCount));
+    }
+    return next;
+  }, [albums, columnCount]);
+
   return (
-    <div className="deep-explorer-albums" aria-label="Albums">
-      {albums.map((album) => (
-        <button
-          type="button"
-          className={`deep-explorer-album${selectedAlbumId === album.id ? " is-selected" : ""}`}
-          aria-pressed={selectedAlbumId === album.id}
-          onClick={() => onSelectAlbum(album)}
-          key={album.id}
+    <div className="deep-explorer-albums" aria-label="Albums" ref={rootRef}>
+      {rows.map((row) => (
+        <div
+          className="deep-explorer-album-row"
+          style={{ "--album-columns": columnCount } as CSSProperties}
+          key={row[0].id}
         >
-          <AlbumArtwork album={album} />
-          <span className="deep-explorer-album__copy">
-            <strong>{album.title}</strong>
-            <span>{album.artist}</span>
-            <small>{album.originalYear ?? "Year unknown"} · {album.publisher ?? "Publisher unknown"} · {formatCount(album.totalTracks)} tracks</small>
-          </span>
-          <ChevronRight aria-hidden="true" />
-        </button>
+          {row.map((album) => {
+            const selected = selectedAlbumId === album.id;
+            return (
+              <button
+                type="button"
+                className={`deep-explorer-album${selected ? " is-selected" : ""}`}
+                aria-pressed={selected}
+                aria-expanded={selected}
+                onClick={() => onSelectAlbum(selected ? null : album)}
+                key={album.id}
+              >
+                <AlbumArtwork album={album} />
+                <span className="deep-explorer-album__copy">
+                  <strong>{album.title}</strong>
+                  <span>{album.artist}</span>
+                  <small>{album.originalYear ?? "Year unknown"} · {album.publisher ?? "Publisher unknown"} · {formatCount(album.totalTracks)} tracks</small>
+                  <span className="deep-explorer-album__metrics">
+                    <AlbumRatingStars rating={album.rating} />
+                    <span aria-hidden="true">·</span>
+                    <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(1)}`}>
+                      Score {album.albumScore === null ? "—" : album.albumScore.toFixed(1)}
+                    </span>
+                  </span>
+                </span>
+                <ChevronRight aria-hidden="true" />
+              </button>
+            );
+          })}
+          {row.some((album) => album.id === detailAlbumId) ? detail : null}
+        </div>
       ))}
     </div>
   );
@@ -531,6 +628,9 @@ function AlbumDetail({
   tracksTruncated,
   state,
   selectedTrackId,
+  currentTrackKey,
+  playbackActive,
+  closing = false,
   busyTrackKeys,
   onClose,
   onSelectTrack,
@@ -544,6 +644,9 @@ function AlbumDetail({
   tracksTruncated: boolean;
   state: ExplorerLoadState;
   selectedTrackId: string | null;
+  currentTrackKey?: string | null;
+  playbackActive?: boolean;
+  closing?: boolean;
   busyTrackKeys: ReadonlySet<string>;
   onClose: () => void;
   onSelectTrack: (track: Track) => void;
@@ -553,7 +656,7 @@ function AlbumDetail({
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
 }) {
   return (
-    <aside className="deep-explorer-album-detail" aria-label={`${album.title} album details`}>
+    <aside className={`deep-explorer-album-detail${closing ? " is-closing" : ""}`} aria-label={`${album.title} album details`}>
       <header>
         <AlbumArtwork album={album} detail />
         <div>
@@ -565,9 +668,11 @@ function AlbumDetail({
             {album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}
           </small>
-          {album.ratedTracks === album.totalTracks && album.albumScore !== null
-            ? <span className="deep-explorer-album-score"><Gauge aria-hidden="true" /> Album Score {album.albumScore.toFixed(1)}</span>
-            : null}
+          <span className="deep-explorer-album-score">
+            <AlbumRatingStars rating={album.rating} />
+            <span aria-hidden="true">·</span>
+            <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(1)}</span>
+          </span>
         </div>
         <button type="button" className="deep-explorer-icon-button" aria-label="Close album details" onClick={onClose}>
           <X aria-hidden="true" />
@@ -583,6 +688,8 @@ function AlbumDetail({
         <TrackTable
           tracks={tracks}
           selectedTrackId={selectedTrackId}
+          currentTrackKey={currentTrackKey}
+          playbackActive={playbackActive}
           busyTrackKeys={busyTrackKeys}
           onSelectTrack={onSelectTrack}
           onActivateTrack={onActivateTrack}
@@ -649,6 +756,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
     albums,
     artists,
     selectedTrackId,
+    currentTrackKey = null,
+    playbackActive = false,
     selectedAlbumId,
     selectedArtistId,
     albumTracks,
@@ -671,7 +780,41 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onLoveChange,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
+  const [closingDetail, setClosingDetail] = useState<{
+    album: ExplorerAlbum;
+    tracks: readonly Track[];
+    tracksTruncated: boolean;
+  } | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const detailAlbum = selectedAlbum ?? closingDetail?.album ?? null;
   const resultCount = resultCountForView(view, props);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
+
+  function selectOrToggleAlbum(album: ExplorerAlbum | null) {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (!album || album.id === selectedAlbumId) {
+      if (selectedAlbum) {
+        setClosingDetail({ album: selectedAlbum, tracks: [...albumTracks], tracksTruncated: albumTracksTruncated });
+        onSelectAlbum(null);
+        closeTimerRef.current = window.setTimeout(() => {
+          setClosingDetail(null);
+          closeTimerRef.current = null;
+        }, 180);
+      } else {
+        setClosingDetail(null);
+        onSelectAlbum(null);
+      }
+      return;
+    }
+    setClosingDetail(null);
+    onSelectAlbum(album);
+  }
 
   function updateFilters(patch: Partial<ExplorerFilters>) {
     onFiltersChange({ ...filters, ...patch });
@@ -740,6 +883,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
           <TrackTable
             tracks={tracks}
             selectedTrackId={selectedTrackId}
+            currentTrackKey={currentTrackKey}
+            playbackActive={playbackActive}
             busyTrackKeys={busyTrackKeys}
             onSelectTrack={onSelectTrack}
             onActivateTrack={onActivateTrack}
@@ -747,17 +892,23 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onLoveChange={onLoveChange}
           />
         ) : view === "albums" ? (
-          <>
-            <AlbumGrid albums={albums} selectedAlbumId={selectedAlbumId} onSelectAlbum={onSelectAlbum} />
-            {selectedAlbum ? (
+          <AlbumGrid
+            albums={albums}
+            selectedAlbumId={selectedAlbumId}
+            onSelectAlbum={selectOrToggleAlbum}
+            detailAlbumId={detailAlbum?.id ?? null}
+            detail={detailAlbum ? (
               <AlbumDetail
-                album={selectedAlbum}
-                tracks={albumTracks}
-                tracksTruncated={albumTracksTruncated}
-                state={albumDetailState}
+                album={detailAlbum}
+                tracks={selectedAlbum ? albumTracks : closingDetail?.tracks ?? []}
+                tracksTruncated={selectedAlbum ? albumTracksTruncated : closingDetail?.tracksTruncated ?? false}
+                state={selectedAlbum ? albumDetailState : "ready"}
                 selectedTrackId={selectedTrackId}
+                currentTrackKey={currentTrackKey}
+                playbackActive={playbackActive}
+                closing={!selectedAlbum}
                 busyTrackKeys={busyTrackKeys}
-                onClose={() => onSelectAlbum(null)}
+                onClose={() => selectOrToggleAlbum(null)}
                 onSelectTrack={onSelectTrack}
                 onActivateTrack={onActivateTrack}
                 onRetry={onRetry}
@@ -765,7 +916,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onLoveChange={onLoveChange}
               />
             ) : null}
-          </>
+          />
         ) : (
           <ArtistList artists={artists} selectedArtistId={selectedArtistId} onSelectArtist={onSelectArtist} />
         )}

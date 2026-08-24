@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artist, Track } from "../../library";
 import {
@@ -192,7 +192,7 @@ describe("DeepExplorer", () => {
     expect(onActivateTrack).toHaveBeenCalledWith(tracks[1]);
   });
 
-  it("renders an album-id cover surface and controlled album detail", () => {
+  it("renders album detail under the selected cover row and toggles it from the cover", () => {
     const onSelectAlbum = vi.fn();
     const onSelectTrack = vi.fn();
     render(
@@ -209,26 +209,55 @@ describe("DeepExplorer", () => {
     );
 
     expect(screen.getAllByLabelText("Night Geometry cover")).toHaveLength(2);
-    expect(screen.getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
+    const albumButton = screen.getByRole("button", { expanded: true });
+    const albumRow = albumButton.closest(".deep-explorer-album-row");
+    expect(albumRow).not.toBeNull();
+    expect(within(albumRow as HTMLElement).getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
+    fireEvent.click(albumButton);
+    expect(onSelectAlbum).toHaveBeenCalledWith(null);
     fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });
 
-  it("only shows Album Score at full completion", () => {
-    const completeAlbum = { ...albums[0], ratedTracks: albums[0].totalTracks };
+  it("shows half-star Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer
         {...explorerProps({
           view: "albums",
           filters: { ...filters, rating: 4.5, sort: "ratingDesc" },
-          albums: [completeAlbum],
-          selectedAlbumId: completeAlbum.id,
+          selectedAlbumId: albums[0].id,
           pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
         })}
       />,
     );
 
+    expect(screen.getAllByLabelText("Album rating 4.5 out of 5 stars")).toHaveLength(2);
+    expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
+    expect(screen.getByText("Score 412.4")).toBeInTheDocument();
     expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
+  });
+
+  it("marks the current playback track independently from the selected row", () => {
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          selectedTrackId: tracks[0].id,
+          currentTrackKey: tracks[1].trackKey,
+          playbackActive: true,
+          albumTracks: tracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const selectedRow = screen.getByRole("row", { name: /Signal One/ });
+    const playingRow = screen.getByRole("row", { name: /Second Light/ });
+    expect(selectedRow).toHaveAttribute("aria-selected", "true");
+    expect(selectedRow).not.toHaveAttribute("aria-current");
+    expect(playingRow).toHaveAttribute("aria-current", "true");
+    expect(playingRow).toHaveTextContent("Currently playing");
   });
 
   it("exposes bounded loading, error, empty, and load-more states", () => {

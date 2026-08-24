@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.1 restores the last active view—including its search, filters, sort, inspector section, and selected album context—when Aurora starts again.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.2 keeps album browsing spatially stable with MusicBee-style inline track expansion, a distinct current-playback marker, and album rating plus Album Score on every album card.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.0 slice
+## Current 0.17.2 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination before one explicit batch apply.
@@ -83,7 +83,9 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Source-precedence release-group discographies capped at 100 rows: curated overlay first for verified identities, catalog mirror fallback, then the broad cache without mixing stale and refreshed sources.
 - Visible local provenance and source availability for the catalog, curated overlay, and broad cache; missing optional databases never block normal library browsing.
 - Explicit overlay export creates a new, complete Music Library-compatible SQLite snapshot in Aurora's app-data `exports` folder. Aurora never mutates the live shared overlay; publishing the exported file remains a deliberate user step.
-- Album cover grids with bounded album track details, playback activation, keyboard row navigation, inline tag controls, and a right inspector whose Album, Track, and Artist tabs stay scoped to the selected album.
+- Album cover grids with a MusicBee-style inline track panel directly beneath the selected cover row. Clicking the same cover or the close control collapses the panel without replacing the grid or losing the browsing position.
+- Every album card and expanded detail shows the stored effective Album Rating as five stars with half-star support alongside the numeric Album Score. The currently playing track has its own animated left signal, independent from the selected row used for inspection or editing.
+- Bounded album track details retain playback activation, keyboard row navigation, inline tag controls, and a right inspector whose Album, Track, and Artist tabs stay scoped to the selected album.
 - A vertical multi-file inspector tag editor plus existing inline half-star rating and Love/Neutral/Ban controls, with read-only duration and optional Last.fm popularity in the Track view.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.
 - Native MP3 playback with play/pause, seek, previous/next, volume, shuffle, and repeat-one/repeat-all controls.

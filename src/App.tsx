@@ -1940,6 +1940,24 @@ function App() {
       if (activeNav === "Ratings") {
         setRatingsReloadToken((value) => value + 1);
       }
+      if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumId) {
+        const albumId = snapshot.track.albumId;
+        const requestId = ++albumRequestRef.current;
+        try {
+          const detail = await loadAlbumDetail(albumId);
+          if (requestId === albumRequestRef.current) {
+            setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
+            setAlbumTracks(detail.tracks);
+            setAlbumTracksTruncated(detail.tracksTruncated);
+            setSelectedTrack((current) => {
+              if (!current || current.albumId !== albumId) return current;
+              return detail.tracks.find((candidate) => candidate.trackKey === current.trackKey) ?? current;
+            });
+          }
+        } catch (error) {
+          console.warn("Aurora could not refresh the album rating after the track edit", error);
+        }
+      }
     } catch (error) {
       applyTrackChange(track, optimistic, false);
       const message = error instanceof Error ? error.message : String(error);
@@ -2437,7 +2455,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.2</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2701,6 +2719,8 @@ function App() {
                 albums={explorerAlbums}
                 artists={explorerArtists}
                 selectedTrackId={selectedTrack?.id ?? null}
+                currentTrackKey={playback.state.currentTrack?.trackKey ?? null}
+                playbackActive={playback.state.status === "playing"}
                 selectedAlbumId={selectedAlbumId}
                 selectedArtistId={selectedArtistId}
                 albumTracks={albumTracks}
