@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.7] - 2026-08-25
+
+### Added
+
+- Added an Album/Tags switch to the Inbox inspector. The Tags view exposes the same vertical manual editor used by Albums, scopes edits through the existing track checkboxes for one track or an entire album, and saves through Inbox's verified rollback-safe writer without cataloging staged files.
+
 ## [0.18.6] - 2026-08-25
 
 ### Fixed

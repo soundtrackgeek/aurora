@@ -21,6 +21,22 @@ interface TagEditorProps {
   onCatalogSync?: (sync: CatalogSync) => void | Promise<void>;
 }
 
+export interface ManualTagEditorSaveResult {
+  state: TagEditorSnapshot;
+  message: string;
+}
+
+interface ManualTagEditorProps {
+  kind: TagEditorTarget["kind"];
+  label: string;
+  loadSnapshot: () => Promise<TagEditorSnapshot>;
+  saveSnapshot: (
+    expected: TagEditorSnapshot,
+    fields: EditableTagField[],
+    values: EditableTagValues,
+  ) => Promise<ManualTagEditorSaveResult>;
+}
+
 type EditorPhase = "loading" | "ready" | "saving" | "saved" | "error";
 type DraftText = Record<EditableTagField, string>;
 type FieldKind = "text" | "rating" | "year" | "position";
@@ -184,7 +200,7 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorProps) {
+export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: ManualTagEditorProps) {
   const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
   const [draft, setDraft] = useState<DraftText>(emptyDraft);
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
@@ -193,21 +209,6 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
   const requestRef = useRef(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef(true);
-  const targetKind = target.kind;
-  const targetAlbumId = target.kind === "album" ? target.albumId : null;
-  const targetTrackId = target.kind === "track" ? target.trackId : null;
-  const targetTrackKey = target.kind === "track" ? target.trackKey : null;
-  const targetLabel = target.label;
-  const requestTarget = useMemo<TagEditorTarget>(() => targetKind === "album"
-    ? { kind: "album", albumId: targetAlbumId!, label: targetLabel }
-    : { kind: "track", trackId: targetTrackId!, trackKey: targetTrackKey!, label: targetLabel }, [
-    targetAlbumId,
-    targetKind,
-    targetLabel,
-    targetTrackId,
-    targetTrackKey,
-  ]);
-
   const acceptSnapshot = useCallback((next: TagEditorSnapshot, nextPhase: EditorPhase) => {
     setSnapshot(next);
     setDraft(draftForSnapshot(next));
@@ -222,7 +223,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     if (showLoading) setPhase("loading");
     setMessage(null);
     try {
-      const next = await readTagEditorState(requestTarget);
+      const next = await loadSnapshot();
       if (requestId !== requestRef.current) return;
       if (!showLoading && dirtyRef.current) return;
       acceptSnapshot(next, "ready");
@@ -232,11 +233,11 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
       setPhase("error");
       setMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [acceptSnapshot, requestTarget]);
+  }, [acceptSnapshot, loadSnapshot]);
 
   useEffect(() => {
     const requestId = ++requestRef.current;
-    void readTagEditorState(requestTarget)
+    void loadSnapshot()
       .then((next) => {
         if (requestId !== requestRef.current) return;
         acceptSnapshot(next, "ready");
@@ -247,7 +248,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
         setMessage(error instanceof Error ? error.message : String(error));
       });
     return () => { requestRef.current += 1; };
-  }, [acceptSnapshot, requestTarget]);
+  }, [acceptSnapshot, loadSnapshot]);
 
   const isWorking = phase === "loading" || phase === "saving";
   const isDirty = selectedFields.size > 0;
@@ -314,36 +315,9 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     setPhase("saving");
     setMessage(null);
     try {
-      const result = await updateTagEditor(requestTarget, snapshot, selectedInOrder, valuesForDraft(draft));
-      const projectionAccepted = result.catalogSync
-        ? onTracksChange(result.tracks, result.catalogSync)
-        : onTracksChange(result.tracks);
-      if (projectionAccepted === false) {
-        await loadState(true);
-        if (result.catalogSync && onCatalogSync) await onCatalogSync(result.catalogSync);
-        return;
-      }
+      const result = await saveSnapshot(snapshot, selectedInOrder, valuesForDraft(draft));
       acceptSnapshot(result.state, "saved");
-      const savedFiles = `Saved ${countLabel(fieldCount, "field")} directly to ${countLabel(savingCount, "MP3", "MP3s")}.`;
-      if (result.catalogSync?.status === "synced") {
-        const remaining = result.catalogSync.pendingFolderCount > 0
-          ? ` ${countLabel(result.catalogSync.pendingFolderCount, "other folder")} still pending; Aurora is retrying automatically.`
-          : "";
-        setMessage(`${savedFiles} Music Library updated.${remaining}`);
-      } else if (result.catalogSync?.status === "pending") {
-        setMessage(`${savedFiles} ${result.catalogSync.message ?? "The MP3 write is verified; catalog sync is pending."}`);
-      } else if (result.catalogSync?.status === "blocked") {
-        setMessage(`${savedFiles} ${result.catalogSync.message ?? "Music Library update needs attention; automatic retries are paused."}`);
-      } else {
-        setMessage(savedFiles);
-      }
-      if (result.catalogSync && onCatalogSync) {
-        try {
-          await onCatalogSync(result.catalogSync);
-        } catch (error) {
-          console.warn("Music Library updated, but Aurora could not refresh its catalog views yet", error);
-        }
-      }
+      setMessage(result.message || `Saved ${countLabel(fieldCount, "field")} directly to ${countLabel(savingCount, "MP3", "MP3s")}.`);
     } catch (error) {
       setPhase("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -354,7 +328,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     return (
       <section className="tag-editor tag-editor--loading" aria-live="polite">
         <RefreshCw className="is-spinning" aria-hidden="true" />
-        <span>Reading tags from the MP3 {target.kind === "album" ? "files" : "file"}…</span>
+        <span>Reading tags from the MP3 {kind === "album" ? "files" : "file"}…</span>
       </section>
     );
   }
@@ -377,8 +351,8 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     <section className="tag-editor" aria-labelledby="tag-editor-heading" aria-busy={isWorking}>
       <div className="tag-editor__heading">
         <div>
-          <p className="eyebrow">{target.kind === "album" ? "Album selection" : "Track selection"}</p>
-          <h3 id="tag-editor-heading">{target.label}</h3>
+          <p className="eyebrow">{kind === "album" ? "Album selection" : "Track selection"}</p>
+          <h3 id="tag-editor-heading">{label}</h3>
           <span>{countLabel(trackCount, "MP3", "MP3s")}</span>
         </div>
         <button
@@ -445,4 +419,66 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
       </div>
     </section>
   );
+}
+
+export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorProps) {
+  const targetKind = target.kind;
+  const targetAlbumId = target.kind === "album" ? target.albumId : null;
+  const targetTrackId = target.kind === "track" ? target.trackId : null;
+  const targetTrackKey = target.kind === "track" ? target.trackKey : null;
+  const targetLabel = target.label;
+  const requestTarget = useMemo<TagEditorTarget>(() => targetKind === "album"
+    ? { kind: "album", albumId: targetAlbumId!, label: targetLabel }
+    : { kind: "track", trackId: targetTrackId!, trackKey: targetTrackKey!, label: targetLabel }, [
+    targetAlbumId,
+    targetKind,
+    targetLabel,
+    targetTrackId,
+    targetTrackKey,
+  ]);
+  const loadSnapshot = useCallback(() => readTagEditorState(requestTarget), [requestTarget]);
+  const saveSnapshot = useCallback(async (
+    expected: TagEditorSnapshot,
+    fields: EditableTagField[],
+    values: EditableTagValues,
+  ): Promise<ManualTagEditorSaveResult> => {
+    const result = await updateTagEditor(requestTarget, expected, fields, values);
+    const projectionAccepted = result.catalogSync
+      ? onTracksChange(result.tracks, result.catalogSync)
+      : onTracksChange(result.tracks);
+    if (projectionAccepted === false) {
+      if (result.catalogSync && onCatalogSync) await onCatalogSync(result.catalogSync);
+      return {
+        state: await readTagEditorState(requestTarget),
+        message: result.catalogSync?.message ?? "Tags were saved; the latest Music Library state is shown.",
+      };
+    }
+    const savedFiles = `Saved ${countLabel(fields.length, "field")} directly to ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`;
+    let message = savedFiles;
+    if (result.catalogSync?.status === "synced") {
+      const remaining = result.catalogSync.pendingFolderCount > 0
+        ? ` ${countLabel(result.catalogSync.pendingFolderCount, "other folder")} still pending; Aurora is retrying automatically.`
+        : "";
+      message = `${savedFiles} Music Library updated.${remaining}`;
+    } else if (result.catalogSync?.status === "pending") {
+      message = `${savedFiles} ${result.catalogSync.message ?? "The MP3 write is verified; catalog sync is pending."}`;
+    } else if (result.catalogSync?.status === "blocked") {
+      message = `${savedFiles} ${result.catalogSync.message ?? "Music Library update needs attention; automatic retries are paused."}`;
+    }
+    if (result.catalogSync && onCatalogSync) {
+      try {
+        await onCatalogSync(result.catalogSync);
+      } catch (error) {
+        console.warn("Music Library updated, but Aurora could not refresh its catalog views yet", error);
+      }
+    }
+    return { state: result.state, message };
+  }, [onCatalogSync, onTracksChange, requestTarget]);
+
+  return <ManualTagEditor
+    kind={target.kind}
+    label={target.label}
+    loadSnapshot={loadSnapshot}
+    saveSnapshot={saveSnapshot}
+  />;
 }

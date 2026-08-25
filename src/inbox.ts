@@ -13,8 +13,15 @@ export interface InboxSettingsStatus {
 export interface InboxTrack {
   path: string;
   fileName: string;
+  albumArtist: string | null;
   title: string | null;
   artist: string | null;
+  album: string | null;
+  genre: string | null;
+  publisher: string | null;
+  rating: number | null;
+  year: number | null;
+  releaseYear: number | null;
   trackNumber: number | null;
   trackTotal: number | null;
   discNumber: number | null;
@@ -118,8 +125,15 @@ const previewTracks = [
 ].map((title, index): InboxTrack => ({
   path: `C:\\Music\\Inbox\\Baltimoore - Freak\\${String(index + 1).padStart(2, "0")} - ${title}.mp3`,
   fileName: `${String(index + 1).padStart(2, "0")} - ${title}.mp3`,
+  albumArtist: "Baltimoore",
   title,
   artist: "Baltimoore",
+  album: "Freak",
+  genre: null,
+  publisher: "SPV Records",
+  rating: null,
+  year: 1990,
+  releaseYear: 1990,
   trackNumber: index + 1,
   trackTotal: 10,
   discNumber: null,

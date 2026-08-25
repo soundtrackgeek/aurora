@@ -41,6 +41,7 @@ import {
   type LibraryIntakePreview,
 } from "../../ingest";
 import type { EditableTagField, EditableTagValues } from "../../tags";
+import { InboxTagEditor } from "./InboxTagEditor";
 import "./Inbox.css";
 
 type LoadState = "loading" | "ready" | "error";
@@ -106,6 +107,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameMessage, setRenameMessage] = useState<string | null>(null);
   const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
+  const [inspectorView, setInspectorView] = useState<"album" | "tags">("album");
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoadState("loading");
@@ -269,7 +271,19 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </section>
 
         <aside className="inbox-inspector" aria-label="Selected Inbox album">
-          {selectedAlbum ? <>
+          {selectedAlbum ? <div className="inbox-inspector-tabs" role="tablist" aria-label="Inbox album details">
+            <button type="button" role="tab" aria-selected={inspectorView === "album"} onClick={() => setInspectorView("album")}>Album</button>
+            <button type="button" role="tab" aria-selected={inspectorView === "tags"} onClick={() => setInspectorView("tags")}>Tags</button>
+          </div> : null}
+          {selectedAlbum && inspectorView === "tags" ? <div className="inbox-manual-tags">
+            <section className="inbox-track-selection"><header><h3>Tracks to edit</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
+            {selectedTracks.length ? <InboxTagEditor
+              key={`${selectedAlbum.id}:${selectedTracks.map((track) => track.path).join("|")}`}
+              album={selectedAlbum}
+              tracks={selectedTracks}
+              onApplied={() => refresh()}
+            /> : <p className="inbox-manual-tags__empty">Select one or more tracks to edit their tags.</p>}
+          </div> : selectedAlbum ? <>
             <header><InboxArtwork album={selectedAlbum} size={128} decorative={false} /><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
             <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
             <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>

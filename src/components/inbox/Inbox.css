@@ -63,6 +63,13 @@
 .inbox-albums__empty svg { width: 28px; height: 28px; color: #53bd81; }
 
 .inbox-inspector { min-width: 0; padding: 14px; overflow-y: auto; border-left: 1px solid var(--border); }
+.inbox-inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: -7px -7px 12px; padding: 3px; border: 1px solid rgba(151,180,211,.1); border-radius: 7px; background: rgba(5,10,16,.62); }
+.inbox-inspector-tabs button { min-height: 27px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.inbox-inspector-tabs button[aria-selected="true"] { background: rgba(120,53,175,.22); color: #e5d5f2; }
+.inbox-manual-tags { min-width: 0; }
+.inbox-manual-tags > .inbox-track-selection { padding-bottom: 10px; border-bottom: 1px solid rgba(151,180,211,.1); }
+.inbox-manual-tags > .tag-editor { margin-top: 10px; }
+.inbox-manual-tags__empty { margin: 10px 0 0; padding: 10px; border-radius: 6px; background: rgba(151,180,211,.05); color: var(--muted); font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); line-height: 1.4; }
 .inbox-inspector > header { display: flex; align-items: center; gap: 11px; padding-bottom: 14px; border-bottom: 1px solid rgba(151,180,211,.1); }
 .inbox-inspector__art { display: grid; place-items: center; width: 68px; height: 68px; flex: 0 0 auto; border: 1px solid rgba(168,85,247,.22); border-radius: 7px; background: radial-gradient(circle, rgba(168,85,247,.18), rgba(10,17,27,.9)); color: #ba7df0; }
 .inbox-inspector__art svg { width: 29px; height: 29px; }

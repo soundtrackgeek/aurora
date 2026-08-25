@@ -40,6 +40,42 @@ describe("Inbox", () => {
     expect(await screen.findByText("10 tracks renamed with the album folder.")).toBeInTheDocument();
   });
 
+  it("uses the vertical tag editor for album batches and individual Inbox tracks", async () => {
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockResolvedValue({
+      changedTracks: 10,
+      renamedTracks: 0,
+      albumPath: "C:\\Music\\Inbox\\Baltimoore - Freak",
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
+
+    expect(await screen.findByText("10 MP3s")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Genre" }), { target: { value: "Hard Rock" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 10 MP3s" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({
+      fields: ["genre"],
+      renameAfterApply: false,
+      tracks: expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining("Memories Calling") })]),
+    })));
+    expect(apply.mock.calls[0]?.[0].tracks).toHaveLength(10);
+
+    fireEvent.click(screen.getByRole("button", { name: "None" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /01.*Memories Calling/ }));
+    expect(await screen.findByText("1 MP3")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Track title" }), { target: { value: "Memories Calling (Edit)" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 1 MP3" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(apply.mock.calls[1]?.[0]).toMatchObject({
+      fields: ["title"],
+      renameAfterApply: false,
+      tracks: [{ path: expect.stringContaining("Memories Calling") }],
+    });
+  });
+
   it("auto-tags only selected disc tracks and exposes disc overrides", async () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
