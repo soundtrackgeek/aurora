@@ -1226,6 +1226,40 @@ impl StateStore {
             })
     }
 
+    pub(crate) fn pending_library_folder_sync_targets(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<PendingLibraryFolderSync>, String> {
+        let limit = limit.min(512);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT directory, filename, updated_at_ms
+                FROM pending_library_folder_sync
+                ORDER BY updated_at_ms DESC, directory COLLATE NOCASE
+                LIMIT ?1
+                "#,
+            )
+            .map_err(|error| {
+                format!("Could not prepare Aurora's pending library targets: {error}")
+            })?;
+        statement
+            .query_map([limit as i64], |row| {
+                Ok(PendingLibraryFolderSync {
+                    directory: row.get(0)?,
+                    filename: row.get(1)?,
+                    token: row.get(2)?,
+                })
+            })
+            .map_err(|error| format!("Could not read Aurora's pending library targets: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not decode Aurora's pending library targets: {error}"))
+    }
+
     pub(crate) fn queue_library_file_syncs(
         &self,
         files: &[(String, String)],

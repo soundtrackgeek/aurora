@@ -1687,9 +1687,16 @@ pub(crate) fn pending_deleted_track(
     summary: &TrackSummary,
     store: &StateStore,
 ) -> Result<bool, String> {
-    let audio_path = catalog_audio_path(&summary.directory, &summary.filename)?;
-    Ok(!audio_path.is_file()
-        && store.library_file_sync_is_pending(&summary.directory, &summary.filename)?)
+    pending_deleted_catalog_file(&summary.directory, &summary.filename, store)
+}
+
+pub(crate) fn pending_deleted_catalog_file(
+    directory: &str,
+    filename: &str,
+    store: &StateStore,
+) -> Result<bool, String> {
+    let audio_path = catalog_audio_path(directory, filename)?;
+    Ok(!audio_path.is_file() && store.library_file_sync_is_pending(directory, filename)?)
 }
 
 fn album_tag_tracks_from_connection(

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MAX_ALBUMS: usize = 14;
 const MAX_QUEUE: usize = 100;
+const MAX_PENDING_DELETION_TARGETS: usize = 256;
 
 const TRACK_RATING_SQL: &str = r#"COALESCE(normalized_rating, CASE trim(rating_raw)
   WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -117,6 +118,13 @@ struct AlbumComparison {
     live: AlbumSnapshot,
 }
 
+#[derive(Clone, Debug)]
+struct PendingDeletedRatingTrack {
+    album_id: String,
+    track_key: String,
+    catalog_rating: Option<i64>,
+}
+
 fn rating_points(value: Option<f64>) -> Option<i64> {
     value.map(|rating| (rating.clamp(0.0, 5.0) * 20.0).round() as i64)
 }
@@ -172,6 +180,7 @@ fn bands_from_counts(counts: BTreeMap<Option<i64>, i64>) -> Vec<RatingBand> {
 fn query_track_bands(
     connection: &Connection,
     overlays: &[TagOverlay],
+    deleted_tracks: &[PendingDeletedRatingTrack],
 ) -> Result<Vec<RatingBand>, String> {
     let sql = format!(
         "SELECT {TRACK_RATING_SQL} AS rating_value, COUNT(*) FROM tracks GROUP BY rating_value"
@@ -190,7 +199,19 @@ fn query_track_bands(
             .map_err(|error| format!("Could not decode the track-rating constellation: {error}"))?;
         *counts.entry(rated_bucket(points)).or_default() += count;
     }
+    let deleted_keys = deleted_tracks
+        .iter()
+        .map(|track| track.track_key.as_str())
+        .collect::<HashSet<_>>();
+    for track in deleted_tracks {
+        *counts
+            .entry(rated_bucket(track.catalog_rating))
+            .or_default() -= 1;
+    }
     for overlay in overlays {
+        if deleted_keys.contains(overlay.track_key.as_str()) {
+            continue;
+        }
         let before = rated_bucket(rating_points(overlay.catalog_values.rating));
         let after = rated_bucket(rating_points(overlay.values.rating));
         if before == after {
@@ -270,6 +291,7 @@ fn query_album_snapshot(
     connection: &Connection,
     album_id: &str,
     overlays: &HashMap<String, TagOverlay>,
+    deleted_track_keys: &HashSet<String>,
 ) -> Result<AlbumSnapshot, String> {
     let metadata = connection
         .query_row(
@@ -312,6 +334,8 @@ fn query_album_snapshot(
     let mut rating_sum = 0_i64;
     let mut loved_tracks = 0_i64;
     let mut five_star_seconds = 0_i64;
+    let mut deleted_tracks = 0_i64;
+    let mut deleted_seconds = 0_i64;
     while let Some(row) = rows
         .next()
         .map_err(|error| format!("Could not decode this album's rating calculation: {error}"))?
@@ -331,6 +355,11 @@ fn query_album_snapshot(
         let directory = row.get::<_, String>(3).map_err(|error| error.to_string())?;
         let filename = row.get::<_, String>(4).map_err(|error| error.to_string())?;
         let key = catalog::normalize_track_key(&directory, &filename);
+        if deleted_track_keys.contains(&key) {
+            deleted_tracks += 1;
+            deleted_seconds += duration;
+            continue;
+        }
         let (rating, love) = overlays
             .get(&key)
             .map(|overlay| {
@@ -360,10 +389,12 @@ fn query_album_snapshot(
         release_year,
         genre,
         publisher,
-        total_tracks,
-        total_seconds,
+        catalog_total_tracks,
+        catalog_total_seconds,
         explicit_rating,
     ) = metadata;
+    let total_tracks = (catalog_total_tracks - deleted_tracks).max(0);
+    let total_seconds = (catalog_total_seconds - deleted_seconds).max(0);
     let provisional_points = (rated_tracks > 0).then_some(rating_sum as f64 / rated_tracks as f64);
     let calculated_rating = (total_tracks > 0 && rated_tracks == total_tracks)
         .then_some((rating_sum as f64 / rated_tracks as f64).round() as i64);
@@ -411,14 +442,76 @@ pub(crate) fn live_album_from_connection(
         .into_iter()
         .map(|overlay| (overlay.track_key.clone(), overlay))
         .collect::<HashMap<_, _>>();
-    query_album_snapshot(connection, album_id, &overlays).map(|snapshot| snapshot.album)
+    let deleted_track_keys = pending_deleted_rating_tracks(connection, store)?
+        .into_iter()
+        .map(|track| track.track_key)
+        .collect::<HashSet<_>>();
+    query_album_snapshot(connection, album_id, &overlays, &deleted_track_keys)
+        .map(|snapshot| snapshot.album)
+}
+
+fn pending_deleted_rating_tracks(
+    connection: &Connection,
+    store: &StateStore,
+) -> Result<Vec<PendingDeletedRatingTrack>, String> {
+    let targets = store.pending_library_folder_sync_targets(MAX_PENDING_DELETION_TARGETS)?;
+    let sql = format!(
+        r#"
+        SELECT album_id, file_path, filename, {TRACK_RATING_SQL}
+        FROM tracks
+        WHERE file_path = ?1 COLLATE NOCASE
+          AND (?2 IS NULL OR filename = ?2 COLLATE NOCASE)
+        LIMIT 501
+        "#
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("Could not prepare pending rating deletions: {error}"))?;
+    let mut seen = HashSet::new();
+    let mut deleted = Vec::new();
+    for target in targets {
+        let rows = statement
+            .query_map(params![target.directory, target.filename], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .map_err(|error| format!("Could not read pending rating deletions: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not decode pending rating deletions: {error}"))?;
+        if rows.len() > 500 {
+            return Err(
+                "A pending library folder contains too many rating tracks to project safely."
+                    .to_owned(),
+            );
+        }
+        for (album_id, directory, filename, catalog_rating) in rows {
+            let Some(album_id) = album_id else { continue };
+            let track_key = catalog::normalize_track_key(&directory, &filename);
+            if seen.insert(track_key.clone())
+                && catalog::pending_deleted_catalog_file(&directory, &filename, store)?
+            {
+                deleted.push(PendingDeletedRatingTrack {
+                    album_id,
+                    track_key,
+                    catalog_rating,
+                });
+            }
+        }
+    }
+    Ok(deleted)
 }
 
 fn affected_album_comparisons(
     connection: &Connection,
     overlays: &[TagOverlay],
+    deleted_tracks: &[PendingDeletedRatingTrack],
+    deleted_track_keys: &HashSet<String>,
 ) -> Result<HashMap<String, AlbumComparison>, String> {
-    if overlays.is_empty() {
+    if overlays.is_empty() && deleted_tracks.is_empty() {
         return Ok(HashMap::new());
     }
     let overlay_map = overlays
@@ -442,6 +535,7 @@ fn affected_album_comparisons(
             album_ids.insert(album_id);
         }
     }
+    album_ids.extend(deleted_tracks.iter().map(|track| track.album_id.clone()));
     let mut comparisons = HashMap::new();
     for album_id in album_ids {
         let (total, rated, effective) = connection
@@ -451,7 +545,7 @@ fn affected_album_comparisons(
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?)),
             )
             .map_err(|error| format!("Could not read an overlaid album: {error}"))?;
-        let live = query_album_snapshot(connection, &album_id, &overlay_map)?;
+        let live = query_album_snapshot(connection, &album_id, &overlay_map, deleted_track_keys)?;
         comparisons.insert(
             album_id,
             AlbumComparison {
@@ -567,6 +661,7 @@ fn query_album_page(
     completion: &CompletionCounts,
     overlays: &[TagOverlay],
     comparisons: &HashMap<String, AlbumComparison>,
+    deleted_track_keys: &HashSet<String>,
 ) -> Result<RatingAlbumPage, String> {
     let overlay_map = overlays
         .iter()
@@ -591,7 +686,8 @@ fn query_album_page(
             .map(|comparison| comparison.live.album.clone())
             .map(Ok)
             .unwrap_or_else(|| {
-                query_album_snapshot(connection, &id, &overlay_map).map(|value| value.album)
+                query_album_snapshot(connection, &id, &overlay_map, deleted_track_keys)
+                    .map(|value| value.album)
             })?;
         if album_matches(kind, &album) {
             albums.push(album);
@@ -629,8 +725,14 @@ fn query_five_star_album_ids(connection: &Connection) -> Result<Vec<String>, Str
 
 fn query_overview(connection: &Connection, store: &StateStore) -> Result<RatingsOverview, String> {
     let overlays = store.all_overlays()?;
-    let comparisons = affected_album_comparisons(connection, &overlays)?;
-    let track_bands = query_track_bands(connection, &overlays)?;
+    let deleted_tracks = pending_deleted_rating_tracks(connection, store)?;
+    let deleted_track_keys = deleted_tracks
+        .iter()
+        .map(|track| track.track_key.clone())
+        .collect::<HashSet<_>>();
+    let comparisons =
+        affected_album_comparisons(connection, &overlays, &deleted_tracks, &deleted_track_keys)?;
+    let track_bands = query_track_bands(connection, &overlays, &deleted_tracks)?;
     let mut album_counts = query_album_bands(connection)?;
     let mut completion = query_completion_counts(connection)?;
     apply_album_deltas(&mut completion, &mut album_counts, &comparisons);
@@ -642,7 +744,8 @@ fn query_overview(connection: &Connection, store: &StateStore) -> Result<Ratings
     let five_star_albums = query_five_star_album_ids(connection)?
         .into_iter()
         .map(|id| {
-            query_album_snapshot(connection, &id, &overlay_map).map(|snapshot| snapshot.album)
+            query_album_snapshot(connection, &id, &overlay_map, &deleted_track_keys)
+                .map(|snapshot| snapshot.album)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let initial_page = query_album_page(
@@ -651,6 +754,7 @@ fn query_overview(connection: &Connection, store: &StateStore) -> Result<Ratings
         &completion,
         &overlays,
         &comparisons,
+        &deleted_track_keys,
     )?;
     let rated_albums = album_counts
         .iter()
@@ -680,11 +784,24 @@ pub(crate) fn load_rating_album_page(
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
     let overlays = store.all_overlays()?;
-    let comparisons = affected_album_comparisons(&connection, &overlays)?;
+    let deleted_tracks = pending_deleted_rating_tracks(&connection, store)?;
+    let deleted_track_keys = deleted_tracks
+        .iter()
+        .map(|track| track.track_key.clone())
+        .collect::<HashSet<_>>();
+    let comparisons =
+        affected_album_comparisons(&connection, &overlays, &deleted_tracks, &deleted_track_keys)?;
     let mut completion = query_completion_counts(&connection)?;
     let mut album_counts = query_album_bands(&connection)?;
     apply_album_deltas(&mut completion, &mut album_counts, &comparisons);
-    query_album_page(&connection, kind, &completion, &overlays, &comparisons)
+    query_album_page(
+        &connection,
+        kind,
+        &completion,
+        &overlays,
+        &comparisons,
+        &deleted_track_keys,
+    )
 }
 
 fn validate_rating_request(request: &RatingCollectionRequest) -> Result<Option<i64>, String> {
@@ -701,6 +818,16 @@ fn validate_rating_request(request: &RatingCollectionRequest) -> Result<Option<i
     Ok(points)
 }
 
+fn remove_pending_deleted_tracks(
+    tracks: Vec<TrackSummary>,
+    deleted_track_keys: &HashSet<String>,
+) -> Vec<TrackSummary> {
+    tracks
+        .into_iter()
+        .filter(|track| !deleted_track_keys.contains(&track.track_key))
+        .collect()
+}
+
 pub(crate) fn load_rating_collection(
     request: RatingCollectionRequest,
     store: &StateStore,
@@ -708,6 +835,10 @@ pub(crate) fn load_rating_collection(
     let points = validate_rating_request(&request)?;
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    let deleted_track_keys = pending_deleted_rating_tracks(&connection, store)?
+        .into_iter()
+        .map(|track| track.track_key)
+        .collect::<HashSet<_>>();
     let predicate = match request.mode {
         RatingMode::Tracks => format!(
             "((:rating_points IS NULL AND ({TRACK_RATING_SQL} IS NULL OR {TRACK_RATING_SQL} <= 0)) OR {TRACK_RATING_SQL} = :rating_points)"
@@ -741,7 +872,7 @@ pub(crate) fn load_rating_collection(
         ORDER BY (p.love = 'L') DESC, p.rating_value DESC, p.album_id, p.id
         "#
     );
-    let mut tracks = catalog::query_tracks(
+    let tracks = catalog::query_tracks(
         &connection,
         &sql,
         named_params! {
@@ -751,6 +882,7 @@ pub(crate) fn load_rating_collection(
         "rating collection",
         Some(store),
     )?;
+    let mut tracks = remove_pending_deleted_tracks(tracks, &deleted_track_keys);
     if request.mode == RatingMode::Tracks {
         tracks.retain(|track| rated_bucket(rating_points(track.rating)) == points);
     }
@@ -770,6 +902,10 @@ pub(crate) fn load_rating_album_queue(
     }
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    let deleted_track_keys = pending_deleted_rating_tracks(&connection, store)?
+        .into_iter()
+        .map(|track| track.track_key)
+        .collect::<HashSet<_>>();
     let sql = format!(
         r#"
         SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -786,13 +922,14 @@ pub(crate) fn load_rating_album_queue(
         LIMIT 200
         "#
     );
-    let mut tracks = catalog::query_tracks(
+    let tracks = catalog::query_tracks(
         &connection,
         &sql,
         named_params! { ":album_id": request.album_id },
         "rating album queue",
         Some(store),
     )?;
+    let mut tracks = remove_pending_deleted_tracks(tracks, &deleted_track_keys);
     if request.unrated_only {
         tracks.retain(|track| track.rating.is_none());
     }
@@ -853,7 +990,8 @@ mod tests {
     fn album_score_matches_music_library_formula() {
         let (connection, store, path) = fixture();
         let snapshot =
-            query_album_snapshot(&connection, "complete", &HashMap::new()).expect("album snapshot");
+            query_album_snapshot(&connection, "complete", &HashMap::new(), &HashSet::new())
+                .expect("album snapshot");
         assert_eq!(snapshot.album.effective_rating, Some(4.5));
         let expected = ((90.0 * 0.5) + (0.5 * 100.0) + (2.0 * 0.3)) / 10.0 + 100.0;
         assert!((snapshot.album.album_score.expect("score") - expected).abs() < 0.001);
@@ -898,6 +1036,59 @@ mod tests {
         assert_eq!(overview.completion.almost_complete, 1);
         assert_eq!(overview.rated_albums, 1);
         assert_eq!(overview.track_bands.last().expect("five stars").count, 2);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn pending_deleted_unrated_track_leaves_completion_and_playback() {
+        let (connection, store, path) = fixture();
+        let album_directory = tempfile::TempDir::new().expect("temporary rating album");
+        let directory = album_directory.path().to_string_lossy().into_owned();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'almost'",
+                [&directory],
+            )
+            .expect("use temporary album path");
+        store
+            .queue_library_file_syncs(&[(directory, "four.mp3".to_owned())])
+            .expect("queue deleted unrated track");
+
+        let overview = query_overview(&connection, &store).expect("ratings after deletion");
+        assert_eq!(overview.completion.almost_complete, 0);
+        assert!(
+            overview
+                .initial_page
+                .albums
+                .iter()
+                .all(|album| album.id != "almost")
+        );
+        let deleted_track_keys = pending_deleted_rating_tracks(&connection, &store)
+            .expect("pending deletion projection")
+            .into_iter()
+            .map(|track| track.track_key)
+            .collect::<HashSet<_>>();
+        let snapshot =
+            query_album_snapshot(&connection, "almost", &HashMap::new(), &deleted_track_keys)
+                .expect("completion album after deletion");
+        assert_eq!(snapshot.album.total_tracks, 3);
+        assert_eq!(snapshot.album.rated_tracks, 3);
+        assert_eq!(snapshot.album.remaining_tracks, 0);
+
+        let sql = format!(
+            "SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year, {TRACK_RATING_SQL}, t.love, t.time_seconds, t.canonical_genre, NULL, t.album_id, t.file_path, t.filename, t.import_run_id, t.year, t.publisher, t.display_artist FROM tracks AS t WHERE t.id = 4"
+        );
+        let stale_queue = catalog::query_tracks(
+            &connection,
+            &sql,
+            [],
+            "deleted rating queue fixture",
+            Some(&store),
+        )
+        .expect("stale catalog queue");
+        assert!(remove_pending_deleted_tracks(stale_queue, &deleted_track_keys).is_empty());
+
         drop(store);
         let _ = fs::remove_file(path);
     }

@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.24] - 2026-08-25
+
+### Fixed
+
+- Ratings completion now removes queued-and-missing deleted MP3s from its counts, **Finish what you love** shelves and album details, track-rating totals, and playback queues. Albums whose only unrated track was deleted become complete immediately, and **Play unrated tracks** can no longer enqueue that unavailable catalog row while Music Library synchronization is pending.
+
 ## [0.17.23] - 2026-08-25
 
 ### Fixed

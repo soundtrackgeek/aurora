@@ -1076,12 +1076,11 @@ fn album_detail_from_connection(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the album tracks: {error}"))?;
     apply_overlays(&mut tracks, store)?;
-    let mut removed_tracks = Vec::new();
     if let Some(store) = store {
         let mut available_tracks = Vec::with_capacity(tracks.len());
         for track in tracks {
             if pending_deleted_track(&track, store)? {
-                removed_tracks.push(track);
+                continue;
             } else {
                 available_tracks.push(track);
             }
@@ -1098,22 +1097,6 @@ fn album_detail_from_connection(
         album.duration_seconds = live.duration_seconds;
         album.rating = live.effective_rating;
         album.album_score = live.album_score;
-        album.total_tracks = (album.total_tracks - removed_tracks.len() as i64).max(0);
-        album.rated_tracks = (album.rated_tracks
-            - removed_tracks
-                .iter()
-                .filter(|track| track.rating.is_some())
-                .count() as i64)
-            .max(0);
-        album.loved_tracks = (album.loved_tracks
-            - removed_tracks.iter().filter(|track| track.loved).count() as i64)
-            .max(0);
-        album.duration_seconds = (album.duration_seconds
-            - removed_tracks
-                .iter()
-                .filter_map(|track| track.duration_seconds)
-                .sum::<i64>())
-        .max(0);
     }
     Ok(AlbumDetail {
         album,
