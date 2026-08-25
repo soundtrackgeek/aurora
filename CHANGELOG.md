@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.31] - 2026-08-25
+
+### Fixed
+
+- **Play unrated tracks** in Ratings now checks pending deletions only for the selected album, removing the multi-second full-catalog rescan before playback while keeping queued missing tracks out of the queue.
+
 ## [0.17.30] - 2026-08-25
 
 ### Fixed

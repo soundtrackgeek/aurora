@@ -932,10 +932,16 @@ pub(crate) fn load_rating_album_queue(
     }
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
-    let deleted_track_keys = pending_deleted_rating_tracks(&connection, store)?
-        .into_iter()
-        .map(|track| track.track_key)
-        .collect::<HashSet<_>>();
+    load_rating_album_queue_from_connection(&connection, &request, store)
+}
+
+fn load_rating_album_queue_from_connection(
+    connection: &Connection,
+    request: &RatingAlbumQueueRequest,
+    store: &StateStore,
+) -> Result<Vec<TrackSummary>, String> {
+    let deleted_track_keys =
+        pending_deleted_track_keys_for_album(connection, &request.album_id, store)?;
     let sql = format!(
         r#"
         SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -953,9 +959,9 @@ pub(crate) fn load_rating_album_queue(
         "#
     );
     let tracks = catalog::query_tracks(
-        &connection,
+        connection,
         &sql,
-        named_params! { ":album_id": request.album_id },
+        named_params! { ":album_id": &request.album_id },
         "rating album queue",
         Some(store),
     )?;
@@ -1128,6 +1134,46 @@ mod tests {
         .expect("stale catalog queue");
         assert!(remove_pending_deleted_tracks(stale_queue, &deleted_track_keys).is_empty());
 
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn album_queue_scopes_pending_deletion_projection_to_the_selected_album() {
+        let (connection, store, path) = fixture();
+        let selected_directory = tempfile::TempDir::new().expect("selected album directory");
+        let selected_directory = selected_directory.path().to_string_lossy().into_owned();
+        let unrelated_directory = tempfile::TempDir::new().expect("unrelated album directory");
+        let unrelated_directory = unrelated_directory.path().to_string_lossy().into_owned();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'almost'",
+                [&selected_directory],
+            )
+            .expect("move selected fixture album");
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'complete'",
+                [&unrelated_directory],
+            )
+            .expect("move unrelated fixture album");
+        store
+            .queue_library_file_syncs(&[(unrelated_directory, "six.mp3".to_owned())])
+            .expect("queue unrelated missing track");
+
+        let tracks = load_rating_album_queue_from_connection(
+            &connection,
+            &RatingAlbumQueueRequest {
+                album_id: "almost".to_owned(),
+                unrated_only: true,
+                limit: 100,
+            },
+            &store,
+        )
+        .expect("load selected album queue");
+
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].title, "Four");
         drop(store);
         let _ = fs::remove_file(path);
     }
