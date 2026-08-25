@@ -207,16 +207,19 @@ async fn delete_album_track(
                 }
                 resolved_tracks.push(resolved);
             }
-            let directories = resolved_tracks
+            let changed_files = resolved_tracks
                 .iter()
-                .map(|resolved| resolved.summary.directory.clone())
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
+                .map(|resolved| {
+                    (
+                        resolved.summary.directory.clone(),
+                        resolved.summary.filename.clone(),
+                    )
+                })
                 .collect::<Vec<_>>();
 
-            // Queue every complete folder before the destructive filesystem step. If Aurora exits
+            // Queue every selected file before the destructive filesystem step. If Aurora exits
             // after any deletion, the next background retry still tells Music Library about it.
-            store.queue_library_folder_syncs(&directories)?;
+            store.queue_library_file_syncs(&changed_files)?;
             let mut deleted_track_keys = Vec::with_capacity(resolved_tracks.len());
             let mut failures = Vec::new();
             let mut changed_directories = std::collections::HashSet::new();

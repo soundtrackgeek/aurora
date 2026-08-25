@@ -2449,6 +2449,11 @@ function App() {
       if (deletedTracks.length === 0) {
         throw new Error(result.failures[0]?.message ?? "Aurora could not delete the selected tracks.");
       }
+      // A catalog or album request that began before deletion must not restore its stale row.
+      albumRequestRef.current += 1;
+      exploreRequestRef.current += 1;
+      setIsLoadingMore(false);
+      setExplorerLoadState("ready");
       const isDeleted = (candidate: Track) => deletedKeys.has(candidate.trackKey);
       const selectedAlbum = explorerAlbums.find((album) => album.id === albumId);
       const removesAlbum = Boolean(selectedAlbum && selectedAlbum.totalTracks <= deletedTracks.length);
@@ -2733,7 +2738,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.20</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.21</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3084,7 +3089,7 @@ function App() {
           <div className="inspector-scroll inspector-scroll--tag-editor">
             <TagEditor
               key={tagEditorTarget.kind === "album"
-                ? `album:${tagEditorTarget.albumId}`
+                ? `album:${tagEditorTarget.albumId}:${albumTracks.length}`
                 : `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`}
               target={tagEditorTarget}
               onTracksChange={applyTrackChanges}

@@ -1226,18 +1226,67 @@ impl StateStore {
             })
     }
 
-    pub(crate) fn queue_library_folder_syncs(&self, directories: &[String]) -> Result<(), String> {
-        validate_pending_library_folder_sync_paths(directories)?;
+    pub(crate) fn queue_library_file_syncs(
+        &self,
+        files: &[(String, String)],
+    ) -> Result<(), String> {
+        if files.is_empty() || files.len() > 100 {
+            return Err(
+                "Aurora can queue between 1 and 100 changed library files at once.".to_owned(),
+            );
+        }
+        if files
+            .iter()
+            .any(|(directory, filename)| directory.trim().is_empty() || filename.trim().is_empty())
+        {
+            return Err("Aurora refused an empty changed library file path.".to_owned());
+        }
+        let directory_count = files
+            .iter()
+            .map(|(directory, _)| directory.to_lowercase())
+            .collect::<HashSet<_>>()
+            .len();
+        if directory_count > MAX_PENDING_LIBRARY_FOLDER_SYNCS {
+            return Err(format!(
+                "Aurora can update at most {MAX_PENDING_LIBRARY_FOLDER_SYNCS} library folders at once."
+            ));
+        }
         let mut connection = self.open()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("Could not prepare Aurora's library-folder sync: {error}"))?;
-        for directory in directories {
-            enqueue_pending_library_folder_sync(&transaction, directory, None)?;
+            .map_err(|error| format!("Could not prepare Aurora's library-file sync: {error}"))?;
+        for (directory, filename) in files {
+            enqueue_pending_library_folder_sync(&transaction, directory, Some(filename))?;
         }
         transaction
             .commit()
-            .map_err(|error| format!("Could not queue Aurora's library-folder sync: {error}"))
+            .map_err(|error| format!("Could not queue Aurora's library-file sync: {error}"))
+    }
+
+    pub(crate) fn library_file_sync_is_pending(
+        &self,
+        directory: &str,
+        filename: &str,
+    ) -> Result<bool, String> {
+        if directory.trim().is_empty() || filename.trim().is_empty() {
+            return Err("Aurora refused an empty pending library file path.".to_owned());
+        }
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT filename FROM pending_library_folder_sync WHERE directory = ?1",
+                params![directory],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(|pending| {
+                pending.is_some_and(|queued_filename| {
+                    queued_filename
+                        .as_deref()
+                        .is_none_or(|queued| queued.eq_ignore_ascii_case(filename))
+                })
+            })
+            .map_err(|error| format!("Could not inspect Aurora's pending library file: {error}"))
     }
 
     pub(crate) fn pending_library_folder_sync_for_paths(
@@ -2156,6 +2205,31 @@ mod tests {
         assert_eq!(pending_paths(&reopened, 99), vec![directory.to_owned()]);
 
         drop(reopened);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn exact_file_sync_identifies_only_the_queued_missing_catalog_file() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let directory = r"D:\Music\Artist\Album";
+
+        store
+            .queue_library_file_syncs(&[(directory.to_owned(), "Bonus.mp3".to_owned())])
+            .expect("queue exact deleted file");
+
+        assert!(
+            store
+                .library_file_sync_is_pending(directory, "bonus.MP3")
+                .expect("matching pending file")
+        );
+        assert!(
+            !store
+                .library_file_sync_is_pending(directory, "Album Track.mp3")
+                .expect("unrelated file")
+        );
+
+        drop(store);
         let _ = fs::remove_file(path);
     }
 

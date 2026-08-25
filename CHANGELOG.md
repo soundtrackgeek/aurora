@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.21] - 2026-08-25
+
+### Fixed
+
+- A successfully deleted album track no longer reappears when an in-flight album or catalog response still contains the stale Music Library row. Aurora keeps the verified-missing file hidden while its durable update is pending and corrects the album track, rating, love, and duration counts.
+- Whole-album Tags now reloads after deletion and excludes only a missing MP3 covered by Aurora's durable Music Library queue. Unrelated unavailable files still stop a batch edit instead of silently editing an incomplete album.
+- New deletions queue exact filenames before filesystem removal, retaining whole-folder fallback only when several changed files in the same album require it.
+
 ## [0.17.20] - 2026-08-25
 
 ### Added

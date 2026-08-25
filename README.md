@@ -1,13 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.20 adds a direct handoff from Ratings completion details to the selected album in Albums.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.21 keeps intentionally deleted MP3s out of album detail and whole-album Tags while Music Library catches up.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.20 slice
+## Current 0.17.21 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
-- Album detail supports standard click, Ctrl+click, and Shift+click track selection, a bulk **Delete selected** action, and an explicit permanent-deletion confirmation. Aurora re-resolves every bounded catalog identity before deleting only regular MP3 files, queues every affected folder durably, and asks Music Library to rescan immediately so its catalog and Updates deletion count reflect the removed tracks; failed bridge work remains in the existing automatic retry queue.
+- Album detail supports standard click, Ctrl+click, and Shift+click track selection, a bulk **Delete selected** action, and an explicit permanent-deletion confirmation. Aurora re-resolves every bounded catalog identity before deleting only regular MP3 files, durably queues the exact affected files, and asks Music Library to rescan immediately so its catalog and Updates deletion count reflect the removed tracks. While a failed or locked bridge update remains queued, stale catalog reads cannot restore a verified-missing deleted row, and whole-album Tags safely excludes only that queued missing file.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination in a bounded, keyboard-scrollable plan before one explicit batch apply. Apply closes the modal and continues under a persistent top-bar status so browsing and playback remain available; the intake action stays disabled until completion, and a synchronous guard prevents duplicate requests. Music Library `0.144.5` then runs its cover-archive/embedded-art workflow only for the added albums, writing embedded front art to the configured `AlbumCovers` folder without a manual full-library Cover add.
 - A dedicated **Tags** tab in the right inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
 - Player stars, global rating/Love shortcuts, inline edits, inspector saves, and undo no longer queue behind slow Music Library bridge work. Background reconciliation reserves an older projection token before it starts and conditionally updates only the exact pending-overlay revision it inspected, so foreground changes appear promptly and always win stale-result races.

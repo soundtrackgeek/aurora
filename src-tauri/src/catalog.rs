@@ -1661,18 +1661,31 @@ pub(crate) fn resolve_album_tracks(
         .map(TrackSummary::catalog_tag_values)
         .collect::<Vec<_>>();
     apply_overlays(&mut summaries, Some(store))?;
-    summaries
-        .into_iter()
-        .zip(catalog_values)
-        .map(|(summary, catalog_values)| {
-            let audio_path = validated_audio_path(&summary.directory, &summary.filename)?;
-            Ok(ResolvedTrack {
-                summary,
-                audio_path,
-                catalog_values,
-            })
-        })
-        .collect()
+    let mut resolved = Vec::with_capacity(summaries.len());
+    for (summary, catalog_values) in summaries.into_iter().zip(catalog_values) {
+        if pending_deleted_track(&summary, store)? {
+            continue;
+        }
+        let audio_path = validated_audio_path(&summary.directory, &summary.filename)?;
+        resolved.push(ResolvedTrack {
+            summary,
+            audio_path,
+            catalog_values,
+        });
+    }
+    if resolved.is_empty() {
+        return Err("This album has no available MP3 files.".to_owned());
+    }
+    Ok(resolved)
+}
+
+pub(crate) fn pending_deleted_track(
+    summary: &TrackSummary,
+    store: &StateStore,
+) -> Result<bool, String> {
+    let audio_path = catalog_audio_path(&summary.directory, &summary.filename)?;
+    Ok(!audio_path.is_file()
+        && store.library_file_sync_is_pending(&summary.directory, &summary.filename)?)
 }
 
 fn album_tag_tracks_from_connection(
@@ -1767,6 +1780,14 @@ pub(crate) fn catalog_tag_values_by_path(
 }
 
 fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String> {
+    let audio_path = catalog_audio_path(directory, filename)?;
+    if !audio_path.is_file() {
+        return Err("The MP3 file is unavailable at its catalog location.".to_owned());
+    }
+    Ok(audio_path)
+}
+
+fn catalog_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String> {
     let filename_path = Path::new(&filename);
     if filename_path.is_absolute()
         || filename_path.components().count() != 1
@@ -1782,7 +1803,7 @@ fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, Stri
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"));
-    if !is_mp3 || !audio_path.is_file() {
+    if !is_mp3 {
         return Err("The MP3 file is unavailable at its catalog location.".to_owned());
     }
     Ok(audio_path)

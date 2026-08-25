@@ -1,7 +1,7 @@
 use crate::{
     catalog::{
         ArtistSummary, TrackSummary, apply_overlays, default_catalog_path, map_track_row,
-        open_catalog, parse_catalog_search, push_album_search_predicates,
+        open_catalog, parse_catalog_search, pending_deleted_track, push_album_search_predicates,
         push_track_search_predicates,
     },
     ratings,
@@ -1075,9 +1075,21 @@ fn album_detail_from_connection(
         .map_err(|error| format!("Could not read the album tracks: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the album tracks: {error}"))?;
+    apply_overlays(&mut tracks, store)?;
+    let mut removed_tracks = Vec::new();
+    if let Some(store) = store {
+        let mut available_tracks = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            if pending_deleted_track(&track, store)? {
+                removed_tracks.push(track);
+            } else {
+                available_tracks.push(track);
+            }
+        }
+        tracks = available_tracks;
+    }
     let tracks_truncated = tracks.len() > usize::from(MAX_PAGE_SIZE);
     tracks.truncate(usize::from(MAX_PAGE_SIZE));
-    apply_overlays(&mut tracks, store)?;
     if let Some(store) = store {
         let live = ratings::live_album_from_connection(connection, album_id, store)?;
         album.total_tracks = live.total_tracks;
@@ -1086,6 +1098,22 @@ fn album_detail_from_connection(
         album.duration_seconds = live.duration_seconds;
         album.rating = live.effective_rating;
         album.album_score = live.album_score;
+        album.total_tracks = (album.total_tracks - removed_tracks.len() as i64).max(0);
+        album.rated_tracks = (album.rated_tracks
+            - removed_tracks
+                .iter()
+                .filter(|track| track.rating.is_some())
+                .count() as i64)
+            .max(0);
+        album.loved_tracks = (album.loved_tracks
+            - removed_tracks.iter().filter(|track| track.loved).count() as i64)
+            .max(0);
+        album.duration_seconds = (album.duration_seconds
+            - removed_tracks
+                .iter()
+                .filter_map(|track| track.duration_seconds)
+                .sum::<i64>())
+        .max(0);
     }
     Ok(AlbumDetail {
         album,
@@ -1712,6 +1740,37 @@ mod tests {
         assert_eq!(detail.tracks[0].title, "Sæglópur");
         assert_eq!(detail.tracks[0].display_artist.as_deref(), Some("Jónsi"));
         assert!(!detail.tracks_truncated);
+    }
+
+    #[test]
+    fn album_detail_hides_a_missing_file_while_its_catalog_sync_is_pending() {
+        let connection = fixture();
+        connection
+            .execute("ALTER TABLE albums ADD COLUMN album_rating REAL", [])
+            .expect("rating detail fixture column");
+        let album_directory = tempfile::TempDir::new().expect("temporary album");
+        let directory = album_directory.path().to_string_lossy().into_owned();
+        std::fs::write(album_directory.path().join("01.mp3"), b"fixture").expect("available track");
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a1'",
+                [&directory],
+            )
+            .expect("use temporary album paths");
+
+        let state_path = album_directory.path().join("aurora-state.sqlite3");
+        let store = StateStore::new(state_path).expect("state store");
+        store
+            .queue_library_file_syncs(&[(directory, "02.mp3".to_owned())])
+            .expect("queue deleted file");
+
+        let detail = album_detail_from_connection(&connection, "a1", Some(&store))
+            .expect("album detail with pending deletion");
+
+        assert_eq!(detail.tracks.len(), 1);
+        assert_eq!(detail.tracks[0].title, "Sæglópur");
+        assert_eq!(detail.album.total_tracks, 1);
+        assert_eq!(detail.album.duration_seconds, 473);
     }
 
     #[test]
