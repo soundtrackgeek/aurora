@@ -1,10 +1,10 @@
 # Sidebar navigation contract
 
-Aurora 0.13.0 keeps the left rail's stable information architecture without changing catalog or playback ownership.
+Aurora 0.18.0 keeps the left rail's stable information architecture without changing catalog or playback ownership.
 
 ## Hierarchy
 
-- Universe, Observatory, and History are top-level destinations.
+- Universe, Inbox, Observatory, and History are top-level destinations. Inbox is fixed between Universe and Observatory.
 - Library owns Songs, Albums, Artists, Genres, Years, Ratings, and Tags.
 - Playlists is a collapsible sibling of Library. Its three rows are bounded previews, not functioning playlist records.
 - Opening a closed Library selects Songs. Closing it leaves the current destination unchanged so playback and exploration context are not discarded.

@@ -224,8 +224,14 @@ const AddFolderDialog = lazy(async () => {
   return { default: module.AddFolderDialog };
 });
 
+const Inbox = lazy(async () => {
+  const module = await import("./components/inbox/Inbox");
+  return { default: module.Inbox };
+});
+
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
+  Inbox: "inbox",
   Observatory: "observatory",
   Songs: "songs",
   Albums: "albums",
@@ -1021,6 +1027,7 @@ function App() {
   useEffect(() => {
     if (
       !libraryReady
+      || activeNav === "Inbox"
       || activeNav === "Observatory"
       || activeNav === "Charts"
       || activeNav === "History"
@@ -1100,7 +1107,7 @@ function App() {
   useEffect(() => {
     if (
       libraryReady
-      && ["Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
+      && ["Inbox", "Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
     ) explorerRestorationPendingRef.current = false;
   }, [activeNav, libraryReady]);
 
@@ -2656,8 +2663,10 @@ function App() {
       ? ["album", "albums"] as const
       : ["artist", "artists"] as const;
   const showExplorerCount = snapshot !== null
-    && !["Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
-  const topbarSearchValue = activeNav === "Observatory"
+    && !["Inbox", "Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
+  const topbarSearchValue = activeNav === "Inbox"
+    ? ""
+    : activeNav === "Observatory"
     ? reviewSearch
     : activeNav === "History"
       ? historySearch
@@ -2668,7 +2677,9 @@ function App() {
         : activeNav === "Years"
           ? ""
         : explorerFilters.query;
-  const topbarSearchPlaceholder = activeNav === "Observatory"
+  const topbarSearchPlaceholder = activeNav === "Inbox"
+    ? "Inbox search is coming after folder monitoring…"
+    : activeNav === "Observatory"
     ? "Search artists to review…"
     : activeNav === "History"
       ? "Search listening history…"
@@ -2681,7 +2692,9 @@ function App() {
         : explorerView === "tracks"
           ? "Search year:1985..1987, OR, NOT…"
           : "Search your universe…";
-  const topbarSearchLabel = activeNav === "Observatory"
+  const topbarSearchLabel = activeNav === "Inbox"
+    ? "Inbox search is not available yet"
+    : activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
     : activeNav === "History"
       ? "Search listening history"
@@ -2694,6 +2707,7 @@ function App() {
         : "Search your music universe";
 
   function updateTopbarSearch(value: string) {
+    if (activeNav === "Inbox") return;
     if (activeNav === "Observatory") setReviewSearch(value);
     else if (activeNav === "History") setHistorySearch(value);
     else if (activeNav === "Genres") setGenreSearch(value);
@@ -2734,6 +2748,7 @@ function App() {
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
       data-right-sidebar={layoutPreferences.rightSidebar}
+      data-inbox={activeNav === "Inbox" ? "true" : undefined}
       data-text-size={displayPreferences.global.textSize}
       data-cover-size={displayPreferences.global.coverSize}
     >
@@ -2763,7 +2778,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.32</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2783,7 +2798,7 @@ function App() {
           >
             <LeftSidebarIcon aria-hidden="true" />
           </button>
-          <form className={`search${activeNav === "Years" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
+          <form className={`search${activeNav === "Years" || activeNav === "Inbox" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
             <Search aria-hidden="true" />
             <input
               ref={searchRef}
@@ -2791,12 +2806,12 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
-              title={explorerView === "tracks" && !["Observatory", "History", "Genres", "Publishers", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
-              disabled={activeNav === "Years"}
+              title={explorerView === "tracks" && !["Inbox", "Observatory", "History", "Genres", "Publishers", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
+              disabled={activeNav === "Years" || activeNav === "Inbox"}
             />
             {topbarSearchValue
               ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
-              : activeNav !== "Years" ? <kbd>Ctrl K</kbd> : null}
+              : activeNav !== "Years" && activeNav !== "Inbox" ? <kbd>Ctrl K</kbd> : null}
           </form>
           {showExplorerCount ? (
             <output className="search-result-count" aria-live="polite" aria-busy={currentExplorerCount === null}>
@@ -2860,7 +2875,14 @@ function App() {
           data-cover-size={activeDisplayPreferences.coverSize}
         >
           {snapshot ? (
-            activeNav === "Observatory" ? (
+            activeNav === "Inbox" ? (
+              <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
+                <Inbox
+                  onOpenMetadataSettings={() => openSettings("metadata")}
+                  onCatalogChanged={refreshCatalogIfChanged}
+                />
+              </Suspense>
+            ) : activeNav === "Observatory" ? (
               <Observatory
                 items={reviewItems}
                 selectedArtistKey={artistIntelligence?.artistKey ?? null}
@@ -3082,7 +3104,7 @@ function App() {
         </div>
       </main>
 
-      {layoutPreferences.rightSidebar === "expanded" && <aside
+      {activeNav !== "Inbox" && layoutPreferences.rightSidebar === "expanded" && <aside
         className="inspector"
         data-text-size={activeDisplayPreferences.textSize}
         data-cover-size={activeDisplayPreferences.coverSize}

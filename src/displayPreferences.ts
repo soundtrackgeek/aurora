@@ -18,6 +18,7 @@ export type CoverSize = typeof coverSizeOptions[number]["value"];
 
 export const displayViews = [
   { id: "universe", label: "Universe", supportsCovers: true },
+  { id: "inbox", label: "Inbox", supportsCovers: true },
   { id: "observatory", label: "Observatory", supportsCovers: false },
   { id: "songs", label: "Songs", supportsCovers: true },
   { id: "albums", label: "Albums", supportsCovers: true },

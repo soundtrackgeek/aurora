@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-25
+
+### Added
+
+- Added **Inbox** between Universe and Observatory as a catalog-external staging surface for up to ten monitored folders, with bounded recursive MP3 scanning, 15-second and focus refreshes, album readiness issues, and device-local persistence.
+- Added `Ctrl+Shift+T` **Album Auto-Tagger** search across MusicBrainz and Discogs releases, editable album/track metadata, per-field write intent, provider track-list comparison, and verified batch application.
+- Added OS-credential-vault Discogs settings for either a personal token or consumer key plus secret. MusicBrainz networking identifies Aurora and observes the service's one-request-per-second limit.
+- Inbox metadata writes now stage same-folder copies, preserve and verify the MP3 audio payload, retain rollback backups until the complete batch succeeds, and restore earlier files when a later install fails.
+- Inbox promotion reuses Add Music's reviewed Music Library preview/apply bridge for General, Scores, and Synthwave so staged albums remain outside the catalog until the selected move succeeds.
+
 ## [0.17.32] - 2026-08-25
 
 ### Added

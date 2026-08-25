@@ -1455,7 +1455,7 @@ fn verify_editor_expected(
     Ok(())
 }
 
-fn read_editable_tag_values(tag: &Tag) -> Result<EditableTagValues, String> {
+pub(crate) fn read_editable_tag_values(tag: &Tag) -> Result<EditableTagValues, String> {
     let legacy = read_tag_values(tag)?;
     let display_artist =
         unique_extended_text_value(tag, DISPLAY_ARTIST_DESCRIPTION, "DISPLAY ARTIST")?;
@@ -1550,7 +1550,7 @@ fn set_optional_credit_text(tag: &mut Tag, id: &str, value: Option<&str>) -> Res
     Ok(())
 }
 
-fn merge_editor_patch(
+pub(crate) fn merge_editor_patch(
     before: &EditableTagValues,
     fields: &[EditableTagField],
     patch: &EditableTagValues,
@@ -1626,7 +1626,7 @@ fn normalize_number_pair(
     Ok(())
 }
 
-fn apply_editor_tag_changes(
+pub(crate) fn apply_editor_tag_changes(
     tag: &mut Tag,
     version: Version,
     fields: &[EditableTagField],
@@ -1871,7 +1871,7 @@ fn validated_pending_overlay_path(
     Ok(audio_path)
 }
 
-fn read_tag_for_write(path: &Path) -> Result<(Tag, Version), String> {
+pub(crate) fn read_tag_for_write(path: &Path) -> Result<(Tag, Version), String> {
     let tag = no_tag_ok(Tag::read_from_path(path))
         .map_err(|error| format!("Could not safely decode this MP3's ID3 tag: {error}"))?;
     match tag {
@@ -2181,7 +2181,7 @@ fn same_frames(actual: &[Frame], expected: &[Frame]) -> bool {
     unmatched.is_empty()
 }
 
-fn audio_payload_hash(path: &Path) -> Result<[u8; 32], String> {
+pub(crate) fn audio_payload_hash(path: &Path) -> Result<[u8; 32], String> {
     let mut file = File::open(path)
         .map_err(|error| format!("Could not open the MP3 for audio verification: {error}"))?;
     Tag::skip(&mut file)

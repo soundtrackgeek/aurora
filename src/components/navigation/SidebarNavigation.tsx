@@ -8,6 +8,7 @@ import {
   Clock3,
   Disc3,
   LibraryBig,
+  Inbox as InboxIcon,
   ListMusic,
   Music2,
   Sparkles,
@@ -22,6 +23,7 @@ import type { LeftSidebarMode } from "../../layoutPreferences";
 
 export type SidebarDestination =
   | "Universe"
+  | "Inbox"
   | "Observatory"
   | "Songs"
   | "Albums"
@@ -57,6 +59,7 @@ type SidebarNavigationProps = {
 
 const primaryItems: readonly NavigationItem[] = [
   { label: "Universe", icon: Sparkles },
+  { label: "Inbox", icon: InboxIcon },
   { label: "Observatory", icon: Telescope },
 ];
 

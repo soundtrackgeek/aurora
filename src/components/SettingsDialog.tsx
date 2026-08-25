@@ -7,6 +7,7 @@ import {
   MonitorCog,
   RotateCcw,
   ShieldCheck,
+  Tags,
   Type,
   Volume2,
   Waves,
@@ -35,8 +36,9 @@ import {
   type DisplayViewKey,
   type TextSize,
 } from "../displayPreferences";
+import { loadInboxSettings, updateDiscogsCredentials, type InboxSettingsStatus } from "../inbox";
 
-export type SettingsTab = "display" | "audio" | "shortcuts";
+export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata";
 
 interface SettingsDialogProps {
   shortcutStatus: GlobalShortcutStatus;
@@ -77,6 +79,19 @@ export function SettingsDialog({
   const [replayGainMode, setReplayGainMode] = useState<ReplayGainMode>(audioStatus.settings.replayGainMode);
   const [displayDraft, setDisplayDraft] = useState<DisplayPreferences>(() => copyDisplayPreferences(displayPreferences));
   const [selectedDisplayView, setSelectedDisplayView] = useState<DisplayViewKey>(activeDisplayView);
+  const [metadataStatus, setMetadataStatus] = useState<InboxSettingsStatus | null>(null);
+  const [discogsToken, setDiscogsToken] = useState("");
+  const [discogsCredentialMode, setDiscogsCredentialMode] = useState<"token" | "consumer">("token");
+  const [discogsConsumerKey, setDiscogsConsumerKey] = useState("");
+  const [discogsConsumerSecret, setDiscogsConsumerSecret] = useState("");
+  const [removeDiscogsToken, setRemoveDiscogsToken] = useState(false);
+  const [metadataSaving, setMetadataSaving] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab !== "metadata" || metadataStatus) return;
+    void loadInboxSettings().then(setMetadataStatus).catch((error: unknown) => setMetadataError(error instanceof Error ? error.message : String(error)));
+  }, [metadataStatus, tab]);
 
   useEffect(() => {
     if (!recordingAction) return;
@@ -113,21 +128,40 @@ export function SettingsDialog({
   const audioDirty = outputDeviceId !== audioStatus.settings.outputDeviceId
     || replayGainMode !== audioStatus.settings.replayGainMode;
   const displayDirty = JSON.stringify(displayDraft) !== JSON.stringify(displayPreferences);
-  const activeTitle = tab === "display" ? "Display" : tab === "audio" ? "Audio" : "Global shortcuts";
-  const activeSaving = tab === "display" ? false : tab === "audio" ? audioSaving : shortcutSaving;
-  const activeDirty = tab === "display" ? displayDirty : tab === "audio" ? audioDirty : shortcutsDirty;
-  const activeError = tab === "display" ? null : tab === "audio" ? audioError : shortcutError;
+  const metadataDirty = removeDiscogsToken
+    || (discogsCredentialMode === "token" ? Boolean(discogsToken.trim()) : Boolean(discogsConsumerKey.trim() && discogsConsumerSecret.trim()));
+  const activeTitle = tab === "display" ? "Display" : tab === "audio" ? "Audio" : tab === "metadata" ? "Metadata" : "Global shortcuts";
+  const activeSaving = tab === "display" ? false : tab === "audio" ? audioSaving : tab === "metadata" ? metadataSaving : shortcutSaving;
+  const activeDirty = tab === "display" ? displayDirty : tab === "audio" ? audioDirty : tab === "metadata" ? metadataDirty : shortcutsDirty;
+  const activeError = tab === "display" ? null : tab === "audio" ? audioError : tab === "metadata" ? metadataError : shortcutError;
 
   function saveActiveTab() {
     if (tab === "display") {
       onSaveDisplay(displayDraft);
     } else if (tab === "audio") {
       onSaveAudio({ outputDeviceId, replayGainMode });
-    } else {
+    } else if (tab === "shortcuts") {
       onSaveShortcuts({
         enabled,
         bindings: bindings.map(({ action, accelerator }) => ({ action, accelerator })),
       });
+    } else {
+      setMetadataSaving(true);
+      setMetadataError(null);
+      void updateDiscogsCredentials(removeDiscogsToken
+        ? { mode: "clear" }
+        : discogsCredentialMode === "token"
+          ? { mode: "token", token: discogsToken }
+          : { mode: "consumer", consumerKey: discogsConsumerKey, consumerSecret: discogsConsumerSecret })
+        .then((status) => {
+          setMetadataStatus(status);
+          setDiscogsToken("");
+          setDiscogsConsumerKey("");
+          setDiscogsConsumerSecret("");
+          setRemoveDiscogsToken(false);
+        })
+        .catch((error: unknown) => setMetadataError(error instanceof Error ? error.message : String(error)))
+        .finally(() => setMetadataSaving(false));
     }
   }
 
@@ -137,7 +171,7 @@ export function SettingsDialog({
     }}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
-          <div className="settings-dialog__mark">{tab === "display" ? <MonitorCog aria-hidden="true" /> : tab === "audio" ? <Volume2 aria-hidden="true" /> : <Keyboard aria-hidden="true" />}</div>
+          <div className="settings-dialog__mark">{tab === "display" ? <MonitorCog aria-hidden="true" /> : tab === "audio" ? <Volume2 aria-hidden="true" /> : tab === "metadata" ? <Tags aria-hidden="true" /> : <Keyboard aria-hidden="true" />}</div>
           <div><p className="eyebrow">Aurora settings</p><h2 id="settings-title">{activeTitle}</h2></div>
           <button type="button" className="settings-dialog__close" aria-label="Close settings" onClick={onClose}><X aria-hidden="true" /></button>
         </header>
@@ -146,6 +180,7 @@ export function SettingsDialog({
           <button type="button" role="tab" aria-selected={tab === "display"} onClick={() => setTab("display")}><MonitorCog aria-hidden="true" /> Display</button>
           <button type="button" role="tab" aria-selected={tab === "audio"} onClick={() => setTab("audio")}><Volume2 aria-hidden="true" /> Audio</button>
           <button type="button" role="tab" aria-selected={tab === "shortcuts"} onClick={() => setTab("shortcuts")}><Keyboard aria-hidden="true" /> Shortcuts</button>
+          <button type="button" role="tab" aria-selected={tab === "metadata"} onClick={() => setTab("metadata")}><Tags aria-hidden="true" /> Metadata</button>
         </nav>
 
         <div className="settings-dialog__body">
@@ -164,7 +199,7 @@ export function SettingsDialog({
               onOutputDeviceChange={setOutputDeviceId}
               onReplayGainModeChange={setReplayGainMode}
             />
-          ) : (
+          ) : tab === "shortcuts" ? (
             <ShortcutSettingsPanel
               status={shortcutStatus}
               enabled={enabled}
@@ -173,6 +208,20 @@ export function SettingsDialog({
               onEnabledChange={setEnabled}
               onBindingsChange={setBindings}
               onRecordingActionChange={setRecordingAction}
+            />
+          ) : (
+            <MetadataSettingsPanel
+              status={metadataStatus}
+              token={discogsToken}
+              credentialMode={discogsCredentialMode}
+              consumerKey={discogsConsumerKey}
+              consumerSecret={discogsConsumerSecret}
+              removeToken={removeDiscogsToken}
+              onCredentialModeChange={setDiscogsCredentialMode}
+              onTokenChange={(value) => { setDiscogsToken(value); setRemoveDiscogsToken(false); }}
+              onConsumerKeyChange={(value) => { setDiscogsConsumerKey(value); setRemoveDiscogsToken(false); }}
+              onConsumerSecretChange={(value) => { setDiscogsConsumerSecret(value); setRemoveDiscogsToken(false); }}
+              onRemoveTokenChange={setRemoveDiscogsToken}
             />
           )}
           {((tab === "shortcuts" && validationError) || activeError) && (
@@ -190,6 +239,51 @@ export function SettingsDialog({
           >{activeSaving ? "Saving…" : "Save changes"}</button>
         </footer>
       </section>
+    </div>
+  );
+}
+
+function MetadataSettingsPanel({
+  status,
+  token,
+  credentialMode,
+  consumerKey,
+  consumerSecret,
+  removeToken,
+  onCredentialModeChange,
+  onTokenChange,
+  onConsumerKeyChange,
+  onConsumerSecretChange,
+  onRemoveTokenChange,
+}: {
+  status: InboxSettingsStatus | null;
+  token: string;
+  credentialMode: "token" | "consumer";
+  consumerKey: string;
+  consumerSecret: string;
+  removeToken: boolean;
+  onCredentialModeChange: (value: "token" | "consumer") => void;
+  onTokenChange: (value: string) => void;
+  onConsumerKeyChange: (value: string) => void;
+  onConsumerSecretChange: (value: string) => void;
+  onRemoveTokenChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="metadata-settings">
+      <section className="display-settings__section" aria-labelledby="discogs-settings-heading">
+        <header>
+          <span><Tags aria-hidden="true" /><span><strong id="discogs-settings-heading">Discogs</strong><small>Used by Inbox Album Auto-Tagger alongside MusicBrainz.</small></span></span>
+          <span className={`metadata-connection${status?.discogsConfigured ? " is-connected" : ""}`}>{status ? status.discogsConfigured ? <><ShieldCheck aria-hidden="true" /> Connected · {status.discogsAuthMode === "consumer" ? "consumer app" : "personal token"}</> : status.discogsIncompleteConsumerKey ? "Consumer secret needed" : "Not connected" : "Checking…"}</span>
+        </header>
+        <label className="metadata-auth-mode"><span>Authentication method</span><select value={credentialMode} disabled={removeToken} onChange={(event) => onCredentialModeChange(event.target.value as "token" | "consumer")}><option value="token">Personal access token</option><option value="consumer">Consumer key + secret</option></select></label>
+        {credentialMode === "token" ? <label className="metadata-token-field">
+          <span>Personal access token</span><input type="password" autoComplete="off" value={token} disabled={removeToken} placeholder={status?.discogsAuthMode === "token" ? "Saved securely · enter a replacement" : "Enter your Discogs token"} onChange={(event) => onTokenChange(event.target.value)} />
+          <small>One token is enough for personal use.</small>
+        </label> : <div className="metadata-consumer-fields"><label className="metadata-token-field"><span>Consumer key</span><input type="password" autoComplete="off" value={consumerKey} disabled={removeToken} placeholder={status?.discogsAuthMode === "consumer" || status?.discogsIncompleteConsumerKey ? "Saved or detected · enter key to replace" : "Enter consumer key"} onChange={(event) => onConsumerKeyChange(event.target.value)} /></label><label className="metadata-token-field"><span>Consumer secret</span><input type="password" autoComplete="off" value={consumerSecret} disabled={removeToken} placeholder={status?.discogsAuthMode === "consumer" ? "Saved securely · enter secret to replace" : "Enter matching consumer secret"} onChange={(event) => onConsumerSecretChange(event.target.value)} /></label></div>}
+        <p className="metadata-vault-note">Aurora stores production credentials in your operating system credential vault. Saved values are never displayed or written to Aurora settings files.</p>
+        {status?.discogsConfigured ? <label className="metadata-remove"><input type="checkbox" checked={removeToken} onChange={(event) => onRemoveTokenChange(event.target.checked)} /> Remove the saved Discogs credentials</label> : null}
+      </section>
+      <div className="metadata-settings__note"><ShieldCheck aria-hidden="true" /><span><strong>MusicBrainz needs no key.</strong><small>Aurora identifies itself and observes MusicBrainz's one-request-per-second limit.</small></span></div>
     </div>
   );
 }

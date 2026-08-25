@@ -1,0 +1,348 @@
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Disc3,
+  Folder,
+  FolderPlus,
+  Inbox as InboxIcon,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+  Settings,
+  Tags,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  addInboxMonitorFolder,
+  applyInboxTags,
+  loadInboxReleaseDetail,
+  loadInboxSnapshot,
+  removeInboxMonitorFolder,
+  searchInboxReleases,
+  selectInboxMonitorFolder,
+  type InboxAlbum,
+  type InboxSnapshot,
+  type MetadataSource,
+  type ReleaseCandidate,
+  type ReleaseCandidateDetail,
+} from "../../inbox";
+import {
+  libraryIntakeAdapter,
+  libraryIntakeCategories,
+  type LibraryIntakeCategoryId,
+  type LibraryIntakePreview,
+} from "../../ingest";
+import type { EditableTagField, EditableTagValues } from "../../tags";
+import "./Inbox.css";
+
+type LoadState = "loading" | "ready" | "error";
+
+interface InboxProps {
+  onOpenMetadataSettings: () => void;
+  onCatalogChanged: () => boolean | void | Promise<boolean | void>;
+}
+
+const allFields: Array<{ id: EditableTagField; label: string }> = [
+  { id: "albumArtist", label: "Album artist" },
+  { id: "artist", label: "Track artists" },
+  { id: "album", label: "Album" },
+  { id: "title", label: "Track titles" },
+  { id: "genre", label: "Genre" },
+  { id: "publisher", label: "Publisher" },
+  { id: "year", label: "Year" },
+  { id: "trackNumber", label: "Track numbers" },
+  { id: "trackTotal", label: "Track totals" },
+  { id: "discNumber", label: "Disc numbers" },
+  { id: "discTotal", label: "Disc total" },
+];
+
+function leafName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+function albumInFolder(album: InboxAlbum, folder: string): boolean {
+  const prefix = folder.endsWith("\\") || folder.endsWith("/") ? folder : `${folder}\\`;
+  return album.path.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase());
+}
+
+function formatTime(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp);
+}
+
+function sourceLabel(source: MetadataSource): string {
+  return source === "musicbrainz" ? "MusicBrainz" : "Discogs";
+}
+
+export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) {
+  const [snapshot, setSnapshot] = useState<InboxSnapshot | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [taggerAlbum, setTaggerAlbum] = useState<InboxAlbum | null>(null);
+  const [moveCategory, setMoveCategory] = useState<LibraryIntakeCategoryId | "">("");
+  const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveMessage, setMoveMessage] = useState<string | null>(null);
+
+  const refresh = useCallback(async (quiet = false) => {
+    if (!quiet) setLoadState("loading");
+    try {
+      const next = await loadInboxSnapshot();
+      setSnapshot(next);
+      setError(null);
+      setLoadState("ready");
+      setSelectedAlbumId((current) => current && next.albums.some((album) => album.id === current) ? current : next.albums[0]?.id ?? null);
+      setSelectedFolder((current) => current && next.settings.monitoredFolders.includes(current) ? current : null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setLoadState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void refresh(), 0);
+    const interval = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(true); }, 15_000);
+    const onFocus = () => void refresh(true);
+    window.addEventListener("focus", onFocus);
+    return () => { window.clearTimeout(initial); window.clearInterval(interval); window.removeEventListener("focus", onFocus); };
+  }, [refresh]);
+
+  const albums = useMemo(() => snapshot?.albums.filter((album) => !selectedFolder || albumInFolder(album, selectedFolder)) ?? [], [selectedFolder, snapshot]);
+  const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? albums[0] ?? null;
+
+  useEffect(() => {
+    function openTagger(event: KeyboardEvent) {
+      if (event.ctrlKey && event.shiftKey && event.key.toLocaleLowerCase() === "t" && selectedAlbum) {
+        event.preventDefault();
+        setTaggerAlbum(selectedAlbum);
+      }
+    }
+    window.addEventListener("keydown", openTagger);
+    return () => window.removeEventListener("keydown", openTagger);
+  }, [selectedAlbum]);
+
+  async function addFolder() {
+    try {
+      const folder = await selectInboxMonitorFolder();
+      if (!folder) return;
+      await addInboxMonitorFolder(folder);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  }
+
+  async function removeFolder(folder: string) {
+    try {
+      await removeInboxMonitorFolder(folder);
+      if (selectedFolder === folder) setSelectedFolder(null);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  }
+
+  async function previewMove() {
+    if (!selectedAlbum || !moveCategory) return;
+    setMoveBusy(true);
+    setMoveMessage(null);
+    try {
+      setMovePreview(await libraryIntakeAdapter.preview({ sourcePath: selectedAlbum.path, category: moveCategory }));
+    } catch (nextError) {
+      setMoveMessage(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setMoveBusy(false);
+    }
+  }
+
+  async function applyMove() {
+    if (!movePreview) return;
+    setMoveBusy(true);
+    try {
+      const result = await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
+      await onCatalogChanged();
+      setMovePreview(null);
+      setMoveCategory("");
+      setMoveMessage(`${result.albumCount} ${result.albumCount === 1 ? "album" : "albums"} moved and cataloged.`);
+      await refresh();
+    } catch (nextError) {
+      setMoveMessage(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setMoveBusy(false);
+    }
+  }
+
+  if (!snapshot && loadState === "loading") return <section className="inbox-load" aria-live="polite"><LoaderCircle className="is-spinning" /><span>Scanning monitored folders…</span></section>;
+  if (!snapshot && loadState === "error") return <section className="inbox-load inbox-load--error" role="alert"><AlertTriangle /><strong>Inbox could not scan your folders.</strong><span>{error}</span><button className="button button--primary" onClick={() => void refresh()}>Try again</button></section>;
+  if (!snapshot) return null;
+
+  return (
+    <section className="inbox-page" aria-label="Inbox">
+      <header className="inbox-page__header">
+        <div><h1>Inbox</h1><p>Review and tag new music before adding it to your library.</p></div>
+        <div>
+          <button type="button" onClick={() => void refresh()} disabled={loadState === "loading"}><RefreshCw className={loadState === "loading" ? "is-spinning" : ""} /> Rescan</button>
+          <button type="button" className="button button--primary" disabled={!selectedAlbum} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag <kbd>Ctrl Shift T</kbd></button>
+        </div>
+      </header>
+
+      {error ? <p className="inbox-banner" role="alert"><AlertTriangle />{error}</p> : null}
+      {snapshot.settings.warning ? <p className="inbox-banner" role="status"><AlertTriangle />{snapshot.settings.warning}</p> : null}
+
+      <div className="inbox-workspace">
+        <aside className="inbox-folders" aria-label="Monitored folders">
+          <header><strong>Monitored folders</strong><button type="button" disabled={snapshot.settings.monitoredFolders.length >= 10} onClick={() => void addFolder()}><FolderPlus /> Add folder</button></header>
+          <button type="button" className={!selectedFolder ? "is-selected" : ""} onClick={() => setSelectedFolder(null)}><InboxIcon /><span><strong>All folders</strong><small>{snapshot.albums.length} albums</small></span></button>
+          {snapshot.settings.monitoredFolders.map((folder) => {
+            const count = snapshot.albums.filter((album) => albumInFolder(album, folder)).length;
+            return <div className={`inbox-folder-row${selectedFolder === folder ? " is-selected" : ""}`} key={folder}>
+              <button type="button" onClick={() => setSelectedFolder(folder)} title={folder}><Folder /><span><strong>{leafName(folder)}</strong><small>{folder}</small></span><output>{count}</output></button>
+              <button type="button" aria-label={`Stop monitoring ${folder}`} title="Stop monitoring" onClick={() => void removeFolder(folder)}><Trash2 /></button>
+            </div>;
+          })}
+          {snapshot.settings.monitoredFolders.length === 0 ? <div className="inbox-folders__empty"><FolderPlus /><strong>Add your first monitored folder</strong><small>Aurora scans it without adding anything to the library.</small><button type="button" onClick={() => void addFolder()}>Choose folder</button></div> : null}
+          <footer>{snapshot.settings.monitoredFolders.length} of 10 folders <span>Last scan {formatTime(snapshot.scannedAtMs)}</span></footer>
+        </aside>
+
+        <section className="inbox-albums" aria-label="Staged albums">
+          <header><strong>{selectedFolder ? leafName(selectedFolder) : "All staged albums"}</strong><span>{albums.length} {albums.length === 1 ? "album" : "albums"} outside the library</span></header>
+          {albums.length ? <div className="inbox-table-wrap"><table><thead><tr><th>Album</th><th>Artist</th><th>Year</th><th>Tracks</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+            {albums.map((album) => <tr key={album.id} className={selectedAlbum?.id === album.id ? "is-selected" : ""} onClick={() => { setSelectedAlbumId(album.id); setMovePreview(null); setMoveMessage(null); }}>
+              <td><span className="inbox-table-art"><Disc3 /></span><span><strong>{album.album ?? album.folderName}</strong><small>{album.folderName}</small></span></td>
+              <td>{album.artist ?? "Unknown artist"}</td><td>{album.year ?? "—"}</td><td>{album.trackCount}</td>
+              <td><span className={album.readiness.ready ? "inbox-status is-ready" : "inbox-status"}>{album.readiness.ready ? <CheckCircle2 /> : <AlertTriangle />}{album.readiness.ready ? "Ready" : `${album.readiness.issues.length} issues`}</span></td>
+              <td>{formatTime(album.modifiedAtMs)}</td>
+            </tr>)}
+          </tbody></table></div> : <div className="inbox-albums__empty"><CheckCircle2 /><strong>Nothing is waiting here.</strong><span>New album folders will appear on the next scan.</span></div>}
+        </section>
+
+        <aside className="inbox-inspector" aria-label="Selected Inbox album">
+          {selectedAlbum ? <>
+            <header><span className="inbox-inspector__art"><Disc3 /></span><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
+            <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
+            <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
+            <button type="button" className="inbox-autotag" onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>Match with MusicBrainz and Discogs</small></span><kbd>Ctrl Shift T</kbd></button>
+            <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
+              {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
+              {moveMessage ? <p className="inbox-move__message" role="status">{moveMessage}</p> : null}
+              <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || !selectedAlbum.readiness.ready} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview ? "Move and catalog" : "Preview move"}</button>
+            </section>
+          </> : <div className="inbox-inspector__empty"><InboxIcon /><span>Select an album to review it.</span></div>}
+        </aside>
+      </div>
+
+      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
+    </section>
+  );
+}
+
+function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: () => void | Promise<void> }) {
+  const [artist, setArtist] = useState(album.artist ?? "");
+  const [title, setTitle] = useState(album.album ?? album.folderName);
+  const [candidates, setCandidates] = useState<ReleaseCandidate[]>([]);
+  const [selectedCandidate, setSelectedCandidate] = useState<ReleaseCandidate | null>(null);
+  const [detail, setDetail] = useState<ReleaseCandidateDetail | null>(null);
+  const [fields, setFields] = useState<Set<EditableTagField>>(() => new Set(allFields.map(({ id }) => id)));
+  const [values, setValues] = useState({ albumArtist: album.artist ?? "", album: album.album ?? "", genre: album.genre ?? "", publisher: album.publisher ?? "", year: album.year?.toString() ?? "" });
+  const [trackTitles, setTrackTitles] = useState<string[]>(album.tracks.map((track) => track.title ?? ""));
+  const [busy, setBusy] = useState<"search" | "detail" | "apply" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+
+  const hydrateDetail = useCallback((next: ReleaseCandidateDetail) => {
+    setValues({ albumArtist: next.albumArtist ?? "", album: next.album ?? "", genre: next.genre ?? "", publisher: next.publisher ?? "", year: next.year?.toString() ?? "" });
+    setTrackTitles(album.tracks.map((track, index) => next.tracks[index]?.title ?? track.title ?? ""));
+  }, [album.tracks]);
+
+  const performSearch = useCallback(async (searchArtist: string, searchTitle: string) => {
+    setBusy("search"); setError(null); setDetail(null); setSelectedCandidate(null);
+    try {
+      const result = await searchInboxReleases(searchArtist, searchTitle, album.trackCount);
+      setCandidates(result.candidates); setWarnings(result.warnings);
+      if (result.candidates[0]) {
+        setSelectedCandidate(result.candidates[0]);
+        setBusy("detail");
+        const next = await loadInboxReleaseDetail(result.candidates[0]);
+        setDetail(next); hydrateDetail(next);
+      }
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+    finally { setBusy(null); }
+  }, [album.trackCount, hydrateDetail]);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void performSearch(album.artist ?? "", album.album ?? album.folderName), 0);
+    return () => window.clearTimeout(initial);
+  }, [album.album, album.artist, album.folderName, performSearch]);
+  useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); }; window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [busy, onClose]);
+
+  async function chooseCandidate(candidate: ReleaseCandidate) {
+    setSelectedCandidate(candidate); setBusy("detail"); setError(null);
+    try { const next = await loadInboxReleaseDetail(candidate); setDetail(next); hydrateDetail(next); }
+    catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+    finally { setBusy(null); }
+  }
+
+  function toggleField(field: EditableTagField) { setFields((current) => { const next = new Set(current); if (next.has(field)) next.delete(field); else next.add(field); return next; }); }
+
+  async function apply() {
+    if (!detail || fields.size === 0) return;
+    setBusy("apply"); setError(null);
+    try {
+      await applyInboxTags({
+        albumPath: album.path,
+        fields: [...fields],
+        tracks: album.tracks.map((track, index) => {
+          const releaseTrack = detail.tracks[index];
+          const next: EditableTagValues = {
+            albumArtist: values.albumArtist || null,
+            artist: (releaseTrack?.artist ?? values.albumArtist) || null,
+            album: values.album || null,
+            title: trackTitles[index] || null,
+            genre: values.genre || null,
+            publisher: values.publisher || null,
+            rating: null,
+            year: values.year ? Number(values.year) : null,
+            releaseYear: null,
+            trackNumber: releaseTrack?.trackNumber ?? index + 1,
+            trackTotal: releaseTrack?.trackTotal ?? album.trackCount,
+            discNumber: releaseTrack?.discNumber ?? 1,
+            discTotal: releaseTrack?.discTotal ?? detail.discTotal ?? 1,
+          };
+          return { path: track.path, values: next };
+        }),
+      });
+      await onApplied();
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); setBusy(null); }
+  }
+
+  return <div className="modal-backdrop inbox-tagger-backdrop" role="presentation"><section className="inbox-tagger" role="dialog" aria-modal="true" aria-labelledby="inbox-tagger-title" aria-busy={Boolean(busy)}>
+    <header><div className="inbox-tagger__mark"><Tags /></div><div><p className="eyebrow">Inbox metadata</p><h2 id="inbox-tagger-title">Album Auto-Tagger</h2></div><button type="button" aria-label="Close auto-tagger" disabled={Boolean(busy)} onClick={onClose}><X /></button></header>
+    <div className="inbox-tagger__search"><label>Album artist<input value={artist} onChange={(event) => setArtist(event.target.value)} /></label><label>Album<input value={title} onChange={(event) => setTitle(event.target.value)} /></label><button type="button" className="button button--primary" disabled={Boolean(busy) || !artist.trim() || !title.trim()} onClick={() => void performSearch(artist, title)}>{busy === "search" ? <LoaderCircle className="is-spinning" /> : <Search />} Find</button></div>
+    {!discogsConfigured ? <div className="inbox-provider-note"><AlertTriangle /><span><strong>Discogs is not connected.</strong><small>MusicBrainz results are still available.</small></span><button type="button" onClick={() => { onClose(); onOpenSettings(); }}><Settings /> Connect</button></div> : null}
+    {warnings.map((warning) => <p className="inbox-tagger__warning" key={warning}><AlertTriangle />{warning}</p>)}
+    {error ? <p className="inbox-tagger__error" role="alert"><AlertTriangle />{error}</p> : null}
+    <div className="inbox-tagger__body">
+      <section className="inbox-candidates" aria-label="Release matches"><table><thead><tr><th>Source</th><th>Score</th><th>Album</th><th>Artist</th><th>Year</th><th>Country</th><th>Format</th><th>Publisher</th></tr></thead><tbody>
+        {candidates.map((candidate) => <tr key={`${candidate.source}:${candidate.id}`} className={selectedCandidate?.id === candidate.id && selectedCandidate.source === candidate.source ? "is-selected" : ""} onClick={() => void chooseCandidate(candidate)}><td><span className={`provider provider--${candidate.source}`}>{sourceLabel(candidate.source)}</span></td><td>{candidate.score}%</td><td>{candidate.title}</td><td>{candidate.artist}</td><td>{candidate.year ?? "—"}</td><td>{candidate.country ?? "—"}</td><td>{candidate.format ?? "—"}</td><td>{candidate.publisher ?? "—"}</td></tr>)}
+        {!candidates.length && busy !== "search" ? <tr><td colSpan={8}>No release matches found. Broaden the artist or album spelling.</td></tr> : null}
+      </tbody></table></section>
+      <div className="inbox-tagger__editor">
+        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><label>Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label>Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label>Genre<input value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label><label>Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label>Year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label></div></section>
+        <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
+      </div>
+      <section className="inbox-track-compare"><table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Match</th></tr></thead><tbody>{album.tracks.map((track, index) => {
+        const releaseTrack = detail?.tracks[index]; const matched = releaseTrack && normalizeTitle(releaseTrack.title) === normalizeTitle(track.title ?? "");
+        return <tr key={track.path}><td>{track.trackNumber ?? index + 1}</td><td title={track.fileName}>{track.fileName}</td><td>{track.title ?? "Missing"}</td><td><input aria-label={`Release title ${index + 1}`} value={trackTitles[index] ?? ""} onChange={(event) => setTrackTitles((current) => current.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /></td><td>{releaseTrack ? matched ? <Check className="is-match" /> : <AlertTriangle className="is-different" /> : "—"}</td></tr>;
+      })}</tbody></table></section>
+    </div>
+    <footer><span>{detail ? `${sourceLabel(detail.candidate.source)} release ${detail.candidate.id}` : "Choose a release to review its tags."}</span><button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button><button type="button" className="button button--primary" disabled={!detail || fields.size === 0 || Boolean(busy)} onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : <Check />} Apply tags</button></footer>
+  </section></div>;
+}
+
+function normalizeTitle(value: string): string { return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(); }

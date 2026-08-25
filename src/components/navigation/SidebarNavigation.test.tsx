@@ -79,6 +79,17 @@ describe("SidebarNavigation", () => {
     expect(value.onNavigate).toHaveBeenCalledWith("Publishers");
   });
 
+  it("places Inbox between Universe and Observatory", () => {
+    render(<SidebarNavigation {...props({ activeDestination: "Inbox" })} />);
+    const universe = screen.getByRole("button", { name: "Universe" });
+    const inbox = screen.getByRole("button", { name: "Inbox" });
+    const observatory = screen.getByRole("button", { name: "Observatory" });
+
+    expect(universe.compareDocumentPosition(inbox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inbox.compareDocumentPosition(observatory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inbox).toHaveAttribute("aria-current", "page");
+  });
+
   it("places Charts directly above History as its own destination", () => {
     const value = props({ activeDestination: "Charts" });
     render(<SidebarNavigation {...value} />);

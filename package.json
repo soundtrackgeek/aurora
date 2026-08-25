@@ -1,7 +1,7 @@
 {
   "name": "aurora",
   "private": true,
-  "version": "0.17.32",
+  "version": "0.18.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

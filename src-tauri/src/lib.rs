@@ -8,6 +8,7 @@ mod device_mode;
 mod explorer;
 mod genres;
 mod history;
+mod inbox;
 mod laptop_mode;
 mod library_bridge;
 mod library_sync;
@@ -37,6 +38,11 @@ use explorer::{
 };
 use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
 use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
+use inbox::{
+    DiscogsCredentialsRequest, InboxRuntime, InboxSettingsStatus, InboxSnapshot,
+    InboxTagApplyRequest, InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest,
+    ReleaseSearchRequest, ReleaseSearchResult,
+};
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
@@ -66,6 +72,7 @@ type TagState = Mutex<TagService>;
 type LaptopState = Mutex<LaptopModeRuntime>;
 type WaveformState = Mutex<WaveformStore>;
 type GlobalShortcutState = Mutex<shortcuts::GlobalShortcutRuntime>;
+type InboxState = Mutex<InboxRuntime>;
 
 async fn with_playback<T: Send + 'static>(
     app: AppHandle,
@@ -90,6 +97,85 @@ async fn with_playback_snapshot(
     let snapshot = with_playback(app, operation).await?;
     media_controls::publish(&publish_app, &snapshot);
     Ok(snapshot)
+}
+
+#[tauri::command]
+async fn inbox_snapshot(app: AppHandle) -> Result<InboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<InboxState>();
+        state
+            .lock()
+            .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+            .scan()
+    })
+    .await
+    .map_err(|error| format!("Aurora's Inbox scan stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+fn inbox_settings(app: AppHandle) -> Result<InboxSettingsStatus, String> {
+    app.state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())
+        .map(|runtime| runtime.status())
+}
+
+#[tauri::command]
+async fn select_inbox_monitor_folder(app: AppHandle) -> Result<Option<String>, String> {
+    library_bridge::select_library_intake_folder(app).await
+}
+
+#[tauri::command]
+fn add_inbox_monitor_folder(app: AppHandle, folder: String) -> Result<InboxSettingsStatus, String> {
+    app.state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .add_folder(folder)
+}
+
+#[tauri::command]
+fn remove_inbox_monitor_folder(
+    app: AppHandle,
+    folder: String,
+) -> Result<InboxSettingsStatus, String> {
+    app.state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .remove_folder(&folder)
+}
+
+#[tauri::command]
+fn update_discogs_credentials(
+    app: AppHandle,
+    request: DiscogsCredentialsRequest,
+) -> Result<InboxSettingsStatus, String> {
+    inbox::save_discogs_credentials(request)?;
+    inbox_settings(app)
+}
+
+#[tauri::command]
+async fn search_inbox_releases(
+    request: ReleaseSearchRequest,
+) -> Result<ReleaseSearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || inbox::search_releases(request))
+        .await
+        .map_err(|error| format!("Aurora's metadata search stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn inbox_release_detail(
+    request: ReleaseDetailRequest,
+) -> Result<ReleaseCandidateDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || inbox::release_detail(request))
+        .await
+        .map_err(|error| format!("Aurora's release lookup stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn apply_inbox_tags(request: InboxTagApplyRequest) -> Result<InboxTagApplyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request))
+        .await
+        .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -997,6 +1083,11 @@ pub fn run() {
             artwork::handle_cover_request(context.app_handle(), &request)
         })
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            {
+                let _ = dotenvy::from_filename(".env.local")
+                    .or_else(|_| dotenvy::from_filename("../.env.local"));
+            }
             let state_directory = app.path().app_data_dir()?;
             let state_path = state_directory.join("aurora-state.sqlite3");
             let remote_state_path =
@@ -1046,6 +1137,9 @@ pub fn run() {
             app.manage(Mutex::new(tag_service));
             app.manage(Mutex::new(laptop_runtime));
             app.manage(Mutex::new(waveform_store));
+            app.manage(Mutex::new(InboxRuntime::load(
+                state_directory.join("aurora-inbox.json"),
+            )));
             app.manage(WaveformWorkCoordinator::default());
             app.manage(LibrarySyncCoordinator::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
@@ -1142,6 +1236,15 @@ pub fn run() {
             select_library_intake_folder,
             preview_library_intake_batch,
             apply_library_intake_batch,
+            inbox_snapshot,
+            inbox_settings,
+            select_inbox_monitor_folder,
+            add_inbox_monitor_folder,
+            remove_inbox_monitor_folder,
+            update_discogs_credentials,
+            search_inbox_releases,
+            inbox_release_detail,
+            apply_inbox_tags,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Aurora")

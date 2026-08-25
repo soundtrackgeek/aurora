@@ -62,6 +62,7 @@ export const defaultViewPreferences: ViewPreferences = {
 
 const destinations = new Set<SidebarDestination>([
   "Universe",
+  "Inbox",
   "Observatory",
   "Songs",
   "Albums",
