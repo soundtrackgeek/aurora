@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.5] - 2026-08-25
+
+### Fixed
+
+- Kept the Album Auto-Tagger's selected release and track comparison stable during periodic or focus-triggered Inbox rescans, eliminating the repeated loading flash and alternating match indicators.
+
 ## [0.18.4] - 2026-08-25
 
 ### Fixed

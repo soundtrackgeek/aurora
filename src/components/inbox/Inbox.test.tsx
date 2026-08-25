@@ -1,8 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as inboxAdapter from "../../inbox";
 import { Inbox } from "./Inbox";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("Inbox", () => {
   it("keeps staged albums outside the library and opens Auto-Tagger from Ctrl+Shift+T", async () => {
@@ -52,6 +56,24 @@ describe("Inbox", () => {
     expect(screen.getByRole("checkbox", { name: /Rename after tagging/ })).toBeDisabled();
     expect(screen.getByLabelText("Disc number override")).toHaveValue("1");
     expect(screen.getByRole("button", { name: "Apply to 2 tracks" })).toBeEnabled();
+  });
+
+  it("keeps the selected release stable while the Inbox refreshes", async () => {
+    const search = vi.spyOn(inboxAdapter, "searchInboxReleases");
+    const loadSnapshot = vi.spyOn(inboxAdapter, "loadInboxSnapshot");
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling"));
+    expect(search).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(window);
+    await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
+
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling");
+    expect(screen.getByRole("button", { name: "Apply & rename" })).toBeEnabled();
   });
 
   it("requires readiness before previewing a library move", async () => {

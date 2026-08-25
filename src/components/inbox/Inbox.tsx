@@ -133,7 +133,14 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const albums = useMemo(() => snapshot?.albums.filter((album) => !selectedFolder || albumInFolder(album, selectedFolder)) ?? [], [selectedFolder, snapshot]);
   const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? albums[0] ?? null;
 
-  const selectedTracks = selectedAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [];
+  const selectedTracks = useMemo(
+    () => selectedAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [],
+    [excludedTrackPaths, selectedAlbum],
+  );
+  const taggerTracks = useMemo(
+    () => taggerAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [],
+    [excludedTrackPaths, taggerAlbum],
+  );
 
   const renameSelectedAlbum = useCallback(async (album: InboxAlbum) => {
     setRenameBusy(true);
@@ -278,7 +285,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </aside>
       </div>
 
-      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerAlbum.tracks.filter((track) => !excludedTrackPaths.has(track.path))} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
+      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
     </section>
   );
 }
