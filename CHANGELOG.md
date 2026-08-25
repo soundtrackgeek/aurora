@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.27] - 2026-08-25
+
+### Fixed
+
+- Opening an album no longer probes every MP3 on the music drive before showing its tracks. Aurora checks its local pending-deletion queue first and touches the filesystem only for a queued row, preserving deleted-track filtering without delaying ordinary album details on sleeping, remote, or unavailable drives.
+
 ## [0.17.26] - 2026-08-25
 
 ### Fixed

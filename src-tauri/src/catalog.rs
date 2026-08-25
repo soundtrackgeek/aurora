@@ -1696,7 +1696,10 @@ pub(crate) fn pending_deleted_catalog_file(
     store: &StateStore,
 ) -> Result<bool, String> {
     let audio_path = catalog_audio_path(directory, filename)?;
-    Ok(!audio_path.is_file() && store.library_file_sync_is_pending(directory, filename)?)
+    // The local pending-sync lookup is cheap. Only touch the music drive when
+    // Aurora has queued this catalog row as a possible deletion; probing every
+    // album track can stall detail loading on sleeping or unavailable drives.
+    Ok(store.library_file_sync_is_pending(directory, filename)? && !audio_path.is_file())
 }
 
 fn album_tag_tracks_from_connection(
