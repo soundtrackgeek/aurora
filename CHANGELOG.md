@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.17] - 2026-08-25
+
+### Added
+
+- Album detail can permanently delete one MP3 or a Ctrl/Shift multi-selection after an explicit confirmation.
+- Successful deletions durably queue complete-folder Music Library synchronization before filesystem removal, run the bridge immediately, and retain automatic retry state so the shared catalog and Music Library Updates deletion count catch up safely.
+
+### Security
+
+- Native deletion accepts at most 100 catalog track references from one open album, re-resolves every transient ID against its stable path key, rejects duplicates and non-regular/non-MP3 targets, and never accepts an arbitrary path from React.
+
 ## [0.17.16] - 2026-08-25
 
 ### Fixed

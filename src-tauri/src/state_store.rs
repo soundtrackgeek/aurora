@@ -1171,6 +1171,20 @@ impl StateStore {
             })
     }
 
+    pub(crate) fn queue_library_folder_syncs(&self, directories: &[String]) -> Result<(), String> {
+        validate_pending_library_folder_sync_paths(directories)?;
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not prepare Aurora's library-folder sync: {error}"))?;
+        for directory in directories {
+            enqueue_pending_library_folder_sync(&transaction, directory, None)?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not queue Aurora's library-folder sync: {error}"))
+    }
+
     pub(crate) fn pending_library_folder_sync_for_paths(
         &self,
         paths: &[String],

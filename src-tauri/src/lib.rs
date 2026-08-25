@@ -23,6 +23,7 @@ mod state_store;
 mod state_sync;
 mod tag_model;
 mod tagging;
+mod track_deletion;
 mod waveform;
 mod years;
 
@@ -160,6 +161,103 @@ async fn album_detail(app: AppHandle, album_id: String) -> Result<AlbumDetail, S
     })
     .await
     .map_err(|error| format!("The album detail worker stopped unexpectedly: {error}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackDeletionResult {
+    deleted_track_keys: Vec<String>,
+    failures: Vec<TrackDeletionFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog_sync: Option<library_sync::CatalogSync>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackDeletionFailure {
+    track_key: String,
+    title: String,
+    message: String,
+}
+
+#[tauri::command]
+async fn delete_album_track(
+    app: AppHandle,
+    album_id: String,
+    track_references: Vec<TrackReference>,
+) -> Result<TrackDeletionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            if track_references.is_empty() || track_references.len() > 100 {
+                return Err("Choose between 1 and 100 album tracks to delete.".to_owned());
+            }
+            let store = app.state::<StateStore>();
+            let mut resolved_tracks = Vec::with_capacity(track_references.len());
+            let mut seen = std::collections::HashSet::new();
+            for reference in track_references {
+                let resolved = catalog::resolve_track(&reference.id, &reference.track_key, &store)?;
+                if resolved.summary.album_id.as_deref() != Some(album_id.as_str()) {
+                    return Err(
+                        "Every selected track must still belong to the open album.".to_owned()
+                    );
+                }
+                if !seen.insert(resolved.summary.track_key.clone()) {
+                    return Err("The track deletion selection contains a duplicate MP3.".to_owned());
+                }
+                resolved_tracks.push(resolved);
+            }
+            let directories = resolved_tracks
+                .iter()
+                .map(|resolved| resolved.summary.directory.clone())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            // Queue every complete folder before the destructive filesystem step. If Aurora exits
+            // after any deletion, the next background retry still tells Music Library about it.
+            store.queue_library_folder_syncs(&directories)?;
+            let mut deleted_track_keys = Vec::with_capacity(resolved_tracks.len());
+            let mut failures = Vec::new();
+            let mut changed_directories = std::collections::HashSet::new();
+            for resolved in resolved_tracks {
+                match track_deletion::remove_verified_mp3(&resolved.audio_path) {
+                    Ok(()) => {
+                        deleted_track_keys.push(resolved.summary.track_key);
+                        changed_directories.insert(resolved.summary.directory);
+                    }
+                    Err(message) => failures.push(TrackDeletionFailure {
+                        track_key: resolved.summary.track_key,
+                        title: resolved.summary.title,
+                        message,
+                    }),
+                }
+            }
+
+            let catalog_sync = if changed_directories.is_empty() {
+                None
+            } else {
+                let changed_directories = changed_directories.into_iter().collect::<Vec<_>>();
+                Some(
+                    coordinator
+                        .sync_directories(&app, &changed_directories)
+                        .catalog_sync,
+                )
+            };
+            Ok::<TrackDeletionResult, String>(TrackDeletionResult {
+                deleted_track_keys,
+                failures,
+                catalog_sync,
+            })
+        });
+        let mut result = result?;
+        if let Some(sync) = &mut result.catalog_sync {
+            sync.projection_token = Some(projection_token);
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("The track deletion worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -969,6 +1067,7 @@ pub fn run() {
             explore_albums,
             explore_artists,
             album_detail,
+            delete_album_track,
             artist_detail,
             genre_index,
             genre_detail,

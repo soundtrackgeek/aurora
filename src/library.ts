@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { CatalogSync } from "./tags";
 
 export type SourceState = "connected" | "unavailable" | "browser-preview";
 
@@ -221,6 +222,12 @@ export interface AlbumDetail {
   album: AlbumSummary;
   tracks: Track[];
   tracksTruncated: boolean;
+}
+
+export interface TrackDeletionResult {
+  deletedTrackKeys: string[];
+  failures: Array<{ trackKey: string; title: string; message: string }>;
+  catalogSync?: CatalogSync;
 }
 
 export interface ArtistDetail {
@@ -497,6 +504,31 @@ export async function loadAlbumDetail(albumId: string): Promise<AlbumDetail> {
     return { album, tracks: browserPreview.tracks.filter((track) => track.albumId === albumId), tracksTruncated: false };
   }
   return invoke<AlbumDetail>("album_detail", { albumId });
+}
+
+export async function deleteAlbumTracks(albumId: string, tracks: readonly Track[]): Promise<TrackDeletionResult> {
+  if (tracks.length < 1 || tracks.length > 100) throw new Error("Choose between 1 and 100 album tracks to delete.");
+  if (!isTauriRuntime()) {
+    const selectedKeys = new Set(tracks.map((track) => track.trackKey));
+    const existing = browserPreview.tracks.filter((track) => selectedKeys.has(track.trackKey) && track.albumId === albumId);
+    if (existing.length !== tracks.length) throw new Error("One or more selected tracks are no longer available in this album.");
+    browserPreview.tracks = browserPreview.tracks.filter((candidate) => !selectedKeys.has(candidate.trackKey));
+    for (const track of tracks) browserPreviewTrackUpdates.delete(track.id);
+    return {
+      deletedTrackKeys: tracks.map((track) => track.trackKey),
+      failures: [],
+      catalogSync: {
+        status: "synced",
+        message: `Music Library recorded ${tracks.length} deleted ${tracks.length === 1 ? "track" : "tracks"}.`,
+        pendingFolderCount: 0,
+        blockedFolderCount: 0,
+      },
+    };
+  }
+  return invoke<TrackDeletionResult>("delete_album_track", {
+    albumId,
+    trackReferences: tracks.map((track) => ({ id: track.id, trackKey: track.trackKey })),
+  });
 }
 
 export async function loadArtistDetail(artist: string): Promise<ArtistDetail> {

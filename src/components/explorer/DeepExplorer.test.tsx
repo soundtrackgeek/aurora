@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artist, Track } from "../../library";
 import {
@@ -255,6 +255,64 @@ describe("DeepExplorer", () => {
     expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
     expect(screen.getByText("Score 412.4")).toBeInTheDocument();
     expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
+  });
+
+  it("requires confirmation before deleting an album track", async () => {
+    const onDeleteTracks = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: tracks,
+          onDeleteTracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Signal One" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Delete “Signal One”?" });
+    expect(dialog).toHaveTextContent("permanently deletes the MP3 from disk");
+    expect(dialog).toHaveTextContent("record one deleted track in Updates");
+    expect(onDeleteTracks).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete track" }));
+    await waitFor(() => expect(onDeleteTracks).toHaveBeenCalledWith([tracks[0]]));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
+
+  it("supports Ctrl toggles and Shift ranges for bulk album-track deletion", async () => {
+    const onDeleteTracks = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: tracks,
+          onDeleteTracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const firstRow = screen.getByRole("row", { name: /Signal One/ });
+    const secondRow = screen.getByRole("row", { name: /Second Light/ });
+    fireEvent.click(firstRow);
+    fireEvent.click(secondRow, { shiftKey: true });
+    expect(firstRow).toHaveAttribute("aria-selected", "true");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(secondRow, { ctrlKey: true });
+    expect(secondRow).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(secondRow, { ctrlKey: true });
+    expect(firstRow).toHaveAttribute("aria-selected", "true");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("2 tracks selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Delete 2 selected tracks?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 tracks" }));
+    await waitFor(() => expect(onDeleteTracks).toHaveBeenCalledWith(tracks));
   });
 
   it("marks the current playback track independently from the selected row", () => {

@@ -13,12 +13,14 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Star,
+  Trash2,
   UsersRound,
   X,
 } from "lucide-react";
 import {
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -118,6 +120,7 @@ export interface DeepExplorerProps {
   onClearFilters?: () => void;
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
+  onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
 }
 
 const EMPTY_BUSY_TRACK_KEYS: ReadonlySet<string> = new Set();
@@ -364,6 +367,9 @@ function TrackTable({
   onActivateTrack,
   onRatingChange,
   onLoveChange,
+  onDeleteTrack,
+  multiSelectedTrackKeys,
+  onSelectionGesture,
   compact = false,
 }: {
   tracks: readonly Track[];
@@ -375,10 +381,21 @@ function TrackTable({
   onActivateTrack?: (track: Track) => void;
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
+  onDeleteTrack?: (track: Track) => void;
+  multiSelectedTrackKeys?: ReadonlySet<string>;
+  onSelectionGesture?: (track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) => void;
   compact?: boolean;
 }) {
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
-  const selectionIsVisible = tracks.some((track) => track.id === selectedTrackId);
+  const selectionIsVisible = tracks.some((track) => multiSelectedTrackKeys?.has(track.trackKey) || track.id === selectedTrackId);
+
+  function selectTrack(track: Track, index: number, event?: Pick<MouseEvent | KeyboardEvent, "ctrlKey" | "metaKey" | "shiftKey">) {
+    onSelectTrack(track);
+    onSelectionGesture?.(track, index, {
+      ctrl: Boolean(event?.ctrlKey || event?.metaKey),
+      shift: Boolean(event?.shiftKey),
+    });
+  }
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, track: Track, index: number) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
@@ -390,14 +407,14 @@ function TrackTable({
           : Math.min(tracks.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)));
       const nextTrack = tracks[nextIndex];
       if (nextTrack) {
-        onSelectTrack(nextTrack);
+        selectTrack(nextTrack, nextIndex, event);
         rowRefs.current.get(nextTrack.id)?.focus();
       }
       return;
     }
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
-      onSelectTrack(track);
+      selectTrack(track, index, event);
       if (event.key === "Enter") onActivateTrack?.(track);
     }
   }
@@ -418,11 +435,14 @@ function TrackTable({
             <th className="is-numeric">Plays</th>
             <th>Rating</th>
             <th aria-label="Love" />
+            {onDeleteTrack ? <th aria-label="Delete" /> : null}
           </tr>
         </thead>
         <tbody>
           {tracks.map((track, index) => {
-            const selected = track.id === selectedTrackId;
+            const selected = multiSelectedTrackKeys && multiSelectedTrackKeys.size > 0
+              ? multiSelectedTrackKeys.has(track.trackKey)
+              : track.id === selectedTrackId;
             const current = track.trackKey === currentTrackKey;
             const busy = busyTrackKeys.has(track.trackKey);
             return (
@@ -436,7 +456,7 @@ function TrackTable({
                 aria-selected={selected}
                 aria-current={current ? "true" : undefined}
                 tabIndex={selected || (!selectionIsVisible && index === 0) ? 0 : -1}
-                onClick={() => onSelectTrack(track)}
+                onClick={(event) => selectTrack(track, index, event)}
                 onDoubleClick={() => onActivateTrack?.(track)}
                 onKeyDown={(event) => handleRowKeyDown(event, track, index)}
               >
@@ -486,6 +506,21 @@ function TrackTable({
                     <Heart className={track.loved ? "is-loved" : undefined} aria-label={track.loved ? "Loved" : "Not loved"} />
                   )}
                 </td>
+                {onDeleteTrack ? (
+                  <td className="deep-explorer-table__delete">
+                    <button
+                      type="button"
+                      aria-label={`Delete ${track.title}`}
+                      disabled={busy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteTrack(track);
+                      }}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             );
           })}
@@ -638,6 +673,7 @@ function AlbumDetail({
   onRetry,
   onRatingChange,
   onLoveChange,
+  onDeleteTracks,
 }: {
   album: ExplorerAlbum;
   tracks: readonly Track[];
@@ -654,7 +690,72 @@ function AlbumDetail({
   onRetry?: () => void;
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
+  onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
 }) {
+  const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
+    tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
+  ));
+  const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<readonly Track[]>([]);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const visibleSelectedTrackKeys = useMemo(() => {
+    const visibleKeys = new Set(tracks.map((track) => track.trackKey));
+    return new Set([...selectedTrackKeys].filter((key) => visibleKeys.has(key)));
+  }, [selectedTrackKeys, tracks]);
+
+  function selectWithModifiers(track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) {
+    if (modifiers.shift && selectionAnchorKey) {
+      const anchorIndex = tracks.findIndex((candidate) => candidate.trackKey === selectionAnchorKey);
+      if (anchorIndex >= 0) {
+        const [start, end] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
+        const range = tracks.slice(start, end + 1).map((candidate) => candidate.trackKey);
+        setSelectedTrackKeys(modifiers.ctrl
+          ? (current) => new Set([...current, ...range])
+          : new Set(range));
+        return;
+      }
+    }
+    if (modifiers.ctrl) {
+      setSelectedTrackKeys((current) => {
+        const next = new Set(current);
+        if (next.has(track.trackKey)) next.delete(track.trackKey);
+        else next.add(track.trackKey);
+        return next;
+      });
+    } else {
+      setSelectedTrackKeys(new Set([track.trackKey]));
+    }
+    setSelectionAnchorKey(track.trackKey);
+  }
+
+  function requestDelete(track?: Track) {
+    if (!onDeleteTracks) return;
+    if (track && !visibleSelectedTrackKeys.has(track.trackKey)) {
+      setDeleteTargets([track]);
+      return;
+    }
+    const selected = tracks.filter((candidate) => visibleSelectedTrackKeys.has(candidate.trackKey));
+    if (selected.length > 0) setDeleteTargets(selected);
+  }
+
+  async function confirmDelete() {
+    if (deleteTargets.length === 0 || !onDeleteTracks || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await onDeleteTracks(deleteTargets);
+      const deletedKeys = new Set(deleteTargets.map((track) => track.trackKey));
+      setSelectedTrackKeys((current) => new Set([...current].filter((key) => !deletedKeys.has(key))));
+      setDeleteTargets([]);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <aside className={`deep-explorer-album-detail${closing ? " is-closing" : ""}`} aria-label={`${album.title} album details`}>
       <header>
@@ -685,19 +786,63 @@ function AlbumDetail({
       ) : tracks.length === 0 ? (
         <ExplorerFeedback kind="empty" />
       ) : (
-        <TrackTable
-          tracks={tracks}
-          selectedTrackId={selectedTrackId}
-          currentTrackKey={currentTrackKey}
-          playbackActive={playbackActive}
-          busyTrackKeys={busyTrackKeys}
-          onSelectTrack={onSelectTrack}
-          onActivateTrack={onActivateTrack}
-          onRatingChange={onRatingChange}
-          onLoveChange={onLoveChange}
-          compact
-        />
+        <>
+          {visibleSelectedTrackKeys.size > 1 ? (
+            <div className="deep-explorer-selection-bar" role="status">
+              <strong>{formatCount(visibleSelectedTrackKeys.size)} tracks selected</strong>
+              <span>Use Ctrl to toggle or Shift to extend the range.</span>
+              <button type="button" onClick={() => requestDelete()}><Trash2 aria-hidden="true" />Delete selected</button>
+              <button type="button" onClick={() => setSelectedTrackKeys(new Set())}>Clear</button>
+            </div>
+          ) : null}
+          <TrackTable
+            tracks={tracks}
+            selectedTrackId={selectedTrackId}
+            currentTrackKey={currentTrackKey}
+            playbackActive={playbackActive}
+            busyTrackKeys={busyTrackKeys}
+            onSelectTrack={onSelectTrack}
+            onActivateTrack={onActivateTrack}
+            onRatingChange={onRatingChange}
+            onLoveChange={onLoveChange}
+            onDeleteTrack={onDeleteTracks ? requestDelete : undefined}
+            multiSelectedTrackKeys={visibleSelectedTrackKeys}
+            onSelectionGesture={selectWithModifiers}
+            compact
+          />
+        </>
       )}
+      {deleteTargets.length > 0 ? (
+        <dialog
+          className="deep-explorer-delete-dialog"
+          open
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-track-title"
+          aria-describedby="delete-track-description"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !deleteBusy) setDeleteTargets([]);
+          }}
+          onCancel={(event) => {
+            event.preventDefault();
+            if (!deleteBusy) setDeleteTargets([]);
+          }}
+        >
+          <span className="deep-explorer-delete-dialog__icon"><Trash2 aria-hidden="true" /></span>
+          <div>
+            <h4 id="delete-track-title">{deleteTargets.length === 1 ? `Delete “${deleteTargets[0].title}”?` : `Delete ${deleteTargets.length} selected tracks?`}</h4>
+            <p id="delete-track-description">This permanently deletes {deleteTargets.length === 1 ? "the MP3" : `${deleteTargets.length} MP3 files`} from disk. Music Library will remove {deleteTargets.length === 1 ? "it" : "them"} from the catalog and record {deleteTargets.length === 1 ? "one deleted track" : `${deleteTargets.length} deleted tracks`} in Updates.</p>
+            {deleteError ? <p className="deep-explorer-delete-dialog__error" role="alert">{deleteError}</p> : null}
+          </div>
+          <div className="deep-explorer-delete-dialog__actions">
+            <button type="button" disabled={deleteBusy} onClick={() => setDeleteTargets([])}>Cancel</button>
+            <button type="button" className="is-destructive" disabled={deleteBusy} autoFocus onClick={() => void confirmDelete()}>
+              {deleteBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+              {deleteBusy ? "Deleting…" : deleteTargets.length === 1 ? "Delete track" : `Delete ${deleteTargets.length} tracks`}
+            </button>
+          </div>
+        </dialog>
+      ) : null}
     </aside>
   );
 }
@@ -778,6 +923,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onClearFilters,
     onRatingChange,
     onLoveChange,
+    onDeleteTracks,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
   const [closingDetail, setClosingDetail] = useState<{
@@ -899,6 +1045,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
             detailAlbumId={detailAlbum?.id ?? null}
             detail={detailAlbum ? (
               <AlbumDetail
+                key={detailAlbum.id}
                 album={detailAlbum}
                 tracks={selectedAlbum ? albumTracks : closingDetail?.tracks ?? []}
                 tracksTruncated={selectedAlbum ? albumTracksTruncated : closingDetail?.tracksTruncated ?? false}
@@ -914,6 +1061,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onRetry={onRetry}
                 onRatingChange={onRatingChange}
                 onLoveChange={onLoveChange}
+                onDeleteTracks={onDeleteTracks}
               />
             ) : null}
           />

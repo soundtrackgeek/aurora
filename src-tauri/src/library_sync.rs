@@ -200,6 +200,14 @@ impl LibrarySyncCoordinator {
         self.run(app, &[])
     }
 
+    pub(crate) fn sync_directories(
+        &self,
+        app: &AppHandle,
+        directories: &[String],
+    ) -> LibrarySyncReport {
+        self.run(app, directories)
+    }
+
     fn run(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
         self.serialize_bridge_work(|| self.run_locked(app, priority_directories))
     }

@@ -81,6 +81,7 @@ import {
   formatCount,
   formatDuration,
   catalogRefreshIsConsistent,
+  deleteAlbumTracks,
   loadAlbumDetail,
   loadArtistDetail,
   loadCatalogRevision,
@@ -2365,6 +2366,71 @@ function App() {
     }
   }
 
+  async function deleteExplorerAlbumTracks(tracks: readonly Track[]) {
+    const albumId = tracks[0]?.albumId;
+    if (!albumId || tracks.some((track) => track.albumId !== albumId)) {
+      throw new Error("Every selected track must belong to the open album.");
+    }
+    try {
+      const result = await deleteAlbumTracks(albumId, tracks);
+      const deletedKeys = new Set(result.deletedTrackKeys);
+      const deletedTracks = tracks.filter((track) => deletedKeys.has(track.trackKey));
+      if (deletedTracks.length === 0) {
+        throw new Error(result.failures[0]?.message ?? "Aurora could not delete the selected tracks.");
+      }
+      const isDeleted = (candidate: Track) => deletedKeys.has(candidate.trackKey);
+      const selectedAlbum = explorerAlbums.find((album) => album.id === albumId);
+      const removesAlbum = Boolean(selectedAlbum && selectedAlbum.totalTracks <= deletedTracks.length);
+      const deletedRated = deletedTracks.filter((track) => track.rating !== null).length;
+      const deletedLoved = deletedTracks.filter((track) => track.loved).length;
+      const deletedDuration = deletedTracks.reduce((total, track) => total + (track.durationSeconds ?? 0), 0);
+
+      setAlbumTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
+      setExplorerTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
+      setYearAlbumTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
+      setRatingAlbumTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
+      setPublisherAlbumTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
+      setExplorerAlbums((current) => removesAlbum
+        ? current.filter((album) => album.id !== albumId)
+        : current.map((album) => album.id === albumId ? {
+          ...album,
+          totalTracks: Math.max(0, album.totalTracks - deletedTracks.length),
+          ratedTracks: Math.max(0, album.ratedTracks - deletedRated),
+          lovedTracks: Math.max(0, album.lovedTracks - deletedLoved),
+          durationSeconds: album.durationSeconds === null
+            ? null
+            : Math.max(0, album.durationSeconds - deletedDuration),
+        } : album));
+      setSnapshot((current) => current ? {
+        ...current,
+        tracks: current.tracks.filter((candidate) => !isDeleted(candidate)),
+        summary: {
+          ...current.summary,
+          songs: Math.max(0, current.summary.songs - deletedTracks.length),
+          albums: Math.max(0, current.summary.albums - (removesAlbum ? 1 : 0)),
+          rated: Math.max(0, current.summary.rated - deletedRated),
+          loved: Math.max(0, current.summary.loved - deletedLoved),
+        },
+      } : current);
+      setGenreDetail((current) => current ? {
+        ...current,
+        highlights: current.highlights.filter((candidate) => !isDeleted(candidate)),
+      } : current);
+      if (selectedTrackRef.current && deletedKeys.has(selectedTrackRef.current.trackKey)) setSelectedTrack(null);
+      if (removesAlbum) setSelectedAlbumId(null);
+
+      const deletedLabel = `${formatCount(deletedTracks.length)} ${deletedTracks.length === 1 ? "track" : "tracks"}`;
+      const failureLabel = result.failures.length > 0
+        ? ` · ${formatCount(result.failures.length)} could not be deleted`
+        : "";
+      setSyncMessage(`Deleted ${deletedLabel} from disk${failureLabel} · notifying Music Library`);
+      await handleCatalogSync(result.catalogSync, true);
+    } catch (error) {
+      setSyncMessage(`Could not delete the selected tracks: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
   async function loadMoreExplorerResults() {
     if (!explorerCursor || isLoadingMore) return;
     const requestId = ++exploreRequestRef.current;
@@ -2596,7 +2662,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.16</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.17</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2898,6 +2964,7 @@ function App() {
                 onClearFilters={() => setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] })}
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+                onDeleteTracks={deleteExplorerAlbumTracks}
               />
             </>
           ) : loadError ? (
