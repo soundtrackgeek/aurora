@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.4 keeps Album cards and Album Detail metadata current immediately after whole-album tag edits.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.6 keeps the Album Auto-Tagger's apply and rename actions visible inside the dialog.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.4 slice
+## Current 0.18.6 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- The Album Auto-Tagger keeps its Rename after tagging, Cancel, and Apply & rename footer visible while release and track results scroll within the available dialog height.
 - Whole-album Tags saves immediately project the verified Album, Album Artist, Year, Release Year, Genre, and Publisher values into both the Album card and Album Detail. Partial or mixed track results never overwrite an album summary by guesswork.
 - Album covers use five compact text lines: title, artist, `Year — Genre — Publisher`, `track count — album length`, and Album Rating/Score. Album Detail presents Genre and Publisher together with explicit unknown-value fallbacks.
 - A dedicated **Inbox** between Universe and Observatory. Up to ten device-local folders are scanned every 15 seconds and whenever Aurora regains focus; folders containing MP3s become staged albums without entering the Music Library catalog.

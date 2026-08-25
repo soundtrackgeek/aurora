@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.6] - 2026-08-25
+
+### Fixed
+
+- Kept the Album Auto-Tagger footer inside the visible dialog so Rename after tagging, Cancel, and Apply & rename remain reachable regardless of optional provider notices or search warnings.
+
 ## [0.18.5] - 2026-08-25
 
 ### Fixed
