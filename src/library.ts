@@ -167,6 +167,44 @@ export interface AlbumSummary {
   albumScore: number | null;
 }
 
+type ConsistentAlbumValue<T> = { consistent: true; value: T } | { consistent: false };
+
+function consistentAlbumValue<T>(values: readonly T[]): ConsistentAlbumValue<T> {
+  const first = values[0];
+  return values.every((value) => Object.is(value, first))
+    ? { consistent: true, value: first }
+    : { consistent: false };
+}
+
+export function applyAlbumTrackTagProjection(
+  current: AlbumSummary,
+  updatedTracks: readonly Track[],
+): AlbumSummary {
+  if (
+    updatedTracks.length !== current.totalTracks
+    || updatedTracks.some((track) => track.albumId !== current.id)
+  ) {
+    return current;
+  }
+
+  const title = consistentAlbumValue(updatedTracks.map((track) => track.album));
+  const artist = consistentAlbumValue(updatedTracks.map((track) => track.artist));
+  const originalYear = consistentAlbumValue(updatedTracks.map((track) => track.originalYear ?? null));
+  const releaseYear = consistentAlbumValue(updatedTracks.map((track) => track.releaseYear));
+  const publisher = consistentAlbumValue(updatedTracks.map((track) => track.publisher ?? null));
+  const genre = consistentAlbumValue(updatedTracks.map((track) => track.genre));
+
+  return {
+    ...current,
+    title: title.consistent ? title.value : current.title,
+    artist: artist.consistent ? artist.value : current.artist,
+    originalYear: originalYear.consistent ? originalYear.value : current.originalYear,
+    releaseYear: releaseYear.consistent ? releaseYear.value : current.releaseYear,
+    publisher: publisher.consistent ? publisher.value : current.publisher,
+    genre: genre.consistent ? genre.value : current.genre,
+  };
+}
+
 export type AlbumSort =
   | "newest"
   | "oldest"

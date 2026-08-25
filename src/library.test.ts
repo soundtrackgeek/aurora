@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyAlbumTrackTagProjection,
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
   catalogRefreshIsConsistent,
@@ -11,6 +12,7 @@ import {
   formatDuration,
   loadAlbumDetail,
   type Track,
+  type AlbumSummary,
 } from "./library";
 
 const tracks: Track[] = [
@@ -116,6 +118,65 @@ describe("library presentation", () => {
       publisher: null,
       trackTotal: 10,
       discTotal: 1,
+    });
+  });
+
+  it("projects consistent album metadata from a complete album editor result", () => {
+    const album: AlbumSummary = {
+      id: "album-1",
+      title: "Takk...",
+      artist: "Sigur Rós",
+      originalYear: 1999,
+      releaseYear: 2005,
+      publisher: "EMI Records",
+      genre: "Post-rock",
+      totalTracks: 2,
+      ratedTracks: 2,
+      lovedTracks: 1,
+      durationSeconds: 716,
+      rating: 4.75,
+      albumScore: 12.5,
+    };
+    const updatedTracks = [
+      { ...tracks[0], album: "Takk", artist: "Sigur Rós & Friends", originalYear: 2000, releaseYear: 2006, publisher: "Krúnk", genre: "Art rock" },
+      { ...tracks[0], id: "2", trackKey: "c:/music/sigur ros/takk/glosoli.mp3", album: "Takk", artist: "Sigur Rós & Friends", originalYear: 2000, releaseYear: 2006, publisher: "Krúnk", genre: "Art rock" },
+    ];
+
+    expect(applyAlbumTrackTagProjection(album, updatedTracks)).toEqual({
+      ...album,
+      title: "Takk",
+      artist: "Sigur Rós & Friends",
+      originalYear: 2000,
+      releaseYear: 2006,
+      publisher: "Krúnk",
+      genre: "Art rock",
+    });
+  });
+
+  it("does not guess album metadata from a partial or mixed track result", () => {
+    const album: AlbumSummary = {
+      id: "album-1",
+      title: "Takk...",
+      artist: "Sigur Rós",
+      originalYear: 1999,
+      releaseYear: 2005,
+      publisher: "EMI Records",
+      genre: "Post-rock",
+      totalTracks: 2,
+      ratedTracks: 1,
+      lovedTracks: 1,
+      durationSeconds: 473,
+      rating: null,
+      albumScore: null,
+    };
+
+    expect(applyAlbumTrackTagProjection(album, [{ ...tracks[0], genre: "Art rock" }])).toBe(album);
+    expect(applyAlbumTrackTagProjection(album, [
+      { ...tracks[0], genre: "Art rock", publisher: null },
+      { ...tracks[0], id: "2", trackKey: "second", genre: "Post-rock", publisher: null },
+    ])).toEqual({
+      ...album,
+      publisher: null,
     });
   });
 

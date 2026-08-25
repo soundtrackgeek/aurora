@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-08-25
+
+### Fixed
+
+- Whole-album tag edits now refresh Album and Album Detail metadata immediately from the complete verified MP3 result, including Album, Album Artist, Year, Release Year, Genre, and Publisher. Partial or mixed track results leave existing album-level values intact.
+
 ## [0.18.3] - 2026-08-25
 
 ### Changed

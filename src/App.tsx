@@ -85,6 +85,7 @@ import {
   loadArtistDetail,
   loadCatalogRevision,
   loadLibrarySnapshot,
+  applyAlbumTrackTagProjection,
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
   type AlbumSummary,
@@ -2006,6 +2007,9 @@ function App() {
 
     setSelectedTrack((current) => current ? project(current) : current);
     setExplorerTracks((current) => current.map(project));
+    setExplorerAlbums((current) => current.map((album) => (
+      applyAlbumTrackTagProjection(album, acceptedTracks)
+    )));
     setAlbumTracks((current) => current.map(project));
     setYearAlbumTracks((current) => current.map(project));
     setRatingAlbumTracks((current) => current.map(project));
@@ -2778,7 +2782,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.3</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.4</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
