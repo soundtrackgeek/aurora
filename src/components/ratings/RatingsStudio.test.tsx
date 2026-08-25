@@ -26,7 +26,7 @@ function props() {
     queueBusy: false,
     queueMessage: null,
     busyTrackKeys: new Set<string>(),
-    onCompletionChange: vi.fn(), onSelectAlbum: vi.fn(), onSelectTrack: vi.fn(), onPlayTrack: vi.fn(),
+    onCompletionChange: vi.fn(), onSelectAlbum: vi.fn(), onGoToAlbum: vi.fn(), onSelectTrack: vi.fn(), onPlayTrack: vi.fn(),
     onRatingChange: vi.fn(), onLoveChange: vi.fn(), onPlayCollection: vi.fn(), onExploreCollection: vi.fn(),
     onPlayUnrated: vi.fn(), onRefresh: vi.fn(), onRetry: vi.fn(), onRetryPage: vi.fn(),
   };
@@ -49,5 +49,7 @@ describe("RatingsStudio", () => {
     expect(screen.getByText("4.25 ★ provisional")).toBeInTheDocument();
     expect(screen.getByText("Available when the effective album rating is valid")).toBeInTheDocument();
     expect(screen.getByText(/2000 · Rock · 10 tracks/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Go to Album" }));
+    expect(callbacks.onGoToAlbum).toHaveBeenCalledWith(album);
   });
 });

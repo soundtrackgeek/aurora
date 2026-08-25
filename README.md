@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.19 keeps rating and tag interactions responsive while Music Library synchronization and tag reconciliation continue in the background.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.20 adds a direct handoff from Ratings completion details to the selected album in Albums.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.19 slice
+## Current 0.17.20 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Album detail supports standard click, Ctrl+click, and Shift+click track selection, a bulk **Delete selected** action, and an explicit permanent-deletion confirmation. Aurora re-resolves every bounded catalog identity before deleting only regular MP3 files, queues every affected folder durably, and asks Music Library to rescan immediately so its catalog and Updates deletion count reflect the removed tracks; failed bridge work remains in the existing automatic retry queue.
@@ -51,6 +51,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A dedicated Album inspector for selected editions, exact Original/Release Year handoff into Songs, and bounded year or album playback without exposing file paths to React.
 - Lazy, stale-safe Years queries: overview payloads contain roughly one row per year, year details return at most 100 representative albums, and playback returns at most 100 tracks.
 - A dedicated Ratings Studio with separate track and effective-album constellations, clickable whole- and half-star bands, an exact 5 Star Collection, and tall real-cover pyramids with a silver-to-magenta constellation palette.
+- Selected albums in Ratings completion details include a **Go to Album** action that opens Albums with that exact album selected, even when it is outside the first album page.
 - Almost Complete, Partially Rated, and Unrated Album lanes with mutually exclusive catalog counts, at most 14 album candidates per request, bounded track details, and Play Unrated Tracks.
 - Ratings completion details respond to the available content-pane width, keeping the cover and album metadata together above the track list while placing Play Unrated Tracks beneath large cover art.
 - Music Library-compatible effective album ratings: explicit MusicBee Album Rating wins; otherwise a rounded normalized track mean becomes valid only after every track is rated. Partial means are labelled provisional and never enter album-rating counts.

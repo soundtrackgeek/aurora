@@ -623,6 +623,7 @@ function App() {
   const appMountedRef = useRef(true);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
   const explorerRestorationPendingRef = useRef(true);
+  const pendingExplorerAlbumIdRef = useRef<string | null>(null);
   const inspectorViewRef = useRef(inspectorView);
   const inspectorArtistNameRef = useRef(inspectorArtistName);
   const openArtistInspectorRef = useRef<(artistName: string) => void>(() => undefined);
@@ -1029,9 +1030,10 @@ function App() {
       || activeNav === "Ratings"
     ) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
-    const restoredAlbumId = restoringStoredView && explorerView === "albums"
+    const handoffAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
+    const restoredAlbumId = handoffAlbumId ?? (restoringStoredView && explorerView === "albums"
       ? initialViewPreferences.selectedAlbumId
-      : null;
+      : null);
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -1055,14 +1057,16 @@ function App() {
           setExplorerCursor(page.nextCursor);
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
-          if (restoredAlbumId && page.albums.some((album) => album.id === restoredAlbumId)) {
+          if (restoredAlbumId && (handoffAlbumId || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
             setAlbumDetailState("loading");
             void loadAlbumDetail(restoredAlbumId)
               .then((detail) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
-                setExplorerAlbums((current) => current.map((album) => album.id === detail.album.id ? detail.album : album));
+                setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
+                  ? current.map((album) => album.id === detail.album.id ? detail.album : album)
+                  : [detail.album, ...current]);
                 setAlbumTracks(detail.tracks);
                 setAlbumTracksTruncated(detail.tracksTruncated);
                 setSelectedTrack(detail.tracks[0] ?? null);
@@ -1076,6 +1080,7 @@ function App() {
           } else if (restoringStoredView) {
             setSelectedAlbumId(null);
           }
+          if (handoffAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
           explorerRestorationPendingRef.current = false;
         })
         .catch((error: unknown) => {
@@ -1869,6 +1874,15 @@ function App() {
           setRatingsPageError(error instanceof Error ? error.message : String(error));
         }
       });
+  }
+
+  function goToRatingAlbum(album: RatingAlbum) {
+    pendingExplorerAlbumIdRef.current = album.id;
+    setSelectedAlbumId(album.id);
+    setActiveNav("Albums");
+    expandLibraryNavigation();
+    setExplorerView("albums");
+    setExplorerFilters(defaultExplorerFilters);
   }
 
   async function playRatingCollection(mode: RatingMode, rating: number | null) {
@@ -2719,7 +2733,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.19</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.20</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2956,6 +2970,7 @@ function App() {
                 busyTrackKeys={inlineSavingKeys}
                 onCompletionChange={setRatingsCompletion}
                 onSelectAlbum={openRatingAlbum}
+                onGoToAlbum={goToRatingAlbum}
                 onSelectTrack={selectTrack}
                 onPlayTrack={(track) => playTrack(track, ratingAlbumTracks)}
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}

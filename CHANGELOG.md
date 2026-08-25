@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.20] - 2026-08-25
+
+### Added
+
+- Ratings completion details now include a **Go to Album** action that opens Albums with the chosen album loaded and selected.
+
 ## [0.17.19] - 2026-08-25
 
 ### Fixed
