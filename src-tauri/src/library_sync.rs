@@ -127,9 +127,10 @@ impl LibrarySyncCoordinator {
         self.serialize_projection_epoch(operation)
     }
 
-    /// Gives reconciliation the same ordering and delivery token as an authoritative edit.
-    pub(crate) fn serialize_reconciliation<T>(&self, operation: impl FnOnce() -> T) -> (T, u64) {
-        self.serialize_projection_epoch(operation)
+    /// Reserves a delivery token before background reconciliation starts. Foreground edits that
+    /// begin later receive newer tokens without waiting for the background worker to finish.
+    pub(crate) fn reserve_background_projection_token(&self) -> u64 {
+        self.next_projection_token.fetch_add(1, Ordering::SeqCst)
     }
 
     fn serialize_projection_epoch<T>(&self, operation: impl FnOnce() -> T) -> (T, u64) {
@@ -652,69 +653,32 @@ mod tests {
     }
 
     #[test]
-    fn reconciliation_and_edit_share_one_projection_epoch() {
+    fn background_reconciliation_never_holds_the_foreground_edit_gate() {
         let coordinator = Arc::new(LibrarySyncCoordinator::default());
-        let reconciliation_inside = Arc::new(Barrier::new(2));
-        let release_reconciliation = Arc::new(Barrier::new(2));
-        let edit_started = Arc::new(Barrier::new(2));
-        let native_projection = Arc::new(AtomicUsize::new(0));
-        let steps = Arc::new(Mutex::new(Vec::new()));
+        let background_inside = Arc::new(Barrier::new(2));
+        let release_background = Arc::new(Barrier::new(2));
 
-        let reconciliation = {
+        let background = {
             let coordinator = Arc::clone(&coordinator);
-            let reconciliation_inside = Arc::clone(&reconciliation_inside);
-            let release_reconciliation = Arc::clone(&release_reconciliation);
-            let native_projection = Arc::clone(&native_projection);
-            let steps = Arc::clone(&steps);
+            let background_inside = Arc::clone(&background_inside);
+            let release_background = Arc::clone(&release_background);
             thread::spawn(move || {
-                let ((), token) = coordinator.serialize_reconciliation(|| {
-                    steps.lock().expect("steps").push("reconciliation-bridge");
-                    reconciliation_inside.wait();
-                    release_reconciliation.wait();
-                    steps.lock().expect("steps").push("reconciliation-read");
-                    native_projection.store(1, Ordering::SeqCst);
-                    steps.lock().expect("steps").push("reconciliation-project");
+                let token = coordinator.reserve_background_projection_token();
+                coordinator.serialize_bridge_work(|| {
+                    background_inside.wait();
+                    release_background.wait();
                 });
                 token
             })
         };
 
-        reconciliation_inside.wait();
-        let edit = {
-            let coordinator = Arc::clone(&coordinator);
-            let edit_started = Arc::clone(&edit_started);
-            let native_projection = Arc::clone(&native_projection);
-            let steps = Arc::clone(&steps);
-            thread::spawn(move || {
-                edit_started.wait();
-                let ((), token) = coordinator.serialize_tag_edit(|| {
-                    steps.lock().expect("steps").push("edit-write");
-                    steps.lock().expect("steps").push("edit-bridge");
-                    native_projection.store(2, Ordering::SeqCst);
-                    steps.lock().expect("steps").push("edit-project");
-                });
-                token
-            })
-        };
-        edit_started.wait();
+        background_inside.wait();
+        let ((), edit_token) = coordinator.serialize_tag_edit(|| ());
+        assert!(coordinator.bridge_gate.try_lock().is_err());
+        assert!(coordinator.edit_gate.try_lock().is_ok());
+        release_background.wait();
 
-        assert!(coordinator.edit_gate.try_lock().is_err());
-        release_reconciliation.wait();
-
-        let reconciliation_token = reconciliation.join().expect("reconciliation");
-        let edit_token = edit.join().expect("edit");
-        assert!(reconciliation_token < edit_token);
-        assert_eq!(native_projection.load(Ordering::SeqCst), 2);
-        assert_eq!(
-            *steps.lock().expect("steps"),
-            vec![
-                "reconciliation-bridge",
-                "reconciliation-read",
-                "reconciliation-project",
-                "edit-write",
-                "edit-bridge",
-                "edit-project",
-            ]
-        );
+        let background_token = background.join().expect("background reconciliation");
+        assert!(background_token < edit_token);
     }
 }

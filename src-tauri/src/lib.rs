@@ -841,16 +841,18 @@ async fn refresh_external_tag_changes(
 ) -> Result<TagReconciliationProjection, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let coordinator = app.state::<LibrarySyncCoordinator>();
-        let (report, projection_token) = coordinator.serialize_reconciliation(|| {
-            let sync = coordinator.retry_one(&app);
+        let projection_token = coordinator.reserve_background_projection_token();
+        let sync = coordinator.retry_one(&app);
+        let report = {
             let state = app.state::<TagState>();
             let service = state
                 .lock()
-                .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
+                .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?
+                .clone();
             let mut report = service.reconcile_pending_overlays(100)?;
             report.catalog_sync = Some(sync.catalog_sync);
             Ok::<TagReconciliationReport, String>(report)
-        });
+        };
         Ok(TagReconciliationProjection {
             report: report?,
             projection_token,

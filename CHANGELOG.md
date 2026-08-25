@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.19] - 2026-08-25
+
+### Fixed
+
+- Rating, Love/Ban, Release Year, inspector, and undo writes no longer wait behind Music Library's slow background bridge or pending-tag reconciliation. Foreground MP3 edits and their player projections keep their own short serialization path, while background reconciliation uses revision-guarded updates so a stale result cannot replace a newer edit.
+
 ## [0.17.18] - 2026-08-25
 
 ### Fixed

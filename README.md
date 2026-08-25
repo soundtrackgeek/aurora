@@ -1,15 +1,16 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.18 makes Add Music review plans independently scrollable, runs applies in the background, and automatically imports covers for newly added albums through Music Library `0.144.5`.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.19 keeps rating and tag interactions responsive while Music Library synchronization and tag reconciliation continue in the background.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.18 slice
+## Current 0.17.19 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Album detail supports standard click, Ctrl+click, and Shift+click track selection, a bulk **Delete selected** action, and an explicit permanent-deletion confirmation. Aurora re-resolves every bounded catalog identity before deleting only regular MP3 files, queues every affected folder durably, and asks Music Library to rescan immediately so its catalog and Updates deletion count reflect the removed tracks; failed bridge work remains in the existing automatic retry queue.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination in a bounded, keyboard-scrollable plan before one explicit batch apply. Apply closes the modal and continues under a persistent top-bar status so browsing and playback remain available; the intake action stays disabled until completion, and a synchronous guard prevents duplicate requests. Music Library `0.144.5` then runs its cover-archive/embedded-art workflow only for the added albums, writing embedded front art to the configured `AlbumCovers` folder without a manual full-library Cover add.
 - A dedicated **Tags** tab in the right inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- Player stars, global rating/Love shortcuts, inline edits, inspector saves, and undo no longer queue behind slow Music Library bridge work. Background reconciliation reserves an older projection token before it starts and conditionally updates only the exact pending-overlay revision it inspected, so foreground changes appear promptly and always win stale-result races.
 - The playbar and Track inspector prefer the selected track's Artist credit, and the Artist tab follows that credit instead of the album-level Album Artist. Track Publisher and Artist metadata remain available through library snapshots, restored queues, and specialized Genres, Publishers, Years, Ratings, and Charts playback routes.
 - Track and album selection semantics model MusicBee's vertical editor: common values are shown once, differing values are labelled **Mixed**, and only checked or edited fields are written. A checked blank value is an explicit clear except for Album Artist, Album, and Track Title, which Music Library requires for safe catalog identity.
 - Artist edits MusicBee's `DISPLAY ARTIST` override while preserving the underlying multi-value performer credits; Album Artist retains semicolon-separated multi-value `TPE2` credits.

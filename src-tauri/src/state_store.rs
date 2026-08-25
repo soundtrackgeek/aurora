@@ -715,7 +715,10 @@ impl StateStore {
             })
     }
 
-    pub(crate) fn defer_overlay_reconciliation(&self, track_key: &str) -> Result<(), String> {
+    pub(crate) fn defer_overlay_reconciliation_if_current(
+        &self,
+        overlay: &TagOverlay,
+    ) -> Result<bool, String> {
         let connection = self.open()?;
         let timestamp = now_ms();
         connection
@@ -723,15 +726,15 @@ impl StateStore {
                 r#"
                 UPDATE tag_overlays
                 SET updated_at_ms = CASE
-                  WHEN updated_at_ms >= ?2 THEN updated_at_ms + 1
-                  ELSE ?2
+                  WHEN updated_at_ms >= ?3 THEN updated_at_ms + 1
+                  ELSE ?3
                 END
-                WHERE track_key = ?1
+                WHERE track_key = ?1 AND updated_at_ms = ?2
                 "#,
-                params![track_key, timestamp],
+                params![&overlay.track_key, overlay.updated_at_ms, timestamp],
             )
-            .map_err(|error| format!("Could not defer a pending-tag retry: {error}"))?;
-        Ok(())
+            .map(|changed| changed == 1)
+            .map_err(|error| format!("Could not defer a pending-tag retry: {error}"))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -823,6 +826,58 @@ impl StateStore {
                     catalog_values.love_state.as_db(),
                     catalog_values.release_year,
                     catalog_import_run_id,
+                    now_ms(),
+                    &overlay.track_key,
+                    overlay.updated_at_ms,
+                ],
+            )
+        }
+        .map_err(|error| format!("Could not reconcile Aurora's tag overlay: {error}"))?;
+        Ok(changed == 1)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn reconcile_pending_overlay_if_current(
+        &self,
+        overlay: &TagOverlay,
+        catalog_values: &TagValues,
+        values: &TagValues,
+        catalog_import_run_id: i64,
+    ) -> Result<bool, String> {
+        let connection = self.open()?;
+        let changed = if values == catalog_values {
+            connection.execute(
+                "DELETE FROM tag_overlays WHERE track_key = ?1 AND updated_at_ms = ?2",
+                params![&overlay.track_key, overlay.updated_at_ms],
+            )
+        } else {
+            connection.execute(
+                r#"
+                UPDATE tag_overlays
+                SET directory = ?1,
+                    filename = ?2,
+                    rating = ?3,
+                    love_state = ?4,
+                    release_year = ?5,
+                    catalog_rating = ?6,
+                    catalog_love_state = ?7,
+                    catalog_release_year = ?8,
+                    catalog_import_run_id = ?9,
+                    last_operation_id = COALESCE(?10, last_operation_id),
+                    updated_at_ms = MAX(?11, updated_at_ms + 1)
+                WHERE track_key = ?12 AND updated_at_ms = ?13
+                "#,
+                params![
+                    &overlay.directory,
+                    &overlay.filename,
+                    values.rating,
+                    values.love_state.as_db(),
+                    values.release_year,
+                    catalog_values.rating,
+                    catalog_values.love_state.as_db(),
+                    catalog_values.release_year,
+                    catalog_import_run_id,
+                    overlay.last_operation_id,
                     now_ms(),
                     &overlay.track_key,
                     overlay.updated_at_ms,
@@ -1723,6 +1778,11 @@ mod tests {
             )
             .expect("newer overlay");
 
+        assert!(
+            !store
+                .reconcile_pending_overlay_if_current(&stale, &first, &first, 52)
+                .expect("stale MP3 reconciliation")
+        );
         assert!(
             !store
                 .reconcile_overlay_if_current(&stale, &first, 52)

@@ -142,6 +142,7 @@ struct PendingOverlayFailure {
     message: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct TagService {
     store: StateStore,
 }
@@ -616,7 +617,7 @@ impl TagService {
             {
                 self.record_pending_failure(
                     &mut report,
-                    &overlay.track_key,
+                    &overlay,
                     PendingOverlayFailure {
                         kind: PendingOverlayFailureKind::Unavailable,
                         message:
@@ -634,7 +635,7 @@ impl TagService {
                 Ok(None) => {
                     self.record_pending_failure(
                         &mut report,
-                        &overlay.track_key,
+                        &overlay,
                         PendingOverlayFailure {
                             kind: PendingOverlayFailureKind::Unavailable,
                             message: "This pending track is no longer present in Music Library's catalog."
@@ -646,7 +647,7 @@ impl TagService {
                 Err(error) => {
                     self.record_pending_failure(
                         &mut report,
-                        &overlay.track_key,
+                        &overlay,
                         PendingOverlayFailure {
                             kind: PendingOverlayFailureKind::Unavailable,
                             message: error,
@@ -659,7 +660,7 @@ impl TagService {
                 match validated_pending_overlay_path(&overlay.directory, &overlay.filename) {
                     Ok(path) => path,
                     Err(failure) => {
-                        self.record_pending_failure(&mut report, &overlay.track_key, failure)?;
+                        self.record_pending_failure(&mut report, &overlay, failure)?;
                         continue;
                     }
                 };
@@ -669,7 +670,7 @@ impl TagService {
                 catalog_values.1,
                 &audio_path,
             ) {
-                Ok(outcome) => {
+                Ok(Some(outcome)) => {
                     report.reconciled += 1;
                     if outcome.external_change {
                         report.external_changes += 1;
@@ -688,11 +689,12 @@ impl TagService {
                         });
                     }
                 }
+                Ok(None) => {}
                 Err(failure) => {
                     if matches!(failure.kind, PendingOverlayFailureKind::State) {
                         return Err(failure.message);
                     }
-                    self.record_pending_failure(&mut report, &overlay.track_key, failure)?;
+                    self.record_pending_failure(&mut report, &overlay, failure)?;
                 }
             }
         }
@@ -702,11 +704,15 @@ impl TagService {
     fn record_pending_failure(
         &self,
         report: &mut TagReconciliationReport,
-        track_key: &str,
+        overlay: &TagOverlay,
         failure: PendingOverlayFailure,
     ) -> Result<(), String> {
-        self.store.defer_overlay_reconciliation(track_key)?;
-        report.record_failure(track_key, failure);
+        if self
+            .store
+            .defer_overlay_reconciliation_if_current(overlay)?
+        {
+            report.record_failure(&overlay.track_key, failure);
+        }
         Ok(())
     }
 
@@ -716,7 +722,7 @@ impl TagService {
         catalog_values: &TagValues,
         catalog_import_run_id: i64,
         audio_path: &Path,
-    ) -> Result<PendingOverlayOutcome, PendingOverlayFailure> {
+    ) -> Result<Option<PendingOverlayOutcome>, PendingOverlayFailure> {
         let before_fingerprint =
             FileFingerprint::read(audio_path).map_err(|message| PendingOverlayFailure {
                 kind: PendingOverlayFailureKind::Unavailable,
@@ -742,25 +748,26 @@ impl TagService {
 
         let external_change = values != overlay.values;
         let catalog_caught_up = values == *catalog_values;
-        self.store
-            .upsert_overlay(
-                &overlay.track_key,
-                &overlay.directory,
-                &overlay.filename,
+        let current = self
+            .store
+            .reconcile_pending_overlay_if_current(
+                overlay,
                 catalog_values,
                 &values,
                 catalog_import_run_id,
-                overlay.last_operation_id,
             )
             .map_err(|message| PendingOverlayFailure {
                 kind: PendingOverlayFailureKind::State,
                 message,
             })?;
-        Ok(PendingOverlayOutcome {
+        if !current {
+            return Ok(None);
+        }
+        Ok(Some(PendingOverlayOutcome {
             values,
             external_change,
             catalog_caught_up,
-        })
+        }))
     }
 
     pub(crate) fn update(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
@@ -2638,7 +2645,8 @@ mod tests {
         };
         let outcome = service
             .reconcile_pending_overlay(&overlay, &catalog_values, 53, &target)
-            .expect("reconcile external rating");
+            .expect("reconcile external rating")
+            .expect("current overlay");
 
         assert!(outcome.external_change);
         assert!(!outcome.catalog_caught_up);
@@ -2673,7 +2681,8 @@ mod tests {
 
         let outcome = service
             .reconcile_pending_overlay(&overlay, &current, 53, &target)
-            .expect("reconcile catalog catch-up");
+            .expect("reconcile catalog catch-up")
+            .expect("current overlay");
 
         assert!(!outcome.external_change);
         assert!(outcome.catalog_caught_up);
@@ -2706,7 +2715,8 @@ mod tests {
 
         let outcome = service
             .reconcile_pending_overlay(&overlay, &catalog_values, 53, &target)
-            .expect("reconcile unchanged file");
+            .expect("reconcile unchanged file")
+            .expect("current overlay");
 
         assert!(!outcome.external_change);
         assert!(!outcome.catalog_caught_up);
