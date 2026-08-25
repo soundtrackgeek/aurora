@@ -196,6 +196,17 @@ describe("DeepExplorer", () => {
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "yearAsc" });
   });
 
+  it("offers added order for albums and reverses it to oldest", () => {
+    const onFiltersChange = vi.fn();
+    render(<DeepExplorer {...explorerProps({ view: "albums", onFiltersChange })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Added · newest" }));
+    expect(screen.getByRole("menuitemradio", { name: "Added · newest" })).toBeVisible();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Added · newest" }));
+
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "oldest" });
+  });
+
   it("supports arrow-key selection and Enter activation in track rows", () => {
     const onSelectTrack = vi.fn();
     const onActivateTrack = vi.fn();

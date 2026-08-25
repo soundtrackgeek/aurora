@@ -214,6 +214,10 @@ describe("library presentation", () => {
     const albumYearDesc = await exploreAlbums({ sort: "yearDesc" });
     expect(albumYearAsc.items.map((album) => album.id)).toEqual(albumYearDesc.items.map((album) => album.id).reverse());
 
+    const albumAddedAsc = await exploreAlbums({ sort: "oldest" });
+    const albumAddedDesc = await exploreAlbums({ sort: "newest" });
+    expect(albumAddedAsc.items.map((album) => album.id)).toEqual(albumAddedDesc.items.map((album) => album.id).reverse());
+
     const artistAsc = await exploreArtists({ sort: "nameAsc" });
     const artistDesc = await exploreArtists({ sort: "nameDesc" });
     expect(artistAsc.items.map((artist) => artist.id)).toEqual(artistDesc.items.map((artist) => artist.id).reverse());

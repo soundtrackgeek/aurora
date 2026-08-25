@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.32] - 2026-08-25
+
+### Added
+
+- Albums can now be sorted by **Added · newest** or **Added · oldest**. Successful Add Music batches persist a synchronized album-added timestamp, while older albums fall back to their newest catalog track's insertion order.
+
 ## [0.17.31] - 2026-08-25
 
 ### Fixed

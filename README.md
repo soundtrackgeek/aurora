@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.31 makes **Play unrated tracks** start promptly from Ratings while retaining durable deleted-track filtering.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.32 adds recent-addition sorting to Albums, matching the existing Songs workflow.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.31 slice
+## Current 0.17.32 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Ratings **Play unrated tracks** scopes pending-deletion reconciliation to the selected album instead of rescanning the million-track catalog for every pending Music Library target before playback.
@@ -88,7 +88,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Bounded startup payload: summary, eight high-volume artists, and 50 five-star tracks.
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
 - The top search reports the exact filtered Songs, Albums, or Artists total even when only the current 50-row page is loaded.
-- Songs, Albums, and Artists keep a compact Sort and Reset row while catalog filtering happens through the persistent top search. The active sort remains an enabled menu choice, so re-selecting it always reverses newest/oldest or A–Z/Z–A direction even after moving across other choices. Existing collection handoffs can still apply exact rating, Love, year, genre, and artist scopes, and Reset clears them.
+- Songs, Albums, and Artists keep a compact Sort and Reset row while catalog filtering happens through the persistent top search. Songs and Albums can sort by when they were added. Successful Add Music batches record a durable, synchronized album-added timestamp; older albums fall back to the newest catalog track's insertion order. The active sort remains an enabled menu choice, so re-selecting it always reverses newest/oldest or A–Z/Z–A direction even after moving across other choices. Existing collection handoffs can still apply exact rating, Love, year, genre, and artist scopes, and Reset clears them.
 - Field-aware search supports `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, and `title:`. Year fields accept exact years and inclusive closed or open ranges such as `year:1985..1987`, `year:1985..`, and `ryear:..1987`. Commas or uppercase `AND` combine groups; uppercase `OR` adds alternatives and inherits the preceding field; `NOT` or a leading `-` excludes a group. A complete quoted value is exact, while unquoted text remains prefix-based. `genre:scores` expands to the Music Library film, TV, animation, anime, and game-score genres.
 - Validated sorts for newest, title, artist, album, year, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
 - Clickable artist planets open an exact artist focus in Songs, while artist results open the artist's Albums by default; both retain an exact artist scope that can be switched between Songs and Albums.

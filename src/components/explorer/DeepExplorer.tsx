@@ -152,6 +152,7 @@ const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
     { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
   ],
   albums: [
+    { value: "added", primary: "newest", primaryLabel: "Added · newest", reverse: "oldest", reverseLabel: "Added · oldest" },
     { value: "year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
     { value: "releaseYear", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
     { value: "title", primary: "titleAsc", primaryLabel: "Album · A–Z", reverse: "titleDesc", reverseLabel: "Album · Z–A" },

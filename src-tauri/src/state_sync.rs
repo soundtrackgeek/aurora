@@ -370,7 +370,17 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
             "musicbrainz_curation_events",
             "id, entity_kind, local_artist_key, artist_mbid, release_mbid, before_json, after_json, created_at_ms",
         ),
+        (
+            "album_additions",
+            "album_id, destination_path, import_run_id, added_at_ms",
+        ),
     ] {
+        if table == "album_additions"
+            && (table_columns(&connection, "main", table)?.is_empty()
+                || table_columns(&connection, "remote_state", table)?.is_empty())
+        {
+            return Ok(false);
+        }
         let differs: bool = connection
             .query_row(
                 &format!(

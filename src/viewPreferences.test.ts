@@ -62,7 +62,7 @@ describe("view preferences", () => {
         yearMissing: false,
         genre: null,
         artist: null,
-        sort: "newest",
+        sort: "albumAsc",
       },
       inspectorView: "tags",
       tagSelectionKind: "album",

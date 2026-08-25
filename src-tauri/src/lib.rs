@@ -140,10 +140,13 @@ async fn explore_tracks(app: AppHandle, request: TrackPageRequest) -> Result<Tra
 }
 
 #[tauri::command]
-async fn explore_albums(request: AlbumPageRequest) -> Result<AlbumPage, String> {
-    tauri::async_runtime::spawn_blocking(move || explorer::load_album_page(request))
-        .await
-        .map_err(|error| format!("The album explorer stopped unexpectedly: {error}"))?
+async fn explore_albums(app: AppHandle, request: AlbumPageRequest) -> Result<AlbumPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        explorer::load_album_page(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The album explorer stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]

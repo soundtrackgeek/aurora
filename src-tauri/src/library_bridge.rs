@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -12,7 +13,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::library_sync::LibrarySyncCoordinator;
+use crate::{
+    catalog::{default_catalog_path, open_catalog},
+    device_mode,
+    library_sync::LibrarySyncCoordinator,
+    state_store::StateStore,
+};
 
 const PROTOCOL_VERSION: u32 = 1;
 const MUSIC_LIBRARY_EXE_ENV: &str = "AURORA_MUSIC_LIBRARY_EXE";
@@ -366,7 +372,7 @@ pub async fn apply_library_intake_batch(
         let coordinator = app.state::<LibrarySyncCoordinator>();
         coordinator.serialize_bridge_work(|| {
             validate_apply_request(&request)?;
-            let result = invoke_bridge::<_, LibraryIntakeApplyResult>(
+            let mut result = invoke_bridge::<_, LibraryIntakeApplyResult>(
                 &app,
                 "applyBatch",
                 ApplyPayload {
@@ -376,6 +382,12 @@ pub async fn apply_library_intake_batch(
                 APPLY_TIMEOUT,
             )?;
             validate_apply_result(&result, &request)?;
+            if let Err(error) = record_album_additions(&app, &result) {
+                result.status = LibraryIntakeApplyStatus::CompletedWithWarnings;
+                result.cleanup_warnings.push(format!(
+                    "Music was added, but Aurora could not record its added date: {error}"
+                ));
+            }
             Ok(result)
         })
     })
@@ -673,6 +685,91 @@ fn validate_apply_result(
     Ok(())
 }
 
+fn record_album_additions(
+    app: &AppHandle,
+    result: &LibraryIntakeApplyResult,
+) -> Result<(), String> {
+    let connection = open_catalog(&default_catalog_path()?)?;
+    let additions = resolve_album_additions(&connection, &result.albums)?;
+    let added_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    app.state::<StateStore>()
+        .record_album_additions(&additions, result.import_run_id, added_at_ms)
+}
+
+fn resolve_album_additions(
+    connection: &Connection,
+    albums: &[LibraryIntakeAppliedAlbum],
+) -> Result<Vec<(String, String)>, String> {
+    let mut exact_statement = connection
+        .prepare(
+            r#"
+            SELECT DISTINCT album_id
+            FROM tracks
+            WHERE file_path IN (?1, ?2, ?3)
+            LIMIT 2
+            "#,
+        )
+        .map_err(|error| format!("Could not prepare the imported-album lookup: {error}"))?;
+    let mut descendant_statement = connection
+        .prepare(
+            r#"
+            SELECT DISTINCT album_id
+            FROM tracks
+            WHERE file_path LIKE ?1 ESCAPE '^' COLLATE NOCASE
+            LIMIT 2
+            "#,
+        )
+        .map_err(|error| format!("Could not prepare the nested imported-album lookup: {error}"))?;
+    let mut additions = Vec::with_capacity(albums.len());
+    for album in albums {
+        let catalog_destination =
+            device_mode::catalog_path_for_device_path(Path::new(&album.destination_path));
+        let catalog_destination = catalog_destination.to_string_lossy();
+        let destination = catalog_destination.trim_end_matches(['\\', '/']);
+        let escaped = destination
+            .replace('^', "^^")
+            .replace('%', "^%")
+            .replace('_', "^_");
+        let descendant_pattern = format!("{escaped}\\%");
+        let windows_directory = format!("{destination}\\");
+        let portable_directory = format!("{destination}/");
+        let mut album_ids = exact_statement
+            .query_map(
+                [
+                    destination,
+                    windows_directory.as_str(),
+                    portable_directory.as_str(),
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| format!("Could not read the imported album identity: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not decode the imported album identity: {error}"))?;
+        if album_ids.is_empty() {
+            album_ids = descendant_statement
+                .query_map([descendant_pattern.as_str()], |row| row.get::<_, String>(0))
+                .map_err(|error| {
+                    format!("Could not read the nested imported album identity: {error}")
+                })?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    format!("Could not decode the nested imported album identity: {error}")
+                })?;
+        }
+        let [album_id] = album_ids.as_slice() else {
+            return Err(format!(
+                "the catalog did not resolve exactly one album at {}",
+                album.destination_path
+            ));
+        };
+        additions.push((album_id.clone(), album.destination_path.clone()));
+    }
+    Ok(additions)
+}
+
 fn invoke_bridge<TRequest, TResponse>(
     app: &AppHandle,
     operation: &'static str,
@@ -916,6 +1013,45 @@ mod tests {
     fn write_response(path: &Path, value: serde_json::Value) {
         fs::write(path, serde_json::to_vec(&value).expect("response JSON"))
             .expect("write response");
+    }
+
+    #[test]
+    fn resolves_completed_intake_paths_to_stable_album_ids() {
+        let connection = Connection::open_in_memory().expect("catalog fixture");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks(album_id TEXT NOT NULL, file_path TEXT NOT NULL);
+                CREATE INDEX idx_tracks_file ON tracks(file_path);
+                INSERT INTO tracks VALUES
+                  ('album-root', 'D:\MUSIC\Artist\Album\'),
+                  ('album-nested', 'D:\MUSIC\Artist\100% Score\Disc 1\');
+                "#,
+            )
+            .expect("catalog fixture schema");
+        let albums = vec![
+            LibraryIntakeAppliedAlbum {
+                source_path: r"C:\Inbox\Album".to_owned(),
+                destination_path: r"Y:\Music\Artist\Album".to_owned(),
+                cleanup_status: LibraryIntakeCleanupStatus::Removed,
+            },
+            LibraryIntakeAppliedAlbum {
+                source_path: r"C:\Inbox\Score".to_owned(),
+                destination_path: r"Y:\Music\Artist\100% Score".to_owned(),
+                cleanup_status: LibraryIntakeCleanupStatus::Removed,
+            },
+        ];
+
+        assert_eq!(
+            resolve_album_additions(&connection, &albums).expect("resolve album additions"),
+            vec![
+                ("album-root".to_owned(), r"Y:\Music\Artist\Album".to_owned()),
+                (
+                    "album-nested".to_owned(),
+                    r"Y:\Music\Artist\100% Score".to_owned()
+                ),
+            ]
+        );
     }
 
     #[test]

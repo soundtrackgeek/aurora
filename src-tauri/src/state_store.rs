@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 11;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -375,6 +375,15 @@ impl StateStore {
                   singleton, lineage_id, snapshot_id, generation,
                   content_revision, mirrored_revision, last_synced_at_ms
                 ) VALUES (1, '', '', 0, 0, 0, NULL);
+
+                CREATE TABLE IF NOT EXISTS album_additions (
+                  album_id TEXT PRIMARY KEY,
+                  destination_path TEXT NOT NULL COLLATE NOCASE,
+                  import_run_id INTEGER NOT NULL CHECK (import_run_id > 0),
+                  added_at_ms INTEGER NOT NULL CHECK (added_at_ms > 0)
+                );
+                CREATE INDEX IF NOT EXISTS idx_album_additions_added_at
+                  ON album_additions(added_at_ms DESC, album_id DESC);
                 "#,
             )
             .map_err(|error| format!("Could not ensure Aurora's state-sync metadata: {error}"))?;
@@ -415,6 +424,7 @@ impl StateStore {
             "musicbrainz_artist_decisions",
             "musicbrainz_release_decisions",
             "musicbrainz_curation_events",
+            "album_additions",
         ];
         if current < 7 {
             for table in synchronized_tables {
@@ -507,6 +517,12 @@ impl StateStore {
                   UPDATE state_sync_meta SET content_revision = content_revision + 1
                   WHERE singleton = 1;
                 END;
+
+                CREATE TRIGGER IF NOT EXISTS state_sync_album_additions_update
+                AFTER UPDATE ON album_additions BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1
+                  WHERE singleton = 1;
+                END;
                 "#,
             )
             .map_err(|error| {
@@ -561,6 +577,63 @@ impl StateStore {
                 },
             )
             .map_err(|error| format!("Could not restore Aurora's playback state: {error}"))
+    }
+
+    pub(crate) fn record_album_additions(
+        &self,
+        additions: &[(String, String)],
+        import_run_id: i64,
+        added_at_ms: i64,
+    ) -> Result<(), String> {
+        if additions.is_empty()
+            || additions.len() > 10_000
+            || import_run_id <= 0
+            || added_at_ms <= 0
+            || additions.iter().any(|(album_id, destination_path)| {
+                album_id.trim().is_empty()
+                    || destination_path.trim().is_empty()
+                    || album_id.chars().count() > 512
+                    || destination_path.chars().count() > 32_768
+            })
+        {
+            return Err("Aurora refused invalid album-addition metadata.".to_owned());
+        }
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not prepare Aurora's album additions: {error}"))?;
+        {
+            let mut statement = transaction
+                .prepare_cached(
+                    r#"
+                    INSERT INTO album_additions(
+                      album_id, destination_path, import_run_id, added_at_ms
+                    ) VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(album_id) DO UPDATE SET
+                      destination_path = excluded.destination_path,
+                      import_run_id = excluded.import_run_id,
+                      added_at_ms = excluded.added_at_ms
+                    "#,
+                )
+                .map_err(|error| {
+                    format!("Could not prepare Aurora's album-addition record: {error}")
+                })?;
+            for (album_id, destination_path) in additions {
+                statement
+                    .execute(params![
+                        album_id,
+                        destination_path,
+                        import_run_id,
+                        added_at_ms
+                    ])
+                    .map_err(|error| {
+                        format!("Could not record Aurora's album addition: {error}")
+                    })?;
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not commit Aurora's album additions: {error}"))
     }
 
     pub(crate) fn save(&self, state: &StoredPlaybackState) -> Result<(), String> {
@@ -1731,6 +1804,40 @@ mod tests {
         store.save(&expected).expect("save stable state");
         assert_eq!(store.load().expect("reload state"), expected);
 
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn records_durable_album_addition_times() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        store
+            .record_album_additions(
+                &[("album-1".to_owned(), "Y:\\Music\\Artist\\Album".to_owned())],
+                203,
+                1_800_000_000_000,
+            )
+            .expect("record album addition");
+
+        let connection = store.open().expect("open state");
+        let stored: (String, i64, i64) = connection
+            .query_row(
+                "SELECT destination_path, import_run_id, added_at_ms FROM album_additions WHERE album_id = 'album-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read album addition");
+        assert_eq!(
+            stored,
+            (
+                "Y:\\Music\\Artist\\Album".to_owned(),
+                203,
+                1_800_000_000_000
+            )
+        );
+
+        drop(connection);
         drop(store);
         let _ = fs::remove_file(path);
     }

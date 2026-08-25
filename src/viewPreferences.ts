@@ -41,7 +41,7 @@ export const defaultExplorerFilters: ExplorerFilters = {
 
 export const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
   tracks: ["newest", "oldest", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "albumAsc", "albumDesc", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "ratingAsc", "ratingDesc"],
-  albums: ["yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
+  albums: ["newest", "oldest", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
   artists: ["artistAsc", "artistDesc", "trackCountAsc", "trackCountDesc"],
 };
 

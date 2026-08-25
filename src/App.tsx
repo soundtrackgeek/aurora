@@ -327,7 +327,7 @@ async function loadExplorerPage(
       missingYear: filters.yearMissing || undefined,
       artist: filters.artist ?? undefined,
       sort: explorerSorts.albums.includes(filters.sort)
-        ? filters.sort as "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
+        ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
         : "yearDesc",
     });
     return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
@@ -2763,7 +2763,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.31</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.32</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

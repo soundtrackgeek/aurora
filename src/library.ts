@@ -168,6 +168,8 @@ export interface AlbumSummary {
 }
 
 export type AlbumSort =
+  | "newest"
+  | "oldest"
   | "titleAsc"
   | "titleDesc"
   | "artistAsc"
@@ -443,7 +445,12 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
     .filter((album) => !request.genre || album.genre === request.genre)
     .filter((album) => !request.artist || album.artist === request.artist)
     .sort((left, right) => {
+      const newestTrackId = (albumId: string) => browserPreview.tracks
+        .filter((track) => track.albumId === albumId)
+        .reduce((newest, track) => compareText(newest, track.id) < 0 ? track.id : newest, "");
       switch (request.sort) {
+        case "newest": return compareText(newestTrackId(left.id), newestTrackId(right.id), true) || compareText(left.id, right.id, true);
+        case "oldest": return compareText(newestTrackId(left.id), newestTrackId(right.id)) || compareText(left.id, right.id);
         case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);
         case "titleDesc": return compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
         case "artistAsc": return compareText(left.artist, right.artist) || compareText(left.title, right.title) || compareText(left.id, right.id);

@@ -95,6 +95,8 @@ pub(crate) struct TrackPage {
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AlbumSort {
+    Newest,
+    Oldest,
     TitleAsc,
     TitleDesc,
     ArtistAsc,
@@ -722,6 +724,18 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
 
 fn album_sort(sort: AlbumSort) -> SortDefinition {
     match sort {
+        AlbumSort::Newest => SortDefinition {
+            cursor_tag: "album-added-desc",
+            expression: "COALESCE((SELECT addition.added_at_ms FROM aurora_state.album_additions AS addition WHERE addition.album_id = a.id), (SELECT MAX(album_track.id) FROM tracks AS album_track WHERE album_track.album_id = a.id))",
+            descending: true,
+            cursor_kind: CursorKind::Integer,
+        },
+        AlbumSort::Oldest => SortDefinition {
+            cursor_tag: "album-added-asc",
+            expression: "COALESCE((SELECT addition.added_at_ms FROM aurora_state.album_additions AS addition WHERE addition.album_id = a.id), (SELECT MAX(album_track.id) FROM tracks AS album_track WHERE album_track.album_id = a.id))",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
         AlbumSort::TitleAsc => SortDefinition {
             cursor_tag: "album-title-asc",
             expression: "COALESCE(a.album, '') COLLATE NOCASE",
@@ -1027,8 +1041,17 @@ pub(crate) fn load_track_page(
     track_page_from_connection(&connection, request, Some(store))
 }
 
-pub(crate) fn load_album_page(request: AlbumPageRequest) -> Result<AlbumPage, String> {
+pub(crate) fn load_album_page(
+    request: AlbumPageRequest,
+    store: &StateStore,
+) -> Result<AlbumPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS aurora_state",
+            [store.path().to_string_lossy().as_ref()],
+        )
+        .map_err(|error| format!("Could not attach Aurora's album additions: {error}"))?;
     album_page_from_connection(&connection, request)
 }
 
@@ -1177,6 +1200,10 @@ mod tests {
                 CREATE VIRTUAL TABLE album_search_fts USING fts5(
                   album_id UNINDEXED, album, album_artist_display, canonical_genre, publisher
                 );
+                ATTACH DATABASE ':memory:' AS aurora_state;
+                CREATE TABLE aurora_state.album_additions (
+                  album_id TEXT PRIMARY KEY, added_at_ms INTEGER NOT NULL
+                );
                 INSERT INTO albums VALUES
                   ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999, 'EMI Records'),
                   ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999, 'FatCat'),
@@ -1312,6 +1339,50 @@ mod tests {
                 .map(|album| album.id.as_str())
                 .collect::<Vec<_>>(),
             reversed_album_ids
+        );
+
+        connection
+            .execute(
+                "INSERT INTO aurora_state.album_additions VALUES ('a1', 1800000000000)",
+                [],
+            )
+            .expect("recorded album addition");
+        let album_added_asc = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                sort: Some(AlbumSort::Oldest),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("oldest added albums");
+        let album_added_desc = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                sort: Some(AlbumSort::Newest),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("newest added albums");
+        let mut reversed_added_album_ids = album_added_desc
+            .items
+            .iter()
+            .map(|album| album.id.as_str())
+            .collect::<Vec<_>>();
+        reversed_added_album_ids.reverse();
+        assert_eq!(
+            album_added_asc
+                .items
+                .iter()
+                .map(|album| album.id.as_str())
+                .collect::<Vec<_>>(),
+            reversed_added_album_ids
+        );
+        assert_eq!(
+            album_added_desc
+                .items
+                .first()
+                .map(|album| album.id.as_str()),
+            Some("a1")
         );
 
         let artist_name_asc = artist_page_from_connection(
