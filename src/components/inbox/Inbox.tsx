@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   Disc3,
+  FilePenLine,
   Folder,
   FolderPlus,
   Inbox as InboxIcon,
@@ -22,10 +23,12 @@ import {
   loadInboxReleaseDetail,
   loadInboxSnapshot,
   removeInboxMonitorFolder,
+  renameInboxAlbum,
   searchInboxReleases,
   selectInboxMonitorFolder,
   type InboxAlbum,
   type InboxSnapshot,
+  type InboxTrack,
   type MetadataSource,
   type ReleaseCandidate,
   type ReleaseCandidateDetail,
@@ -89,6 +92,9 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveMessage, setMoveMessage] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameMessage, setRenameMessage] = useState<string | null>(null);
+  const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoadState("loading");
@@ -116,16 +122,36 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const albums = useMemo(() => snapshot?.albums.filter((album) => !selectedFolder || albumInFolder(album, selectedFolder)) ?? [], [selectedFolder, snapshot]);
   const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? albums[0] ?? null;
 
+  const selectedTracks = selectedAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [];
+
+  const renameSelectedAlbum = useCallback(async (album: InboxAlbum) => {
+    setRenameBusy(true);
+    setRenameMessage(null);
+    setError(null);
+    try {
+      const result = await renameInboxAlbum(album.path);
+      setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed${result.folderRenamed ? " with the album folder" : ""}.`);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setRenameBusy(false);
+    }
+  }, [refresh]);
+
   useEffect(() => {
-    function openTagger(event: KeyboardEvent) {
-      if (event.ctrlKey && event.shiftKey && event.key.toLocaleLowerCase() === "t" && selectedAlbum) {
+    function handleInboxShortcut(event: KeyboardEvent) {
+      if (event.ctrlKey && event.shiftKey && event.key.toLocaleLowerCase() === "t" && selectedAlbum && selectedTracks.length) {
         event.preventDefault();
         setTaggerAlbum(selectedAlbum);
+      } else if (event.ctrlKey && !event.shiftKey && event.key.toLocaleLowerCase() === "r" && selectedAlbum && !taggerAlbum && !renameBusy) {
+        event.preventDefault();
+        void renameSelectedAlbum(selectedAlbum);
       }
     }
-    window.addEventListener("keydown", openTagger);
-    return () => window.removeEventListener("keydown", openTagger);
-  }, [selectedAlbum]);
+    window.addEventListener("keydown", handleInboxShortcut);
+    return () => window.removeEventListener("keydown", handleInboxShortcut);
+  }, [renameBusy, renameSelectedAlbum, selectedAlbum, selectedTracks.length, taggerAlbum]);
 
   async function addFolder() {
     try {
@@ -188,11 +214,13 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         <div><h1>Inbox</h1><p>Review and tag new music before adding it to your library.</p></div>
         <div>
           <button type="button" onClick={() => void refresh()} disabled={loadState === "loading"}><RefreshCw className={loadState === "loading" ? "is-spinning" : ""} /> Rescan</button>
-          <button type="button" className="button button--primary" disabled={!selectedAlbum} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag <kbd>Ctrl Shift T</kbd></button>
+          <button type="button" disabled={!selectedAlbum || renameBusy} onClick={() => selectedAlbum && void renameSelectedAlbum(selectedAlbum)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename <kbd>Ctrl R</kbd></button>
+          <button type="button" className="button button--primary" disabled={!selectedAlbum || !selectedTracks.length || renameBusy} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag {selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl Shift T</kbd></button>
         </div>
       </header>
 
       {error ? <p className="inbox-banner" role="alert"><AlertTriangle />{error}</p> : null}
+      {renameMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{renameMessage}</p> : null}
       {snapshot.settings.warning ? <p className="inbox-banner" role="status"><AlertTriangle />{snapshot.settings.warning}</p> : null}
 
       <div className="inbox-workspace">
@@ -216,7 +244,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             {albums.map((album) => <tr key={album.id} className={selectedAlbum?.id === album.id ? "is-selected" : ""} onClick={() => { setSelectedAlbumId(album.id); setMovePreview(null); setMoveMessage(null); }}>
               <td><span className="inbox-table-art"><Disc3 /></span><span><strong>{album.album ?? album.folderName}</strong><small>{album.folderName}</small></span></td>
               <td>{album.artist ?? "Unknown artist"}</td><td>{album.year ?? "—"}</td><td>{album.trackCount}</td>
-              <td><span className={album.readiness.ready ? "inbox-status is-ready" : "inbox-status"}>{album.readiness.ready ? <CheckCircle2 /> : <AlertTriangle />}{album.readiness.ready ? "Ready" : `${album.readiness.issues.length} issues`}</span></td>
+              <td><span className={album.readiness.ready ? "inbox-status is-ready" : "inbox-status"}>{album.readiness.ready ? <CheckCircle2 /> : <AlertTriangle />}{album.readiness.ready ? "Ready" : `${album.readiness.issues.length} ${album.readiness.issues.length === 1 ? "issue" : "issues"}`}</span></td>
               <td>{formatTime(album.modifiedAtMs)}</td>
             </tr>)}
           </tbody></table></div> : <div className="inbox-albums__empty"><CheckCircle2 /><strong>Nothing is waiting here.</strong><span>New album folders will appear on the next scan.</span></div>}
@@ -227,7 +255,9 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             <header><span className="inbox-inspector__art"><Disc3 /></span><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
             <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
             <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
-            <button type="button" className="inbox-autotag" onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>Match with MusicBrainz and Discogs</small></span><kbd>Ctrl Shift T</kbd></button>
+            <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
+            <button type="button" className="inbox-autotag" disabled={!selectedTracks.length} onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl Shift T</kbd></button>
+            <button type="button" className="inbox-autotag inbox-rename" disabled={renameBusy} onClick={() => void renameSelectedAlbum(selectedAlbum)}><FilePenLine /><span><strong>Rename from tags</strong><small>Standardize the album folder and track filenames</small></span><kbd>Ctrl R</kbd></button>
             <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
               {moveMessage ? <p className="inbox-move__message" role="status">{moveMessage}</p> : null}
@@ -237,12 +267,12 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </aside>
       </div>
 
-      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
+      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerAlbum.tracks.filter((track) => !excludedTrackPaths.has(track.path))} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
     </section>
   );
 }
 
-function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: () => void | Promise<void> }) {
+function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; tracks: InboxTrack[]; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: () => void | Promise<void> }) {
   const [artist, setArtist] = useState(album.artist ?? "");
   const [title, setTitle] = useState(album.album ?? album.folderName);
   const [candidates, setCandidates] = useState<ReleaseCandidate[]>([]);
@@ -250,20 +280,26 @@ function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, on
   const [detail, setDetail] = useState<ReleaseCandidateDetail | null>(null);
   const [fields, setFields] = useState<Set<EditableTagField>>(() => new Set(allFields.map(({ id }) => id)));
   const [values, setValues] = useState({ albumArtist: album.artist ?? "", album: album.album ?? "", genre: album.genre ?? "", publisher: album.publisher ?? "", year: album.year?.toString() ?? "" });
-  const [trackTitles, setTrackTitles] = useState<string[]>(album.tracks.map((track) => track.title ?? ""));
+  const [trackTitles, setTrackTitles] = useState<string[]>(tracks.map((track) => track.title ?? ""));
+  const [renameAfterApply, setRenameAfterApply] = useState(tracks.length === album.tracks.length);
+  const [discNumber, setDiscNumber] = useState("");
+  const [discTotal, setDiscTotal] = useState("");
   const [busy, setBusy] = useState<"search" | "detail" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const hydrateDetail = useCallback((next: ReleaseCandidateDetail) => {
     setValues({ albumArtist: next.albumArtist ?? "", album: next.album ?? "", genre: next.genre ?? "", publisher: next.publisher ?? "", year: next.year?.toString() ?? "" });
-    setTrackTitles(album.tracks.map((track, index) => next.tracks[index]?.title ?? track.title ?? ""));
-  }, [album.tracks]);
+    setTrackTitles(tracks.map((track, index) => next.tracks[index]?.title ?? track.title ?? ""));
+    const releaseDiscs = new Set(next.tracks.map((track) => track.discNumber).filter((value): value is number => value !== null));
+    setDiscNumber(releaseDiscs.size === 1 ? String([...releaseDiscs][0]) : "");
+    setDiscTotal(next.discTotal ? String(next.discTotal) : "");
+  }, [tracks]);
 
   const performSearch = useCallback(async (searchArtist: string, searchTitle: string) => {
     setBusy("search"); setError(null); setDetail(null); setSelectedCandidate(null);
     try {
-      const result = await searchInboxReleases(searchArtist, searchTitle, album.trackCount);
+      const result = await searchInboxReleases(searchArtist, searchTitle, tracks.length);
       setCandidates(result.candidates); setWarnings(result.warnings);
       if (result.candidates[0]) {
         setSelectedCandidate(result.candidates[0]);
@@ -273,7 +309,7 @@ function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, on
       }
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
     finally { setBusy(null); }
-  }, [album.trackCount, hydrateDetail]);
+  }, [hydrateDetail, tracks.length]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void performSearch(album.artist ?? "", album.album ?? album.folderName), 0);
@@ -297,7 +333,7 @@ function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, on
       await applyInboxTags({
         albumPath: album.path,
         fields: [...fields],
-        tracks: album.tracks.map((track, index) => {
+        tracks: tracks.map((track, index) => {
           const releaseTrack = detail.tracks[index];
           const next: EditableTagValues = {
             albumArtist: values.albumArtist || null,
@@ -310,12 +346,13 @@ function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, on
             year: values.year ? Number(values.year) : null,
             releaseYear: null,
             trackNumber: releaseTrack?.trackNumber ?? index + 1,
-            trackTotal: releaseTrack?.trackTotal ?? album.trackCount,
-            discNumber: releaseTrack?.discNumber ?? 1,
-            discTotal: releaseTrack?.discTotal ?? detail.discTotal ?? 1,
+            trackTotal: releaseTrack?.trackTotal ?? tracks.length,
+            discNumber: discNumber ? Number(discNumber) : releaseTrack?.discNumber ?? null,
+            discTotal: discTotal ? Number(discTotal) : releaseTrack?.discTotal ?? detail.discTotal ?? null,
           };
           return { path: track.path, values: next };
         }),
+        renameAfterApply,
       });
       await onApplied();
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); setBusy(null); }
@@ -333,15 +370,15 @@ function AlbumAutoTagger({ album, discogsConfigured, onOpenSettings, onClose, on
         {!candidates.length && busy !== "search" ? <tr><td colSpan={8}>No release matches found. Broaden the artist or album spelling.</td></tr> : null}
       </tbody></table></section>
       <div className="inbox-tagger__editor">
-        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><label>Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label>Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label>Genre<input value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label><label>Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label>Year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label></div></section>
+        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><label>Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label>Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label>Genre<input value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label><label>Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label>Year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label>Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label>Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label></div></section>
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
-      <section className="inbox-track-compare"><table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Match</th></tr></thead><tbody>{album.tracks.map((track, index) => {
+      <section className="inbox-track-compare"><table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Match</th></tr></thead><tbody>{tracks.map((track, index) => {
         const releaseTrack = detail?.tracks[index]; const matched = releaseTrack && normalizeTitle(releaseTrack.title) === normalizeTitle(track.title ?? "");
         return <tr key={track.path}><td>{track.trackNumber ?? index + 1}</td><td title={track.fileName}>{track.fileName}</td><td>{track.title ?? "Missing"}</td><td><input aria-label={`Release title ${index + 1}`} value={trackTitles[index] ?? ""} onChange={(event) => setTrackTitles((current) => current.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /></td><td>{releaseTrack ? matched ? <Check className="is-match" /> : <AlertTriangle className="is-different" /> : "—"}</td></tr>;
       })}</tbody></table></section>
     </div>
-    <footer><span>{detail ? `${sourceLabel(detail.candidate.source)} release ${detail.candidate.id}` : "Choose a release to review its tags."}</span><button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button><button type="button" className="button button--primary" disabled={!detail || fields.size === 0 || Boolean(busy)} onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : <Check />} Apply tags</button></footer>
+    <footer><label className="inbox-rename-option"><input type="checkbox" checked={renameAfterApply} disabled={Boolean(busy) || tracks.length !== album.tracks.length} onChange={(event) => setRenameAfterApply(event.target.checked)} /><span><strong>Rename after tagging</strong><small>{tracks.length === album.tracks.length ? "Album Artist - Album (Year) · 1-01 or 01 - Artist - Title" : "Tag all album tracks before renaming"}</small></span></label><span className="inbox-tagger__source">{detail ? `${sourceLabel(detail.candidate.source)} release ${detail.candidate.id}` : "Choose a release to review its tags."}</span><button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button><button type="button" className="button button--primary" disabled={!detail || fields.size === 0 || Boolean(busy)} onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : <Check />} {renameAfterApply ? "Apply & rename" : `Apply to ${tracks.length} tracks`}</button></footer>
   </section></div>;
 }
 

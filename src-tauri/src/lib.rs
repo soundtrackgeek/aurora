@@ -39,9 +39,9 @@ use explorer::{
 use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
 use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
 use inbox::{
-    DiscogsCredentialsRequest, InboxRuntime, InboxSettingsStatus, InboxSnapshot,
-    InboxTagApplyRequest, InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest,
-    ReleaseSearchRequest, ReleaseSearchResult,
+    DiscogsCredentialsRequest, InboxRenameRequest, InboxRenameResult, InboxRuntime,
+    InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest, InboxTagApplyResult,
+    ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest, ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use library_bridge::{
@@ -176,6 +176,13 @@ async fn apply_inbox_tags(request: InboxTagApplyRequest) -> Result<InboxTagApply
     tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request))
         .await
         .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn rename_inbox_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
+    tauri::async_runtime::spawn_blocking(move || inbox::rename_album(request))
+        .await
+        .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1245,6 +1252,7 @@ pub fn run() {
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,
+            rename_inbox_album,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Aurora")

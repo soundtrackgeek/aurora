@@ -1,13 +1,13 @@
 # Inbox contract
 
-Aurora 0.18.0 introduces Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
+Aurora 0.18.1 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
 
 ## Monitoring and identity
 
 - Inbox stores at most ten canonical folder paths in `%APPDATA%\com.soundtrackgeek.aurora\aurora-inbox.json`. The setting is device-local and is not copied into Aurora's shared state or OneDrive snapshots.
 - Aurora performs a bounded recursive scan on entry, every 15 seconds while visible, and whenever the window regains focus. Directory symlinks and reparse-style links are not followed; one directory containing MP3 files is one staged album.
 - Scanning never opens the Music Library database for writes and never moves, renames, or catalogs a file. A SHA-256 of the canonical album path provides React's stable selection identity without exposing it as catalog identity.
-- Readiness reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, disc number, Genre, and Publisher. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
+- Readiness reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, Genre, and Publisher. Disc numbering is optional, but a partially numbered multidisc album is reported as incomplete. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
 
 ## Metadata providers
 
@@ -30,6 +30,14 @@ Before replacing originals, Aurora:
 6. Removes working files and backups only after the complete album succeeds.
 
 Inbox files are not cataloged, so this transaction does not queue an existing-folder Music Library sync. The files remain staged for further edits or promotion.
+
+## Rename transaction
+
+- Auto-Tagger offers a default-on **Rename after tagging** option. `Ctrl+R` runs the same operation from the selected Inbox album's existing tags without contacting a metadata provider.
+- Inbox track checkboxes scope `Ctrl+Shift+T` to a subset. Release matching and track numbering use only that ordered selection, while Disc # and Disc total overrides allow separate CD1/CD2 releases to become one correctly numbered multidisc album. Partial selections do not auto-rename; after every disc is tagged, `Ctrl+R` renames the complete album together.
+- The album directory is renamed in place, under its current parent, to `Album Artist - Album (Year)`. MP3 files become `Disc-01 - Artist - Title.mp3` when a disc number exists, or `01 - Artist - Title.mp3` when it does not. Track numbers use at least two digits.
+- Discogs vinyl positions such as A1, A2, B1, and B2 are treated as one continuous sequence rather than separate discs. Explicit numeric multidisc positions such as `2-03` retain their disc number.
+- Aurora replaces Windows-invalid filename characters, rejects missing required tags and existing destinations before mutation, stages every changed filename through unique temporary names, and reverses the batch if any file or folder rename fails.
 
 ## Promotion
 

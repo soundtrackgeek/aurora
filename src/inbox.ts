@@ -90,6 +90,13 @@ export interface InboxTagApplyRequest {
   albumPath: string;
   fields: EditableTagField[];
   tracks: Array<{ path: string; values: EditableTagValues }>;
+  renameAfterApply: boolean;
+}
+
+export interface InboxRenameResult {
+  albumPath: string;
+  renamedTracks: number;
+  folderRenamed: boolean;
 }
 
 const previewTracks = [
@@ -126,7 +133,7 @@ const previewAlbum: InboxAlbum = {
   trackCount: 10,
   artworkPresent: true,
   modifiedAtMs: Date.now() - 5 * 60_000,
-  readiness: { ready: false, issues: ["Genre is missing", "Disc numbers are incomplete"] },
+  readiness: { ready: false, issues: ["Genre is missing"] },
   tracks: previewTracks,
 };
 
@@ -216,7 +223,12 @@ export async function loadInboxReleaseDetail(candidate: ReleaseCandidate): Promi
   return invoke<ReleaseCandidateDetail>("inbox_release_detail", { request: { source: candidate.source, id: candidate.id } });
 }
 
-export async function applyInboxTags(request: InboxTagApplyRequest): Promise<{ changedTracks: number }> {
-  if (!isTauriRuntime()) return { changedTracks: request.tracks.length };
-  return invoke<{ changedTracks: number }>("apply_inbox_tags", { request });
+export async function applyInboxTags(request: InboxTagApplyRequest): Promise<{ changedTracks: number; renamedTracks: number; albumPath: string }> {
+  if (!isTauriRuntime()) return { changedTracks: request.tracks.length, renamedTracks: request.renameAfterApply ? request.tracks.length : 0, albumPath: request.albumPath };
+  return invoke<{ changedTracks: number; renamedTracks: number; albumPath: string }>("apply_inbox_tags", { request });
+}
+
+export async function renameInboxAlbum(albumPath: string): Promise<InboxRenameResult> {
+  if (!isTauriRuntime()) return { albumPath: `${albumPath} (renamed)`, renamedTracks: previewTracks.length, folderRenamed: true };
+  return invoke<InboxRenameResult>("rename_inbox_album", { request: { albumPath } });
 }

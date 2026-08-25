@@ -223,18 +223,42 @@ pub(crate) struct InboxTagApplyRequest {
     album_path: String,
     fields: Vec<EditableTagField>,
     tracks: Vec<InboxTrackPatch>,
+    #[serde(default)]
+    rename_after_apply: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InboxTagApplyResult {
     changed_tracks: usize,
+    renamed_tracks: usize,
+    album_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InboxRenameRequest {
+    album_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxRenameResult {
+    album_path: String,
+    renamed_tracks: usize,
+    folder_renamed: bool,
 }
 
 struct PreparedWrite {
     target: PathBuf,
     temporary: PathBuf,
     backup: PathBuf,
+}
+
+struct PreparedRename {
+    source: PathBuf,
+    temporary: PathBuf,
+    destination: PathBuf,
 }
 
 impl InboxRuntime {
@@ -531,12 +555,161 @@ pub(crate) fn apply_tags(request: InboxTagApplyRequest) -> Result<InboxTagApplyR
         }
         installed += 1;
     }
+    let rename_result = if request.rename_after_apply {
+        match rename_album_path(&album) {
+            Ok(result) => Some(result),
+            Err(error) => {
+                for item in prepared.iter().rev() {
+                    let _ = state_sync::replace_file_atomic(&item.target, &item.backup);
+                }
+                cleanup_prepared(&prepared);
+                return Err(format!(
+                    "Aurora could not rename the tagged album and restored its original tags: {error}"
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    let final_album = rename_result
+        .as_ref()
+        .map(|result| PathBuf::from(&result.album_path))
+        .unwrap_or_else(|| album.clone());
     for item in &prepared {
-        let _ = fs::remove_file(&item.backup);
+        if let Some(name) = item.backup.file_name() {
+            let _ = fs::remove_file(final_album.join(name));
+        }
     }
     Ok(InboxTagApplyResult {
         changed_tracks: installed,
+        renamed_tracks: rename_result
+            .as_ref()
+            .map_or(0, |result| result.renamed_tracks),
+        album_path: path_text(&final_album)?,
     })
+}
+
+pub(crate) fn rename_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
+    let album = canonical_directory(&request.album_path)?;
+    rename_album_path(&album)
+}
+
+fn rename_album_path(album: &Path) -> Result<InboxRenameResult, String> {
+    let scanned = scan_album(album)?;
+    let album_artist = required_component(scanned.artist.as_deref(), "Album Artist")?;
+    let album_title = required_component(scanned.album.as_deref(), "Album")?;
+    let year = scanned
+        .year
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "Add a Year tag before renaming this album.".to_owned())?;
+    let parent = album
+        .parent()
+        .ok_or_else(|| "The Inbox album has no parent folder.".to_owned())?;
+    let folder_name = sanitize_component(&format!("{album_artist} - {album_title} ({year})"))?;
+    let destination_folder = parent.join(folder_name);
+    let folder_renamed = !path_eq(album, &destination_folder);
+    if folder_renamed && destination_folder.exists() {
+        return Err(format!(
+            "The destination album folder already exists: {}",
+            destination_folder.display()
+        ));
+    }
+
+    let sequence = now_ms();
+    let track_width = scanned
+        .tracks
+        .iter()
+        .filter_map(|track| track.track_number.or(track.track_total))
+        .max()
+        .map_or(2, decimal_width)
+        .max(2);
+    let mut destinations = HashSet::new();
+    let sources = scanned
+        .tracks
+        .iter()
+        .map(|track| path_key(Path::new(&track.path)))
+        .collect::<HashSet<_>>();
+    let mut prepared = Vec::new();
+    for (index, track) in scanned.tracks.iter().enumerate() {
+        let track_number = track.track_number.ok_or_else(|| {
+            format!(
+                "Add a Track Number tag to {} before renaming.",
+                track.file_name
+            )
+        })?;
+        let artist = required_component(track.artist.as_deref(), "Artist")?;
+        let title = required_component(track.title.as_deref(), "Title")?;
+        let position = match track.disc_number {
+            Some(disc) => format!("{disc}-{track_number:0track_width$}"),
+            None => format!("{track_number:0track_width$}"),
+        };
+        let file_name = sanitize_component(&format!("{position} - {artist} - {title}"))?;
+        let source = PathBuf::from(&track.path);
+        let destination = album.join(format!("{file_name}.mp3"));
+        if !destinations.insert(path_key(&destination)) {
+            return Err(format!(
+                "More than one track would be named {file_name}.mp3."
+            ));
+        }
+        if destination.exists() && !sources.contains(&path_key(&destination)) {
+            return Err(format!(
+                "The destination track already exists: {}",
+                destination.display()
+            ));
+        }
+        if path_eq(&source, &destination) {
+            continue;
+        }
+        prepared.push(PreparedRename {
+            source,
+            temporary: album.join(format!(".aurora-rename-{sequence}-{index}.tmp")),
+            destination,
+        });
+    }
+
+    stage_renames(&prepared)?;
+    if folder_renamed && let Err(error) = fs::rename(album, &destination_folder) {
+        rollback_renames(&prepared, prepared.len());
+        return Err(format!("Could not rename the album folder: {error}"));
+    }
+    Ok(InboxRenameResult {
+        album_path: path_text(if folder_renamed {
+            &destination_folder
+        } else {
+            album
+        })?,
+        renamed_tracks: prepared.len(),
+        folder_renamed,
+    })
+}
+
+fn stage_renames(items: &[PreparedRename]) -> Result<(), String> {
+    for (index, item) in items.iter().enumerate() {
+        if let Err(error) = fs::rename(&item.source, &item.temporary) {
+            for previous in items[..index].iter().rev() {
+                let _ = fs::rename(&previous.temporary, &previous.source);
+            }
+            return Err(format!("Could not prepare track renames: {error}"));
+        }
+    }
+    for (index, item) in items.iter().enumerate() {
+        if let Err(error) = fs::rename(&item.temporary, &item.destination) {
+            rollback_renames(items, index);
+            return Err(format!("Could not finish track renames: {error}"));
+        }
+    }
+    Ok(())
+}
+
+fn rollback_renames(items: &[PreparedRename], placed: usize) {
+    for item in items[..placed].iter().rev() {
+        let _ = fs::rename(&item.destination, &item.temporary);
+    }
+    for item in items.iter().rev() {
+        if item.temporary.exists() {
+            let _ = fs::rename(&item.temporary, &item.source);
+        }
+    }
 }
 
 fn cleanup_prepared(items: &[PreparedWrite]) {
@@ -643,7 +816,8 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     if tracks.len() > 1 && tracks.iter().any(|track| track.track_total.is_none()) {
         issues.push("Track totals are incomplete".to_owned());
     }
-    if tracks.iter().any(|track| track.disc_number.is_none()) {
+    let has_disc_numbers = tracks.iter().any(|track| track.disc_number.is_some());
+    if has_disc_numbers && tracks.iter().any(|track| track.disc_number.is_none()) {
         issues.push("Disc numbers are incomplete".to_owned());
     }
     if genre.is_none() {
@@ -923,8 +1097,7 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
     let disc_total = rows
         .iter()
         .filter_map(|row| text(row, "position").and_then(|value| parse_disc_track(&value).0))
-        .max()
-        .or(Some(1));
+        .max();
     let playable = rows
         .iter()
         .filter(|row| text(row, "type_").as_deref() != Some("heading"))
@@ -936,13 +1109,13 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         .map(|(index, row)| {
             let (disc, position) = text(row, "position")
                 .map(|value| parse_disc_track(&value))
-                .unwrap_or((Some(1), Some((index + 1) as u32)));
+                .unwrap_or((None, None));
             ReleaseTrack {
                 title: text(row, "title").unwrap_or_else(|| format!("Track {}", index + 1)),
                 artist: None,
                 track_number: position.or(Some((index + 1) as u32)),
                 track_total: Some(total),
-                disc_number: disc.or(Some(1)),
+                disc_number: disc,
                 disc_total,
                 duration_ms: text(row, "duration").and_then(|value| parse_duration_ms(&value)),
             }
@@ -1111,6 +1284,17 @@ fn path_text(path: &Path) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or_else(|| "Inbox requires Unicode folder paths.".to_owned())
 }
+fn path_key(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value.into_owned()
+    }
+}
+fn path_eq(left: &Path, right: &Path) -> bool {
+    path_key(left) == path_key(right)
+}
 fn paths_equal(left: &str, right: &str) -> bool {
     if cfg!(windows) {
         left.eq_ignore_ascii_case(right)
@@ -1118,10 +1302,54 @@ fn paths_equal(left: &str, right: &str) -> bool {
         left == right
     }
 }
+fn required_component(value: Option<&str>, label: &str) -> Result<String, String> {
+    let value = value.map(str::trim).filter(|value| !value.is_empty());
+    value
+        .map(str::to_owned)
+        .ok_or_else(|| format!("Add a {label} tag before renaming this album."))
+}
+fn sanitize_component(value: &str) -> Result<String, String> {
+    let mut sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    sanitized = sanitized.trim().trim_end_matches(['.', ' ']).to_owned();
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        return Err("The tags do not produce a valid Windows file name.".to_owned());
+    }
+    let stem = sanitized.split('.').next().unwrap_or_default();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if reserved.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+        sanitized.insert(0, '_');
+    }
+    Ok(sanitized)
+}
+fn decimal_width(value: u32) -> usize {
+    value.max(1).ilog10() as usize + 1
+}
 fn is_mp3(path: &Path) -> bool {
-    path.extension()
+    !path
+        .file_name()
         .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case("mp3"))
+        .is_some_and(|value| value.starts_with(".aurora-"))
+        && path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("mp3"))
 }
 fn system_time_ms(value: SystemTime) -> Option<u64> {
     value
@@ -1207,13 +1435,20 @@ fn first_label(value: &Value) -> Option<String> {
 fn parse_disc_track(value: &str) -> (Option<u32>, Option<u32>) {
     let normalized = value.trim();
     if let Some((disc, track)) = normalized.split_once('-') {
-        return (disc.parse().ok(), track.parse().ok());
+        let parsed = (disc.parse().ok(), track.parse().ok());
+        if parsed.0.is_some() && parsed.1.is_some() {
+            return parsed;
+        }
     }
-    let digits = normalized
+    if normalized
         .chars()
-        .filter(char::is_ascii_digit)
-        .collect::<String>();
-    (Some(1), digits.parse().ok())
+        .all(|character| character.is_ascii_digit())
+    {
+        return (None, normalized.parse().ok());
+    }
+    // Vinyl positions such as A1, A2, B1 describe sides, not separate discs.
+    // Returning no numeric position lets the release-order index become 01, 02, 03….
+    (None, None)
 }
 fn parse_duration_ms(value: &str) -> Option<u64> {
     let mut parts = value.split(':').map(|part| part.parse::<u64>().ok());
@@ -1225,11 +1460,90 @@ fn parse_duration_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use id3::{Tag, TagLike, Version};
 
     #[test]
     fn discogs_positions_support_multidisc_and_plain_tracks() {
         assert_eq!(parse_disc_track("2-03"), (Some(2), Some(3)));
-        assert_eq!(parse_disc_track("A1"), (Some(1), Some(1)));
+        assert_eq!(parse_disc_track("3"), (None, Some(3)));
+        assert_eq!(parse_disc_track("A1"), (None, None));
+        assert_eq!(parse_disc_track("B1"), (None, None));
+    }
+
+    #[test]
+    fn rename_components_are_windows_safe_and_track_width_is_at_least_two() {
+        assert_eq!(sanitize_component("AC/DC: Live").unwrap(), "AC_DC_ Live");
+        assert_eq!(sanitize_component("CON").unwrap(), "_CON");
+        assert_eq!(decimal_width(9).max(2), 2);
+        assert_eq!(decimal_width(101).max(2), 3);
+    }
+
+    #[test]
+    fn rename_album_uses_optional_disc_and_two_digit_tracks() {
+        let parent = std::env::temp_dir().join(format!(
+            "aurora-inbox-rename-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let album = parent.join("incoming");
+        fs::create_dir_all(&album).expect("create album");
+        write_rename_fixture(&album.join("first.mp3"), 1, None, "First");
+        write_rename_fixture(&album.join("second.mp3"), 2, None, "Second");
+
+        let result = rename_album(InboxRenameRequest {
+            album_path: path_text(&album).expect("album path"),
+        })
+        .expect("rename album");
+        let renamed = PathBuf::from(result.album_path);
+        assert!(renamed.ends_with("Test Artist - Test Album (1990)"));
+        assert!(renamed.join("01 - Track Artist - First.mp3").is_file());
+        assert!(renamed.join("02 - Track Artist - Second.mp3").is_file());
+        assert_eq!(result.renamed_tracks, 2);
+        fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    #[test]
+    fn rename_album_keeps_multidisc_tracks_in_one_folder() {
+        let parent = std::env::temp_dir().join(format!(
+            "aurora-inbox-multidisc-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let album = parent.join("incoming");
+        fs::create_dir_all(&album).expect("create album");
+        write_rename_fixture(&album.join("disc-one.mp3"), 1, Some(1), "Disc One");
+        write_rename_fixture(&album.join("disc-two.mp3"), 1, Some(2), "Disc Two");
+
+        let result = rename_album(InboxRenameRequest {
+            album_path: path_text(&album).expect("album path"),
+        })
+        .expect("rename multidisc album");
+        let renamed = PathBuf::from(result.album_path);
+        assert!(renamed.join("1-01 - Track Artist - Disc One.mp3").is_file());
+        assert!(renamed.join("2-01 - Track Artist - Disc Two.mp3").is_file());
+        assert_eq!(fs::read_dir(&renamed).expect("read album").count(), 2);
+        fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    fn write_rename_fixture(path: &Path, track: u32, disc: Option<u32>, title: &str) {
+        File::create(path)
+            .expect("create track")
+            .write_all(b"FAKE-MPEG-AUDIO")
+            .expect("write track");
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.set_album_artist("Test Artist");
+        tag.set_artist("Track Artist");
+        tag.set_album("Test Album");
+        tag.set_title(title);
+        tag.set_year(1990);
+        tag.set_track(track);
+        tag.set_total_tracks(2);
+        if let Some(disc) = disc {
+            tag.set_disc(disc);
+            tag.set_total_discs(2);
+        }
+        tag.write_to_path(path, Version::Id3v24)
+            .expect("write track tags");
     }
 
     #[test]

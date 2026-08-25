@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-25
+
+### Added
+
+- Added default-on folder and track renaming to Inbox Auto-Tagger plus `Ctrl+R` renaming for manually tagged albums. Renames stay within the album's current parent folder, use `Album Artist - Album (Year)` and optional-disc/two-digit-track filenames, reject collisions, and roll back partial file renames.
+- Discogs vinyl positions such as A1, A2, and B1 now become continuous numeric track numbers instead of duplicate side-local numbers.
+- Inbox albums now expose per-track selection for `Ctrl+Shift+T`. Separate CD1/CD2 provider matches can tag only their selected tracks, restart track numbering at 01, and override Disc # / Disc total while retaining one album folder.
+
 ## [0.18.0] - 2026-08-25
 
 ### Added
