@@ -29,7 +29,6 @@ const LEGACY_DEFAULT_POPM_OWNER: &str = "Default";
 const LOVE_RATING_DESCRIPTION: &str = "LOVE RATING";
 const RELEASE_TIME_DESCRIPTION: &str = "TDRL";
 const DISPLAY_ARTIST_DESCRIPTION: &str = "DISPLAY ARTIST";
-const RETAINED_BACKUPS: usize = 20;
 const MAX_PENDING_RECONCILIATION_BATCH: usize = 200;
 const MAX_TAG_EDITOR_ALBUM_TRACKS: usize = 500;
 
@@ -185,6 +184,7 @@ impl TagService {
     pub(crate) fn new(store: StateStore) -> Result<Self, String> {
         let service = Self { store };
         service.recover_interrupted_operations()?;
+        let _ = service.store.cleanup_completed_tag_backups();
         Ok(service)
     }
 
@@ -313,7 +313,7 @@ impl TagService {
                         }
                     }
                     if rollback_errors.is_empty() {
-                        let _ = self.store.prune_old_backups(RETAINED_BACKUPS);
+                        let _ = self.store.cleanup_completed_tag_backups();
                         return Err(format!(
                             "Aurora could not finish the batch and restored every MP3 it had changed. {}",
                             write_error.message
@@ -331,13 +331,12 @@ impl TagService {
             .iter()
             .map(|(_, track_key)| track_key.clone())
             .collect::<HashSet<_>>();
-        let result = self.editor_result(&request.target, &request.expected, &changed_keys);
-        if result.is_ok() {
-            let _ = self
-                .store
-                .prune_old_backups(RETAINED_BACKUPS.max(changed_keys.len()));
-        }
-        result
+        self.store.cleanup_completed_tag_backups().map_err(|error| {
+            format!(
+                "Aurora installed and verified every MP3 edit, but could not remove its completed safety backups: {error}"
+            )
+        })?;
+        self.editor_result(&request.target, &request.expected, &changed_keys)
     }
 
     fn resolve_editor_target(
@@ -908,7 +907,11 @@ impl TagService {
                 "Aurora installed and verified the MP3 edit, but could not finish its journal. The retained files will be reconciled at startup: {error}"
             ));
         }
-        let _ = self.store.prune_old_backups(RETAINED_BACKUPS);
+        self.store.cleanup_completed_tag_backups().map_err(|error| {
+            format!(
+                "Aurora installed and verified the MP3 edit, but could not remove its completed safety backup: {error}"
+            )
+        })?;
         self.snapshot_with_values(resolved, request.desired, Some(operation_id))
     }
 
@@ -3410,51 +3413,14 @@ mod tests {
                 .map(|overlay| overlay.values.clone()),
             Some(after.clone())
         );
-        let recovered_operation = store
-            .latest_undo_operation("fixture-track-key")
-            .expect("undo lookup")
-            .expect("undo operation");
-
-        let undo_current = sibling_operation_path(&target, operation_id, "undo-current.backup")
-            .expect("undo safety path");
-        let undo_replacement = sibling_operation_path(&target, operation_id, "undo-original.tmp")
-            .expect("undo replacement path");
-        fs::copy(
-            recovered_operation
-                .backup_path
-                .as_ref()
-                .expect("original backup"),
-            &undo_replacement,
-        )
-        .expect("copy undo replacement");
-        store
-            .begin_undo(
-                operation_id,
-                &undo_current.to_string_lossy(),
-                &FileFingerprint::read(&target)
-                    .expect("undo source fingerprint")
-                    .to_string(),
-            )
-            .expect("begin interrupted undo");
-        replace_file_atomic(&target, &undo_replacement, Some(&undo_current))
-            .expect("simulate undo replacement");
-
-        TagService::new(store.clone()).expect("recover interrupted undo");
-
-        assert_eq!(
-            read_tag_values_from_path(&target).expect("read undone target"),
-            before
-        );
-        assert!(store.all_overlays().expect("undo overlay").is_empty());
+        assert!(!backup.exists());
         assert!(
             store
                 .latest_undo_operation("fixture-track-key")
-                .expect("completed undo lookup")
+                .expect("completed operation lookup")
                 .is_none()
         );
         let _ = fs::remove_file(target);
-        let _ = fs::remove_file(backup);
-        let _ = fs::remove_file(undo_current);
         let _ = fs::remove_file(&state_path);
         let _ = fs::remove_file(PathBuf::from(format!("{}-wal", state_path.display())));
         let _ = fs::remove_file(PathBuf::from(format!("{}-shm", state_path.display())));
@@ -3656,46 +3622,16 @@ mod tests {
             read_tag_values_from_path(&target).expect("read recovered target"),
             after
         );
-        assert!(backup.is_file());
-
-        let recovered_operation = store
-            .latest_undo_operation("partial-replace-track-key")
-            .expect("undo lookup")
-            .expect("undo operation");
-        let undo_current = sibling_operation_path(&target, operation_id, "undo-current.backup")
-            .expect("undo safety path");
-        let undo_replacement = sibling_operation_path(&target, operation_id, "undo-original.tmp")
-            .expect("undo replacement path");
-        fs::copy(
-            recovered_operation
-                .backup_path
-                .as_ref()
-                .expect("original backup"),
-            &undo_replacement,
-        )
-        .expect("copy undo replacement");
-        store
-            .begin_undo(
-                operation_id,
-                &undo_current.to_string_lossy(),
-                &FileFingerprint::read(&target)
-                    .expect("undo source fingerprint")
-                    .to_string(),
-            )
-            .expect("begin undo");
-        fs::rename(&target, &undo_current).expect("simulate partial undo move");
-        assert!(!target.exists());
-
-        TagService::new(store.clone()).expect("recover partial undo");
-        assert_eq!(
-            read_tag_values_from_path(&target).expect("read recovered undo"),
-            before
-        );
+        assert!(!backup.exists());
         assert!(store.interrupted_operations().expect("journal").is_empty());
+        assert!(
+            store
+                .latest_undo_operation("partial-replace-track-key")
+                .expect("completed operation lookup")
+                .is_none()
+        );
 
         let _ = fs::remove_file(target);
-        let _ = fs::remove_file(backup);
-        let _ = fs::remove_file(undo_current);
         let _ = fs::remove_file(&state_path);
         let _ = fs::remove_file(PathBuf::from(format!("{}-wal", state_path.display())));
         let _ = fs::remove_file(PathBuf::from(format!("{}-shm", state_path.display())));

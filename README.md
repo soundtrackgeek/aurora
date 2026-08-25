@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.27 restores near-instant album details while retaining verified deleted-track filtering.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.28 removes temporary original MP3 backups after verified tag operations complete.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.27 slice
+## Current 0.17.28 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Album detail reads Aurora's local pending-deletion queue before checking an MP3 path, so ordinary album opens avoid synchronous probes across sleeping, remote, or unavailable music drives while queued-and-missing deleted tracks remain hidden.
@@ -112,7 +112,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Durable queue, current track, position, volume, shuffle, and repeat state in Aurora's own SQLite database.
 - Stable queue identity based on the normalized MP3 path, verified alongside every transient track ID so queue items survive Music Library catalog imports without being retargeted.
 - Transactional same-folder MP3 writes using standard ID3 text/position frames, MusicBee's exact POPM byte map, legacy whole-star `Default` POPM fallback, `LOVE RATING`, Release Time, and existing `DISPLAY ARTIST` conventions. A rating edit replaces either recognized owner with one canonical `MusicBee` frame while preserving unrelated POPM owners.
-- Conflict detection, post-write tag/audio verification, Windows atomic replacement, retained rollback copies, crash recovery, and one-step undo. Ambiguous or externally changed files are never auto-overwritten; Aurora retains both versions for manual recovery.
+- Conflict detection, post-write tag/audio verification, Windows atomic replacement, and crash recovery. Original backups remain available while a single-file or album operation is in progress, then are deleted after the complete operation verifies; ambiguous or failed recovery files remain untouched for manual recovery.
 - Aurora-owned tag overlays update rating, Love, and Release Year immediately while the verified save asks Music Library to reimport the existing album folder. The normal catalog-revision watcher then refreshes every affected view.
 - Focus-time reconciliation remains as a recovery path for pending overlays: it reads only bounded pending MP3s, treats their tags as authoritative, clears caught-up overlays, and rotates unavailable files so they cannot starve later work.
 - Half-star track reconciliation reads Music Library's raw rating when its older normalized field is null; removed-track overlays are excluded from library totals.

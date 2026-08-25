@@ -1,6 +1,6 @@
 # Tag editing contract
 
-Aurora 0.17.7 edits MusicBee-compatible metadata in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
+Aurora 0.17.28 edits MusicBee-compatible metadata in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
 
 ## Selection and write intent
 
@@ -29,15 +29,16 @@ For each file, Aurora:
 5. Opens a Windows handle that permits reads and replacement but denies concurrent writers, then rechecks canonical path, volume/file ID, size, modified time, and creation time.
 6. Atomically replaces the MP3 with `ReplaceFileW`, retaining the original as the operation backup.
 7. Checkpoints `replaced`, verifies the installed MP3 again, and atomically commits `verified` with Aurora's rating/Love/Release Year overlay.
+8. Deletes the original backup and clears its journal path after the complete single-file or album operation succeeds.
 
 The batch preflights all files before step 1 begins. If a later file fails, Aurora attempts to undo every earlier completed file in reverse order. Atomicity is therefore per MP3 rather than filesystem-wide: a failure reported after Windows replacement can require the retained backup and startup recovery, and Aurora states that uncertainty explicitly.
 
-## Recovery, undo, and preservation
+## Recovery and preservation
 
 - Recovery metadata is operation-specific. Startup knows which frames Aurora intended to change and verifies the full before/after editable value set before completing or rejecting a recovery path.
 - Artwork, lyrics, ReplayGain, MusicBrainz identifiers, unknown frames, other POPM owners, ID3v1/trailing bytes, and audio bytes are outside the operation and must remain unchanged.
-- Undo is available only for the latest operation on a track while the installed MP3 still matches Aurora's verified after-state and the retained original still matches the before-state.
-- Ambiguous or externally changed files are never auto-overwritten. Aurora retains the available files and records a candid recovery error.
+- Successful operations do not retain an undo copy. Album writes keep their per-file originals only until every track has verified so a later failure can restore earlier tracks.
+- Ambiguous, interrupted, or externally changed files are never auto-overwritten or prematurely cleaned up. Aurora retains the available files and records a candid recovery error.
 
 ## Catalog workflow
 

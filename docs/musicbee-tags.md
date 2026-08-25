@@ -48,6 +48,6 @@ Aurora's Rust writer:
 3. Preserves artwork, lyrics, ReplayGain, MusicBrainz fields, unknown frames, other POPM owners, ID3v1/trailing data, and the audio payload.
 4. Writes to a same-directory temporary copy and verifies the full resulting editable value set, unselected frames, and unchanged audio bytes.
 5. Rechecks original size, timestamps, and Windows file identity immediately before atomic replacement.
-6. Retains a journaled original for rollback, crash recovery, and guarded one-step undo.
+6. Retains a journaled original for rollback and crash recovery only until the complete operation verifies, then deletes it.
 
 After a verified save, Music Library performs the guarded existing-folder import and Aurora's normal revision watcher refreshes the catalog. Aurora never writes the shared Music Library SQLite database itself.

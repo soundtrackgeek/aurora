@@ -96,11 +96,11 @@ describe("tag editing preview boundary", () => {
       loved: true,
       loveState: "loved",
       tagSyncState: "pendingImport",
-      canUndoTagEdit: true,
+      canUndoTagEdit: false,
     });
   });
 
-  it("saves half-star, love, and Release Year together and supports undo", async () => {
+  it("saves half-star, love, and Release Year without retaining undo state", async () => {
     const original = track("tag-edit-and-undo");
     const expected = tagValuesForTrack(original);
     const saved = await updateTrackTags(original, expected, {
@@ -111,11 +111,8 @@ describe("tag editing preview boundary", () => {
 
     expect(saved.tagState.values).toEqual({ rating: 4.5, loveState: "loved", releaseYear: 2024 });
     expect(saved.tagState.syncState).toBe("pendingImport");
-    expect(saved.tagState.canUndo).toBe(true);
-
-    const restored = await undoTrackTagEdit(saved.track);
-    expect(restored.tagState.values).toEqual(expected);
-    expect(restored.tagState.canUndo).toBe(false);
+    expect(saved.tagState.canUndo).toBe(false);
+    await expect(undoTrackTagEdit(saved.track)).rejects.toThrow(/cannot be undone/i);
   });
 
   it("rejects a stale expected value", async () => {
@@ -164,7 +161,7 @@ describe("tag editing preview boundary", () => {
   it("keeps a saved inline edit when the browser Explorer reloads", async () => {
     const original = browserPreview.tracks[0];
     const desired = { ...tagValuesForTrack(original), rating: 2, loveState: "neutral" as const };
-    const saved = await updateTrackTags(original, tagValuesForTrack(original), desired);
+    await updateTrackTags(original, tagValuesForTrack(original), desired);
 
     const reloaded = await exploreTracks({ artist: original.artist });
     expect(reloaded.items.find((candidate) => candidate.id === original.id)).toMatchObject({
@@ -173,8 +170,6 @@ describe("tag editing preview boundary", () => {
       loveState: "neutral",
       tagSyncState: "pendingImport",
     });
-
-    await undoTrackTagEdit(saved.track);
   });
 });
 

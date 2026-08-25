@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.28] - 2026-08-25
+
+### Fixed
+
+- Verified rating, Love, Release Year, and full Tags editor operations now delete Aurora's same-folder `.original.backup` files as soon as the complete single-track or album operation succeeds. Album backups remain available until every track verifies so mid-batch failures can still roll back safely, and startup removes completed backups left by older Aurora versions.
+
 ## [0.17.27] - 2026-08-25
 
 ### Fixed

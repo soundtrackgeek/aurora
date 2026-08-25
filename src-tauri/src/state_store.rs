@@ -1505,27 +1505,27 @@ impl StateStore {
         Ok(undoable)
     }
 
-    pub(crate) fn prune_old_backups(&self, keep: usize) -> Result<(), String> {
+    pub(crate) fn cleanup_completed_tag_backups(&self) -> Result<(), String> {
         let connection = self.open()?;
         let mut statement = connection
             .prepare(
                 r#"
                 SELECT id, backup_path FROM tag_edit_operations
                 WHERE status IN ('verified', 'rolledBack') AND backup_path IS NOT NULL
-                ORDER BY id DESC LIMIT -1 OFFSET ?1
+                ORDER BY id
                 "#,
             )
-            .map_err(|error| format!("Could not prepare Aurora's backup retention: {error}"))?;
+            .map_err(|error| format!("Could not prepare Aurora's backup cleanup: {error}"))?;
         let stale = statement
-            .query_map(params![keep as i64], |row| {
+            .query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     device_mode::resolve_device_path(Path::new(&row.get::<_, String>(1)?)),
                 ))
             })
-            .map_err(|error| format!("Could not read Aurora's backup retention list: {error}"))?
+            .map_err(|error| format!("Could not read Aurora's backup cleanup list: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("Could not decode Aurora's backup retention list: {error}"))?;
+            .map_err(|error| format!("Could not decode Aurora's backup cleanup list: {error}"))?;
         drop(statement);
 
         for (operation_id, path) in stale {
@@ -1537,7 +1537,7 @@ impl StateStore {
                 });
             if looks_owned && path.is_file() {
                 fs::remove_file(&path).map_err(|error| {
-                    format!("Could not remove an expired Aurora tag backup: {error}")
+                    format!("Could not remove a completed Aurora tag backup: {error}")
                 })?;
             }
             connection
@@ -1545,7 +1545,7 @@ impl StateStore {
                     "UPDATE tag_edit_operations SET backup_path = NULL WHERE id = ?1",
                     params![operation_id],
                 )
-                .map_err(|error| format!("Could not record Aurora's backup retention: {error}"))?;
+                .map_err(|error| format!("Could not record Aurora's backup cleanup: {error}"))?;
         }
         Ok(())
     }
@@ -2240,6 +2240,91 @@ mod tests {
 
         drop(reopened);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn completed_tag_backup_cleanup_removes_owned_files_and_undo_state() {
+        let state_path = temporary_state_path();
+        let store = StateStore::new(state_path.clone()).expect("state store");
+        let directory = std::env::temp_dir().join(format!(
+            "aurora-backup-cleanup-{}-{}",
+            std::process::id(),
+            TEMP_STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).expect("create backup cleanup directory");
+        let target = directory.join("Track.mp3");
+        let working = directory.join(".Track.mp3.aurora-1.working.tmp");
+        let backup = directory.join(".Track.mp3.aurora-1.original.backup");
+        fs::write(&target, b"edited").expect("write target");
+        fs::write(&backup, b"original").expect("write completed backup");
+        let before = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: Some(2000),
+        };
+        let after = TagValues {
+            rating: Some(4.5),
+            love_state: LoveState::Loved,
+            release_year: Some(2001),
+        };
+        let operation_id = store
+            .begin_tag_operation(
+                "cleanup-track-key",
+                &target.to_string_lossy(),
+                &before,
+                &after,
+                "original-fingerprint",
+            )
+            .expect("begin operation");
+        store
+            .set_operation_paths(
+                operation_id,
+                &working.to_string_lossy(),
+                &backup.to_string_lossy(),
+            )
+            .expect("save operation paths");
+        store
+            .finish_tag_operation(
+                operation_id,
+                "cleanup-track-key",
+                &directory.to_string_lossy(),
+                "Track.mp3",
+                &before,
+                &after,
+                1,
+            )
+            .expect("finish operation");
+
+        assert!(backup.is_file());
+        assert!(
+            store
+                .can_undo("cleanup-track-key")
+                .expect("undo before cleanup")
+        );
+        store
+            .cleanup_completed_tag_backups()
+            .expect("cleanup completed backup");
+        assert!(!backup.exists());
+        assert!(
+            !store
+                .can_undo("cleanup-track-key")
+                .expect("undo after cleanup")
+        );
+        let backup_path: Option<String> = store
+            .open()
+            .expect("open state")
+            .query_row(
+                "SELECT backup_path FROM tag_edit_operations WHERE id = ?1",
+                params![operation_id],
+                |row| row.get(0),
+            )
+            .expect("read cleared backup path");
+        assert_eq!(backup_path, None);
+
+        drop(store);
+        let _ = fs::remove_file(state_path);
+        let _ = fs::remove_file(target);
+        let _ = fs::remove_dir(directory);
     }
 
     #[test]

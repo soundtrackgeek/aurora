@@ -202,7 +202,6 @@ type PreviewEditableTrack = Track & {
   discTotal?: number | null;
 };
 
-const browserUndo = new Map<string, Track>();
 const browserTracks = new Map<string, Track>();
 const browserEditableValues = new Map<string, EditableTagValues>();
 const browserTagRevisions = new Map<string, number>();
@@ -368,7 +367,7 @@ export function trackWithTagValues(track: Track, values: TagValues): Track {
     loved: values.loveState === "loved",
     releaseYear: values.releaseYear,
     tagSyncState: "pendingImport",
-    canUndoTagEdit: true,
+    canUndoTagEdit: false,
   };
 }
 
@@ -410,7 +409,6 @@ export async function updateTrackTags(
     if (JSON.stringify(tagValuesForTrack(current)) !== JSON.stringify(expected)) {
       throw new Error("This preview track changed after the editor opened. Reload before saving.");
     }
-    browserUndo.set(track.id, current);
     const updated = trackWithTagValues(current, desired);
     browserTracks.set(track.id, updated);
     syncInlineBrowserValues(updated);
@@ -428,18 +426,7 @@ export async function updateTrackTags(
 
 export async function undoTrackTagEdit(track: Track): Promise<TrackTagSnapshot> {
   if (!isTauriRuntime()) {
-    const previous = browserUndo.get(track.id);
-    if (!previous) throw new Error("There is no preview tag edit to undo.");
-    browserUndo.delete(track.id);
-    const restored = { ...previous, canUndoTagEdit: false, tagSyncState: null };
-    browserTracks.set(track.id, restored);
-    syncInlineBrowserValues(restored);
-    bumpBrowserRevision(track.id);
-    updateBrowserPreviewTrack(restored);
-    return {
-      ...browserSnapshot(restored),
-      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
-    };
+    throw new Error("Aurora removes completed tag safety backups, so this edit cannot be undone.");
   }
   return invoke<TrackTagSnapshot>("undo_track_tag_edit", { trackId: track.id, trackKey: track.trackKey });
 }

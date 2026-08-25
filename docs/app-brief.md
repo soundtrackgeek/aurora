@@ -176,7 +176,7 @@ The app is local-first and offline-capable. Rust owns SQLite, filesystem, audio,
 - Read a selected MP3's current MusicBee rating, Love/Ban, and Release Time without exposing its path to React.
 - Save all three fields as one verified transaction using a same-folder working copy and Windows atomic replacement.
 - Preserve non-target ID3 frames, tag version, ID3v1/trailing data, and audio bytes; retain both files without overwriting either when verification or journal recovery finds an ambiguous external change.
-- Detect external edits before replacement, retain the latest 20 rollback copies, recover interrupted writes on startup, and support safe one-step undo.
+- Detect external edits before replacement, retain rollback copies only while an operation is active, recover interrupted writes on startup, and remove completed originals immediately after verification.
 - Show the file edit immediately from Aurora's own overlay without writing Music Library; clear it when a later catalog import matches.
 - Reconcile 3.5/4.5 ratings from validated raw catalog values even when the current importer leaves its normalized field empty.
 - Produce a Windows GUI executable and NSIS updater artifact with aligned release versions.
