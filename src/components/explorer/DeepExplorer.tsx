@@ -641,7 +641,12 @@ function AlbumGrid({
                 <span className="deep-explorer-album__copy">
                   <strong>{album.title}</strong>
                   <span>{album.artist}</span>
-                  <small>{album.originalYear ?? "Year unknown"} · {album.publisher ?? "Publisher unknown"} · {formatCount(album.totalTracks)} tracks</small>
+                  <small className="deep-explorer-album__metadata">
+                    {album.originalYear ?? "Year unknown"} <span aria-hidden="true">—</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
+                  </small>
+                  <small className="deep-explorer-album__length">
+                    {formatCount(album.totalTracks)} tracks <span aria-hidden="true">—</span> {formatDuration(album.durationSeconds)}
+                  </small>
                   <span className="deep-explorer-album__metrics">
                     <AlbumRatingStars rating={album.rating} />
                     <span aria-hidden="true">·</span>
@@ -768,7 +773,9 @@ function AlbumDetail({
           <span className="deep-explorer-kicker">Album detail</span>
           <h3>{album.title}</h3>
           <p>{album.artist}</p>
-          <span className="deep-explorer-album-publisher">{album.publisher ?? "Publisher unknown"}</span>
+          <span className="deep-explorer-album-publisher">
+            {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
+          </span>
           <small>
             {album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}

@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-08-25
+
+### Changed
+
+- Album covers now use five compact text lines, adding `Year — Genre — Publisher` and `track count — album length` above Album Rating/Score. Album Detail also shows `Genre — Publisher` beneath the artist, with clear unknown-value fallbacks.
+
 ## [0.18.2] - 2026-08-25
 
 ### Added

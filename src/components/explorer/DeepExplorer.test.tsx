@@ -59,6 +59,7 @@ const albums: ExplorerAlbum[] = [
     artist: "Aurora Lines",
     originalYear: 1985,
     releaseYear: 2024,
+    publisher: "EMI Records",
     rating: 4.5,
     totalTracks: 12,
     durationSeconds: 2_844,
@@ -288,6 +289,19 @@ describe("DeepExplorer", () => {
     expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
     expect(screen.getByText("Score 412.4")).toBeInTheDocument();
     expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => (
+      element?.classList.contains("deep-explorer-album__metadata") === true
+      && element.textContent?.replace(/\s+/g, " ").trim() === "1985 — Synthwave — EMI Records"
+    ))).toBeVisible();
+    expect(screen.getByText((_, element) => (
+      element?.classList.contains("deep-explorer-album__length") === true
+      && element.textContent?.replace(/\s+/g, " ").trim() === "12 tracks — 47:24"
+    ))).toBeVisible();
+    const albumDetail = screen.getByRole("complementary", { name: "Night Geometry album details" });
+    expect(within(albumDetail).getByText((_, element) => (
+      element?.classList.contains("deep-explorer-album-publisher") === true
+      && element.textContent?.replace(/\s+/g, " ").trim() === "Synthwave — EMI Records"
+    ))).toBeVisible();
   });
 
   it("requires confirmation before deleting an album track", async () => {
