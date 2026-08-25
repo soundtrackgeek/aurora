@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.24 removes queued-and-missing deleted tracks from Ratings completion and playback while Music Library catches up.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.25 enriches Universe's Last Heard summary with the track Artist, album title, and cover art.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.24 slice
+## Current 0.17.25 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Universe's compact Listening Memory strip shows the last-heard song's exact per-track Artist credit, album title, and small cover image, with historical metadata retained when its live catalog track cannot be resolved.
 - Ratings completion counts, **Finish what you love** shelves and details, rating-band totals, and **Play unrated tracks** queues exclude verified-missing MP3s covered by Aurora's durable Music Library synchronization queue. An album whose only unrated track was deleted becomes complete immediately instead of retaining an unplayable card.
 - Inline rating, Love, and Release Year updates refresh only those tag fields in the native playback queue, so a later star click cannot restore stale Artist, title, album, or other metadata after a vertical Tags editor save.
 - Album and Ratings album-detail track lists show the exact per-track Artist credit as a muted, MusicBee-style suffix beside the title. `DISPLAY ARTIST` overrides remain preferred, so Various Artists compilations identify every performer without sacrificing the compact album layout.

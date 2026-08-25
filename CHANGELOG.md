@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.25] - 2026-08-25
+
+### Added
+
+- Universe's **Last heard** summary now shows a small album cover and the album title alongside the song, and prefers the track's exact Artist credit over its Album Artist while retaining historical metadata when the catalog track is unavailable.
+
 ## [0.17.24] - 2026-08-25
 
 ### Fixed

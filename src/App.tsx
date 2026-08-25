@@ -3,9 +3,7 @@ import {
   Album,
   AudioLines,
   BadgeCheck,
-  ChevronRight,
   CircleUserRound,
-  Clock3,
   Disc3,
   Download,
   FlaskConical,
@@ -49,6 +47,7 @@ import {
   type HistoryDateRange,
   type HistoryLoadState,
 } from "./components/history/ListeningHistory";
+import { UniverseListeningMemory } from "./components/history/UniverseListeningMemory";
 import { GenreAtlas, type GenreAtlasLoadState } from "./components/genres/GenreAtlas";
 import {
   YearAlbumInspector,
@@ -2738,7 +2737,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.24</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.25</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3004,13 +3003,7 @@ function App() {
                   {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
                 </article>
               </section>
-              {historyPage && (
-                <section className="memory-strip" aria-label="Listening memory">
-                  <div className="memory-strip__heading"><Clock3 aria-hidden="true" /><span><strong>Listening Memory</strong><small>{formatCount(historyPage.summary.plays)} registered plays across {historyPage.devices.length || 1} {historyPage.devices.length === 1 ? "device" : "devices"}</small></span></div>
-                  {historyPage.items[0] ? <div className="memory-strip__recent"><span>Last heard</span><strong>{historyPage.items[0].title}</strong><small>{historyPage.items[0].artist}</small></div> : <div className="memory-strip__recent"><span>Ready to remember</span><strong>Play something you love</strong><small>It counts after {historyPage.playThresholdSeconds} seconds</small></div>}
-                  <button type="button" onClick={() => navigate("History")}>Open History <ChevronRight aria-hidden="true" /></button>
-                </section>
-              )}
+              {historyPage && <UniverseListeningMemory page={historyPage} onOpenHistory={() => navigate("History")} />}
               </> : null}
 
               <DeepExplorer
