@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.16] - 2026-08-25
+
+### Fixed
+
+- The Ratings completion detail now responds to its content-pane width, keeping the cover and album metadata together above the track list while placing Play Unrated Tracks beneath large cover art on constrained screens.
+
 ## [0.17.15] - 2026-08-25
 
 ### Fixed
