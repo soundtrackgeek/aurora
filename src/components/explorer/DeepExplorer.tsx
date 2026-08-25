@@ -29,7 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { albumCoverUrl, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
+import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import "./DeepExplorer.css";
@@ -468,12 +468,15 @@ function TrackTable({
                   <span className="deep-explorer-track-title">
                     <Artwork track={track} />
                     <span>
-                      <strong>{track.title}</strong>
+                      <span className="deep-explorer-track-heading">
+                        <strong>{track.title}</strong>
+                        {compact ? <small className="deep-explorer-track-artist">[{displayTrackArtist(track)}]</small> : null}
+                      </span>
                       {track.tagSyncState ? <small>Pending tag import</small> : null}
                     </span>
                   </span>
                 </td>
-                <td>{track.artist}</td>
+                <td>{displayTrackArtist(track)}</td>
                 <td>{track.album}</td>
                 <td className="is-numeric">{track.originalYear ?? "—"}</td>
                 <td>{track.genre ?? "—"}</td>

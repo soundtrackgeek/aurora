@@ -9,7 +9,7 @@ import {
   Star,
 } from "lucide-react";
 import { type CSSProperties, useMemo, useState } from "react";
-import type { Track } from "../../library";
+import { displayTrackArtist, type Track } from "../../library";
 import type {
   CompletionKind,
   RatingAlbum,
@@ -235,7 +235,7 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
         </div>
         <div className="completion-tracks" role="table" aria-label={`${selectedAlbum.title} tracks`}>
           {albumTracks.slice(0, 10).map((track, index) => <div role="row" className="completion-track" onClick={() => props.onSelectTrack(track)} onDoubleClick={() => props.onPlayTrack(track)} tabIndex={0} key={track.trackKey}>
-            <span>{index + 1}</span><strong>{track.title}</strong>
+            <span>{index + 1}</span><span className="completion-track__title"><strong>{track.title}</strong><small>[{displayTrackArtist(track)}]</small></span>
             <InlineRatingControl title={track.title} rating={track.rating} busy={props.busyTrackKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => props.onRatingChange(track, rating)} />
             <InlineLoveControl title={track.title} loveState={track.loveState} busy={props.busyTrackKeys.has(track.trackKey)} onLoveChange={(state) => props.onLoveChange(track, state)} />
             <small>{formatDuration(track.durationSeconds)}</small>

@@ -239,6 +239,28 @@ describe("DeepExplorer", () => {
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });
 
+  it("shows each track's display artist beside its title in album detail", () => {
+    const soundtrackTrack: Track = {
+      ...tracks[0],
+      artist: "Various Artists",
+      displayArtist: "Andrea & Hot Mink",
+    };
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: [soundtrackTrack],
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const albumDetail = screen.getByRole("complementary", { name: "Night Geometry album details" });
+    expect(within(albumDetail).getByText("[Andrea & Hot Mink]")).toBeVisible();
+    expect(within(albumDetail).queryByText("[Various Artists]")).not.toBeInTheDocument();
+  });
+
   it("shows half-star Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer

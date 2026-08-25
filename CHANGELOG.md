@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.22] - 2026-08-25
+
+### Added
+
+- Album detail and Ratings completion now show each track's exact Artist credit beside its title, including `DISPLAY ARTIST` overrides on Various Artists releases.
+
 ## [0.17.21] - 2026-08-25
 
 ### Fixed

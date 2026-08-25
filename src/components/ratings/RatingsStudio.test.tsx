@@ -1,9 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Track } from "../../library";
 import type { RatingsOverview } from "../../ratings";
 import { RatingsStudio } from "./RatingsStudio";
 
 const album = { id: "album", title: "Almost There", artist: "Artist", originalYear: 2000, releaseYear: 2025, genre: "Rock", totalTracks: 10, ratedTracks: 8, lovedTracks: 1, durationSeconds: 2400, remainingTracks: 2, effectiveRating: null, provisionalRating: 4.25, albumScore: null };
+const soundtrackTrack: Track = { id: "track", trackKey: "file:track", albumId: album.id, title: "Manhattan", artist: "Various Artists", displayArtist: "Andrea & Hot Mink", album: album.title, originalYear: 2000, releaseYear: 2025, rating: 4, loved: false, loveState: "neutral", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 227, genre: "Soundtrack", playCount: 1 };
 const overview: RatingsOverview = {
   trackBands: [null, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((rating) => ({ rating, count: rating === null ? 947_794 : rating === 5 ? 59_293 : 10 })),
   albumBands: [null, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((rating) => ({ rating, count: rating === 5 ? 1_120 : 5 })),
@@ -51,5 +53,13 @@ describe("RatingsStudio", () => {
     expect(screen.getByText(/2000 · Rock · 10 tracks/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Go to Album" }));
     expect(callbacks.onGoToAlbum).toHaveBeenCalledWith(album);
+  });
+
+  it("shows each track's display artist in album completion detail", () => {
+    render(<RatingsStudio {...props()} albumTracks={[soundtrackTrack]} />);
+
+    expect(screen.getByText("Manhattan")).toBeVisible();
+    expect(screen.getByText("[Andrea & Hot Mink]")).toBeVisible();
+    expect(screen.queryByText("[Various Artists]")).not.toBeInTheDocument();
   });
 });
