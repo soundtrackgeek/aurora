@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-08-25
+
+### Added
+
+- Inbox album rows and the selected-album inspector now show embedded cover art from the first sorted track only. Aurora validates the MP3 beneath a monitored root, decodes and bounds the embedded image natively, caches WebP thumbnails, and retains the existing disc fallback when track 1 has no usable art.
+
 ## [0.18.1] - 2026-08-25
 
 ### Added

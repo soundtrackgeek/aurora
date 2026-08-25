@@ -1,13 +1,14 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.1 adds safe, tag-driven Inbox folder and track renaming to its staging, auto-tagging, and reviewed library-promotion workflow.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.2 adds embedded album covers to Inbox while preserving its catalog-external staging workflow.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.1 slice
+## Current 0.18.2 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - A dedicated **Inbox** between Universe and Observatory. Up to ten device-local folders are scanned every 15 seconds and whenever Aurora regains focus; folders containing MP3s become staged albums without entering the Music Library catalog.
+- Inbox album rows and the selected-album inspector show the embedded image from the first sorted track. Aurora reads no other track for artwork, serves bounded WebP thumbnails through its local cover protocol, and falls back to the existing disc mark when track 1 has no usable image.
 - Inbox readiness reports missing or inconsistent album identity, track titles, track/disc numbering, genre, and publisher context before promotion. `Ctrl+Shift+T` opens a dense Album Auto-Tagger that searches concrete MusicBrainz and Discogs releases, compares their track lists, allows per-field inclusion and manual Genre/title correction, and applies one verified album batch.
 - Auto-Tagger renaming is enabled by default for a full album, and `Ctrl+R` applies the same rename rules to manually tagged Inbox albums. Album folders become `Album Artist - Album (Year)`; tracks become `Disc-01 - Artist - Title.mp3` when a disc tag exists or `01 - Artist - Title.mp3` when it does not. Inbox track checkboxes can scope Auto-Tagger to one CD at a time, with Disc # and total overrides for separate CD1/CD2 releases. Windows-invalid characters and collisions are handled safely, and Discogs vinyl positions such as A1/A2/B1 are normalized to continuous 01/02/03 numbering.
 - MusicBrainz requests use Aurora's identifying User-Agent and a process-wide one-request-per-second gate. Discogs accepts either a personal access token or a consumer key plus secret stored only in the operating-system credential vault; saved values are never returned to React or written to Aurora JSON/SQLite state. Debug builds may read `DISCOGS` and `DISCOGS_SECRET` (or `DISCOGS_TOKEN`) from the ignored `.env.local` for local endpoint testing.

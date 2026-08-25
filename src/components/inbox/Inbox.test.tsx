@@ -11,6 +11,10 @@ describe("Inbox", () => {
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     expect(screen.getByText("1 album outside the library")).toBeInTheDocument();
     expect(screen.getByText("1 issue")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Freak cover" })).toHaveAttribute(
+      "src",
+      "/__aurora-preview-cover/preview-freak?size=128",
+    );
     await waitFor(() => expect(screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/ })).toBeEnabled());
 
     fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });

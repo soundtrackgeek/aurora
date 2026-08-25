@@ -9,6 +9,7 @@ import type { Plugin } from "vite";
 const host = process.env.TAURI_DEV_HOST;
 const previewCoverRoot = process.env.AURORA_PREVIEW_COVER_ROOT ?? "C:\\_code\\music_backup_v5\\AlbumCovers";
 const previewCovers: Readonly<Record<string, string>> = {
+  "preview-freak": "Baltimoore - Freak (1990).jpg",
   "preview-viva": "Coldplay - Viva La Vida Or Death And All His Friends (2008).jpg",
   "preview-plastic-beach": "Gorillaz - Plastic Beach (2010).jpg",
   "preview-discovery": "Daft Punk - Discovery (2001).jpg",

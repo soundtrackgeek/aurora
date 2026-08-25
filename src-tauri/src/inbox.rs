@@ -307,6 +307,23 @@ impl InboxRuntime {
         }
     }
 
+    pub(crate) fn resolve_cover_track(&self, value: &str) -> Result<PathBuf, String> {
+        if value.trim().is_empty() || value.chars().count() > 32_768 {
+            return Err("The Inbox cover path is invalid.".to_owned());
+        }
+        let track = fs::canonicalize(value)
+            .map_err(|_| "The Inbox cover track is unavailable.".to_owned())?;
+        if !track.is_file() || !is_mp3(&track) {
+            return Err("The Inbox cover source is not an MP3.".to_owned());
+        }
+        let allowed = self.settings.monitored_folders.iter().any(|root| {
+            fs::canonicalize(root).is_ok_and(|canonical_root| track.starts_with(canonical_root))
+        });
+        allowed
+            .then_some(track)
+            .ok_or_else(|| "The Inbox cover source is outside the monitored folders.".to_owned())
+    }
+
     pub(crate) fn add_folder(&mut self, folder: String) -> Result<InboxSettingsStatus, String> {
         if self.settings.monitored_folders.len() >= MAX_MONITORED_FOLDERS {
             return Err("Inbox can monitor at most 10 folders.".to_owned());
@@ -779,10 +796,12 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     let mut tags = Vec::new();
     let mut artwork_present = false;
     let mut modified_at_ms = 0;
-    for track in &tracks {
+    for (index, track) in tracks.iter().enumerate() {
         let path = Path::new(&track.path);
         let (tag, _) = read_tag_for_write(path)?;
-        artwork_present |= tag.pictures().next().is_some();
+        if index == 0 {
+            artwork_present = tag.pictures().next().is_some();
+        }
         modified_at_ms = modified_at_ms.max(
             fs::metadata(path)
                 .ok()
@@ -1460,6 +1479,7 @@ fn parse_duration_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use id3::frame::{Picture, PictureType};
     use id3::{Tag, TagLike, Version};
 
     #[test]
@@ -1523,6 +1543,49 @@ mod tests {
         assert!(renamed.join("2-01 - Track Artist - Disc Two.mp3").is_file());
         assert_eq!(fs::read_dir(&renamed).expect("read album").count(), 2);
         fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    #[test]
+    fn inbox_artwork_presence_checks_only_the_first_sorted_track() {
+        let parent = std::env::temp_dir().join(format!(
+            "aurora-inbox-artwork-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir_all(&parent).expect("create album");
+        write_artwork_fixture(&parent.join("second.mp3"), 2, true);
+        write_artwork_fixture(&parent.join("first.mp3"), 1, false);
+
+        let album = scan_album(&parent).expect("scan album");
+        assert!(!album.artwork_present);
+
+        fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    fn write_artwork_fixture(path: &Path, track: u32, with_picture: bool) {
+        File::create(path)
+            .expect("create track")
+            .write_all(b"FAKE-MPEG-AUDIO")
+            .expect("write track");
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.set_album_artist("Test Artist");
+        tag.set_artist("Test Artist");
+        tag.set_album("Test Album");
+        tag.set_title(format!("Track {track}"));
+        tag.set_track(track);
+        tag.set_total_tracks(2);
+        tag.set_genre("Rock");
+        tag.set_text("TPUB", "Test Label");
+        if with_picture {
+            tag.add_frame(Picture {
+                mime_type: "image/png".to_owned(),
+                picture_type: PictureType::CoverFront,
+                description: String::new(),
+                data: vec![1, 2, 3],
+            });
+        }
+        tag.write_to_path(path, Version::Id3v24)
+            .expect("write track tags");
     }
 
     fn write_rename_fixture(path: &Path, track: u32, disc: Option<u32>, title: &str) {

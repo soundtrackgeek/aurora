@@ -1,6 +1,6 @@
 # Sidebar navigation contract
 
-Aurora 0.18.1 keeps the left rail's stable information architecture without changing catalog or playback ownership.
+Aurora 0.18.2 keeps the left rail's stable information architecture without changing catalog or playback ownership.
 
 ## Hierarchy
 

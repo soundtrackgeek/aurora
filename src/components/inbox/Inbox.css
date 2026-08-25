@@ -52,6 +52,7 @@
 .inbox-albums td:first-child { display: flex; align-items: center; gap: 9px; }
 .inbox-table-art { display: grid; place-items: center; width: 33px; height: 33px; flex: 0 0 auto; border: 1px solid rgba(168,85,247,.2); border-radius: 5px; background: radial-gradient(circle, rgba(168,85,247,.18), rgba(12,20,30,.9)); color: #ba7df0; }
 .inbox-table-art svg { width: 17px; }
+.inbox-table-art img, .inbox-inspector__art img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .inbox-albums td:first-child span:last-child { min-width: 0; }
 .inbox-albums td strong, .inbox-albums td small { display: block; overflow: hidden; text-overflow: ellipsis; }
 .inbox-albums td strong { color: #e4e7ee; font-weight: 500; }

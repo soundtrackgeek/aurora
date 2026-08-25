@@ -99,6 +99,19 @@ export interface InboxRenameResult {
   folderRenamed: boolean;
 }
 
+export function inboxCoverUrl(
+  album: Pick<InboxAlbum, "id" | "artworkPresent" | "modifiedAtMs" | "tracks">,
+  size: 64 | 128 | 256,
+): string | null {
+  if (!album.artworkPresent || !album.tracks[0]) return null;
+  if (!isTauriRuntime()) {
+    return album.id === "preview-freak"
+      ? `/__aurora-preview-cover/preview-freak?size=${size}`
+      : null;
+  }
+  return `http://aurora-cover.localhost/inbox/${encodeURIComponent(album.tracks[0].path)}?size=${size}&revision=${album.modifiedAtMs}`;
+}
+
 const previewTracks = [
   "Memories Calling", "Kahlua Confusion", "Dying Alone", "Don’t Stop Running", "Without You",
   "Straight Line", "Day to Come", "What It Is", "Fly So Gently", "Shadows",

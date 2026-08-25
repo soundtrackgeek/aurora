@@ -1,12 +1,13 @@
 # Inbox contract
 
-Aurora 0.18.1 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
+Aurora 0.18.2 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
 
 ## Monitoring and identity
 
 - Inbox stores at most ten canonical folder paths in `%APPDATA%\com.soundtrackgeek.aurora\aurora-inbox.json`. The setting is device-local and is not copied into Aurora's shared state or OneDrive snapshots.
 - Aurora performs a bounded recursive scan on entry, every 15 seconds while visible, and whenever the window regains focus. Directory symlinks and reparse-style links are not followed; one directory containing MP3 files is one staged album.
 - Scanning never opens the Music Library database for writes and never moves, renames, or catalogs a file. A SHA-256 of the canonical album path provides React's stable selection identity without exposing it as catalog identity.
+- Album artwork comes only from the first track after disc/track/filename sorting. Aurora checks that track's first embedded ID3 picture, produces bounded cached WebP thumbnails through the local cover protocol, and verifies that every requested source remains an MP3 beneath a currently monitored root. It does not scan later tracks for artwork.
 - Readiness reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, Genre, and Publisher. Disc numbering is optional, but a partially numbered multidisc album is reported as incomplete. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
 
 ## Metadata providers

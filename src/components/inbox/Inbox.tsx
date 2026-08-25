@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   addInboxMonitorFolder,
   applyInboxTags,
+  inboxCoverUrl,
   loadInboxReleaseDetail,
   loadInboxSnapshot,
   removeInboxMonitorFolder,
@@ -47,6 +48,16 @@ type LoadState = "loading" | "ready" | "error";
 interface InboxProps {
   onOpenMetadataSettings: () => void;
   onCatalogChanged: () => boolean | void | Promise<boolean | void>;
+}
+
+function InboxArtwork({ album, size, decorative = true }: { album: InboxAlbum; size: 64 | 128; decorative?: boolean }) {
+  const source = inboxCoverUrl(album, size);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  return <span className={size === 64 ? "inbox-table-art" : "inbox-inspector__art"} aria-hidden={decorative || undefined}>
+    {source && source !== failedSource
+      ? <img src={source} alt={decorative ? "" : `${album.album ?? album.folderName} cover`} onError={() => setFailedSource(source)} />
+      : <Disc3 />}
+  </span>;
 }
 
 const allFields: Array<{ id: EditableTagField; label: string }> = [
@@ -242,7 +253,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
           <header><strong>{selectedFolder ? leafName(selectedFolder) : "All staged albums"}</strong><span>{albums.length} {albums.length === 1 ? "album" : "albums"} outside the library</span></header>
           {albums.length ? <div className="inbox-table-wrap"><table><thead><tr><th>Album</th><th>Artist</th><th>Year</th><th>Tracks</th><th>Status</th><th>Updated</th></tr></thead><tbody>
             {albums.map((album) => <tr key={album.id} className={selectedAlbum?.id === album.id ? "is-selected" : ""} onClick={() => { setSelectedAlbumId(album.id); setMovePreview(null); setMoveMessage(null); }}>
-              <td><span className="inbox-table-art"><Disc3 /></span><span><strong>{album.album ?? album.folderName}</strong><small>{album.folderName}</small></span></td>
+              <td><InboxArtwork album={album} size={64} /><span><strong>{album.album ?? album.folderName}</strong><small>{album.folderName}</small></span></td>
               <td>{album.artist ?? "Unknown artist"}</td><td>{album.year ?? "—"}</td><td>{album.trackCount}</td>
               <td><span className={album.readiness.ready ? "inbox-status is-ready" : "inbox-status"}>{album.readiness.ready ? <CheckCircle2 /> : <AlertTriangle />}{album.readiness.ready ? "Ready" : `${album.readiness.issues.length} ${album.readiness.issues.length === 1 ? "issue" : "issues"}`}</span></td>
               <td>{formatTime(album.modifiedAtMs)}</td>
@@ -252,7 +263,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
 
         <aside className="inbox-inspector" aria-label="Selected Inbox album">
           {selectedAlbum ? <>
-            <header><span className="inbox-inspector__art"><Disc3 /></span><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
+            <header><InboxArtwork album={selectedAlbum} size={128} decorative={false} /><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
             <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
             <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
