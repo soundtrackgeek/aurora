@@ -1,7 +1,7 @@
 use crate::{
     catalog::{
         ArtistSummary, TrackSummary, apply_overlays, default_catalog_path, map_track_row,
-        open_catalog, parse_catalog_search, pending_deleted_track, push_album_search_predicates,
+        open_catalog, parse_catalog_search, push_album_search_predicates,
         push_track_search_predicates,
     },
     ratings,
@@ -10,6 +10,7 @@ use crate::{
 };
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 const DEFAULT_PAGE_SIZE: u16 = 50;
 const MAX_PAGE_SIZE: u16 = 100;
@@ -1076,21 +1077,17 @@ fn album_detail_from_connection(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the album tracks: {error}"))?;
     apply_overlays(&mut tracks, store)?;
-    if let Some(store) = store {
-        let mut available_tracks = Vec::with_capacity(tracks.len());
-        for track in tracks {
-            if pending_deleted_track(&track, store)? {
-                continue;
-            } else {
-                available_tracks.push(track);
-            }
-        }
-        tracks = available_tracks;
-    }
+    let deleted_track_keys = if let Some(store) = store {
+        ratings::pending_deleted_track_keys_for_album(connection, album_id, store)?
+    } else {
+        HashSet::new()
+    };
+    tracks.retain(|track| !deleted_track_keys.contains(&track.track_key));
     let tracks_truncated = tracks.len() > usize::from(MAX_PAGE_SIZE);
     tracks.truncate(usize::from(MAX_PAGE_SIZE));
     if let Some(store) = store {
-        let live = ratings::live_album_from_connection(connection, album_id, store)?;
+        let live =
+            ratings::live_album_from_connection(connection, album_id, store, &deleted_track_keys)?;
         album.total_tracks = live.total_tracks;
         album.rated_tracks = live.rated_tracks;
         album.loved_tracks = live.loved_tracks;

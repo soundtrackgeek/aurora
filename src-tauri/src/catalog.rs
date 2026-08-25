@@ -1,6 +1,6 @@
 use crate::{
     device_mode,
-    state_store::{StateStore, StoredQueueEntry},
+    state_store::{PendingLibraryFolderSync, StateStore, StoredQueueEntry},
     tag_model::{LoveState, TagSyncState, TagValues},
 };
 use rusqlite::{
@@ -1665,9 +1665,10 @@ pub(crate) fn resolve_album_tracks(
         .map(TrackSummary::catalog_tag_values)
         .collect::<Vec<_>>();
     apply_overlays(&mut summaries, Some(store))?;
+    let pending_targets = store.pending_library_folder_sync_targets(512)?;
     let mut resolved = Vec::with_capacity(summaries.len());
     for (summary, catalog_values) in summaries.into_iter().zip(catalog_values) {
-        if pending_deleted_track(&summary, store)? {
+        if pending_deleted_track(&summary, &pending_targets)? {
             continue;
         }
         let audio_path = validated_audio_path(&summary.directory, &summary.filename)?;
@@ -1685,21 +1686,28 @@ pub(crate) fn resolve_album_tracks(
 
 pub(crate) fn pending_deleted_track(
     summary: &TrackSummary,
-    store: &StateStore,
+    pending_targets: &[PendingLibraryFolderSync],
 ) -> Result<bool, String> {
-    pending_deleted_catalog_file(&summary.directory, &summary.filename, store)
+    pending_deleted_catalog_file(&summary.directory, &summary.filename, pending_targets)
 }
 
 pub(crate) fn pending_deleted_catalog_file(
     directory: &str,
     filename: &str,
-    store: &StateStore,
+    pending_targets: &[PendingLibraryFolderSync],
 ) -> Result<bool, String> {
+    let is_pending = pending_targets.iter().any(|target| {
+        target.directory.eq_ignore_ascii_case(directory)
+            && target
+                .filename
+                .as_deref()
+                .is_none_or(|queued| queued.eq_ignore_ascii_case(filename))
+    });
+    if !is_pending {
+        return Ok(false);
+    }
     let audio_path = catalog_audio_path(directory, filename)?;
-    // The local pending-sync lookup is cheap. Only touch the music drive when
-    // Aurora has queued this catalog row as a possible deletion; probing every
-    // album track can stall detail loading on sleeping or unavailable drives.
-    Ok(store.library_file_sync_is_pending(directory, filename)? && !audio_path.is_file())
+    Ok(!audio_path.is_file())
 }
 
 fn album_tag_tracks_from_connection(

@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.29] - 2026-08-25
+
+### Fixed
+
+- Album detail no longer invokes Ratings' global pending-deletion scan or opens Aurora's state database once per track. It loads the durable deletion queue once, scopes missing-file checks to the selected album, and reuses those keys for both visible rows and live album counts, removing the remaining five-second delay without restoring deleted tracks.
+
 ## [0.17.28] - 2026-08-25
 
 ### Fixed

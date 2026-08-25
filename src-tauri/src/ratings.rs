@@ -436,18 +436,48 @@ pub(crate) fn live_album_from_connection(
     connection: &Connection,
     album_id: &str,
     store: &StateStore,
+    deleted_track_keys: &HashSet<String>,
 ) -> Result<RatingAlbum, String> {
     let overlays = store
         .all_overlays()?
         .into_iter()
         .map(|overlay| (overlay.track_key.clone(), overlay))
         .collect::<HashMap<_, _>>();
-    let deleted_track_keys = pending_deleted_rating_tracks(connection, store)?
-        .into_iter()
-        .map(|track| track.track_key)
-        .collect::<HashSet<_>>();
     query_album_snapshot(connection, album_id, &overlays, &deleted_track_keys)
         .map(|snapshot| snapshot.album)
+}
+
+pub(crate) fn pending_deleted_track_keys_for_album(
+    connection: &Connection,
+    album_id: &str,
+    store: &StateStore,
+) -> Result<HashSet<String>, String> {
+    let targets = store.pending_library_folder_sync_targets(MAX_PENDING_DELETION_TARGETS)?;
+    if targets.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut statement = connection
+        .prepare("SELECT file_path, filename FROM tracks WHERE album_id = ?1 LIMIT 501")
+        .map_err(|error| format!("Could not prepare this album's pending deletions: {error}"))?;
+    let rows = statement
+        .query_map([album_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| format!("Could not read this album's pending deletions: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not decode this album's pending deletions: {error}"))?;
+    if rows.len() > 500 {
+        return Err(
+            "This album contains too many tracks to project pending deletions safely.".to_owned(),
+        );
+    }
+    let mut deleted_track_keys = HashSet::new();
+    for (directory, filename) in rows {
+        if catalog::pending_deleted_catalog_file(&directory, &filename, &targets)? {
+            deleted_track_keys.insert(catalog::normalize_track_key(&directory, &filename));
+        }
+    }
+    Ok(deleted_track_keys)
 }
 
 fn pending_deleted_rating_tracks(
@@ -469,9 +499,9 @@ fn pending_deleted_rating_tracks(
         .map_err(|error| format!("Could not prepare pending rating deletions: {error}"))?;
     let mut seen = HashSet::new();
     let mut deleted = Vec::new();
-    for target in targets {
+    for target in &targets {
         let rows = statement
-            .query_map(params![target.directory, target.filename], |row| {
+            .query_map(params![&target.directory, &target.filename], |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, String>(1)?,
@@ -492,7 +522,7 @@ fn pending_deleted_rating_tracks(
             let Some(album_id) = album_id else { continue };
             let track_key = catalog::normalize_track_key(&directory, &filename);
             if seen.insert(track_key.clone())
-                && catalog::pending_deleted_catalog_file(&directory, &filename, store)?
+                && catalog::pending_deleted_catalog_file(&directory, &filename, &targets)?
             {
                 deleted.push(PendingDeletedRatingTrack {
                     album_id,
@@ -1069,6 +1099,15 @@ mod tests {
             .into_iter()
             .map(|track| track.track_key)
             .collect::<HashSet<_>>();
+        let selected_album_keys =
+            pending_deleted_track_keys_for_album(&connection, "almost", &store)
+                .expect("selected album deletion projection");
+        assert_eq!(selected_album_keys, deleted_track_keys);
+        assert!(
+            pending_deleted_track_keys_for_album(&connection, "complete", &store)
+                .expect("unrelated album deletion projection")
+                .is_empty()
+        );
         let snapshot =
             query_album_snapshot(&connection, "almost", &HashMap::new(), &deleted_track_keys)
                 .expect("completion album after deletion");
