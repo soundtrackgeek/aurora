@@ -18,6 +18,7 @@ import {
   type LibraryBridgeCapabilities,
   type LibraryIntakeAdapter,
   type LibraryIntakeApplyResult,
+  type LibraryIntakeApplyRequest,
   type LibraryIntakeCategoryId,
   type LibraryIntakePreview,
 } from "../ingest";
@@ -28,6 +29,10 @@ type BusyAction = "capabilities" | "selecting" | "previewing" | "applying" | nul
 interface AddFolderDialogProps {
   onClose: () => void;
   onCatalogChanged: () => boolean | void | Promise<boolean | void>;
+  onApplyInBackground?: (
+    request: LibraryIntakeApplyRequest,
+    preview: LibraryIntakePreview,
+  ) => void;
   adapter?: LibraryIntakeAdapter;
 }
 
@@ -49,6 +54,7 @@ function CategoryIcon({ category }: { category: LibraryIntakeCategoryId }) {
 export function AddFolderDialog({
   onClose,
   onCatalogChanged,
+  onApplyInBackground,
   adapter = libraryIntakeAdapter,
 }: AddFolderDialogProps) {
   const [capabilities, setCapabilities] = useState<LibraryBridgeCapabilities | null>(null);
@@ -61,6 +67,7 @@ export function AddFolderDialog({
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const requestGenerationRef = useRef(0);
+  const applyInFlightRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isBusy = busyAction === "selecting" || busyAction === "previewing" || busyAction === "applying";
@@ -194,15 +201,27 @@ export function AddFolderDialog({
   }
 
   async function applyPreview() {
-    if (!preview || !canApply) return;
+    if (applyInFlightRef.current || !preview || !canApply) return;
+    applyInFlightRef.current = true;
+    const request = {
+      planId: preview.planId,
+      sessionId: preview.sessionId,
+    };
+    if (onApplyInBackground) {
+      try {
+        onApplyInBackground(request, preview);
+        onClose();
+      } catch (nextError) {
+        applyInFlightRef.current = false;
+        setError(errorMessage(nextError));
+      }
+      return;
+    }
     setBusyAction("applying");
     setError(null);
     setRefreshWarning(null);
     try {
-      const nextResult = await adapter.apply({
-        planId: preview.planId,
-        sessionId: preview.sessionId,
-      });
+      const nextResult = await adapter.apply(request);
       setConfirming(false);
       try {
         const refreshed = await onCatalogChanged();
@@ -216,6 +235,7 @@ export function AddFolderDialog({
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
+      applyInFlightRef.current = false;
       setBusyAction(null);
     }
   }
@@ -327,7 +347,11 @@ export function AddFolderDialog({
                 <span><strong>{preview.delta.changedAlbums}</strong> changed</span>
                 <span><strong>−{preview.delta.removedAlbums}</strong> removed</span>
               </div>
-              <ol className="intake-album-list" aria-label="Album moves">
+              <ol
+                className={`intake-album-list${preview.albums.length > 2 ? " is-scrollable" : ""}`}
+                aria-label="Album moves"
+                tabIndex={0}
+              >
                 {preview.albums.map((album) => (
                   <li key={`${album.sourcePath}\n${album.destinationPath}`}>
                     <span><strong>{album.album}</strong><small>{album.artist} · {album.year || "Year unknown"} · {album.trackCount} tracks</small></span>
@@ -344,7 +368,7 @@ export function AddFolderDialog({
             </section>
           ) : null}
 
-          {confirming && preview ? (
+          {confirming && preview && busyAction !== "applying" ? (
             <section className="intake-confirmation" role="alertdialog" aria-label="Confirm album move">
               <ShieldCheck aria-hidden="true" />
               <span><strong>Move and catalog {preview.albumCount} {preview.albumCount === 1 ? "album" : "albums"}?</strong><small>Destination root: {preview.category.destinationRoot}</small></span>
@@ -353,7 +377,7 @@ export function AddFolderDialog({
             </section>
           ) : null}
 
-          {busyAction === "applying" ? <p className="intake-progress" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /> Moving albums, verifying copies, and updating the catalog… Keep Aurora open.</p> : null}
+          {busyAction === "applying" ? <p className="intake-progress" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /> Copying and verifying albums, then applying the reviewed catalog snapshot and rebuilding indexes… This can take a few minutes.</p> : null}
 
           {result ? (
             <section className={`intake-result${cleanupWarnings.length > 0 || refreshWarning ? " has-warnings" : ""}`} role="status">

@@ -168,7 +168,9 @@
 .intake-delta span { min-width: 0; padding: 8px 6px; border-right: 1px solid rgba(148, 174, 199, .08); color: #778691; font-size: max(var(--aurora-font-min), calc(7.5px + var(--aurora-font-offset))); text-align: center; }
 .intake-delta span:last-child { border-right: 0; }
 .intake-delta strong { display: block; margin-bottom: 1px; color: #dbe3e9; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); font-weight: 620; }
-.intake-album-list { max-height: 285px; margin: 0; padding: 0; overflow-y: auto; list-style: none; scrollbar-width: thin; }
+.intake-album-list { max-height: 285px; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; scrollbar-color: #34404c transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
+.intake-album-list.is-scrollable { height: clamp(128px, 26vh, 285px); }
+.intake-album-list:focus-visible { outline: 2px solid rgba(205, 139, 242, .72); outline-offset: -2px; }
 .intake-album-list li { display: grid; grid-template-columns: minmax(130px, .75fr) minmax(280px, 1.25fr); align-items: center; gap: 14px; min-height: 57px; padding: 8px 13px; border-bottom: 1px solid rgba(148, 174, 199, .08); }
 .intake-album-list li:last-child { border-bottom: 0; }
 .intake-album-list li > span:first-child { min-width: 0; }
@@ -242,6 +244,7 @@
   .add-folder-dialog__body { padding-block: 12px; }
   .intake-step { padding: 10px; }
   .intake-album-list { max-height: 210px; }
+  .intake-album-list.is-scrollable { height: clamp(128px, 26vh, 210px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

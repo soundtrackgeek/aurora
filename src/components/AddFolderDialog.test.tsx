@@ -191,6 +191,74 @@ describe("AddFolderDialog", () => {
     expect(screen.getAllByText("removed")).toHaveLength(2);
   });
 
+  it("makes a multi-album plan a keyboard-accessible scroll region", async () => {
+    const scrollPreview: LibraryIntakePreview = {
+      ...preview,
+      albumCount: 3,
+      trackCount: 20,
+      albums: [
+        ...preview.albums,
+        {
+          sourcePath: "C:\\Intake\\Third Artist - Last Album (2026)",
+          destinationPath: "D:\\Music\\Scores\\Third Artist - Last Album (2026)",
+          artist: "Third Artist",
+          album: "Last Album",
+          year: "2026",
+          trackCount: 1,
+        },
+      ],
+    };
+    renderDialog(createAdapter({ preview: vi.fn().mockResolvedValue(scrollPreview) }));
+    await screen.findByText("Music Library companion ready");
+    fireEvent.click(screen.getByRole("button", { name: "Choose folder" }));
+    await screen.findByText("C:\\Intake");
+    fireEvent.click(screen.getByRole("radio", { name: /Movie \/ TV \/ game music/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview batch" }));
+    await screen.findByRole("heading", { name: "3 albums · 20 tracks" });
+
+    const albumMoves = screen.getByRole("list", { name: "Album moves" });
+    expect(albumMoves).toHaveClass("is-scrollable");
+    expect(albumMoves).toHaveAttribute("tabindex", "0");
+  });
+
+  it("hides confirmation while applying and prevents duplicate apply requests", async () => {
+    let resolveApply: (value: LibraryIntakeApplyResult) => void = () => undefined;
+    const pendingApply = new Promise<LibraryIntakeApplyResult>((resolve) => { resolveApply = resolve; });
+    const apply = vi.fn().mockReturnValue(pendingApply);
+    renderDialog(createAdapter({ apply }));
+    await chooseScoresAndPreview();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review apply" }));
+    const moveButton = screen.getByRole("button", { name: "Move and catalog 2" });
+    fireEvent.click(moveButton);
+    fireEvent.click(moveButton);
+
+    expect(apply).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Move and catalog 2" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Copying and verifying albums");
+
+    await act(async () => { resolveApply(applyResult); });
+    await screen.findByText("2 of 2 albums fully moved · 2 cataloged · 19 tracks");
+  });
+
+  it("hands apply to the app background worker and closes immediately", async () => {
+    const onApplyInBackground = vi.fn();
+    const onClose = vi.fn();
+    const adapter = createAdapter();
+    renderDialog(adapter, { onApplyInBackground, onClose });
+    await chooseScoresAndPreview();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move and catalog 2" }));
+
+    expect(onApplyInBackground).toHaveBeenCalledWith(
+      { planId: "plan-42", sessionId: 42 },
+      preview,
+    );
+    expect(adapter.apply).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("requires explicit confirmation, applies the locked plan, and refreshes Aurora", async () => {
     const onCatalogChanged = vi.fn().mockResolvedValue(true);
     const adapter = createAdapter();

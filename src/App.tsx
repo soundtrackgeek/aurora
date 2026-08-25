@@ -214,6 +214,11 @@ import {
   type PublisherOverview,
   type PublisherSummary,
 } from "./publishers";
+import {
+  libraryIntakeAdapter,
+  type LibraryIntakeApplyRequest,
+  type LibraryIntakePreview,
+} from "./ingest";
 
 const AddFolderDialog = lazy(async () => {
   const module = await import("./components/AddFolderDialog");
@@ -496,6 +501,11 @@ function App() {
   const [reconciliationHasMore, setReconciliationHasMore] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [addFolderOpen, setAddFolderOpen] = useState(false);
+  const [backgroundIntakeNotice, setBackgroundIntakeNotice] = useState<{
+    status: "running" | "completed" | "failed";
+    message: string;
+  } | null>(null);
+  const backgroundIntakeRunningRef = useRef(false);
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
   const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
@@ -868,6 +878,53 @@ function App() {
     catalogRefreshPromiseRef.current = refreshTask;
     return refreshTask;
   }, [rebindPlaybackCatalog]);
+
+  const startBackgroundIntake = useCallback((
+    request: LibraryIntakeApplyRequest,
+    preview: LibraryIntakePreview,
+  ) => {
+    if (backgroundIntakeRunningRef.current) return;
+    backgroundIntakeRunningRef.current = true;
+    setBackgroundIntakeNotice({
+      status: "running",
+      message: `Adding ${formatCount(preview.albumCount)} ${preview.albumCount === 1 ? "album" : "albums"} in the background · Aurora remains usable`,
+    });
+    void libraryIntakeAdapter.apply(request)
+      .then(async (result) => {
+        const refreshed = await refreshCatalogIfChanged();
+        if (!appMountedRef.current) return;
+        if (result.cleanupWarnings.length > 0 || result.status === "completedWithWarnings") {
+          setBackgroundIntakeNotice({
+            status: "failed",
+            message: `Albums cataloged with attention needed · ${result.cleanupWarnings[0] ?? "Open Add Music for details."}`,
+          });
+          return;
+        }
+        setBackgroundIntakeNotice({
+          status: "completed",
+          message: `${formatCount(result.albumCount)} ${result.albumCount === 1 ? "album" : "albums"} added · catalog updated and available covers checked${refreshed ? "" : " · Aurora refresh is catching up"}`,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!appMountedRef.current) return;
+        setBackgroundIntakeNotice({
+          status: "failed",
+          message: `Add Music needs attention · ${error instanceof Error ? error.message : String(error)}`,
+        });
+      })
+      .finally(() => {
+        backgroundIntakeRunningRef.current = false;
+      });
+  }, [refreshCatalogIfChanged]);
+
+  useEffect(() => {
+    if (backgroundIntakeNotice?.status !== "completed") return;
+    const completedNotice = backgroundIntakeNotice;
+    const timeout = window.setTimeout(() => {
+      setBackgroundIntakeNotice((current) => current === completedNotice ? null : current);
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [backgroundIntakeNotice]);
 
   const handleCatalogSync = useCallback(async (
     sync: CatalogSync | null | undefined,
@@ -2662,7 +2719,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.17</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.18</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2708,9 +2765,17 @@ function App() {
           ) : null}
         </div>
         <div className="topbar__actions">
-          <button type="button" className="add-music-action" onClick={() => setAddFolderOpen(true)}><FolderPlus aria-hidden="true" /><span>Add music</span></button>
-          {syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
-          {catalogNoticeMessage && (
+          <button type="button" className="add-music-action" disabled={backgroundIntakeNotice?.status === "running"} onClick={() => setAddFolderOpen(true)}><FolderPlus aria-hidden="true" /><span>{backgroundIntakeNotice?.status === "running" ? "Adding music" : "Add music"}</span></button>
+          {backgroundIntakeNotice && (
+            <span
+              className="tag-sync-message intake-background-message"
+              data-intake-status={backgroundIntakeNotice.status}
+              role={backgroundIntakeNotice.status === "failed" ? "alert" : "status"}
+              title={backgroundIntakeNotice.message}
+            >{backgroundIntakeNotice.message}</span>
+          )}
+          {!backgroundIntakeNotice && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+          {!backgroundIntakeNotice && catalogNoticeMessage && (
             <span
               className="tag-sync-message"
               data-sync-status={catalogSyncNotice?.status}
@@ -3128,6 +3193,7 @@ function App() {
           <AddFolderDialog
             onClose={() => setAddFolderOpen(false)}
             onCatalogChanged={refreshCatalogIfChanged}
+            onApplyInBackground={startBackgroundIntake}
           />
         </Suspense>
       )}

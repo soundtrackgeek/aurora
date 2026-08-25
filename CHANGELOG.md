@@ -4,6 +4,15 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.18] - 2026-08-25
+
+### Fixed
+
+- Add Music review plans with more than two albums now use a bounded, keyboard-accessible album list, so every source-to-destination row remains scrollable inside the Verified Plan card at constrained window heights.
+- Starting **Move and catalog** immediately closes the modal and continues the intake in the background, leaving browsing and playback usable while a persistent top-bar status reports completion or failure. The Add Music action remains disabled during that one active intake, and a synchronous in-flight guard prevents rapid clicks from submitting the same locked plan twice.
+- The progress copy now distinguishes fast file copying from Music Library's reviewed whole-catalog snapshot apply and index rebuild instead of making a multi-minute catalog phase look like a stalled file move.
+- Music Library `0.144.5` automatically archives and links embedded cover art for newly added Aurora intake albums, removing the separate manual Cover add step.
+
 ## [0.17.17] - 2026-08-25
 
 ### Added
