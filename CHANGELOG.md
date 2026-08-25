@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.15] - 2026-08-25
+
+### Fixed
+
+- Add Music preview and apply now share Aurora's Music Library bridge coordinator with background tag synchronization, so intake waits for active work instead of racing the helper's Windows workflow lock.
+- Folder synchronization pauses after three consecutive failures instead of retrying every five seconds forever. Aurora reports the blocked folders clearly, and a later MP3 edit resets that folder's retry budget.
+
 ## [0.17.14] - 2026-08-24
 
 ### Fixed

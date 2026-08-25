@@ -13,6 +13,7 @@ use std::{
 pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
+pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -1142,6 +1143,7 @@ impl StateStore {
                 r#"
                 SELECT directory, filename, updated_at_ms
                 FROM pending_library_folder_sync
+                WHERE attempt_count < ?2
                 ORDER BY updated_at_ms, directory COLLATE NOCASE
                 LIMIT ?1
                 "#,
@@ -1150,13 +1152,16 @@ impl StateStore {
                 format!("Could not prepare Aurora's pending library-folder sync: {error}")
             })?;
         statement
-            .query_map(params![limit as i64], |row| {
-                Ok(PendingLibraryFolderSync {
-                    directory: row.get(0)?,
-                    filename: row.get(1)?,
-                    token: row.get(2)?,
-                })
-            })
+            .query_map(
+                params![limit as i64, MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS],
+                |row| {
+                    Ok(PendingLibraryFolderSync {
+                        directory: row.get(0)?,
+                        filename: row.get(1)?,
+                        token: row.get(2)?,
+                    })
+                },
+            )
             .map_err(|error| {
                 format!("Could not read Aurora's pending library-folder sync: {error}")
             })?
@@ -1201,15 +1206,25 @@ impl StateStore {
         Ok(pending)
     }
 
-    pub(crate) fn pending_library_folder_sync_count(&self) -> Result<usize, String> {
+    pub(crate) fn library_folder_sync_counts(&self) -> Result<(usize, usize), String> {
         let connection = self.open()?;
         connection
             .query_row(
-                "SELECT COUNT(*) FROM pending_library_folder_sync",
-                [],
-                |row| row.get::<_, i64>(0),
+                r#"
+                SELECT
+                  SUM(CASE WHEN attempt_count < ?1 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN attempt_count >= ?1 THEN 1 ELSE 0 END)
+                FROM pending_library_folder_sync
+                "#,
+                params![MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
             )
-            .map(|count| count.max(0) as usize)
+            .map(|(retryable, blocked)| {
+                (
+                    retryable.unwrap_or(0).max(0) as usize,
+                    blocked.unwrap_or(0).max(0) as usize,
+                )
+            })
             .map_err(|error| {
                 format!("Could not count Aurora's pending library-folder sync: {error}")
             })
@@ -2067,6 +2082,49 @@ mod tests {
         assert_eq!(pending_paths(&reopened, 99), vec![directory.to_owned()]);
 
         drop(reopened);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn automatic_folder_sync_stops_after_three_failures_and_a_new_edit_resets_it() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let directory = r"D:\Music\Artist\Blocked Album";
+        {
+            let mut connection = store.open().expect("open queue");
+            let transaction = connection.transaction().expect("start queue transaction");
+            enqueue_pending_library_folder_sync(&transaction, directory, Some("Track.mp3"))
+                .expect("queue folder");
+            transaction.commit().expect("commit queue");
+        }
+
+        for _ in 0..MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS {
+            let pending = store
+                .pending_library_folder_sync(1)
+                .expect("load retryable folder")
+                .pop()
+                .expect("retryable folder");
+            assert!(
+                store
+                    .defer_library_folder_sync(&pending, "permanent validation failure")
+                    .expect("record failed attempt")
+            );
+        }
+
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (0, 1));
+
+        {
+            let mut connection = store.open().expect("reopen queue");
+            let transaction = connection.transaction().expect("start reset transaction");
+            enqueue_pending_library_folder_sync(&transaction, directory, Some("Track.mp3"))
+                .expect("reset queue after a new edit");
+            transaction.commit().expect("commit reset");
+        }
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
+        assert_eq!(store.pending_library_folder_sync(1).unwrap().len(), 1);
+
+        drop(store);
         let _ = fs::remove_file(path);
     }
 

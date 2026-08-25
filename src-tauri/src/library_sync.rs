@@ -20,6 +20,7 @@ const BACKGROUND_RETRY_FOLDERS: usize = 1;
 pub(crate) enum CatalogSyncStatus {
     Synced,
     Pending,
+    Blocked,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -29,31 +30,62 @@ pub(crate) struct CatalogSync {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) message: Option<String>,
     pub(crate) pending_folder_count: usize,
+    pub(crate) blocked_folder_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) projection_token: Option<u64>,
 }
 
 impl CatalogSync {
-    fn synced(pending_folder_count: usize) -> Self {
+    fn synced() -> Self {
         Self {
             status: CatalogSyncStatus::Synced,
             message: Some("Music Library updated.".to_owned()),
-            pending_folder_count,
+            pending_folder_count: 0,
+            blocked_folder_count: 0,
             projection_token: None,
         }
     }
 
-    fn pending(pending_folder_count: usize, detail: Option<String>) -> Self {
+    fn pending(
+        retryable_folder_count: usize,
+        blocked_folder_count: usize,
+        detail: Option<String>,
+    ) -> Self {
         let mut message =
             "Music Library update pending; Aurora will retry automatically.".to_owned();
         if let Some(detail) = detail.filter(|detail| !detail.trim().is_empty()) {
             message.push(' ');
             message.push_str(detail.trim());
         }
+        if blocked_folder_count > 0 {
+            message.push_str(&format!(
+                " {blocked_folder_count} other folder{} will not retry until its MP3s change again.",
+                if blocked_folder_count == 1 { "" } else { "s" }
+            ));
+        }
         Self {
             status: CatalogSyncStatus::Pending,
             message: Some(message),
-            pending_folder_count,
+            pending_folder_count: retryable_folder_count + blocked_folder_count,
+            blocked_folder_count,
+            projection_token: None,
+        }
+    }
+
+    fn blocked(blocked_folder_count: usize, detail: Option<String>) -> Self {
+        let mut message = format!(
+            "Music Library update needs attention for {blocked_folder_count} folder{}; automatic retries are paused until those MP3s change again.",
+            if blocked_folder_count == 1 { "" } else { "s" }
+        );
+        if let Some(detail) = detail.filter(|detail| !detail.trim().is_empty()) {
+            message.push(' ');
+            message.push_str(detail.trim());
+        }
+        Self {
+            status: CatalogSyncStatus::Blocked,
+            message: Some(message),
+            pending_folder_count: blocked_folder_count,
+            blocked_folder_count,
             projection_token: None,
         }
     }
@@ -121,7 +153,7 @@ impl LibrarySyncCoordinator {
             Ok(targets) => targets,
             Err(error) => {
                 return LibrarySyncReport {
-                    catalog_sync: CatalogSync::pending(priorities.len().max(1), Some(error)),
+                    catalog_sync: CatalogSync::pending(priorities.len().max(1), 0, Some(error)),
                     completed_directories: HashSet::new(),
                 };
             }
@@ -135,20 +167,26 @@ impl LibrarySyncCoordinator {
             .map(|directory| normalized_directory(directory))
             .filter(|directory| !target_keys.contains(directory))
             .collect::<HashSet<_>>();
-        let pending_folder_count = match store.pending_library_folder_sync_count() {
-            Ok(count) => count,
-            Err(error) => {
-                return LibrarySyncReport {
-                    catalog_sync: CatalogSync::pending(1, Some(error)),
-                    completed_directories,
-                };
-            }
-        };
+        let (retryable_folder_count, blocked_folder_count) =
+            match store.library_folder_sync_counts() {
+                Ok(counts) => counts,
+                Err(error) => {
+                    return LibrarySyncReport {
+                        catalog_sync: CatalogSync::pending(1, 0, Some(error)),
+                        completed_directories,
+                    };
+                }
+            };
         let catalog_sync = if targets.is_empty() {
-            CatalogSync::synced(pending_folder_count)
+            if blocked_folder_count > 0 {
+                CatalogSync::blocked(blocked_folder_count, None)
+            } else {
+                CatalogSync::synced()
+            }
         } else {
             CatalogSync::pending(
-                pending_folder_count.max(targets.len()),
+                retryable_folder_count.max(targets.len()),
+                blocked_folder_count,
                 Some("The verified MP3 edit is queued for Music Library.".to_owned()),
             )
         };
@@ -163,10 +201,10 @@ impl LibrarySyncCoordinator {
     }
 
     fn run(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
-        self.run_serialized(|| self.run_locked(app, priority_directories))
+        self.serialize_bridge_work(|| self.run_locked(app, priority_directories))
     }
 
-    fn run_serialized<T>(&self, operation: impl FnOnce() -> T) -> T {
+    pub(crate) fn serialize_bridge_work<T>(&self, operation: impl FnOnce() -> T) -> T {
         let _guard = self
             .bridge_gate
             .lock()
@@ -182,7 +220,7 @@ impl LibrarySyncCoordinator {
                 Ok(items) => items,
                 Err(error) => {
                     return LibrarySyncReport {
-                        catalog_sync: CatalogSync::pending(1, Some(error)),
+                        catalog_sync: CatalogSync::pending(1, 0, Some(error)),
                         completed_directories: HashSet::new(),
                     };
                 }
@@ -192,7 +230,7 @@ impl LibrarySyncCoordinator {
                 Ok(items) => items,
                 Err(error) => {
                     return LibrarySyncReport {
-                        catalog_sync: CatalogSync::pending(priorities.len(), Some(error)),
+                        catalog_sync: CatalogSync::pending(priorities.len(), 0, Some(error)),
                         completed_directories: HashSet::new(),
                     };
                 }
@@ -224,26 +262,22 @@ impl LibrarySyncCoordinator {
         completed_directories.extend(processed.completed_directories);
         let mut first_error = processed.first_error;
 
-        let pending_folder_count = match store.pending_library_folder_sync_count() {
-            Ok(count) => count,
-            Err(error) => {
-                first_error.get_or_insert(error);
-                1
-            }
-        };
-        let priorities_completed = priorities
-            .iter()
-            .all(|directory| completed_directories.contains(&normalized_directory(directory)));
-        let current_work_synced = if priorities.is_empty() {
-            first_error.is_none()
-                && (!completed_directories.is_empty() || pending_folder_count == 0)
+        let (retryable_folder_count, blocked_folder_count) =
+            match store.library_folder_sync_counts() {
+                Ok(counts) => counts,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    (1, 0)
+                }
+            };
+        let catalog_sync = if retryable_folder_count > 0 {
+            CatalogSync::pending(retryable_folder_count, blocked_folder_count, first_error)
+        } else if blocked_folder_count > 0 {
+            CatalogSync::blocked(blocked_folder_count, first_error)
+        } else if let Some(error) = first_error {
+            CatalogSync::pending(1, 0, Some(error))
         } else {
-            priorities_completed && first_error.is_none()
-        };
-        let catalog_sync = if current_work_synced {
-            CatalogSync::synced(pending_folder_count)
-        } else {
-            CatalogSync::pending(pending_folder_count.max(1), first_error)
+            CatalogSync::synced()
         };
 
         LibrarySyncReport {
@@ -393,10 +427,21 @@ mod tests {
 
     #[test]
     fn pending_copy_is_explicit_about_automatic_retry() {
-        let sync = CatalogSync::pending(2, Some("Music Library is busy.".to_owned()));
+        let sync = CatalogSync::pending(2, 0, Some("Music Library is busy.".to_owned()));
         assert_eq!(sync.status, CatalogSyncStatus::Pending);
         assert_eq!(sync.pending_folder_count, 2);
         assert!(sync.message.unwrap().contains("retry automatically"));
+    }
+
+    #[test]
+    fn blocked_copy_is_explicit_that_automatic_retry_stopped() {
+        let sync = CatalogSync::blocked(2, Some("The folder is invalid.".to_owned()));
+        assert_eq!(sync.status, CatalogSyncStatus::Blocked);
+        assert_eq!(sync.pending_folder_count, 2);
+        assert_eq!(sync.blocked_folder_count, 2);
+        let message = sync.message.unwrap();
+        assert!(message.contains("automatic retries are paused"));
+        assert!(message.contains("The folder is invalid."));
     }
 
     #[test]
@@ -514,7 +559,7 @@ mod tests {
             let maximum = Arc::clone(&maximum);
             workers.push(thread::spawn(move || {
                 start.wait();
-                coordinator.run_serialized(|| {
+                coordinator.serialize_bridge_work(|| {
                     let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
                     maximum.fetch_max(now_active, Ordering::SeqCst);
                     thread::sleep(Duration::from_millis(5));

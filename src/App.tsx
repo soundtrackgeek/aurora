@@ -238,7 +238,7 @@ const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist 
 const catalogSyncRetryIntervalMs = 5_000;
 
 function catalogSyncNeedsRetry(sync: CatalogSync | null): boolean {
-  return Boolean(sync && (sync.status === "pending" || sync.pendingFolderCount > 0));
+  return sync?.status === "pending";
 }
 
 function catalogSyncMessage(sync: CatalogSync): string {
@@ -247,6 +247,9 @@ function catalogSyncMessage(sync: CatalogSync): string {
   }
   if (sync.status === "pending") {
     return `MP3 changes are saved · ${sync.message?.trim() || "Music Library update pending; retrying automatically."}`;
+  }
+  if (sync.status === "blocked") {
+    return `MP3 changes are saved · ${sync.message?.trim() || "Music Library update needs attention; automatic retries are paused."}`;
   }
   return sync.message?.trim() || "Music Library updated.";
 }
@@ -877,9 +880,9 @@ function App() {
     if (!syncDecision.accepted) return;
     latestCatalogSyncTokenRef.current = syncDecision.latestToken;
     const previous = catalogSyncNoticeRef.current;
-    const wasPending = catalogSyncNeedsRetry(previous);
+    const wasUnsettled = previous?.status === "pending" || previous?.status === "blocked";
     const needsRetry = catalogSyncNeedsRetry(sync);
-    if (needsRetry || announceSuccess || wasPending) {
+    if (needsRetry || sync.status === "blocked" || announceSuccess || wasUnsettled) {
       catalogSyncNoticeRef.current = sync;
       setCatalogSyncNotice(sync);
     } else if (!previous) {
@@ -1479,7 +1482,8 @@ function App() {
     };
   }, [libraryReady, reloadToken, refreshExternalTagChanges]);
 
-  const catalogSyncRetryPending = catalogSyncNeedsRetry(catalogSyncNotice) || reconciliationHasMore;
+  const catalogSyncRetryPending = catalogSyncNeedsRetry(catalogSyncNotice)
+    || (reconciliationHasMore && catalogSyncNotice?.status !== "blocked");
   useEffect(() => {
     if (!libraryReady || !catalogSyncRetryPending) return;
     const interval = window.setInterval(() => {
@@ -1489,7 +1493,7 @@ function App() {
   }, [catalogSyncRetryPending, libraryReady, refreshExternalTagChanges]);
 
   useEffect(() => {
-    if (!catalogSyncNotice || catalogSyncNeedsRetry(catalogSyncNotice)) return;
+    if (catalogSyncNotice?.status !== "synced") return;
     const settledNotice = catalogSyncNotice;
     const timeout = window.setTimeout(() => {
       if (catalogSyncNoticeRef.current !== settledNotice) return;
@@ -2592,7 +2596,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.14</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.15</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

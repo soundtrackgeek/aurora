@@ -178,6 +178,27 @@ describe("TagEditor", () => {
     })));
   });
 
+  it("reports when Music Library retries are paused without obscuring the MP3 save", async () => {
+    tagMocks.update.mockResolvedValue({
+      state: snapshot(),
+      tracks: updatedTracks(),
+      catalogSync: {
+        status: "blocked",
+        message: "Music Library update needs attention; automatic retries are paused.",
+        pendingFolderCount: 1,
+        blockedFolderCount: 1,
+      },
+    });
+    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+
+    fireEvent.change(await screen.findByLabelText("Genre"), { target: { value: "Pop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByText(
+      "Saved 1 field directly to 2 MP3s. Music Library update needs attention; automatic retries are paused.",
+    )).toBeInTheDocument();
+  });
+
   it("reloads authoritative tags instead of projecting a stale edit result", async () => {
     const authoritative = snapshot();
     authoritative.tracks = authoritative.tracks.map((track) => ({

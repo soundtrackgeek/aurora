@@ -331,6 +331,8 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
         setMessage(`${savedFiles} Music Library updated.${remaining}`);
       } else if (result.catalogSync?.status === "pending") {
         setMessage(`${savedFiles} ${result.catalogSync.message ?? "The MP3 write is verified; catalog sync is pending."}`);
+      } else if (result.catalogSync?.status === "blocked") {
+        setMessage(`${savedFiles} ${result.catalogSync.message ?? "Music Library update needs attention; automatic retries are paused."}`);
       } else {
         setMessage(savedFiles);
       }

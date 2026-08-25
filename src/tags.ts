@@ -28,9 +28,10 @@ export interface TrackTagSnapshot {
 }
 
 export interface CatalogSync {
-  status: "synced" | "pending";
+  status: "synced" | "pending" | "blocked";
   message?: string | null;
   pendingFolderCount: number;
+  blockedFolderCount?: number;
   projectionToken?: number | null;
 }
 

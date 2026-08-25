@@ -12,6 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::library_sync::LibrarySyncCoordinator;
+
 const PROTOCOL_VERSION: u32 = 1;
 const MUSIC_LIBRARY_EXE_ENV: &str = "AURORA_MUSIC_LIBRARY_EXE";
 const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
@@ -335,18 +337,21 @@ pub async fn preview_library_intake_batch(
     request: LibraryIntakePreviewRequest,
 ) -> Result<LibraryIntakePreview, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let source_path = validate_source_path(&request.source_path)?;
-        let result = invoke_bridge::<_, LibraryIntakePreview>(
-            &app,
-            "previewBatch",
-            PreviewPayload {
-                source_path: &source_path,
-                category: request.category,
-            },
-            PREVIEW_TIMEOUT,
-        )?;
-        validate_preview(&result, request.category)?;
-        Ok(result)
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| {
+            let source_path = validate_source_path(&request.source_path)?;
+            let result = invoke_bridge::<_, LibraryIntakePreview>(
+                &app,
+                "previewBatch",
+                PreviewPayload {
+                    source_path: &source_path,
+                    category: request.category,
+                },
+                PREVIEW_TIMEOUT,
+            )?;
+            validate_preview(&result, request.category)?;
+            Ok(result)
+        })
     })
     .await
     .map_err(|error| format!("The album preview worker stopped unexpectedly: {error}"))?
@@ -358,18 +363,21 @@ pub async fn apply_library_intake_batch(
     request: LibraryIntakeApplyRequest,
 ) -> Result<LibraryIntakeApplyResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        validate_apply_request(&request)?;
-        let result = invoke_bridge::<_, LibraryIntakeApplyResult>(
-            &app,
-            "applyBatch",
-            ApplyPayload {
-                plan_id: &request.plan_id,
-                session_id: request.session_id,
-            },
-            APPLY_TIMEOUT,
-        )?;
-        validate_apply_result(&result, &request)?;
-        Ok(result)
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| {
+            validate_apply_request(&request)?;
+            let result = invoke_bridge::<_, LibraryIntakeApplyResult>(
+                &app,
+                "applyBatch",
+                ApplyPayload {
+                    plan_id: &request.plan_id,
+                    session_id: request.session_id,
+                },
+                APPLY_TIMEOUT,
+            )?;
+            validate_apply_result(&result, &request)?;
+            Ok(result)
+        })
     })
     .await
     .map_err(|error| format!("The album import worker stopped unexpectedly: {error}"))?
