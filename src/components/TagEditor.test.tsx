@@ -233,7 +233,12 @@ describe("TagEditor", () => {
 
     expect(await screen.findByDisplayValue("America Town Newer")).toBeInTheDocument();
     expect(tagMocks.read).toHaveBeenCalledTimes(2);
-    expect(onCatalogSync).not.toHaveBeenCalled();
+    expect(onCatalogSync).toHaveBeenCalledWith({
+      status: "synced",
+      message: "Music Library updated.",
+      pendingFolderCount: 0,
+      projectionToken: 1,
+    });
   });
 
   it("refuses to clear Music Library identity fields", async () => {

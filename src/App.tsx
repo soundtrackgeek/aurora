@@ -929,13 +929,13 @@ function App() {
   const handleCatalogSync = useCallback(async (
     sync: CatalogSync | null | undefined,
     announceSuccess = false,
-  ): Promise<void> => {
-    if (!sync) return;
+  ): Promise<boolean> => {
+    if (!sync) return false;
     const syncDecision = advanceCatalogProjectionToken(
       latestCatalogSyncTokenRef.current,
       sync.projectionToken,
     );
-    if (!syncDecision.accepted) return;
+    if (!syncDecision.accepted) return false;
     latestCatalogSyncTokenRef.current = syncDecision.latestToken;
     const previous = catalogSyncNoticeRef.current;
     const wasUnsettled = previous?.status === "pending" || previous?.status === "blocked";
@@ -947,9 +947,10 @@ function App() {
       catalogSyncNoticeRef.current = sync;
     }
     try {
-      await refreshCatalogIfChanged();
+      return await refreshCatalogIfChanged();
     } catch (error) {
       console.warn("Aurora could not check Music Library for partial sync updates yet", error);
+      return false;
     }
   }, [refreshCatalogIfChanged]);
 
@@ -2037,6 +2038,31 @@ function App() {
     return projection.complete;
   }
 
+  async function refreshTagEditorCatalogViews(sync: CatalogSync) {
+    const albumId = selectedAlbumId;
+    if (albumId) pendingExplorerAlbumIdRef.current = albumId;
+    const catalogRefreshed = await handleCatalogSync(sync, true);
+    if (catalogRefreshed || !albumId) return;
+    if (pendingExplorerAlbumIdRef.current === albumId) pendingExplorerAlbumIdRef.current = null;
+    if (sync.status !== "synced") return;
+
+    const requestId = ++albumRequestRef.current;
+    try {
+      const detail = await loadAlbumDetail(albumId);
+      if (requestId !== albumRequestRef.current) return;
+      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
+      setAlbumTracks(detail.tracks);
+      setAlbumTracksTruncated(detail.tracksTruncated);
+      setSelectedTrack((current) => {
+        if (!current || current.albumId !== albumId) return current;
+        return detail.tracks.find((candidate) => candidate.trackKey === current.trackKey) ?? current;
+      });
+      setAlbumDetailState("ready");
+    } catch (error) {
+      console.warn("Aurora could not refresh the selected album after the tag edit", error);
+    }
+  }
+
   function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
     const baseline = previous ?? (selectedTrack?.trackKey === updated.trackKey ? selectedTrack : undefined);
     const refreshMatchingTrack = (track: Track) => track.trackKey === updated.trackKey
@@ -2737,7 +2763,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.17.25</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.17.26</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3086,7 +3112,7 @@ function App() {
                 : `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`}
               target={tagEditorTarget}
               onTracksChange={applyTrackChanges}
-              onCatalogSync={(sync) => handleCatalogSync(sync, true)}
+              onCatalogSync={refreshTagEditorCatalogViews}
             />
           </div>
         ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (

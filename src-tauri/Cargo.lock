@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.17.25"
+version = "0.17.26"
 dependencies = [
  "cpal",
  "id3",

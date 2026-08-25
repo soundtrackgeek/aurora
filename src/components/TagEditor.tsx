@@ -320,6 +320,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
         : onTracksChange(result.tracks);
       if (projectionAccepted === false) {
         await loadState(true);
+        if (result.catalogSync && onCatalogSync) await onCatalogSync(result.catalogSync);
         return;
       }
       acceptSnapshot(result.state, "saved");

@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.26] - 2026-08-25
+
+### Fixed
+
+- Albums detail now preserves and refreshes the selected album after a synchronized Tags save, so a changed per-track Artist credit appears in the track row instead of leaving the pre-edit artist visible. A superseded optimistic projection also triggers the authoritative catalog refresh rather than updating only the tag editor.
+
 ## [0.17.25] - 2026-08-25
 
 ### Added
