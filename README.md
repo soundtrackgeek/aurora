@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.29 restores fast album opening while retaining durable deleted-track filtering and corrected album counts.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.17.30 restores the verified release pipeline for fast album opening while retaining durable deleted-track filtering and corrected album counts.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.17.29 slice
+## Current 0.17.30 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Rust's strict warning-as-error CI lint passes for the optimized album snapshot path without changing its deletion projection or runtime behavior.
 - Album detail reads pending deletion state once, scopes missing-file verification to the selected album, and reuses that result for its rows, rating, Love, duration, and track counts. It never runs Ratings' global deletion scan or opens the state database once per track during an ordinary album open.
 - Album detail reads Aurora's local pending-deletion queue before checking an MP3 path, so ordinary album opens avoid synchronous probes across sleeping, remote, or unavailable music drives while queued-and-missing deleted tracks remain hidden.
 - Albums detail refreshes its selected track rows after a synchronized Tags save, so the displayed per-track Artist credit matches both the verified MP3 and the tag editor without collapsing the selected album.

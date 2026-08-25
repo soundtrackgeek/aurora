@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.30] - 2026-08-25
+
+### Fixed
+
+- Removed a redundant borrow from the optimized album snapshot path so Aurora's strict Rust lint passes and the Windows release can proceed without changing album loading behavior.
+
 ## [0.17.29] - 2026-08-25
 
 ### Fixed

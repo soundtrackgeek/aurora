@@ -443,7 +443,7 @@ pub(crate) fn live_album_from_connection(
         .into_iter()
         .map(|overlay| (overlay.track_key.clone(), overlay))
         .collect::<HashMap<_, _>>();
-    query_album_snapshot(connection, album_id, &overlays, &deleted_track_keys)
+    query_album_snapshot(connection, album_id, &overlays, deleted_track_keys)
         .map(|snapshot| snapshot.album)
 }
 
