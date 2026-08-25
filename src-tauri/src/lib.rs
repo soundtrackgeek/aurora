@@ -666,7 +666,14 @@ async fn track_waveform(
     .await
 }
 
-fn refresh_playback_track(app: &AppHandle, track: &TrackSummary) {
+fn refresh_playback_track_tags(app: &AppHandle, track: &TrackSummary) {
+    let playback = app.state::<PlaybackState>();
+    if let Ok(mut runtime) = playback.lock() {
+        runtime.refresh_track_tags(track);
+    }
+}
+
+fn refresh_playback_track_metadata(app: &AppHandle, track: &TrackSummary) {
     let playback = app.state::<PlaybackState>();
     if let Ok(mut runtime) = playback.lock() {
         runtime.refresh_track_metadata(track);
@@ -687,7 +694,7 @@ async fn track_tag_state(
                 .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
             service.inspect(&track_id, &track_key)?
         };
-        refresh_playback_track(&app, &result.track);
+        refresh_playback_track_tags(&app, &result.track);
         Ok(result)
     })
     .await
@@ -709,7 +716,7 @@ async fn update_track_tags(
                     .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
                 service.update(request)?
             };
-            refresh_playback_track(&app, &result.track);
+            refresh_playback_track_tags(&app, &result.track);
             let directory = result.track.directory.clone();
             let sync = coordinator.queue_after_edit(&app, std::slice::from_ref(&directory));
             if sync.completed(&directory) {
@@ -717,7 +724,7 @@ async fn update_track_tags(
                 result.tag_state.sync_state = None;
             }
             result.catalog_sync = Some(sync.catalog_sync);
-            refresh_playback_track(&app, &result.track);
+            refresh_playback_track_tags(&app, &result.track);
             Ok::<TrackTagSnapshot, String>(result)
         });
         let mut result = result?;
@@ -763,7 +770,7 @@ async fn update_tag_editor(
             };
 
             for track in &result.tracks {
-                refresh_playback_track(&app, track);
+                refresh_playback_track_metadata(&app, track);
             }
             let directories = result
                 .tracks
@@ -779,7 +786,7 @@ async fn update_tag_editor(
             }
             result.catalog_sync = Some(sync.catalog_sync);
             for track in &result.tracks {
-                refresh_playback_track(&app, track);
+                refresh_playback_track_metadata(&app, track);
             }
             Ok::<TagEditorUpdateResult, String>(result)
         });
@@ -809,7 +816,7 @@ async fn undo_track_tag_edit(
                     .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
                 service.undo(&track_id, &track_key)?
             };
-            refresh_playback_track(&app, &result.track);
+            refresh_playback_track_tags(&app, &result.track);
             let directory = result.track.directory.clone();
             let sync = coordinator.queue_after_edit(&app, std::slice::from_ref(&directory));
             if sync.completed(&directory) {
@@ -817,7 +824,7 @@ async fn undo_track_tag_edit(
                 result.tag_state.sync_state = None;
             }
             result.catalog_sync = Some(sync.catalog_sync);
-            refresh_playback_track(&app, &result.track);
+            refresh_playback_track_tags(&app, &result.track);
             Ok::<TrackTagSnapshot, String>(result)
         });
         let mut result = result?;

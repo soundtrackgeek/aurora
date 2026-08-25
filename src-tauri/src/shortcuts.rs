@@ -572,7 +572,7 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                     let mut playback = state
                         .lock()
                         .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                    playback.refresh_track_metadata(&updated.track);
+                    playback.refresh_track_tags(&updated.track);
                 }
                 let directory = updated.track.directory.clone();
                 let sync = coordinator.queue_after_edit(app, std::slice::from_ref(&directory));
@@ -585,7 +585,7 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                     let mut playback = state
                         .lock()
                         .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                    playback.refresh_track_metadata(&updated.track);
+                    playback.refresh_track_tags(&updated.track);
                 }
                 let message = match action {
                     ShortcutAction::Rating(0) => {

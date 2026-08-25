@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.17.23] - 2026-08-25
+
+### Fixed
+
+- Rating, Love, and Release Year changes no longer restore stale Artist, title, album, or other editable metadata in the player after a vertical Tags editor save.
+
 ## [0.17.22] - 2026-08-25
 
 ### Added

@@ -1355,6 +1355,14 @@ impl PlaybackRuntime {
         Ok(self.audio_settings_status())
     }
 
+    pub(crate) fn refresh_track_tags(&mut self, updated: &TrackSummary) {
+        for track in &mut self.queue {
+            if track.track_key == updated.track_key {
+                track.apply_inline_tag_projection(updated);
+            }
+        }
+    }
+
     pub(crate) fn refresh_track_metadata(&mut self, updated: &TrackSummary) {
         for track in &mut self.queue {
             if track.track_key == updated.track_key {

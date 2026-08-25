@@ -89,15 +89,21 @@ impl TrackSummary {
         self.tag_sync_state = pending_import.then_some(TagSyncState::PendingImport);
     }
 
-    pub(crate) fn apply_tag_projection(&mut self, updated: &Self) {
-        self.title = updated.title.clone();
-        self.artist = updated.artist.clone();
-        self.display_artist = updated.display_artist.clone();
-        self.album = updated.album.clone();
+    pub(crate) fn apply_inline_tag_projection(&mut self, updated: &Self) {
         self.rating = updated.rating;
         self.loved = updated.loved;
         self.love_state = updated.love_state;
         self.release_year = updated.release_year;
+        self.tag_sync_state = updated.tag_sync_state;
+        self.can_undo_tag_edit = updated.can_undo_tag_edit;
+    }
+
+    pub(crate) fn apply_tag_projection(&mut self, updated: &Self) {
+        self.apply_inline_tag_projection(updated);
+        self.title = updated.title.clone();
+        self.artist = updated.artist.clone();
+        self.display_artist = updated.display_artist.clone();
+        self.album = updated.album.clone();
         self.original_year = updated.original_year;
         self.publisher = updated.publisher.clone();
         self.genre = updated.genre.clone();
@@ -105,8 +111,6 @@ impl TrackSummary {
         self.track_total = updated.track_total;
         self.disc_number = updated.disc_number;
         self.disc_total = updated.disc_total;
-        self.tag_sync_state = updated.tag_sync_state;
-        self.can_undo_tag_edit = updated.can_undo_tag_edit;
     }
 }
 
@@ -1924,6 +1928,55 @@ mod tests {
         assert_eq!(rebound.id, "fresh-id");
         assert_eq!(rebound.rating, Some(3.5));
         assert_eq!(rebound.love_state, LoveState::Banned);
+    }
+
+    #[test]
+    fn inline_tag_projection_preserves_metadata_from_a_full_editor_save() {
+        let mut edited = TrackSummary {
+            id: "fresh-id".to_owned(),
+            track_key: "d:\\music\\track.mp3".to_owned(),
+            album_id: Some("fresh-album".to_owned()),
+            title: "Edited title".to_owned(),
+            artist: "Edited album artist".to_owned(),
+            display_artist: Some("Edited artist".to_owned()),
+            album: "Edited album".to_owned(),
+            release_year: Some(2026),
+            original_year: Some(2025),
+            publisher: None,
+            rating: None,
+            loved: false,
+            love_state: LoveState::Neutral,
+            tag_sync_state: None,
+            can_undo_tag_edit: false,
+            duration_seconds: Some(180),
+            genre: Some("Pop".to_owned()),
+            play_count: None,
+            track_number: Some(1),
+            track_total: Some(10),
+            disc_number: Some(1),
+            disc_total: Some(1),
+            directory: "D:\\MUSIC".to_owned(),
+            filename: "track.mp3".to_owned(),
+            catalog_import_run_id: 1,
+        };
+        let mut stale_rating_update = edited.clone();
+        stale_rating_update.title = "Stale title".to_owned();
+        stale_rating_update.artist = "Stale album artist".to_owned();
+        stale_rating_update.display_artist = Some("Stale artist".to_owned());
+        stale_rating_update.album = "Stale album".to_owned();
+        stale_rating_update.rating = Some(4.5);
+        stale_rating_update.tag_sync_state = Some(TagSyncState::PendingImport);
+        stale_rating_update.can_undo_tag_edit = true;
+
+        edited.apply_inline_tag_projection(&stale_rating_update);
+
+        assert_eq!(edited.title, "Edited title");
+        assert_eq!(edited.artist, "Edited album artist");
+        assert_eq!(edited.display_artist.as_deref(), Some("Edited artist"));
+        assert_eq!(edited.album, "Edited album");
+        assert_eq!(edited.rating, Some(4.5));
+        assert_eq!(edited.tag_sync_state, Some(TagSyncState::PendingImport));
+        assert!(edited.can_undo_tag_edit);
     }
 
     #[test]
