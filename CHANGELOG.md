@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.12] - 2026-08-26
+
+### Changed
+
+- The Ratings **Finish what you love** Refresh button now gives immediate pressed feedback, disables itself, changes to **Refreshing…**, and spins its icon until both the overview and active completion shelf finish reloading.
+
 ## [0.18.11] - 2026-08-26
 
 ### Changed

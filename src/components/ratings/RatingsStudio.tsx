@@ -35,6 +35,7 @@ interface RatingsStudioProps {
   errorMessage: string | null;
   pageError: string | null;
   queueBusy: boolean;
+  refreshing: boolean;
   queueMessage: string | null;
   busyTrackKeys: ReadonlySet<string>;
   onCompletionChange: (kind: CompletionKind) => void;
@@ -208,8 +209,15 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
             key={tab.kind}
           >{tab.label} <span>{formatCount(overview.completion[tab.kind])}</span></button>)}
         </div>
-        <button type="button" className="button button--quiet completion-refresh" onClick={props.onRefresh}>
-          <RefreshCw aria-hidden="true" /> Refresh
+        <button
+          type="button"
+          className="button button--quiet completion-refresh"
+          disabled={props.refreshing}
+          aria-busy={props.refreshing}
+          onClick={props.onRefresh}
+        >
+          <RefreshCw className={props.refreshing ? "is-spinning" : undefined} aria-hidden="true" />
+          {props.refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </div>
     </header>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Track } from "../../library";
 import type { RatingsOverview } from "../../ratings";
@@ -26,6 +26,7 @@ function props() {
     errorMessage: null,
     pageError: null,
     queueBusy: false,
+    refreshing: false,
     queueMessage: null,
     busyTrackKeys: new Set<string>(),
     onCompletionChange: vi.fn(), onSelectAlbum: vi.fn(), onGoToAlbum: vi.fn(), onSelectTrack: vi.fn(), onPlayTrack: vi.fn(),
@@ -61,5 +62,23 @@ describe("RatingsStudio", () => {
     expect(screen.getByText("Manhattan")).toBeVisible();
     expect(screen.getByText("[Andrea & Hot Mink]")).toBeVisible();
     expect(screen.queryByText("[Various Artists]")).not.toBeInTheDocument();
+  });
+
+  it("shows refresh feedback until the reload completes", () => {
+    const callbacks = props();
+    const { container, rerender } = render(<RatingsStudio {...callbacks} />);
+    const refresh = within(container).getByRole("button", { name: "Refresh" });
+
+    fireEvent.click(refresh);
+    expect(callbacks.onRefresh).toHaveBeenCalledOnce();
+
+    rerender(<RatingsStudio {...callbacks} refreshing />);
+    const refreshing = within(container).getByRole("button", { name: "Refreshing…" });
+    expect(refreshing).toBeDisabled();
+    expect(refreshing).toHaveAttribute("aria-busy", "true");
+    expect(refreshing.querySelector("svg")).toHaveClass("is-spinning");
+
+    rerender(<RatingsStudio {...callbacks} refreshing={false} />);
+    expect(within(container).getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 });

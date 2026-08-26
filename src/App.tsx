@@ -576,6 +576,7 @@ function App() {
   const [ratingsError, setRatingsError] = useState<string | null>(null);
   const [ratingsPageError, setRatingsPageError] = useState<string | null>(null);
   const [ratingsReloadToken, setRatingsReloadToken] = useState(0);
+  const [ratingsRefreshing, setRatingsRefreshing] = useState(false);
   const [ratingsCompletion, setRatingsCompletion] = useState<CompletionKind>("almostComplete");
   const [selectedRatingAlbum, setSelectedRatingAlbum] = useState<RatingAlbum | null>(null);
   const [ratingAlbumTracks, setRatingAlbumTracks] = useState<Track[]>([]);
@@ -1313,6 +1314,7 @@ function App() {
           setRatingsError(error instanceof Error ? error.message : String(error));
           setRatingsLoadState("error");
           setRatingsPageState("error");
+          setRatingsRefreshing(false);
         });
     }, 0);
     return () => {
@@ -1339,6 +1341,7 @@ function App() {
           if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
           setRatingsPage(page);
           setRatingsPageState("ready");
+          setRatingsRefreshing(false);
           const initialAlbum = page.albums.find((album) => album.id === previousAlbumId)
             ?? page.albums[0]
             ?? null;
@@ -1360,6 +1363,7 @@ function App() {
         if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
         setRatingsPageError(error instanceof Error ? error.message : String(error));
         setRatingsPageState("error");
+        setRatingsRefreshing(false);
       });
     return () => {
       cancelled = true;
@@ -2782,7 +2786,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.11</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.12</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3022,6 +3026,7 @@ function App() {
                 errorMessage={ratingsError}
                 pageError={ratingsPageError}
                 queueBusy={ratingsQueueBusy}
+                refreshing={ratingsRefreshing}
                 queueMessage={ratingsQueueMessage}
                 busyTrackKeys={inlineSavingKeys}
                 onCompletionChange={setRatingsCompletion}
@@ -3034,7 +3039,11 @@ function App() {
                 onPlayCollection={(mode, rating) => void playRatingCollection(mode, rating)}
                 onExploreCollection={exploreRatingCollection}
                 onPlayUnrated={(album) => void playRatingAlbumUnrated(album)}
-                onRefresh={() => setRatingsReloadToken((value) => value + 1)}
+                onRefresh={() => {
+                  if (ratingsRefreshing) return;
+                  setRatingsRefreshing(true);
+                  setRatingsReloadToken((value) => value + 1);
+                }}
                 onRetry={() => setRatingsReloadToken((value) => value + 1)}
                 onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
               />

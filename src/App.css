@@ -511,6 +511,10 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 @keyframes loadingPulse { 50% { transform: scale(1.08); box-shadow: 0 0 27px rgba(168,85,247,.3); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.completion-refresh { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease; }
+.completion-refresh:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+.completion-refresh[aria-busy="true"] { border-color: rgba(197,88,236,.38); color: #e2c7ed; background: rgba(120,43,161,.16); }
+
 @media (max-width: 1180px) {
   .app-shell { --left-sidebar-width: 192px; --right-sidebar-width: 260px; }
   .sidebar { padding-inline: 10px; }.brand { padding-inline: 7px; }.brand span { display: none; }
