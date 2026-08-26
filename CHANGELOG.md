@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.14] - 2026-08-26
+
+### Fixed
+
+- Kept the Tags editor within the right sidebar when long values are selected or scrolled, while preserving native horizontal scrolling inside each fixed-width input.
+
 ## [0.18.13] - 2026-08-26
 
 ### Changed
