@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-26
+
+### Added
+
+- Added a dedicated **Listening report** page inside History with 7-, 30-, and 90-day periods plus all-time reporting, previous-period navigation, device filtering, comparative activity bars, top artists/albums/tracks, a 24-hour listening clock, listening fingerprint, release-decade distribution, discovery ratios, and quick facts.
+- Added a non-paginated Rust reporting command that aggregates the complete matching listening record across every available device-history database. The existing 50-row History page limit affects only the visible timeline and never report totals.
+
+### Changed
+
+- History now opens on Listening report while keeping the original searchable, filterable session timeline as a peer page.
+
 ## [0.18.23] - 2026-08-26
 
 ### Documentation

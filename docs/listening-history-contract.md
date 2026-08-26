@@ -40,6 +40,25 @@ History queries open the local database and up to 16 named peer snapshots read-o
 
 This design avoids the weak assumption that two computers can safely write the same SQLite history file through OneDrive. OneDrive propagation can still be delayed, so a peer's newest sessions appear only after its snapshot reaches the current machine. Local recording continues when OneDrive is unavailable.
 
+## Listening reports
+
+History has two peer pages. **Listening report** is the default analytical view; **History** retains the searchable session timeline, played-threshold setting, and 50-row application page size.
+
+The `listening_history_report` command is deliberately independent of timeline pagination. For the requested period and optional device, it reads every session from the local database and each valid peer snapshot, removes duplicate session IDs, and only then computes totals and insights. A timeline page size or cursor can never reduce a report total.
+
+Report periods use explicit inclusive millisecond boundaries supplied by React. The request also carries the browser's local time-zone offset so day and hour buckets match the dates and clock shown in the interface. A bounded previous period supplies comparisons for 7, 30, and 90 days; all time has no invented comparison period.
+
+The report returns:
+
+- complete session, play, skip, completion, listening-time, unique-track, unique-artist, and unique-album totals;
+- current and previous daily play buckets plus 24 local-hour buckets;
+- top artists, albums, and tracks, with current-catalog resolution for playable tracks and album artwork;
+- active-day, most-active-day, and longest-session facts;
+- release-decade counts from the current catalog year when a historical track can still be resolved;
+- discovery counts based on the earliest registered play across the complete matching device record, not catalog added dates or Last.fm popularity.
+
+The five Listening fingerprint values are transparent UI-level transformations of those returned facts. They describe only the selected period and are not compared with a global population or presented as a scientific score.
+
 ## Scope and privacy
 
 History stays on the user's computer and configured OneDrive folder. Aurora does not submit plays to Last.fm, MusicBrainz, or another service. Imported Last.fm popularity remains separate from Aurora's personal registered-play count.

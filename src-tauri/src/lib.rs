@@ -37,7 +37,10 @@ use explorer::{
     TrackPage, TrackPageRequest,
 };
 use genres::{GenreDetail, GenreQueueRequest, GenreSummary};
-use history::{HistoryPage, HistoryPageRequest, HistoryStore, TrackHistoryInsight};
+use history::{
+    HistoryPage, HistoryPageRequest, HistoryReport, HistoryReportRequest, HistoryStore,
+    TrackHistoryInsight,
+};
 use inbox::{
     DiscogsCredentialsRequest, InboxRenameRequest, InboxRenameResult, InboxRuntime,
     InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest, InboxTagApplyResult,
@@ -1020,6 +1023,20 @@ async fn listening_history_page(
 }
 
 #[tauri::command]
+async fn listening_history_report(
+    app: AppHandle,
+    request: HistoryReportRequest,
+) -> Result<HistoryReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let history = app.state::<HistoryStore>();
+        let store = app.state::<StateStore>();
+        history.report(request, &store)
+    })
+    .await
+    .map_err(|error| format!("The listening-report worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn track_history_insight(
     app: AppHandle,
     track_key: String,
@@ -1245,6 +1262,7 @@ pub fn run() {
             laptop_mode_status,
             set_laptop_mode,
             listening_history_page,
+            listening_history_report,
             track_history_insight,
             set_history_play_threshold,
             global_shortcut_settings,

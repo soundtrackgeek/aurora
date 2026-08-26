@@ -6,7 +6,7 @@ use crate::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -141,6 +141,93 @@ pub(crate) struct HistoryPage {
     play_threshold_seconds: u32,
     sync_state: &'static str,
     sync_message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct HistoryReportRequest {
+    started_after_ms: Option<i64>,
+    started_before_ms: Option<i64>,
+    previous_started_after_ms: Option<i64>,
+    previous_started_before_ms: Option<i64>,
+    device_id: Option<String>,
+    timezone_offset_minutes: i32,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportSummary {
+    sessions: i64,
+    plays: i64,
+    skips: i64,
+    unique_tracks: i64,
+    listened_seconds: f64,
+    unique_artists: i64,
+    unique_albums: i64,
+    completed: i64,
+    active_days: i64,
+    most_active_day_start_ms: Option<i64>,
+    most_active_day_plays: i64,
+    longest_session_seconds: f64,
+    longest_session_started_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportBucket {
+    start_ms: i64,
+    plays: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportArtist {
+    artist: String,
+    plays: i64,
+    listened_seconds: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportAlbum {
+    album: String,
+    artist: String,
+    plays: i64,
+    listened_seconds: f64,
+    track: Option<TrackSummary>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportDiscovery {
+    new_artists: i64,
+    total_artists: i64,
+    new_albums: i64,
+    total_albums: i64,
+    new_tracks: i64,
+    total_tracks: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportDecade {
+    decade: String,
+    plays: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReport {
+    summary: HistoryReportSummary,
+    previous_summary: Option<HistoryReportSummary>,
+    daily: Vec<HistoryReportBucket>,
+    previous_daily: Vec<HistoryReportBucket>,
+    hourly: Vec<i64>,
+    top_artists: Vec<HistoryReportArtist>,
+    top_albums: Vec<HistoryReportAlbum>,
+    top_tracks: Vec<HistoryTopTrack>,
+    discovery: HistoryReportDiscovery,
+    decades: Vec<HistoryReportDecade>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -874,6 +961,257 @@ impl HistoryStore {
         })
     }
 
+    pub(crate) fn report(
+        &self,
+        request: HistoryReportRequest,
+        state_store: &StateStore,
+    ) -> Result<HistoryReport, String> {
+        validate_report_request(&request)?;
+        let mut all_rows = Vec::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            if request
+                .device_id
+                .as_deref()
+                .is_some_and(|device| device != metadata.device_id)
+            {
+                continue;
+            }
+            all_rows.extend(query_report_rows(&connection, &metadata)?);
+        }
+        all_rows.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
+        let mut seen = HashSet::new();
+        all_rows.retain(|row| seen.insert(row.session_id.clone()));
+
+        let current = all_rows
+            .iter()
+            .filter(|row| {
+                report_range_matches(
+                    row.started_at_ms,
+                    request.started_after_ms,
+                    request.started_before_ms,
+                )
+            })
+            .collect::<Vec<_>>();
+        let previous = request.previous_started_after_ms.map(|after| {
+            all_rows
+                .iter()
+                .filter(|row| {
+                    report_range_matches(
+                        row.started_at_ms,
+                        Some(after),
+                        request.previous_started_before_ms,
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        let current_plays = current
+            .iter()
+            .copied()
+            .filter(|row| row.registered_play)
+            .collect::<Vec<_>>();
+
+        let references = current_plays
+            .iter()
+            .map(|row| StoredQueueEntry {
+                track_id: String::new(),
+                track_key: Some(row.track_key.clone()),
+                directory: Some(row.directory.clone()),
+                filename: Some(row.filename.clone()),
+            })
+            .collect::<Vec<_>>();
+        let resolved = if references.is_empty() {
+            Vec::new()
+        } else {
+            catalog::load_tracks_by_references(&references, state_store)
+                .map(|(tracks, _, _)| tracks)
+                .unwrap_or_default()
+        };
+        let resolved_by_key = resolved
+            .into_iter()
+            .map(|track| (track.track_key.clone(), track))
+            .collect::<HashMap<_, _>>();
+
+        let mut daily = BTreeMap::new();
+        let mut hourly = vec![0_i64; 24];
+        for row in &current_plays {
+            *daily
+                .entry(report_local_day_start(
+                    row.started_at_ms,
+                    request.timezone_offset_minutes,
+                ))
+                .or_insert(0_i64) += 1;
+            let hour = report_local_hour(row.started_at_ms, request.timezone_offset_minutes);
+            hourly[hour] = hourly[hour].saturating_add(1);
+        }
+        let mut previous_daily = BTreeMap::new();
+        if let Some(rows) = previous.as_ref() {
+            for row in rows.iter().filter(|row| row.registered_play) {
+                *previous_daily
+                    .entry(report_local_day_start(
+                        row.started_at_ms,
+                        request.timezone_offset_minutes,
+                    ))
+                    .or_insert(0_i64) += 1;
+            }
+        }
+
+        let mut artists: HashMap<String, HistoryReportArtist> = HashMap::new();
+        let mut albums: HashMap<String, (HistoryReportAlbum, String)> = HashMap::new();
+        let mut tracks: HashMap<String, HistoryTopRow> = HashMap::new();
+        let mut decades: BTreeMap<String, i64> = BTreeMap::new();
+        for row in &current_plays {
+            let artist_key = row.artist.trim().to_lowercase();
+            artists
+                .entry(artist_key)
+                .and_modify(|artist| {
+                    artist.plays = artist.plays.saturating_add(1);
+                    artist.listened_seconds += row.listened_seconds;
+                })
+                .or_insert_with(|| HistoryReportArtist {
+                    artist: row.artist.clone(),
+                    plays: 1,
+                    listened_seconds: row.listened_seconds,
+                });
+            let album_key = format!(
+                "{}\0{}",
+                row.artist.trim().to_lowercase(),
+                row.album.trim().to_lowercase()
+            );
+            albums
+                .entry(album_key)
+                .and_modify(|(album, representative)| {
+                    album.plays = album.plays.saturating_add(1);
+                    album.listened_seconds += row.listened_seconds;
+                    if row.started_at_ms
+                        > tracks
+                            .get(representative)
+                            .map_or(i64::MIN, |track| track.last_played_at_ms)
+                    {
+                        *representative = row.track_key.clone();
+                    }
+                })
+                .or_insert_with(|| {
+                    (
+                        HistoryReportAlbum {
+                            album: row.album.clone(),
+                            artist: row.artist.clone(),
+                            plays: 1,
+                            listened_seconds: row.listened_seconds,
+                            track: None,
+                        },
+                        row.track_key.clone(),
+                    )
+                });
+            tracks
+                .entry(row.track_key.clone())
+                .and_modify(|track| {
+                    track.plays = track.plays.saturating_add(1);
+                    track.listened_seconds += row.listened_seconds;
+                    track.last_played_at_ms = track.last_played_at_ms.max(row.started_at_ms);
+                })
+                .or_insert_with(|| HistoryTopRow {
+                    track_key: row.track_key.clone(),
+                    title: row.title.clone(),
+                    artist: row.artist.clone(),
+                    album: row.album.clone(),
+                    directory: row.directory.clone(),
+                    filename: row.filename.clone(),
+                    plays: 1,
+                    listened_seconds: row.listened_seconds,
+                    last_played_at_ms: row.started_at_ms,
+                });
+            let decade = resolved_by_key
+                .get(&row.track_key)
+                .and_then(|track| track.release_year)
+                .map(|year| format!("{}s", year.div_euclid(10) * 10))
+                .unwrap_or_else(|| "Unknown".to_owned());
+            *decades.entry(decade).or_insert(0) += 1;
+        }
+
+        let mut top_artists = artists.into_values().collect::<Vec<_>>();
+        top_artists.sort_by(|left, right| {
+            right
+                .plays
+                .cmp(&left.plays)
+                .then_with(|| right.listened_seconds.total_cmp(&left.listened_seconds))
+        });
+        top_artists.truncate(5);
+        let mut top_albums = albums
+            .into_values()
+            .map(|(mut album, representative)| {
+                album.track = resolved_by_key.get(&representative).cloned();
+                album
+            })
+            .collect::<Vec<_>>();
+        top_albums.sort_by(|left, right| {
+            right
+                .plays
+                .cmp(&left.plays)
+                .then_with(|| right.listened_seconds.total_cmp(&left.listened_seconds))
+        });
+        top_albums.truncate(5);
+        let mut top_track_rows = tracks.into_values().collect::<Vec<_>>();
+        top_track_rows.sort_by(|left, right| {
+            right
+                .plays
+                .cmp(&left.plays)
+                .then_with(|| right.listened_seconds.total_cmp(&left.listened_seconds))
+        });
+        top_track_rows.truncate(5);
+        let top_tracks = top_track_rows
+            .into_iter()
+            .map(|row| HistoryTopTrack {
+                track: resolved_by_key.get(&row.track_key).cloned(),
+                track_key: row.track_key,
+                title: row.title,
+                artist: row.artist,
+                album: row.album,
+                plays: row.plays,
+                listened_seconds: row.listened_seconds,
+                last_played_at_ms: row.last_played_at_ms,
+            })
+            .collect();
+
+        let discovery = report_discovery(
+            &all_rows,
+            &current_plays,
+            request.started_after_ms,
+            request.started_before_ms,
+        );
+        Ok(HistoryReport {
+            summary: report_summary(&current, request.timezone_offset_minutes),
+            previous_summary: previous
+                .as_ref()
+                .map(|rows| report_summary(rows, request.timezone_offset_minutes)),
+            daily: daily
+                .into_iter()
+                .map(|(start_ms, plays)| HistoryReportBucket { start_ms, plays })
+                .collect(),
+            previous_daily: previous_daily
+                .into_iter()
+                .map(|(start_ms, plays)| HistoryReportBucket { start_ms, plays })
+                .collect(),
+            hourly,
+            top_artists,
+            top_albums,
+            top_tracks,
+            discovery,
+            decades: decades
+                .into_iter()
+                .map(|(decade, plays)| HistoryReportDecade { decade, plays })
+                .collect(),
+        })
+    }
+
     pub(crate) fn track_insight(&self, track_key: &str) -> Result<TrackHistoryInsight, String> {
         if track_key.trim().is_empty() || track_key.len() > 2_048 {
             return Err("Listening-history track identity is invalid.".to_owned());
@@ -1226,6 +1564,202 @@ fn validate_request(request: &HistoryPageRequest) -> Result<(), String> {
         parse_cursor(cursor)?;
     }
     Ok(())
+}
+
+fn validate_report_request(request: &HistoryReportRequest) -> Result<(), String> {
+    if request
+        .device_id
+        .as_deref()
+        .is_some_and(|value| !valid_device_id(value))
+    {
+        return Err("History report device filter is invalid.".to_owned());
+    }
+    if !(-1_440..=1_440).contains(&request.timezone_offset_minutes) {
+        return Err("History report time zone offset is invalid.".to_owned());
+    }
+    for (after, before) in [
+        (request.started_after_ms, request.started_before_ms),
+        (
+            request.previous_started_after_ms,
+            request.previous_started_before_ms,
+        ),
+    ] {
+        if after.is_some_and(|value| value < 0)
+            || before.is_some_and(|value| value < 0)
+            || matches!((after, before), (Some(start), Some(end)) if start > end)
+        {
+            return Err("History report date range is invalid.".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn report_range_matches(timestamp: i64, after: Option<i64>, before: Option<i64>) -> bool {
+    after.is_none_or(|start| timestamp >= start) && before.is_none_or(|end| timestamp <= end)
+}
+
+fn report_local_day_start(timestamp: i64, timezone_offset_minutes: i32) -> i64 {
+    const DAY_MS: i64 = 86_400_000;
+    let offset_ms = i64::from(timezone_offset_minutes) * 60_000;
+    (timestamp - offset_ms).div_euclid(DAY_MS) * DAY_MS + offset_ms
+}
+
+fn report_local_hour(timestamp: i64, timezone_offset_minutes: i32) -> usize {
+    let offset_ms = i64::from(timezone_offset_minutes) * 60_000;
+    (timestamp - offset_ms).div_euclid(3_600_000).rem_euclid(24) as usize
+}
+
+fn report_summary(rows: &[&HistoryRow], timezone_offset_minutes: i32) -> HistoryReportSummary {
+    let mut tracks = HashSet::new();
+    let mut artists = HashSet::new();
+    let mut albums = HashSet::new();
+    let mut days: HashMap<i64, i64> = HashMap::new();
+    let mut summary = HistoryReportSummary::default();
+    for row in rows {
+        summary.sessions = summary.sessions.saturating_add(1);
+        summary.listened_seconds += row.listened_seconds;
+        summary.skips += i64::from(row.outcome == "skipped");
+        summary.completed += i64::from(row.outcome == "completed");
+        if row.listened_seconds > summary.longest_session_seconds {
+            summary.longest_session_seconds = row.listened_seconds;
+            summary.longest_session_started_at_ms = Some(row.started_at_ms);
+        }
+        if row.registered_play {
+            summary.plays = summary.plays.saturating_add(1);
+            tracks.insert(row.track_key.to_owned());
+            artists.insert(row.artist.trim().to_lowercase());
+            albums.insert(format!(
+                "{}\0{}",
+                row.artist.trim().to_lowercase(),
+                row.album.trim().to_lowercase()
+            ));
+            *days
+                .entry(report_local_day_start(
+                    row.started_at_ms,
+                    timezone_offset_minutes,
+                ))
+                .or_insert(0) += 1;
+        }
+    }
+    summary.unique_tracks = tracks.len().min(i64::MAX as usize) as i64;
+    summary.unique_artists = artists.len().min(i64::MAX as usize) as i64;
+    summary.unique_albums = albums.len().min(i64::MAX as usize) as i64;
+    summary.active_days = days.len().min(i64::MAX as usize) as i64;
+    if let Some((day, plays)) = days
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)))
+    {
+        summary.most_active_day_start_ms = Some(day);
+        summary.most_active_day_plays = plays;
+    }
+    summary
+}
+
+fn report_discovery(
+    all_rows: &[HistoryRow],
+    current_plays: &[&HistoryRow],
+    started_after_ms: Option<i64>,
+    started_before_ms: Option<i64>,
+) -> HistoryReportDiscovery {
+    let mut first_artists: HashMap<String, i64> = HashMap::new();
+    let mut first_albums: HashMap<String, i64> = HashMap::new();
+    let mut first_tracks: HashMap<String, i64> = HashMap::new();
+    for row in all_rows.iter().filter(|row| row.registered_play) {
+        let artist = row.artist.trim().to_lowercase();
+        let album = format!("{}\0{}", artist, row.album.trim().to_lowercase());
+        first_artists
+            .entry(artist)
+            .and_modify(|first| *first = (*first).min(row.started_at_ms))
+            .or_insert(row.started_at_ms);
+        first_albums
+            .entry(album)
+            .and_modify(|first| *first = (*first).min(row.started_at_ms))
+            .or_insert(row.started_at_ms);
+        first_tracks
+            .entry(row.track_key.clone())
+            .and_modify(|first| *first = (*first).min(row.started_at_ms))
+            .or_insert(row.started_at_ms);
+    }
+    let current_artists = current_plays
+        .iter()
+        .map(|row| row.artist.trim().to_lowercase())
+        .collect::<HashSet<_>>();
+    let current_albums = current_plays
+        .iter()
+        .map(|row| {
+            format!(
+                "{}\0{}",
+                row.artist.trim().to_lowercase(),
+                row.album.trim().to_lowercase()
+            )
+        })
+        .collect::<HashSet<_>>();
+    let current_tracks = current_plays
+        .iter()
+        .map(|row| row.track_key.clone())
+        .collect::<HashSet<_>>();
+    let discovered_now =
+        |timestamp: &i64| report_range_matches(*timestamp, started_after_ms, started_before_ms);
+    HistoryReportDiscovery {
+        new_artists: first_artists
+            .iter()
+            .filter(|(key, first)| current_artists.contains(*key) && discovered_now(first))
+            .count() as i64,
+        total_artists: current_artists.len() as i64,
+        new_albums: first_albums
+            .iter()
+            .filter(|(key, first)| current_albums.contains(*key) && discovered_now(first))
+            .count() as i64,
+        total_albums: current_albums.len() as i64,
+        new_tracks: first_tracks
+            .iter()
+            .filter(|(key, first)| current_tracks.contains(*key) && discovered_now(first))
+            .count() as i64,
+        total_tracks: current_tracks.len() as i64,
+    }
+}
+
+fn query_report_rows(
+    connection: &Connection,
+    metadata: &HistoryMetadata,
+) -> Result<Vec<HistoryRow>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+            SELECT session_id, track_key, title, artist, album, genre,
+                   directory, filename, duration_seconds, started_at_ms,
+                   ended_at_ms, listened_seconds, registered_play,
+                   registered_at_ms, outcome
+            FROM listening_sessions
+            ORDER BY started_at_ms DESC, session_id DESC
+            "#,
+        )
+        .map_err(|error| format!("Could not prepare Aurora's listening report: {error}"))?;
+    statement
+        .query_map([], |row| {
+            Ok(HistoryRow {
+                session_id: row.get(0)?,
+                track_key: row.get(1)?,
+                title: row.get(2)?,
+                artist: row.get(3)?,
+                album: row.get(4)?,
+                genre: row.get(5)?,
+                directory: row.get(6)?,
+                filename: row.get(7)?,
+                duration_seconds: row.get(8)?,
+                device_id: metadata.device_id.clone(),
+                device_name: metadata.device_name.clone(),
+                started_at_ms: row.get(9)?,
+                ended_at_ms: row.get(10)?,
+                listened_seconds: row.get::<_, f64>(11)?.max(0.0),
+                registered_play: row.get::<_, i64>(12)? == 1,
+                registered_at_ms: row.get(13)?,
+                outcome: row.get(14)?,
+            })
+        })
+        .map_err(|error| format!("Could not read Aurora's listening report: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not decode Aurora's listening report: {error}"))
 }
 
 fn parse_cursor(cursor: &str) -> Result<(i64, String), String> {
@@ -1689,6 +2223,39 @@ mod tests {
         assert_eq!(threshold, 60);
         assert_eq!(registered, 1);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn report_aggregation_is_not_limited_to_the_visible_history_page() {
+        let rows = (0..150)
+            .map(|index| HistoryRow {
+                session_id: format!("session-{index}"),
+                track_key: format!("track-{}", index % 12),
+                title: format!("Track {}", index % 12),
+                artist: format!("Artist {}", index % 4),
+                album: format!("Album {}", index % 6),
+                genre: Some("Electronic".to_owned()),
+                directory: r"D:\Music".to_owned(),
+                filename: format!("track-{index}.mp3"),
+                duration_seconds: Some(240),
+                device_id: "device-test-report".to_owned(),
+                device_name: "Test computer".to_owned(),
+                started_at_ms: 1_700_000_000_000 + i64::from(index) * 3_600_000,
+                ended_at_ms: Some(1_700_000_030_000 + i64::from(index) * 3_600_000),
+                listened_seconds: 30.0,
+                registered_play: true,
+                registered_at_ms: Some(1_700_000_030_000 + i64::from(index) * 3_600_000),
+                outcome: "completed".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let references = rows.iter().collect::<Vec<_>>();
+        let summary = report_summary(&references, 0);
+
+        assert_eq!(summary.sessions, 150);
+        assert_eq!(summary.plays, 150);
+        assert_eq!(summary.unique_tracks, 12);
+        assert_eq!(summary.unique_artists, 4);
+        assert!(summary.active_days > 1);
     }
 
     #[test]

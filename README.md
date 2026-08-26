@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.23 adds a complete guide to every search surface and the catalog query language.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.0 turns the complete listening record into a period-aware Listening Report.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.23 slice
+## Current 0.19.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- History now opens with a dedicated **Listening report** page for 7, 30, or 90 days and all time. It aggregates every matching session across all available device-history databases—not the 50 visible timeline rows—and reports period comparisons, daily activity, top artists/albums/tracks, listening hour, a personal listening fingerprint, release decades, discovery, and quick facts. The original searchable timeline remains available as the adjacent **History** page.
 - A dedicated [search guide](docs/search.md) covers every search surface, field, operator, range, exclusion, exact match, shortcut, limitation, and practical query recipe.
 - Library search waits for a two-second pause after typing before filtering, so complete expressions such as `aartist:dolly parton` run once instead of repeatedly filtering partial input. Clearing search remains immediate.
 - Music Library folder retries run in their own single-flight loop, continue while Aurora is unfocused, and select the most recently edited folder first. Pending-tag reconciliation remains focus-aware but can no longer starve a newly rated album's companion import.

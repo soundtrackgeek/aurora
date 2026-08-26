@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   CalendarDays,
   Check,
   Clock3,
@@ -14,7 +15,7 @@ import {
   SkipForward,
   TimerReset,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import type {
   HistoryItem,
   HistoryOutcomeFilter,
@@ -23,6 +24,8 @@ import type {
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
 import "./ListeningHistory.css";
+
+const ListeningReport = lazy(() => import("./ListeningReport").then((module) => ({ default: module.ListeningReport })));
 
 export type HistoryLoadState = "loading" | "ready" | "error";
 export type HistoryDateRange = "all" | "7" | "30" | "90";
@@ -177,6 +180,7 @@ export function ListeningHistory({
   onLoadMore,
   onRefresh,
 }: ListeningHistoryProps) {
+  const [activePage, setActivePage] = useState<"report" | "history">("report");
   const grouped = useMemo(() => {
     const groups: Array<{ key: string; label: string; items: HistoryItem[] }> = [];
     for (const item of page?.items ?? []) {
@@ -189,6 +193,16 @@ export function ListeningHistory({
   }, [page?.items]);
 
   return (
+    <div className="history-shell">
+      <nav className="history-page-tabs" aria-label="Listening memory pages">
+        <button type="button" className={activePage === "report" ? "is-active" : ""} aria-current={activePage === "report" ? "page" : undefined} onClick={() => setActivePage("report")}><BarChart3 aria-hidden="true" /> Listening report</button>
+        <button type="button" className={activePage === "history" ? "is-active" : ""} aria-current={activePage === "history" ? "page" : undefined} onClick={() => setActivePage("history")}><History aria-hidden="true" /> History</button>
+      </nav>
+      {activePage === "report" ? (
+        <Suspense fallback={<section className="history-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Opening listening report…</p></section>}>
+          <ListeningReport devices={page?.devices ?? []} deviceId={deviceId} onDeviceChange={onDeviceChange} onPlayTrack={onPlayTrack} />
+        </Suspense>
+      ) : (
     <section className="history-view" aria-labelledby="history-title">
       <header className="history-hero">
         <div>
@@ -253,5 +267,7 @@ export function ListeningHistory({
         {page?.nextCursor && <div className="history-load-more"><button type="button" disabled={isLoadingMore} onClick={onLoadMore}>{isLoadingMore ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Clock3 aria-hidden="true" />}{isLoadingMore ? "Loading…" : "Load earlier sessions"}</button></div>}
       </section>
     </section>
+      )}
+    </div>
   );
 }

@@ -80,6 +80,7 @@ function renderHistory(items: HistoryItem[] = [historyItem()]) {
       onRefresh={() => undefined}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
   return { onSaveThreshold, onPlayTrack, onSelectTrack, onOutcomeChange };
 }
 

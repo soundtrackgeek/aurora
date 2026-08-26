@@ -71,6 +71,72 @@ export interface HistoryPage {
   syncMessage: string;
 }
 
+export interface HistoryReportRequest {
+  startedAfterMs?: number;
+  startedBeforeMs?: number;
+  previousStartedAfterMs?: number;
+  previousStartedBeforeMs?: number;
+  deviceId?: string;
+  timezoneOffsetMinutes: number;
+}
+
+export interface HistoryReportSummary extends HistorySummary {
+  uniqueArtists: number;
+  uniqueAlbums: number;
+  completed: number;
+  activeDays: number;
+  mostActiveDayStartMs: number | null;
+  mostActiveDayPlays: number;
+  longestSessionSeconds: number;
+  longestSessionStartedAtMs: number | null;
+}
+
+export interface HistoryReportBucket {
+  startMs: number;
+  plays: number;
+}
+
+export interface HistoryReportArtist {
+  artist: string;
+  plays: number;
+  listenedSeconds: number;
+}
+
+export interface HistoryReportAlbum {
+  album: string;
+  artist: string;
+  plays: number;
+  listenedSeconds: number;
+  track: Track | null;
+}
+
+export interface HistoryReportDiscovery {
+  newArtists: number;
+  totalArtists: number;
+  newAlbums: number;
+  totalAlbums: number;
+  newTracks: number;
+  totalTracks: number;
+}
+
+export interface HistoryReportDecade {
+  decade: string;
+  plays: number;
+}
+
+export interface HistoryReport {
+  summary: HistoryReportSummary;
+  previousSummary: HistoryReportSummary | null;
+  daily: HistoryReportBucket[];
+  previousDaily: HistoryReportBucket[];
+  hourly: number[];
+  topArtists: HistoryReportArtist[];
+  topAlbums: HistoryReportAlbum[];
+  topTracks: HistoryTopTrack[];
+  discovery: HistoryReportDiscovery;
+  decades: HistoryReportDecade[];
+}
+
 export interface TrackHistoryInsight {
   sessions: number;
   plays: number;
@@ -182,9 +248,125 @@ async function previewHistoryPage(request: HistoryPageRequest): Promise<HistoryP
   };
 }
 
+function inReportRange(item: HistoryItem, after?: number, before?: number): boolean {
+  return (after === undefined || item.startedAtMs >= after)
+    && (before === undefined || item.startedAtMs <= before);
+}
+
+function localDayStart(timestamp: number, timezoneOffsetMinutes: number): number {
+  const offsetMs = timezoneOffsetMinutes * 60_000;
+  return Math.floor((timestamp - offsetMs) / 86_400_000) * 86_400_000 + offsetMs;
+}
+
+function reportSummary(items: HistoryItem[], timezoneOffsetMinutes: number): HistoryReportSummary {
+  const plays = items.filter((item) => item.registeredPlay);
+  const daily = new Map<number, number>();
+  for (const item of plays) {
+    const start = localDayStart(item.startedAtMs, timezoneOffsetMinutes);
+    daily.set(start, (daily.get(start) ?? 0) + 1);
+  }
+  const mostActive = [...daily.entries()].sort((left, right) => right[1] - left[1] || right[0] - left[0])[0];
+  const longest = items.reduce<HistoryItem | null>((current, item) => !current || item.listenedSeconds > current.listenedSeconds ? item : current, null);
+  return {
+    sessions: items.length,
+    plays: plays.length,
+    skips: items.filter((item) => item.outcome === "skipped").length,
+    uniqueTracks: new Set(plays.map((item) => item.trackKey)).size,
+    listenedSeconds: items.reduce((total, item) => total + item.listenedSeconds, 0),
+    uniqueArtists: new Set(plays.map((item) => item.artist.toLocaleLowerCase())).size,
+    uniqueAlbums: new Set(plays.map((item) => `${item.artist}\u0000${item.album}`.toLocaleLowerCase())).size,
+    completed: items.filter((item) => item.outcome === "completed").length,
+    activeDays: daily.size,
+    mostActiveDayStartMs: mostActive?.[0] ?? null,
+    mostActiveDayPlays: mostActive?.[1] ?? 0,
+    longestSessionSeconds: longest?.listenedSeconds ?? 0,
+    longestSessionStartedAtMs: longest?.startedAtMs ?? null,
+  };
+}
+
+function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): HistoryReport {
+  const all = previewItems(tracks).filter((item) => !request.deviceId || item.deviceId === request.deviceId);
+  const current = all.filter((item) => inReportRange(item, request.startedAfterMs, request.startedBeforeMs));
+  const previous = request.previousStartedAfterMs === undefined
+    ? []
+    : all.filter((item) => inReportRange(item, request.previousStartedAfterMs, request.previousStartedBeforeMs));
+  const plays = current.filter((item) => item.registeredPlay);
+  const dailyMap = new Map<number, number>();
+  const previousDailyMap = new Map<number, number>();
+  const hourly = Array.from({ length: 24 }, () => 0);
+  for (const item of plays) {
+    const day = localDayStart(item.startedAtMs, request.timezoneOffsetMinutes);
+    dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+    const local = new Date(item.startedAtMs - request.timezoneOffsetMinutes * 60_000);
+    hourly[local.getUTCHours()] += 1;
+  }
+  for (const item of previous.filter((candidate) => candidate.registeredPlay)) {
+    const day = localDayStart(item.startedAtMs, request.timezoneOffsetMinutes);
+    previousDailyMap.set(day, (previousDailyMap.get(day) ?? 0) + 1);
+  }
+  const artistMap = new Map<string, HistoryReportArtist>();
+  const albumMap = new Map<string, HistoryReportAlbum>();
+  for (const item of plays) {
+    const artistKey = item.artist.toLocaleLowerCase();
+    const artist = artistMap.get(artistKey) ?? { artist: item.artist, plays: 0, listenedSeconds: 0 };
+    artist.plays += 1;
+    artist.listenedSeconds += item.listenedSeconds;
+    artistMap.set(artistKey, artist);
+    const albumKey = `${item.artist}\u0000${item.album}`.toLocaleLowerCase();
+    const album = albumMap.get(albumKey) ?? { album: item.album, artist: item.artist, plays: 0, listenedSeconds: 0, track: item.track };
+    album.plays += 1;
+    album.listenedSeconds += item.listenedSeconds;
+    albumMap.set(albumKey, album);
+  }
+  const firstArtist = new Map<string, number>();
+  const firstAlbum = new Map<string, number>();
+  const firstTrack = new Map<string, number>();
+  for (const item of all.filter((candidate) => candidate.registeredPlay)) {
+    const artist = item.artist.toLocaleLowerCase();
+    const album = `${item.artist}\u0000${item.album}`.toLocaleLowerCase();
+    firstArtist.set(artist, Math.min(firstArtist.get(artist) ?? item.startedAtMs, item.startedAtMs));
+    firstAlbum.set(album, Math.min(firstAlbum.get(album) ?? item.startedAtMs, item.startedAtMs));
+    firstTrack.set(item.trackKey, Math.min(firstTrack.get(item.trackKey) ?? item.startedAtMs, item.startedAtMs));
+  }
+  const isNew = (timestamp: number) => request.startedAfterMs === undefined || timestamp >= request.startedAfterMs;
+  const decades = new Map<string, number>();
+  for (const item of plays) {
+    const year = item.track?.releaseYear;
+    const label = year ? `${Math.floor(year / 10) * 10}s` : "Unknown";
+    decades.set(label, (decades.get(label) ?? 0) + 1);
+  }
+  return {
+    summary: reportSummary(current, request.timezoneOffsetMinutes),
+    previousSummary: request.previousStartedAfterMs === undefined ? null : reportSummary(previous, request.timezoneOffsetMinutes),
+    daily: [...dailyMap].map(([startMs, count]) => ({ startMs, plays: count })).sort((a, b) => a.startMs - b.startMs),
+    previousDaily: [...previousDailyMap].map(([startMs, count]) => ({ startMs, plays: count })).sort((a, b) => a.startMs - b.startMs),
+    hourly,
+    topArtists: [...artistMap.values()].sort((a, b) => b.plays - a.plays || b.listenedSeconds - a.listenedSeconds).slice(0, 5),
+    topAlbums: [...albumMap.values()].sort((a, b) => b.plays - a.plays || b.listenedSeconds - a.listenedSeconds).slice(0, 5),
+    topTracks: previewTopTracks(current).slice(0, 5),
+    discovery: {
+      newArtists: [...firstArtist.values()].filter(isNew).length,
+      totalArtists: new Set(plays.map((item) => item.artist.toLocaleLowerCase())).size,
+      newAlbums: [...firstAlbum.values()].filter(isNew).length,
+      totalAlbums: new Set(plays.map((item) => `${item.artist}\u0000${item.album}`.toLocaleLowerCase())).size,
+      newTracks: [...firstTrack.values()].filter(isNew).length,
+      totalTracks: new Set(plays.map((item) => item.trackKey)).size,
+    },
+    decades: [...decades].map(([decade, count]) => ({ decade, plays: count })).sort((a, b) => a.decade.localeCompare(b.decade)),
+  };
+}
+
 export async function loadHistoryPage(request: HistoryPageRequest): Promise<HistoryPage> {
   if (!isTauriRuntime()) return previewHistoryPage(request);
   return invoke<HistoryPage>("listening_history_page", { request });
+}
+
+export async function loadHistoryReport(request: HistoryReportRequest): Promise<HistoryReport> {
+  if (!isTauriRuntime()) {
+    const snapshot = await loadLibrarySnapshot();
+    return previewHistoryReport(request, snapshot.tracks);
+  }
+  return invoke<HistoryReport>("listening_history_report", { request });
 }
 
 export async function loadTrackHistoryInsight(trackKey: string): Promise<TrackHistoryInsight> {
