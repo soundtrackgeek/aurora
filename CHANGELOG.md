@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.16] - 2026-08-26
+
+### Fixed
+
+- Normalized Discogs track positions outside the release's track total to sequential release order in Album Auto-Tagger, so values such as track `41` on a 13-track CD are applied as track 13 instead of failing validation.
+
 ## [0.18.15] - 2026-08-26
 
 ### Fixed

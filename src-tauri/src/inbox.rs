@@ -1146,7 +1146,7 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
             ReleaseTrack {
                 title: text(row, "title").unwrap_or_else(|| format!("Track {}", index + 1)),
                 artist: None,
-                track_number: position.or(Some((index + 1) as u32)),
+                track_number: Some(normalize_discogs_track_number(position, index, total)),
                 track_total: Some(total),
                 disc_number: disc,
                 disc_total,
@@ -1485,6 +1485,11 @@ fn parse_disc_track(value: &str) -> (Option<u32>, Option<u32>) {
     // Returning no numeric position lets the release-order index become 01, 02, 03….
     (None, None)
 }
+fn normalize_discogs_track_number(position: Option<u32>, index: usize, total: u32) -> u32 {
+    position
+        .filter(|position| (1..=total).contains(position))
+        .unwrap_or((index + 1) as u32)
+}
 fn parse_duration_ms(value: &str) -> Option<u64> {
     let mut parts = value.split(':').map(|part| part.parse::<u64>().ok());
     let minutes = parts.next()??;
@@ -1504,6 +1509,14 @@ mod tests {
         assert_eq!(parse_disc_track("3"), (None, Some(3)));
         assert_eq!(parse_disc_track("A1"), (None, None));
         assert_eq!(parse_disc_track("B1"), (None, None));
+    }
+
+    #[test]
+    fn discogs_positions_outside_the_track_total_follow_release_order() {
+        assert_eq!(normalize_discogs_track_number(Some(12), 11, 13), 12);
+        assert_eq!(normalize_discogs_track_number(Some(41), 12, 13), 13);
+        assert_eq!(normalize_discogs_track_number(Some(0), 0, 13), 1);
+        assert_eq!(normalize_discogs_track_number(None, 4, 13), 5);
     }
 
     #[test]
