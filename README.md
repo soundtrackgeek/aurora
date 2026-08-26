@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.14 keeps the Tags editor locked inside the right sidebar while long field values scroll within their inputs.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.15 preserves MusicBrainz artist-credit wording in Album Auto-Tagger tags and filenames.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.14 slice
+## Current 0.18.15 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Album Auto-Tagger preserves MusicBrainz artist-credit join phrases such as `featuring`, `&`, and commas when applying Artist metadata and building renamed track filenames.
 - The Tags editor cannot horizontally scroll or grow beyond the right sidebar; long values retain native scrolling inside their fixed-width inputs.
 - Album Auto-Tagger places Genre in the wide lower-left metadata slot and Disc total in the compact lower-right numeric slot, with matching visual and keyboard order plus a two-column responsive arrangement.
 - The **Finish what you love** Refresh button now reacts immediately, spins while its overview and active shelf reload, and prevents duplicate refresh requests until the cycle finishes.

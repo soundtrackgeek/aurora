@@ -1443,17 +1443,19 @@ fn artist_credit(value: &Value) -> Option<String> {
         .map(|rows| {
             rows.iter()
                 .filter_map(|row| {
-                    row.get("name")
+                    let name = row.get("name").and_then(Value::as_str).or_else(|| {
+                        row.get("artist")
+                            .and_then(|artist| artist.get("name"))
+                            .and_then(Value::as_str)
+                    })?;
+                    let join_phrase = row
+                        .get("joinphrase")
                         .and_then(Value::as_str)
-                        .or_else(|| {
-                            row.get("artist")
-                                .and_then(|artist| artist.get("name"))
-                                .and_then(Value::as_str)
-                        })
-                        .map(str::to_owned)
+                        .unwrap_or_default();
+                    Some(format!("{name}{join_phrase}"))
                 })
                 .collect::<Vec<_>>()
-                .join("; ")
+                .join("")
         })
         .filter(|value| !value.is_empty())
 }
@@ -1510,6 +1512,21 @@ mod tests {
         assert_eq!(sanitize_component("CON").unwrap(), "_CON");
         assert_eq!(decimal_width(9).max(2), 2);
         assert_eq!(decimal_width(101).max(2), 3);
+    }
+
+    #[test]
+    fn musicbrainz_artist_credit_preserves_join_phrases() {
+        let value = serde_json::json!({
+            "artist-credit": [
+                { "name": "X‐Ecutioners", "joinphrase": " featuring " },
+                { "name": "Large Professor", "joinphrase": "" }
+            ]
+        });
+
+        assert_eq!(
+            artist_credit(&value).as_deref(),
+            Some("X‐Ecutioners featuring Large Professor")
+        );
     }
 
     #[test]

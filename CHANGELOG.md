@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.15] - 2026-08-26
+
+### Fixed
+
+- Preserved MusicBrainz artist-credit join phrases in Album Auto-Tagger metadata and renamed track filenames, including credits such as `X‐Ecutioners featuring Large Professor` instead of replacing `featuring` with a semicolon.
+
 ## [0.18.14] - 2026-08-26
 
 ### Fixed
