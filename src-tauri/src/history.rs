@@ -987,7 +987,7 @@ impl HistoryStore {
             }
             all_rows.extend(query_report_rows(&connection, &metadata)?);
         }
-        all_rows.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
+        all_rows.sort_by_key(|row| std::cmp::Reverse(row.started_at_ms));
         let mut seen = HashSet::new();
         all_rows.retain(|row| seen.insert(row.session_id.clone()));
 

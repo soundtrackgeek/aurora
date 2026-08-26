@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-08-26
+
+### Fixed
+
+- Updated Listening Report history ordering to use Clippy's preferred keyed descending sort, restoring the warning-free Rust CI gate.
+
 ## [0.19.0] - 2026-08-26
 
 ### Added
