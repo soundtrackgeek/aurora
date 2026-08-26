@@ -42,7 +42,7 @@ Inbox files are not cataloged, so this transaction does not queue an existing-fo
 
 ## Promotion
 
-Move to library uses the existing Music Library bridge without a second mover implementation:
+Album-level **Move to library** and the monitored-folder/**All folders** **Add to Library** actions use the existing Music Library bridge without a second mover implementation. Folder intake assigns a General, Scores, or Synthwave destination independently to each non-empty monitored root, previews every root before apply, and blocks the complete scope when any contained Inbox album is not ready.
 
 ```text
 staged album folder
@@ -52,6 +52,8 @@ General / Scores / Synthwave selection
 Music Library preview with exact destination and catalog delta
         ↓
 explicit move-and-catalog apply
+        ↓
+Music Library archives embedded front art in AlbumCovers
         ↓
 catalog revision refresh + Inbox rescan
 ```

@@ -6,6 +6,7 @@ import {
   Disc3,
   FilePenLine,
   Folder,
+  FolderInput,
   FolderPlus,
   Inbox as InboxIcon,
   LoaderCircle,
@@ -42,6 +43,7 @@ import {
 } from "../../ingest";
 import type { EditableTagField, EditableTagValues } from "../../tags";
 import { InboxTagEditor } from "./InboxTagEditor";
+import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
 import "./Inbox.css";
 
 type LoadState = "loading" | "ready" | "error";
@@ -108,6 +110,8 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [renameMessage, setRenameMessage] = useState<string | null>(null);
   const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
   const [inspectorView, setInspectorView] = useState<"album" | "tags">("album");
+  const [intakeScope, setIntakeScope] = useState<{ label: string; targets: InboxLibraryIntakeTarget[] } | null>(null);
+  const [intakeMessage, setIntakeMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoadState("loading");
@@ -194,6 +198,29 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     }
   }
 
+  function intakeTargetForFolder(folder: string): InboxLibraryIntakeTarget | null {
+    if (!snapshot) return null;
+    const folderAlbums = snapshot.albums.filter((album) => albumInFolder(album, folder));
+    if (!folderAlbums.length) return null;
+    return {
+      sourcePath: folder,
+      label: leafName(folder),
+      albumCount: folderAlbums.length,
+      unreadyAlbumCount: folderAlbums.filter((album) => !album.readiness.ready).length,
+    };
+  }
+
+  function openFolderIntake(folder: string) {
+    const target = intakeTargetForFolder(folder);
+    if (target) setIntakeScope({ label: target.label, targets: [target] });
+  }
+
+  function openAllFoldersIntake() {
+    if (!snapshot) return;
+    const targets = snapshot.settings.monitoredFolders.map(intakeTargetForFolder).filter((target): target is InboxLibraryIntakeTarget => Boolean(target));
+    if (targets.length) setIntakeScope({ label: "all folders", targets });
+  }
+
   async function previewMove() {
     if (!selectedAlbum || !moveCategory) return;
     setMoveBusy(true);
@@ -241,17 +268,24 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
 
       {error ? <p className="inbox-banner" role="alert"><AlertTriangle />{error}</p> : null}
       {renameMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{renameMessage}</p> : null}
+      {intakeMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{intakeMessage}</p> : null}
       {snapshot.settings.warning ? <p className="inbox-banner" role="status"><AlertTriangle />{snapshot.settings.warning}</p> : null}
 
       <div className="inbox-workspace">
         <aside className="inbox-folders" aria-label="Monitored folders">
           <header><strong>Monitored folders</strong><button type="button" disabled={snapshot.settings.monitoredFolders.length >= 10} onClick={() => void addFolder()}><FolderPlus /> Add folder</button></header>
-          <button type="button" className={!selectedFolder ? "is-selected" : ""} onClick={() => setSelectedFolder(null)}><InboxIcon /><span><strong>All folders</strong><small>{snapshot.albums.length} albums</small></span></button>
+          <div className={`inbox-folder-row inbox-folder-row--all${!selectedFolder ? " is-selected" : ""}`}>
+            <button type="button" onClick={() => setSelectedFolder(null)}><InboxIcon /><span><strong>All folders</strong><small>{snapshot.albums.length} albums</small></span></button>
+            <button type="button" className="inbox-folder-add" aria-label="Add All folders to library" title="Add All folders to library" disabled={!snapshot.albums.length} onClick={() => openAllFoldersIntake()}><FolderInput /></button>
+          </div>
           {snapshot.settings.monitoredFolders.map((folder) => {
             const count = snapshot.albums.filter((album) => albumInFolder(album, folder)).length;
             return <div className={`inbox-folder-row${selectedFolder === folder ? " is-selected" : ""}`} key={folder}>
               <button type="button" onClick={() => setSelectedFolder(folder)} title={folder}><Folder /><span><strong>{leafName(folder)}</strong><small>{folder}</small></span><output>{count}</output></button>
-              <button type="button" aria-label={`Stop monitoring ${folder}`} title="Stop monitoring" onClick={() => void removeFolder(folder)}><Trash2 /></button>
+              <span className="inbox-folder-actions">
+                <button type="button" className="inbox-folder-add" aria-label={`Add ${leafName(folder)} to library`} title="Add folder to library" disabled={!count} onClick={() => openFolderIntake(folder)}><FolderInput /></button>
+                <button type="button" aria-label={`Stop monitoring ${folder}`} title="Stop monitoring" onClick={() => void removeFolder(folder)}><Trash2 /></button>
+              </span>
             </div>;
           })}
           {snapshot.settings.monitoredFolders.length === 0 ? <div className="inbox-folders__empty"><FolderPlus /><strong>Add your first monitored folder</strong><small>Aurora scans it without adding anything to the library.</small><button type="button" onClick={() => void addFolder()}>Choose folder</button></div> : null}
@@ -300,6 +334,13 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
       </div>
 
       {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async () => { setTaggerAlbum(null); await refresh(); }} /> : null}
+      {intakeScope ? <InboxLibraryIntakeDialog
+        scopeLabel={intakeScope.label}
+        targets={intakeScope.targets}
+        onClose={() => setIntakeScope(null)}
+        onApplied={async () => { await onCatalogChanged(); await refresh(); }}
+        onCompleted={setIntakeMessage}
+      /> : null}
     </section>
   );
 }

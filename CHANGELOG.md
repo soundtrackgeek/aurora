@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.8] - 2026-08-26
+
+### Added
+
+- Added an **Add to Library** action to every monitored Inbox folder and to **All folders**. The reviewed batch dialog assigns a General, Scores, or Synthwave root per monitored folder, blocks folders containing unready albums, previews every destination, then uses Music Library's existing mover, embedded-cover archive, catalog update, and Aurora added-date workflow.
+
 ## [0.18.7] - 2026-08-25
 
 ### Added

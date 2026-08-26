@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.7 brings the vertical manual tag editor to Inbox albums and selected tracks.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.8 adds reviewed folder-level and all-folder Inbox intake into the music library.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.7 slice
+## Current 0.18.8 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Every monitored Inbox folder now has an **Add to Library** action, as does **All folders**. A single reviewed dialog can assign General, Scores, or Synthwave independently to each non-empty monitored folder, refuses scopes containing albums with unresolved readiness issues, previews exact destinations, and then delegates moving, embedded-cover archiving, catalog updates, and added-date recording to the existing Music Library bridge.
 - Inbox's selected-album inspector now has Album and Tags tabs. The Tags tab reuses Aurora's vertical field-selecting editor for one selected track or a multi-track/whole-album batch, while keeping writes in Inbox's verified, rollback-safe MP3 pipeline and outside the Music Library catalog.
 - The Album Auto-Tagger keeps its Rename after tagging, Cancel, and Apply & rename footer visible while release and track results scroll within the available dialog height.
 - Whole-album Tags saves immediately project the verified Album, Album Artist, Year, Release Year, Genre, and Publisher values into both the Album card and Album Detail. Partial or mixed track results never overwrite an album summary by guesswork.
@@ -17,7 +18,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Auto-Tagger renaming is enabled by default for a full album, and `Ctrl+R` applies the same rename rules to manually tagged Inbox albums. Album folders become `Album Artist - Album (Year)`; tracks become `Disc-01 - Artist - Title.mp3` when a disc tag exists or `01 - Artist - Title.mp3` when it does not. Inbox track checkboxes can scope Auto-Tagger to one CD at a time, with Disc # and total overrides for separate CD1/CD2 releases. Windows-invalid characters and collisions are handled safely, and Discogs vinyl positions such as A1/A2/B1 are normalized to continuous 01/02/03 numbering.
 - MusicBrainz requests use Aurora's identifying User-Agent and a process-wide one-request-per-second gate. Discogs accepts either a personal access token or a consumer key plus secret stored only in the operating-system credential vault; saved values are never returned to React or written to Aurora JSON/SQLite state. Debug builds may read `DISCOGS` and `DISCOGS_SECRET` (or `DISCOGS_TOKEN`) from the ignored `.env.local` for local endpoint testing.
 - Inbox tag writes stay outside the catalog workflow: Rust canonicalizes every selected album path, stages same-folder MP3 copies, verifies parsed tags and the post-ID3 audio SHA-256, creates safety backups, installs atomically, and restores earlier tracks if a later write fails.
-- **Move to library** reuses Add Music's exact preview/apply bridge and its General, Scores, and Synthwave roots. Music Library remains the sole filesystem mover and catalog writer; Inbox albums disappear from staging only after that reviewed bridge operation completes.
+- Album-level **Move to library** and folder-level **Add to Library** reuse Add Music's exact preview/apply bridge and its General, Scores, and Synthwave roots. Music Library remains the sole filesystem mover, cover archiver, and catalog writer; Inbox albums disappear from staging only after that reviewed bridge operation completes.
 - Ratings **Play unrated tracks** scopes pending-deletion reconciliation to the selected album instead of rescanning the million-track catalog for every pending Music Library target before playback.
 - Rust's strict warning-as-error CI lint passes for the optimized album snapshot path without changing its deletion projection or runtime behavior.
 - Album detail reads pending deletion state once, scopes missing-file verification to the selected album, and reuses that result for its rows, rating, Love, duration, and track counts. It never runs Ratings' global deletion scan or opens the state database once per track during an ordinary album open.
