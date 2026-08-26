@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.13] - 2026-08-26
+
+### Changed
+
+- Reorganized Album Auto-Tagger metadata fields so Genre uses the wide lower-left editor slot and Disc total uses the compact lower-right numeric slot, including an intentional two-column arrangement for narrower windows.
+
 ## [0.18.12] - 2026-08-26
 
 ### Changed

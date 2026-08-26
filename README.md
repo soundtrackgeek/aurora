@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.12 gives the Ratings completion Refresh action clear pressed and in-progress feedback until its data is actually reloaded.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.13 gives Album Auto-Tagger genres a practical editing width while keeping disc totals compact.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.12 slice
+## Current 0.18.13 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Album Auto-Tagger places Genre in the wide lower-left metadata slot and Disc total in the compact lower-right numeric slot, with matching visual and keyboard order plus a two-column responsive arrangement.
 - The **Finish what you love** Refresh button now reacts immediately, spins while its overview and active shelf reload, and prevents duplicate refresh requests until the cycle finishes.
 - The Album Auto-Tagger grows up to 1100 px tall when the window allows it, giving release matches and track comparisons more visible room without sacrificing the viewport margin or fixed action footer.
 - All-folders Inbox intake re-previews each monitored root immediately before its apply, preventing an earlier folder's catalog update from making the next Music Library plan stale. Aurora compares that fresh plan with the reviewed album and destination list and stops for a new review if the source contents actually changed.
