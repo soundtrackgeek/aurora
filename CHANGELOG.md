@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.9] - 2026-08-26
+
+### Fixed
+
+- Ratings completion details now place album information above the track list sooner in narrow content panes, preventing maximum-size text from crowding the tracks when the right inspector is open.
+
 ## [0.18.8] - 2026-08-26
 
 ### Added
