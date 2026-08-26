@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.20] - 2026-08-26
+
+### Changed
+
+- Expanded opened-album track lists into the main library scroll, replacing the nested five-row scrollbar with one natural page scroll.
+- Replaced the redundant album-detail Year column with track number and tightened the delete column so long track titles and per-track Artist credits use the remaining width.
+- Preserved the active Library list, loaded order, open album, selected track, and scroll position across automatic Music Library catalog refreshes instead of replacing the view with a loading state.
+
+### Fixed
+
+- Made the finite PCM buffer ordering test wait for producer completion before its artificial faster-than-real-time drain, removing the Windows CI underrun race behind three consecutive failed release runs.
+
 ## [0.18.19] - 2026-08-26
 
 ### Changed

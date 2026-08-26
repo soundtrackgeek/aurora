@@ -435,14 +435,14 @@ function TrackTable({
             <th>Title</th>
             <th>Artist</th>
             <th>Album</th>
-            <th>Year</th>
+            <th className="deep-explorer-table__position is-numeric">{compact ? "Track" : "Year"}</th>
             <th>Genre</th>
             <th>Publisher</th>
             <th className="is-numeric">Time</th>
             <th className="is-numeric">Plays</th>
             <th>Rating</th>
             <th aria-label="Love" />
-            {onDeleteTrack ? <th aria-label="Delete" /> : null}
+            {onDeleteTrack ? <th className="deep-explorer-table__delete-heading" aria-label="Delete" /> : null}
           </tr>
         </thead>
         <tbody>
@@ -485,7 +485,13 @@ function TrackTable({
                 </td>
                 <td>{displayTrackArtist(track)}</td>
                 <td>{track.album}</td>
-                <td className="is-numeric">{track.originalYear ?? "—"}</td>
+                <td className="deep-explorer-table__position is-numeric">
+                  {compact
+                    ? track.trackNumber === null || track.trackNumber === undefined
+                      ? "—"
+                      : String(track.trackNumber).padStart(2, "0")
+                    : track.originalYear ?? "—"}
+                </td>
                 <td>{track.genre ?? "—"}</td>
                 <td>{track.publisher ?? "—"}</td>
                 <td className="is-numeric">{formatDuration(track.durationSeconds)}</td>

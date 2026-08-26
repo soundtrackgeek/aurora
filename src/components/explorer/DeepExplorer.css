@@ -102,9 +102,10 @@
 .deep-explorer-table th:nth-child(10) { width: 126px; }
 .deep-explorer-table th:nth-child(11) { width: 34px; }
 .deep-explorer-table-wrap.is-compact th:nth-child(2) { width: auto; }
-.deep-explorer-table-wrap.is-compact th:nth-child(5) { width: 48px; }
+.deep-explorer-table-wrap.is-compact th:nth-child(5) { width: 44px; }
 .deep-explorer-table-wrap.is-compact th:nth-child(8) { width: 48px; }
 .deep-explorer-table-wrap.is-compact th:nth-child(10) { width: 126px; }
+.deep-explorer-table-wrap.is-compact .deep-explorer-table__delete-heading { width: 34px; padding: 0; }
 .deep-explorer-table-wrap.is-compact th:nth-child(3),
 .deep-explorer-table-wrap.is-compact td:nth-child(3),
 .deep-explorer-table-wrap.is-compact th:nth-child(4),
@@ -182,7 +183,7 @@
 .deep-explorer-album-rating__fill { color: #e6bc68; fill: currentColor; }
 .deep-explorer-album-rating__star.is-half .deep-explorer-album-rating__fill { clip-path: inset(0 50% 0 0); }
 
-.deep-explorer-album-detail { grid-column: 1 / -1; min-width: 0; max-height: min(520px, 58vh); margin: 4px -10px 8px; overflow: auto; border-top: 1px solid var(--explorer-border-strong); border-bottom: 1px solid var(--explorer-border); background: rgba(5, 11, 17, .82); box-shadow: inset 0 14px 28px rgba(0, 0, 0, .18); scrollbar-width: thin; transform-origin: top; animation: deep-explorer-detail-open .2s ease-out both; }
+.deep-explorer-album-detail { grid-column: 1 / -1; min-width: 0; margin: 4px -10px 8px; overflow: visible; border-top: 1px solid var(--explorer-border-strong); border-bottom: 1px solid var(--explorer-border); background: rgba(5, 11, 17, .82); box-shadow: inset 0 14px 28px rgba(0, 0, 0, .18); transform-origin: top; animation: deep-explorer-detail-open .2s ease-out both; }
 .deep-explorer-album-detail.is-closing { pointer-events: none; animation: deep-explorer-detail-close .18s ease-in both; }
 .deep-explorer-album-detail > header { position: sticky; z-index: 3; top: 0; display: grid; grid-template-columns: var(--aurora-album-detail-cover) 1fr auto; gap: 12px; align-items: center; min-height: calc(var(--aurora-album-detail-cover) + 24px); padding: 12px; border-bottom: 1px solid var(--explorer-border); background: rgba(8, 15, 23, .96); backdrop-filter: blur(12px); }
 .deep-explorer-album-detail header .deep-explorer-album-artwork { width: var(--aurora-album-detail-cover); }
@@ -261,10 +262,6 @@
   .deep-explorer-table-wrap:not(.is-compact) td:nth-child(7),
   .deep-explorer-table-wrap:not(.is-compact) th:nth-child(9),
   .deep-explorer-table-wrap:not(.is-compact) td:nth-child(9) { display: none; }
-}
-
-@media (max-width: 900px) {
-  .deep-explorer-album-detail { max-height: min(460px, 62vh); }
 }
 
 @keyframes deep-explorer-detail-open {

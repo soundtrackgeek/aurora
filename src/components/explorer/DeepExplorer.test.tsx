@@ -27,6 +27,7 @@ const tracks: Track[] = [
     durationSeconds: 243,
     genre: "Synthwave",
     playCount: 84,
+    trackNumber: 1,
   },
   {
     id: "track-2",
@@ -45,6 +46,7 @@ const tracks: Track[] = [
     durationSeconds: 198,
     genre: "Synthwave",
     playCount: null,
+    trackNumber: 2,
   },
 ];
 
@@ -316,6 +318,25 @@ describe("DeepExplorer", () => {
     const albumDetail = screen.getByRole("complementary", { name: "Night Geometry album details" });
     expect(within(albumDetail).getByText("[Andrea & Hot Mink]")).toBeVisible();
     expect(within(albumDetail).queryByText("[Various Artists]")).not.toBeInTheDocument();
+  });
+
+  it("uses track numbers instead of the repeated year in album detail", () => {
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: tracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const albumTracks = within(screen.getByRole("grid", { name: "Album tracks" }));
+    expect(albumTracks.getByRole("columnheader", { name: "Track" })).toBeVisible();
+    expect(albumTracks.queryByRole("columnheader", { name: "Year" })).not.toBeInTheDocument();
+    expect(albumTracks.getByText("01")).toBeVisible();
+    expect(albumTracks.getByText("02")).toBeVisible();
   });
 
   it("shows half-star Album Rating and Album Score together on album cards and detail", () => {

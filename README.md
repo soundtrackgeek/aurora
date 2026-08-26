@@ -1,12 +1,15 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.19 gives top-bar status messages their own line beneath search so the search field keeps its working space.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.20 expands opened albums into the main library scroll and gives their track titles and artists the available row width.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.19 slice
+## Current 0.18.20 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Opened albums show every track in the library's natural page scroll instead of trapping the first rows in a second scrollbar. Their compact table replaces the repeated Year column with track number and constrains the delete action so title and per-track Artist use the remaining width.
+- Background Music Library imports refresh metadata without replacing the visible Library list: the active view, loaded row order, open album, selected track, and scroll position stay in place while newly discovered items join the loaded results.
+- The finite PCM ordering test now waits for its background producer to finish filling before consuming faster than real-time, eliminating a Windows CI race that caused three consecutive otherwise-clean releases to fail verification.
 - Top-bar sync, intake, and catalog status messages now use a dedicated line beneath search instead of competing with the search field beside **Add music**.
 - **Finish what you love** now has one **Partially rated** shelf for every incomplete album with at least one rating. Filter it to any exact positive number of tracks left, with quick choices for 1, 2, and 3 plus a custom value such as 7.
 - Library track rows, album cards, and opened-album track rows follow Windows selection conventions: plain click replaces, Ctrl-click toggles, and Shift-click selects a contiguous range without browser-style text highlighting. Multi-track and multi-album selections flow into the Tags sidebar for verified batch editing of up to 500 MP3 files.

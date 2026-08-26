@@ -145,6 +145,7 @@ import {
   loadViewPreferences,
   saveViewPreferences,
 } from "./viewPreferences";
+import { mergeRefreshedExplorerPage } from "./explorerRefresh";
 import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
@@ -632,7 +633,9 @@ function App() {
   const catalogRefreshRequestedRef = useRef(false);
   const appMountedRef = useRef(true);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
+  const selectedAlbumIdRef = useRef<string | null>(selectedAlbumId);
   const explorerRestorationPendingRef = useRef(true);
+  const preserveExplorerOnReloadRef = useRef(false);
   const pendingExplorerAlbumIdRef = useRef<string | null>(null);
   const inspectorViewRef = useRef(inspectorView);
   const inspectorArtistNameRef = useRef(inspectorArtistName);
@@ -646,6 +649,7 @@ function App() {
   const selectedGenreRef = useRef(selectedGenre);
   selectedGenreRef.current = selectedGenre;
   selectedTrackRef.current = selectedTrack;
+  selectedAlbumIdRef.current = selectedAlbumId;
   inspectorViewRef.current = inspectorView;
   inspectorArtistNameRef.current = inspectorArtistName;
   publisherDetailRef.current = publisherDetail;
@@ -854,6 +858,7 @@ function App() {
         }
         catalogRevisionRef.current = revision;
 
+        preserveExplorerOnReloadRef.current = true;
         setExplorerReloadToken((value) => value + 1);
         setReviewReloadToken((value) => value + 1);
         setHistoryReloadToken((value) => value + 1);
@@ -1030,6 +1035,8 @@ function App() {
   ]);
 
   useEffect(() => {
+    const preservingCurrentView = preserveExplorerOnReloadRef.current;
+    preserveExplorerOnReloadRef.current = false;
     if (
       !libraryReady
       || activeNav === "Inbox"
@@ -1043,33 +1050,36 @@ function App() {
     ) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
     const handoffAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
-    const restoredAlbumId = handoffAlbumId ?? (restoringStoredView && explorerView === "albums"
-      ? initialViewPreferences.selectedAlbumId
-      : null);
+    const restoredAlbumId = handoffAlbumId
+      ?? (preservingCurrentView && explorerView === "albums" ? selectedAlbumIdRef.current : null)
+      ?? (restoringStoredView && explorerView === "albums" ? initialViewPreferences.selectedAlbumId : null);
+    const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : null;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
     const clearDetailTimer = window.setTimeout(() => {
       if (cancelled) return;
       setIsLoadingMore(false);
-      if (!restoredAlbumId) setSelectedAlbumId(null);
-      setAlbumTracks([]);
-      setAlbumTracksTruncated(false);
+      if (!preservingCurrentView) {
+        if (!restoredAlbumId) setSelectedAlbumId(null);
+        setAlbumTracks([]);
+        setAlbumTracksTruncated(false);
+      }
     }, 0);
     const timer = window.setTimeout(() => {
-      setExplorerLoadState("loading");
+      if (!preservingCurrentView) setExplorerLoadState("loading");
       setExplorerError(null);
       setExplorerCursor(null);
       void loadExplorerPage(explorerView, explorerFilters)
         .then((page) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
-          setExplorerTracks(page.tracks);
-          setExplorerAlbums(page.albums);
-          setExplorerArtists(page.artists);
+          setExplorerTracks((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.tracks) : page.tracks);
+          setExplorerAlbums((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.albums) : page.albums);
+          setExplorerArtists((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.artists) : page.artists);
           setExplorerCursor(page.nextCursor);
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
-          if (restoredAlbumId && (handoffAlbumId || page.albums.some((album) => album.id === restoredAlbumId))) {
+          if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
             setAlbumDetailState("loading");
@@ -1081,7 +1091,7 @@ function App() {
                   : [detail.album, ...current]);
                 setAlbumTracks(detail.tracks);
                 setAlbumTracksTruncated(detail.tracksTruncated);
-                setSelectedTrack(detail.tracks[0] ?? null);
+                setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
                 setAlbumDetailState("ready");
               })
               .catch((error: unknown) => {
@@ -1099,7 +1109,11 @@ function App() {
           if (cancelled || requestId !== exploreRequestRef.current) return;
           explorerRestorationPendingRef.current = false;
           setExplorerError(error instanceof Error ? error.message : String(error));
-          setExplorerLoadState("error");
+          if (preservingCurrentView) {
+            console.warn("Aurora kept the current Library view after its background refresh failed", error);
+          } else {
+            setExplorerLoadState("error");
+          }
         });
     }, explorerFilters.query.trim() ? 160 : 0);
     return () => {
@@ -2827,7 +2841,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.19</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.20</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

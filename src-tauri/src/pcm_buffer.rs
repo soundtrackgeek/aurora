@@ -329,6 +329,15 @@ mod tests {
         )
         .expect("spawn PCM producer");
 
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !buffered.finished.load(Ordering::Acquire) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "finite test source did not finish buffering"
+            );
+            thread::yield_now();
+        }
+
         assert_eq!(buffered.collect::<Vec<_>>(), values);
         assert_eq!(underruns.load(Ordering::Relaxed), 0);
     }
