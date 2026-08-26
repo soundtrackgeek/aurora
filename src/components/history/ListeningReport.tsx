@@ -174,21 +174,40 @@ function ActivityChart({ report, period, range }: {
 function ListeningClock({ hourly }: { hourly: number[] }) {
   const max = Math.max(1, ...hourly);
   const busiest = hourly.reduce((best, value, index) => value > hourly[best] ? index : best, 0);
+  const chartWidth = 600;
+  const baseline = 238;
+  const cellWidth = 17;
+  const cellGap = 7;
+  const startX = 13;
+  const barHeight = (value: number) => 18 + (value / max) * 68;
+  const busiestHeight = barHeight(hourly[busiest]);
+  const busiestX = startX + busiest * (cellWidth + cellGap);
+  const calloutY = baseline - busiestHeight - 43;
   return (
     <div className="report-clock">
-      <svg viewBox="0 0 300 300" role="img" aria-label={`Listening activity by hour. Busiest hour ${busiest}:00 with ${hourly[busiest]} plays.`}>
+      <svg viewBox={`0 0 ${chartWidth} 300`} role="img" aria-label={`Listening activity by hour. Busiest hour ${busiest}:00 with ${hourly[busiest]} plays.`}>
         <title>Listening activity over 24 hours</title>
+        <defs>
+          <linearGradient id="listening-rhythm-gradient" x1="0" y1="0" x2={chartWidth} y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#283345" />
+            <stop offset="0.38" stopColor="#a75ce4" />
+            <stop offset="0.68" stopColor="#29bce1" />
+            <stop offset="1" stopColor="#253345" />
+          </linearGradient>
+        </defs>
+        <text className="report-clock__label" x={chartWidth / 2} y="36" textAnchor="middle">Busiest hour</text>
+        <text className="report-clock__time" x={chartWidth / 2} y="76" textAnchor="middle">{String(busiest).padStart(2, "0")}:00</text>
+        <text className="report-clock__plays" x={chartWidth / 2} y="99" textAnchor="middle">{hourly[busiest]} plays</text>
         {hourly.map((value, hour) => {
-          const angle = hour * 15;
-          const height = 10 + (value / max) * 42;
-          return <rect key={hour} className={hour === busiest ? "is-busiest" : ""} x="143" y="32" width="14" height={height} rx="4" transform={`rotate(${angle} 150 150)`}><title>{hour}:00 · {value} plays</title></rect>;
+          const height = barHeight(value);
+          const x = startX + hour * (cellWidth + cellGap);
+          return <rect key={hour} className={hour === busiest ? "is-busiest" : ""} x={x} y={baseline - height} width={cellWidth} height={height} rx="5" style={{ opacity: hour === busiest ? 1 : 0.38 + (value / max) * 0.56 }}><title>{String(hour).padStart(2, "0")}:00 · {value} plays</title></rect>;
         })}
-        <circle cx="150" cy="150" r="68" />
-        <text x="150" y="135" textAnchor="middle">Busiest hour</text>
-        <text className="report-clock__time" x="150" y="165" textAnchor="middle">{String(busiest).padStart(2, "0")}:00</text>
-        <text x="150" y="186" textAnchor="middle">{hourly[busiest]} plays</text>
-        <text x="150" y="18" textAnchor="middle">00</text><text x="286" y="154" textAnchor="middle">06</text>
-        <text x="150" y="296" textAnchor="middle">12</text><text x="14" y="154" textAnchor="middle">18</text>
+        <line className="report-clock__marker" x1={busiestX + cellWidth / 2} x2={busiestX + cellWidth / 2} y1={calloutY + 22} y2={baseline - busiestHeight - 5} />
+        <rect className="report-clock__callout" x={busiestX - 14} y={calloutY} width="45" height="23" rx="6" />
+        <text className="report-clock__callout-text" x={busiestX + cellWidth / 2} y={calloutY + 16} textAnchor="middle">{String(busiest).padStart(2, "0")}:00</text>
+        {[0, 6, 12, 18].map((hour) => <text key={hour} className="report-clock__tick" x={startX + hour * (cellWidth + cellGap) + cellWidth / 2} y="270" textAnchor="middle">{String(hour).padStart(2, "0")}</text>)}
+        <text className="report-clock__tick" x={chartWidth - 10} y="270" textAnchor="end">24</text>
       </svg>
     </div>
   );
@@ -293,7 +312,7 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
             <article><div className="report-heading"><div><h2>Listening fingerprint</h2><p>Five signals derived from this period—no global score.</p></div></div><RadarChart report={report} /></article>
           </section>
           <section className="report-analysis report-analysis--lower">
-            <article><div className="report-heading"><div><h2>Music by decade</h2><p>Registered plays by the release year in your catalog.</p></div></div><div className="report-decades">{report.decades.map((item) => <div key={item.decade}><span>{item.decade}</span><i><b style={{ width: `${(item.plays / maxDecade) * 100}%` }} /></i><strong>{item.plays}</strong></div>)}</div></article>
+            <article><div className="report-heading"><div><h2>Music by decade</h2><p>Registered plays by the Year field in your catalog.</p></div></div><div className="report-decades">{report.decades.map((item) => <div key={item.decade}><span>{item.decade}</span><i><b style={{ width: `${(item.plays / maxDecade) * 100}%` }} /></i><strong>{item.plays}</strong></div>)}</div></article>
             <article><div className="report-heading"><div><h2>Discovery</h2><p>Music first heard in Aurora during this period.</p></div></div><div className="report-discovery"><div><UserRound aria-hidden="true" /><span><small>New artists</small><strong>{percent(report.discovery.newArtists, report.discovery.totalArtists)}%</strong><em>{report.discovery.newArtists} of {report.discovery.totalArtists}</em></span></div><div><Disc3 aria-hidden="true" /><span><small>New albums</small><strong>{percent(report.discovery.newAlbums, report.discovery.totalAlbums)}%</strong><em>{report.discovery.newAlbums} of {report.discovery.totalAlbums}</em></span></div><div><Sparkles aria-hidden="true" /><span><small>New tracks</small><strong>{percent(report.discovery.newTracks, report.discovery.totalTracks)}%</strong><em>{report.discovery.newTracks} of {report.discovery.totalTracks}</em></span></div></div></article>
           </section>
           <section className="report-section report-facts"><div className="report-heading"><div><h2>Quick facts</h2><p>The shape of this listening period at a glance.</p></div></div><div className="report-facts__grid"><article><Clock3 aria-hidden="true" /><span>Listening time</span><strong>{durationLabel(report.summary.listenedSeconds)}</strong><small>Total session time</small></article><article><Music2 aria-hidden="true" /><span>Average per active day</span><strong>{Math.round(report.summary.plays / Math.max(1, report.summary.activeDays))}</strong><small>Registered plays</small></article><article><CalendarDays aria-hidden="true" /><span>Most active day</span><strong>{report.summary.mostActiveDayStartMs ? new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(report.summary.mostActiveDayStartMs) : "—"}</strong><small>{report.summary.mostActiveDayPlays} plays</small></article><article><Headphones aria-hidden="true" /><span>Longest session</span><strong>{durationLabel(report.summary.longestSessionSeconds)}</strong><small>{report.summary.longestSessionStartedAtMs ? new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(report.summary.longestSessionStartedAtMs) : "No sessions"}</small></article><article><Disc3 aria-hidden="true" /><span>Completion rate</span><strong>{completionRate}%</strong><small>{report.summary.completed} completed sessions</small></article></div></section>

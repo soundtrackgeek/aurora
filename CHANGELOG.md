@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-26
+
+### Changed
+
+- Replaced Listening Rhythm's radial clock with a clearer 24-hour segmented activity ribbon that highlights the busiest hour while preserving every hourly value.
+
+### Fixed
+
+- Music by Decade now always groups listening history by Aurora's **Year** field instead of **Release Year**, including the browser preview path.
+
 ## [0.19.1] - 2026-08-26
 
 ### Fixed

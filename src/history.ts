@@ -331,7 +331,7 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
   const isNew = (timestamp: number) => request.startedAfterMs === undefined || timestamp >= request.startedAfterMs;
   const decades = new Map<string, number>();
   for (const item of plays) {
-    const year = item.track?.releaseYear;
+    const year = item.track?.originalYear;
     const label = year ? `${Math.floor(year / 10) * 10}s` : "Unknown";
     decades.set(label, (decades.get(label) ?? 0) + 1);
   }

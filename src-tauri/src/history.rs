@@ -1129,11 +1129,7 @@ impl HistoryStore {
                     listened_seconds: row.listened_seconds,
                     last_played_at_ms: row.started_at_ms,
                 });
-            let decade = resolved_by_key
-                .get(&row.track_key)
-                .and_then(|track| track.release_year)
-                .map(|year| format!("{}s", year.div_euclid(10) * 10))
-                .unwrap_or_else(|| "Unknown".to_owned());
+            let decade = report_decade(resolved_by_key.get(&row.track_key));
             *decades.entry(decade).or_insert(0) += 1;
         }
 
@@ -1653,6 +1649,13 @@ fn report_summary(rows: &[&HistoryRow], timezone_offset_minutes: i32) -> History
         summary.most_active_day_plays = plays;
     }
     summary
+}
+
+fn report_decade(track: Option<&TrackSummary>) -> String {
+    track
+        .and_then(|track| track.original_year)
+        .map(|year| format!("{}s", year.div_euclid(10) * 10))
+        .unwrap_or_else(|| "Unknown".to_owned())
 }
 
 fn report_discovery(
@@ -2256,6 +2259,17 @@ mod tests {
         assert_eq!(summary.unique_tracks, 12);
         assert_eq!(summary.unique_artists, 4);
         assert!(summary.active_days > 1);
+    }
+
+    #[test]
+    fn report_decade_uses_year_instead_of_release_year() {
+        let mut summary = track(240);
+        summary.original_year = Some(1987);
+        summary.release_year = Some(2024);
+
+        assert_eq!(report_decade(Some(&summary)), "1980s");
+        summary.original_year = None;
+        assert_eq!(report_decade(Some(&summary)), "Unknown");
     }
 
     #[test]
