@@ -1,6 +1,6 @@
-# Ratings Studio contract (0.14.0)
+# Ratings Studio contract (0.18.18)
 
-Aurora 0.14.0 gives Ratings its own bounded, read-only catalog surface while preserving Aurora's verified instant MP3 tag pipeline.
+Aurora gives Ratings its own bounded, read-only catalog surface while preserving Aurora's verified instant MP3 tag pipeline.
 
 ## Authority and identity
 
@@ -21,8 +21,7 @@ Aurora 0.14.0 gives Ratings its own bounded, read-only catalog surface while pre
 
 ## Completion states
 
-- Almost complete: at least one track is rated and only 1–3 tracks remain unrated.
-- Partially rated: at least one track is rated and more than 3 tracks remain unrated.
+- Partially rated: at least one track is rated and at least one track remains unrated. The shelf can be filtered to an exact positive number of tracks left.
 - Unrated album: no tracks are rated.
 - Fully rated albums are omitted from the completion workbench and may show their current Album Score in album detail.
 
@@ -38,8 +37,7 @@ Aurora 0.14.0 gives Ratings its own bounded, read-only catalog surface while pre
 
 - Track and album-rating constellation bands are clickable.
 - Five-star track selection exposes the 5 Star Collection.
-- Completion tabs switch between Almost Complete, Partially Rated, and Unrated Albums.
+- Completion tabs switch between Partially Rated and Unrated Albums. Partially Rated provides quick filters for 1, 2, and 3 tracks left plus a custom exact count.
 - Selecting an album opens its bounded track list. Stars and Love save instantly through the existing verified MP3 transaction and Aurora overlay.
 - `Play unrated tracks` queues only unrated tracks from the selected album.
 - A successful tag edit refreshes Ratings so completion, spectra, provisional averages, and Album Score reconcile with the newest overlay.
-

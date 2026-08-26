@@ -38,7 +38,9 @@ interface RatingsStudioProps {
   refreshing: boolean;
   queueMessage: string | null;
   busyTrackKeys: ReadonlySet<string>;
+  remainingTracks: number | null;
   onCompletionChange: (kind: CompletionKind) => void;
+  onRemainingTracksChange: (remainingTracks: number | null) => void;
   onSelectAlbum: (album: RatingAlbum) => void;
   onGoToAlbum: (album: RatingAlbum) => void;
   onSelectTrack: (track: Track) => void;
@@ -180,10 +182,11 @@ function Constellation({
 }
 
 const completionTabs: ReadonlyArray<{ kind: CompletionKind; label: string }> = [
-  { kind: "almostComplete", label: "Almost complete" },
   { kind: "partiallyRated", label: "Partially rated" },
   { kind: "unrated", label: "Unrated albums" },
 ];
+
+const quickRemainingTrackFilters = [1, 2, 3] as const;
 
 function Feedback({ detail, error, onRetry }: { detail: boolean; error: string | null; onRetry: () => void }) {
   if (!error) return <div className="ratings-feedback" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>{detail ? "Opening this completion lane…" : "Mapping your taste constellation…"}</strong></div>;
@@ -221,6 +224,32 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
         </button>
       </div>
     </header>
+    {page?.kind === "partiallyRated" ? <div className="completion-filter" aria-label="Partially rated album filters">
+      <span>Tracks left</span>
+      <button type="button" aria-pressed={props.remainingTracks === null} onClick={() => props.onRemainingTracksChange(null)}>Any</button>
+      {quickRemainingTrackFilters.map((remaining) => <button
+        type="button"
+        aria-pressed={props.remainingTracks === remaining}
+        onClick={() => props.onRemainingTracksChange(remaining)}
+        key={remaining}
+      >{remaining}</button>)}
+      <label>
+        <span>Custom</span>
+        <input
+          type="number"
+          min="1"
+          step="1"
+          inputMode="numeric"
+          aria-label="Custom tracks left"
+          placeholder="e.g. 7"
+          value={props.remainingTracks !== null && !quickRemainingTrackFilters.includes(props.remainingTracks as 1 | 2 | 3) ? props.remainingTracks : ""}
+          onChange={(event) => {
+            const value = event.currentTarget.valueAsNumber;
+            props.onRemainingTracksChange(Number.isInteger(value) && value >= 1 ? value : null);
+          }}
+        />
+      </label>
+    </div> : null}
     {props.pageState !== "ready" || !page ? <Feedback detail error={props.pageError} onRetry={props.onRetryPage} /> : <>
       <div className="completion-shelf" aria-label={`${formatCount(page.total)} ${completionTabs.find((tab) => tab.kind === page.kind)?.label.toLocaleLowerCase()} albums`}>
         {page.albums.map((album) => <button type="button" className={selectedAlbum?.id === album.id ? "is-selected" : undefined} aria-pressed={selectedAlbum?.id === album.id} onClick={() => props.onSelectAlbum(album)} key={album.id}>

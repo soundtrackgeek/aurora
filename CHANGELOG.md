@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.18] - 2026-08-26
+
+### Changed
+
+- Consolidated **Finish what you love** into one **Partially rated** shelf for every incomplete album with at least one rating, with exact remaining-track filters for 1, 2, 3, or any custom positive count such as 7.
+
 ## [0.18.17] - 2026-08-26
 
 ### Changed

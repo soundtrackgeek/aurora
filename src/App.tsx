@@ -579,7 +579,8 @@ function App() {
   const [ratingsPageError, setRatingsPageError] = useState<string | null>(null);
   const [ratingsReloadToken, setRatingsReloadToken] = useState(0);
   const [ratingsRefreshing, setRatingsRefreshing] = useState(false);
-  const [ratingsCompletion, setRatingsCompletion] = useState<CompletionKind>("almostComplete");
+  const [ratingsCompletion, setRatingsCompletion] = useState<CompletionKind>("partiallyRated");
+  const [ratingsRemainingTracks, setRatingsRemainingTracks] = useState<number | null>(null);
   const [selectedRatingAlbum, setSelectedRatingAlbum] = useState<RatingAlbum | null>(null);
   const [ratingAlbumTracks, setRatingAlbumTracks] = useState<Track[]>([]);
   const [ratingsQueueBusy, setRatingsQueueBusy] = useState(false);
@@ -1335,9 +1336,9 @@ function App() {
     let cancelled = false;
     if (!preserveSelection) setRatingsPageState("loading");
     setRatingsPageError(null);
-    const request = ratingsCompletion === "almostComplete"
+    const request = ratingsCompletion === "partiallyRated" && ratingsRemainingTracks === null
       ? Promise.resolve(ratingsOverview.initialPage)
-      : loadRatingAlbumPage(ratingsCompletion);
+      : loadRatingAlbumPage(ratingsCompletion, ratingsCompletion === "partiallyRated" ? ratingsRemainingTracks : null);
     void request
       .then((page) => {
           if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
@@ -1370,7 +1371,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeNav, libraryReady, ratingsCompletion, ratingsOverview, ratingsReloadToken]);
+  }, [activeNav, libraryReady, ratingsCompletion, ratingsOverview, ratingsReloadToken, ratingsRemainingTracks]);
 
   useEffect(() => {
     if (!genreRadioSession) return;
@@ -2826,7 +2827,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.17</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.18</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3069,7 +3070,9 @@ function App() {
                 refreshing={ratingsRefreshing}
                 queueMessage={ratingsQueueMessage}
                 busyTrackKeys={inlineSavingKeys}
+                remainingTracks={ratingsRemainingTracks}
                 onCompletionChange={setRatingsCompletion}
+                onRemainingTracksChange={setRatingsRemainingTracks}
                 onSelectAlbum={openRatingAlbum}
                 onGoToAlbum={goToRatingAlbum}
                 onSelectTrack={selectTrack}

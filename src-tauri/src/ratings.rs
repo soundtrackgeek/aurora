@@ -29,7 +29,6 @@ pub(crate) enum RatingMode {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum CompletionKind {
-    AlmostComplete,
     PartiallyRated,
     Unrated,
 }
@@ -44,7 +43,6 @@ pub(crate) struct RatingBand {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CompletionCounts {
-    pub(crate) almost_complete: i64,
     pub(crate) partially_rated: i64,
     pub(crate) unrated: i64,
 }
@@ -114,6 +112,7 @@ struct AlbumSnapshot {
 #[derive(Clone, Debug)]
 struct AlbumComparison {
     base_completion: Option<CompletionKind>,
+    base_remaining_tracks: i64,
     base_rating_band: Option<i64>,
     live: AlbumSnapshot,
 }
@@ -143,8 +142,6 @@ fn completion_kind(total: i64, rated: i64) -> Option<CompletionKind> {
         Some(CompletionKind::Unrated)
     } else if remaining == 0 {
         None
-    } else if remaining <= 3 {
-        Some(CompletionKind::AlmostComplete)
     } else {
         Some(CompletionKind::PartiallyRated)
     }
@@ -253,17 +250,15 @@ fn query_completion_counts(connection: &Connection) -> Result<CompletionCounts, 
     connection
         .query_row(
             r#"
-            SELECT SUM(CASE WHEN rated_tracks > 0 AND total_tracks - rated_tracks BETWEEN 1 AND 3 THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN rated_tracks > 0 AND total_tracks - rated_tracks > 3 THEN 1 ELSE 0 END),
+            SELECT SUM(CASE WHEN rated_tracks > 0 AND total_tracks - rated_tracks > 0 THEN 1 ELSE 0 END),
                    SUM(CASE WHEN rated_tracks = 0 THEN 1 ELSE 0 END)
             FROM albums
             "#,
             [],
             |row| {
                 Ok(CompletionCounts {
-                    almost_complete: row.get(0)?,
-                    partially_rated: row.get(1)?,
-                    unrated: row.get(2)?,
+                    partially_rated: row.get(0)?,
+                    unrated: row.get(1)?,
                 })
             },
         )
@@ -272,7 +267,6 @@ fn query_completion_counts(connection: &Connection) -> Result<CompletionCounts, 
 
 fn count_for_kind(counts: &CompletionCounts, kind: CompletionKind) -> i64 {
     match kind {
-        CompletionKind::AlmostComplete => counts.almost_complete,
         CompletionKind::PartiallyRated => counts.partially_rated,
         CompletionKind::Unrated => counts.unrated,
     }
@@ -280,7 +274,6 @@ fn count_for_kind(counts: &CompletionCounts, kind: CompletionKind) -> i64 {
 
 fn adjust_completion(counts: &mut CompletionCounts, kind: CompletionKind, delta: i64) {
     let target = match kind {
-        CompletionKind::AlmostComplete => &mut counts.almost_complete,
         CompletionKind::PartiallyRated => &mut counts.partially_rated,
         CompletionKind::Unrated => &mut counts.unrated,
     };
@@ -580,6 +573,7 @@ fn affected_album_comparisons(
             album_id,
             AlbumComparison {
                 base_completion: completion_kind(total, rated),
+                base_remaining_tracks: (total - rated).max(0),
                 base_rating_band: album_band(effective),
                 live,
             },
@@ -609,17 +603,15 @@ fn apply_album_deltas(
     }
 }
 
-fn album_matches(kind: CompletionKind, album: &RatingAlbum) -> bool {
+fn album_matches(kind: CompletionKind, remaining_tracks: Option<i64>, album: &RatingAlbum) -> bool {
     completion_kind(album.total_tracks, album.rated_tracks) == Some(kind)
+        && remaining_tracks.is_none_or(|remaining| album.remaining_tracks == remaining)
 }
 
 fn candidate_predicate(kind: CompletionKind) -> &'static str {
     match kind {
-        CompletionKind::AlmostComplete => {
-            "a.rated_tracks > 0 AND a.total_tracks - a.rated_tracks BETWEEN 1 AND 3"
-        }
         CompletionKind::PartiallyRated => {
-            "a.rated_tracks > 0 AND a.total_tracks - a.rated_tracks > 3"
+            "a.rated_tracks > 0 AND a.total_tracks - a.rated_tracks > 0"
         }
         CompletionKind::Unrated => "a.rated_tracks = 0 AND a.total_tracks BETWEEN 1 AND 30",
     }
@@ -628,26 +620,31 @@ fn candidate_predicate(kind: CompletionKind) -> &'static str {
 fn query_candidate_ids(
     connection: &Connection,
     kind: CompletionKind,
+    remaining_tracks: Option<i64>,
     limit: usize,
 ) -> Result<Vec<String>, String> {
     let order = match kind {
-        CompletionKind::AlmostComplete => {
-            "a.total_tracks - a.rated_tracks, a.loved_tracks DESC, COALESCE(a.album_score, -1) DESC, a.id"
-        }
         CompletionKind::PartiallyRated => {
-            "a.rating_completeness DESC, a.loved_tracks DESC, COALESCE(a.album_score, -1) DESC, a.id"
+            "a.total_tracks - a.rated_tracks, a.rating_completeness DESC, a.loved_tracks DESC, COALESCE(a.album_score, -1) DESC, a.id"
         }
         CompletionKind::Unrated => "COALESCE(a.year, -1) DESC, a.total_tracks, a.id",
     };
+    let remaining_predicate = if remaining_tracks.is_some() {
+        " AND a.total_tracks - a.rated_tracks = ?1"
+    } else {
+        ""
+    };
     let sql = format!(
-        "SELECT a.id FROM albums AS a WHERE {} ORDER BY {order} LIMIT ?1",
-        candidate_predicate(kind)
+        "SELECT a.id FROM albums AS a WHERE {}{remaining_predicate} ORDER BY {order} LIMIT ?2",
+        candidate_predicate(kind),
     );
     let mut statement = connection
         .prepare(&sql)
         .map_err(|error| format!("Could not prepare the album-completion shelf: {error}"))?;
     statement
-        .query_map([limit as i64], |row| row.get::<_, String>(0))
+        .query_map(params![remaining_tracks, limit as i64], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|error| format!("Could not read the album-completion shelf: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the album-completion shelf: {error}"))
@@ -660,12 +657,6 @@ fn sort_albums(kind: CompletionKind, albums: &mut [RatingAlbum]) {
             .partial_cmp(&left.album_score)
             .unwrap_or(Ordering::Equal);
         match kind {
-            CompletionKind::AlmostComplete => left
-                .remaining_tracks
-                .cmp(&right.remaining_tracks)
-                .then_with(|| right.loved_tracks.cmp(&left.loved_tracks))
-                .then(score_order)
-                .then_with(|| left.id.cmp(&right.id)),
             CompletionKind::PartiallyRated => {
                 let left_ratio = left.rated_tracks as f64 / left.total_tracks.max(1) as f64;
                 let right_ratio = right.rated_tracks as f64 / right.total_tracks.max(1) as f64;
@@ -688,6 +679,7 @@ fn sort_albums(kind: CompletionKind, albums: &mut [RatingAlbum]) {
 fn query_album_page(
     connection: &Connection,
     kind: CompletionKind,
+    remaining_tracks: Option<i64>,
     completion: &CompletionCounts,
     overlays: &[TagOverlay],
     comparisons: &HashMap<String, AlbumComparison>,
@@ -698,11 +690,11 @@ fn query_album_page(
         .cloned()
         .map(|overlay| (overlay.track_key.clone(), overlay))
         .collect::<HashMap<_, _>>();
-    let mut ids = query_candidate_ids(connection, kind, MAX_ALBUMS * 3)?;
+    let mut ids = query_candidate_ids(connection, kind, remaining_tracks, MAX_ALBUMS * 3)?;
     ids.extend(
         comparisons
             .iter()
-            .filter(|(_, comparison)| comparison.live.completion == Some(kind))
+            .filter(|(_, comparison)| album_matches(kind, remaining_tracks, &comparison.live.album))
             .map(|(id, _)| id.clone()),
     );
     let mut seen = HashSet::new();
@@ -719,15 +711,35 @@ fn query_album_page(
                 query_album_snapshot(connection, &id, &overlay_map, deleted_track_keys)
                     .map(|value| value.album)
             })?;
-        if album_matches(kind, &album) {
+        if album_matches(kind, remaining_tracks, &album) {
             albums.push(album);
         }
     }
     sort_albums(kind, &mut albums);
     albums.truncate(MAX_ALBUMS);
+    let total = if let Some(remaining) = remaining_tracks {
+        let mut total = connection
+            .query_row(
+                &format!("SELECT COUNT(*) FROM albums AS a WHERE {} AND a.total_tracks - a.rated_tracks = ?1", candidate_predicate(kind)),
+                [remaining],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("Could not count the filtered album-completion shelf: {error}"))?;
+        for comparison in comparisons.values() {
+            let base_matches = comparison.base_completion == Some(kind)
+                && comparison.base_remaining_tracks == remaining;
+            let live_matches = album_matches(kind, Some(remaining), &comparison.live.album);
+            if base_matches != live_matches {
+                total += if live_matches { 1 } else { -1 };
+            }
+        }
+        total.max(0)
+    } else {
+        count_for_kind(completion, kind)
+    };
     Ok(RatingAlbumPage {
         kind,
-        total: count_for_kind(completion, kind),
+        total,
         albums,
     })
 }
@@ -780,7 +792,8 @@ fn query_overview(connection: &Connection, store: &StateStore) -> Result<Ratings
         .collect::<Result<Vec<_>, _>>()?;
     let initial_page = query_album_page(
         connection,
-        CompletionKind::AlmostComplete,
+        CompletionKind::PartiallyRated,
+        None,
         &completion,
         &overlays,
         &comparisons,
@@ -809,8 +822,12 @@ pub(crate) fn load_ratings_overview(store: &StateStore) -> Result<RatingsOvervie
 
 pub(crate) fn load_rating_album_page(
     kind: CompletionKind,
+    remaining_tracks: Option<i64>,
     store: &StateStore,
 ) -> Result<RatingAlbumPage, String> {
+    if remaining_tracks.is_some_and(|remaining| remaining < 1) {
+        return Err("Tracks left must be at least 1.".to_owned());
+    }
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
     let overlays = store.all_overlays()?;
@@ -827,6 +844,7 @@ pub(crate) fn load_rating_album_page(
     query_album_page(
         &connection,
         kind,
+        remaining_tracks,
         &completion,
         &overlays,
         &comparisons,
@@ -977,7 +995,10 @@ fn load_rating_album_queue_from_connection(
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn fixture() -> (Connection, StateStore, std::path::PathBuf) {
         let connection = Connection::open_in_memory().expect("open rating fixture");
@@ -1017,7 +1038,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("aurora-ratings-{unique}.sqlite3"));
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "aurora-ratings-{}-{unique}-{sequence}.sqlite3",
+            std::process::id()
+        ));
         let store = StateStore::new(path.clone()).expect("state store");
         (connection, store, path)
     }
@@ -1037,10 +1062,33 @@ mod tests {
 
     #[test]
     fn completion_states_are_mutually_exclusive() {
-        assert_eq!(completion_kind(10, 9), Some(CompletionKind::AlmostComplete));
+        assert_eq!(completion_kind(10, 9), Some(CompletionKind::PartiallyRated));
         assert_eq!(completion_kind(10, 4), Some(CompletionKind::PartiallyRated));
         assert_eq!(completion_kind(10, 0), Some(CompletionKind::Unrated));
         assert_eq!(completion_kind(10, 10), None);
+    }
+
+    #[test]
+    fn partially_rated_page_filters_exact_remaining_tracks() {
+        let (connection, store, path) = fixture();
+        let completion = query_completion_counts(&connection).expect("completion counts");
+        let page = query_album_page(
+            &connection,
+            CompletionKind::PartiallyRated,
+            Some(1),
+            &completion,
+            &[],
+            &HashMap::new(),
+            &HashSet::new(),
+        )
+        .expect("filtered partial page");
+
+        assert_eq!(page.total, 1);
+        assert_eq!(page.albums.len(), 1);
+        assert_eq!(page.albums[0].id, "almost");
+        assert_eq!(page.albums[0].remaining_tracks, 1);
+        drop(store);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -1060,7 +1108,7 @@ mod tests {
             )
             .expect("seed unrated ordering fixture");
 
-        let ids = query_candidate_ids(&connection, CompletionKind::Unrated, 10)
+        let ids = query_candidate_ids(&connection, CompletionKind::Unrated, None, 10)
             .expect("unrated candidates");
         assert_eq!(ids, vec!["new-year", "new-release"]);
     }
@@ -1069,7 +1117,7 @@ mod tests {
     fn fixture_overview_keeps_track_and_album_ratings_distinct() {
         let (connection, store, path) = fixture();
         let overview = query_overview(&connection, &store).expect("ratings overview");
-        assert_eq!(overview.completion.almost_complete, 1);
+        assert_eq!(overview.completion.partially_rated, 1);
         assert_eq!(overview.rated_albums, 1);
         assert_eq!(overview.track_bands.last().expect("five stars").count, 2);
         drop(store);
@@ -1092,7 +1140,7 @@ mod tests {
             .expect("queue deleted unrated track");
 
         let overview = query_overview(&connection, &store).expect("ratings after deletion");
-        assert_eq!(overview.completion.almost_complete, 0);
+        assert_eq!(overview.completion.partially_rated, 0);
         assert!(
             overview
                 .initial_page
@@ -1233,8 +1281,7 @@ mod tests {
             72_012
         );
         assert_eq!(overview.rated_albums, 12_434);
-        assert_eq!(overview.completion.almost_complete, 678);
-        assert_eq!(overview.completion.partially_rated, 5_723);
+        assert_eq!(overview.completion.partially_rated, 6_401);
         assert_eq!(overview.completion.unrated, 59_578);
         assert!(overview.initial_page.albums.len() <= MAX_ALBUMS);
         assert!(overview.five_star_albums.len() <= 8);

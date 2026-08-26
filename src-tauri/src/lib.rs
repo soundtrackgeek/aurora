@@ -507,10 +507,11 @@ async fn publisher_queue_tracks(
 async fn rating_album_page(
     app: AppHandle,
     kind: CompletionKind,
+    remaining_tracks: Option<i64>,
 ) -> Result<RatingAlbumPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        ratings::load_rating_album_page(kind, &store)
+        ratings::load_rating_album_page(kind, remaining_tracks, &store)
     })
     .await
     .map_err(|error| format!("The album-rating worker stopped unexpectedly: {error}"))?

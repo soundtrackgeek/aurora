@@ -9,10 +9,10 @@ const soundtrackTrack: Track = { id: "track", trackKey: "file:track", albumId: a
 const overview: RatingsOverview = {
   trackBands: [null, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((rating) => ({ rating, count: rating === null ? 947_794 : rating === 5 ? 59_293 : 10 })),
   albumBands: [null, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((rating) => ({ rating, count: rating === 5 ? 1_120 : 5 })),
-  completion: { almostComplete: 678, partiallyRated: 5_723, unrated: 59_578 },
+  completion: { partiallyRated: 6_401, unrated: 59_578 },
   ratedAlbums: 12_434,
   fiveStarAlbums: [{ ...album, ratedTracks: 10, remainingTracks: 0, effectiveRating: 5, albumScore: 112 }],
-  initialPage: { kind: "almostComplete", total: 678, albums: [album] },
+  initialPage: { kind: "partiallyRated", total: 6_401, albums: [album] },
 };
 
 function props() {
@@ -29,7 +29,8 @@ function props() {
     refreshing: false,
     queueMessage: null,
     busyTrackKeys: new Set<string>(),
-    onCompletionChange: vi.fn(), onSelectAlbum: vi.fn(), onGoToAlbum: vi.fn(), onSelectTrack: vi.fn(), onPlayTrack: vi.fn(),
+    remainingTracks: null,
+    onCompletionChange: vi.fn(), onRemainingTracksChange: vi.fn(), onSelectAlbum: vi.fn(), onGoToAlbum: vi.fn(), onSelectTrack: vi.fn(), onPlayTrack: vi.fn(),
     onRatingChange: vi.fn(), onLoveChange: vi.fn(), onPlayCollection: vi.fn(), onExploreCollection: vi.fn(),
     onPlayUnrated: vi.fn(), onRefresh: vi.fn(), onRetry: vi.fn(), onRetryPage: vi.fn(),
   };
@@ -47,6 +48,11 @@ describe("RatingsStudio", () => {
     expect(screen.getByLabelText("5 stars, 1,120")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /Partially rated/ }));
     expect(callbacks.onCompletionChange).toHaveBeenCalledWith("partiallyRated");
+    expect(screen.queryByRole("tab", { name: /Almost complete/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    expect(callbacks.onRemainingTracksChange).toHaveBeenCalledWith(2);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom tracks left" }), { target: { value: "7" } });
+    expect(callbacks.onRemainingTracksChange).toHaveBeenCalledWith(7);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(callbacks.onRefresh).toHaveBeenCalledOnce();
     expect(screen.getByText("4.25 ★ provisional")).toBeInTheDocument();
