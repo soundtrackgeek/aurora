@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.10] - 2026-08-26
+
+### Fixed
+
+- Fixed multi-folder Inbox intake failing with Music Library's `stalePlan` response. Aurora now re-previews each monitored root immediately before applying it, after any earlier root has updated the catalog, and refuses the apply if that fresh plan no longer matches the destinations and albums the user reviewed.
+
 ## [0.18.9] - 2026-08-26
 
 ### Fixed

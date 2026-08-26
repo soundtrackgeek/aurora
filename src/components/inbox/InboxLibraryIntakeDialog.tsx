@@ -60,8 +60,16 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     setError(null);
     let completedAlbums = 0;
     try {
-      for (const preview of previews) {
-        const result = await libraryIntakeAdapter.apply({ planId: preview.planId, sessionId: preview.sessionId });
+      for (const [index, reviewedPreview] of previews.entries()) {
+        const target = targets[index];
+        const freshPreview = await libraryIntakeAdapter.preview({
+          sourcePath: target.sourcePath,
+          category: destinations[target.sourcePath] as LibraryIntakeCategoryId,
+        });
+        if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
+          throw new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
+        }
+        const result = await libraryIntakeAdapter.apply({ planId: freshPreview.planId, sessionId: freshPreview.sessionId });
         completedAlbums += result.albumCount;
       }
       await onApplied();
@@ -114,4 +122,24 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       </footer>
     </section>
   </div>;
+}
+
+function sameReviewedIntake(reviewed: LibraryIntakePreview, fresh: LibraryIntakePreview): boolean {
+  return fresh.canApply
+    && reviewed.sourcePath === fresh.sourcePath
+    && reviewed.category.id === fresh.category.id
+    && reviewed.category.destinationRoot === fresh.category.destinationRoot
+    && reviewed.albumCount === fresh.albumCount
+    && reviewed.trackCount === fresh.trackCount
+    && reviewed.albums.length === fresh.albums.length
+    && reviewed.albums.every((album, index) => {
+      const candidate = fresh.albums[index];
+      return candidate
+        && album.sourcePath === candidate.sourcePath
+        && album.destinationPath === candidate.destinationPath
+        && album.artist === candidate.artist
+        && album.album === candidate.album
+        && album.year === candidate.year
+        && album.trackCount === candidate.trackCount;
+    });
 }

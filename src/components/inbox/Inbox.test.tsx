@@ -129,9 +129,13 @@ describe("Inbox", () => {
       ...snapshot,
       albums: snapshot.albums.map((album) => ({ ...album, genre: "Hard Rock", readiness: { ready: true, issues: [] } })),
     });
-    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => libraryPreview("folder-plan", 41, sourcePath, category, 1));
+    let previewSequence = 0;
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => {
+      previewSequence += 1;
+      return libraryPreview(`folder-plan-${previewSequence}`, 40 + previewSequence, sourcePath, category, 1);
+    });
     const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockResolvedValue({
-      planId: "folder-plan", sessionId: 41, status: "completed", albumCount: 1, trackCount: 10,
+      planId: "folder-plan-2", sessionId: 42, status: "completed", albumCount: 1, trackCount: 10,
       movedAlbumCount: 1, importRunId: 7, backupPath: null, cleanupWarnings: [],
       albums: [{ sourcePath: "C:\\Music\\Inbox\\Baltimoore - Freak", destinationPath: "D:\\Music\\Baltimoore - Freak", cleanupStatus: "removed" }],
     });
@@ -148,7 +152,8 @@ describe("Inbox", () => {
     expect(await screen.findByText(/1 album · 10 tracks → D:\\Music/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add 1 album" }));
 
-    await waitFor(() => expect(apply).toHaveBeenCalledWith({ planId: "folder-plan", sessionId: 41 }));
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(2));
+    expect(apply).toHaveBeenCalledWith({ planId: "folder-plan-2", sessionId: 42 });
     expect(catalogChanged).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
   });
@@ -165,7 +170,11 @@ describe("Inbox", () => {
       tracks: first.tracks.map((track) => ({ ...track, path: track.path.replace("C:\\Music\\Inbox\\Baltimoore - Freak", "D:\\Bandcamp\\Neon Nights") })),
     };
     vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [first, second] });
-    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => libraryPreview(sourcePath.includes("Bandcamp") ? "all-plan-2" : "all-plan-1", sourcePath.includes("Bandcamp") ? 52 : 51, sourcePath, category, 1));
+    let previewSequence = 0;
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => {
+      previewSequence += 1;
+      return libraryPreview(`all-plan-${previewSequence}`, 50 + previewSequence, sourcePath, category, 1);
+    });
     const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockImplementation(async ({ planId, sessionId }) => ({
       planId, sessionId, status: "completed", albumCount: 1, trackCount: 10, movedAlbumCount: 1,
       importRunId: sessionId, backupPath: null, cleanupWarnings: [],
@@ -184,7 +193,35 @@ describe("Inbox", () => {
     expect(preview).toHaveBeenNthCalledWith(2, { sourcePath: "D:\\Bandcamp", category: "synthwave" });
     fireEvent.click(await screen.findByRole("button", { name: "Add 2 albums" }));
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(preview).toHaveBeenCalledTimes(4);
+    expect(apply).toHaveBeenNthCalledWith(1, { planId: "all-plan-3", sessionId: 53 });
+    expect(apply).toHaveBeenNthCalledWith(2, { planId: "all-plan-4", sessionId: 54 });
     expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+  });
+
+  it("stops when a fresh apply-time preview no longer matches the reviewed intake", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({
+      ...snapshot,
+      albums: snapshot.albums.map((album) => ({ ...album, genre: "Hard Rock", readiness: { ready: true, issues: [] } })),
+    });
+    let previewSequence = 0;
+    vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => {
+      previewSequence += 1;
+      const preview = libraryPreview(`changed-plan-${previewSequence}`, 60 + previewSequence, sourcePath, category, 1);
+      return previewSequence === 1 ? preview : { ...preview, trackCount: 11 };
+    });
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply");
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    fireEvent.click(screen.getByRole("button", { name: "Add Inbox to library" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Library destination for Inbox" }), { target: { value: "general" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add 1 album" }));
+
+    expect(await screen.findByText("Inbox changed after review. Preview destinations again before adding it to the library.")).toBeInTheDocument();
+    expect(apply).not.toHaveBeenCalled();
   });
 });
 

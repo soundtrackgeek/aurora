@@ -42,7 +42,7 @@ Inbox files are not cataloged, so this transaction does not queue an existing-fo
 
 ## Promotion
 
-Album-level **Move to library** and the monitored-folder/**All folders** **Add to Library** actions use the existing Music Library bridge without a second mover implementation. Folder intake assigns a General, Scores, or Synthwave destination independently to each non-empty monitored root, previews every root before apply, and blocks the complete scope when any contained Inbox album is not ready.
+Album-level **Move to library** and the monitored-folder/**All folders** **Add to Library** actions use the existing Music Library bridge without a second mover implementation. Folder intake assigns a General, Scores, or Synthwave destination independently to each non-empty monitored root, previews every root for review, and blocks the complete scope when any contained Inbox album is not ready. Because every successful Music Library apply changes the active catalog and invalidates later plans, Aurora obtains a fresh preview immediately before each root's apply and verifies that its albums, track counts, and destinations still match the reviewed preview.
 
 ```text
 staged album folder
