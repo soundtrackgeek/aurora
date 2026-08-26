@@ -37,6 +37,7 @@ import {
   type ExplorerAlbum,
   type ExplorerFilters,
   type ExplorerLoadState,
+  type ExplorerSelection,
   type ExplorerView,
 } from "./components/explorer/DeepExplorer";
 import { resolveExplorerAlbumInspectorContext } from "./components/explorer/inspectorContext";
@@ -498,6 +499,7 @@ function App() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [explorerReloadToken, setExplorerReloadToken] = useState(0);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(initialViewPreferences.selectedAlbumId);
+  const [explorerSelection, setExplorerSelection] = useState<ExplorerSelection | null>(null);
   const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
   const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
   const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
@@ -2225,6 +2227,7 @@ function App() {
   }
 
   function changeExplorerView(view: ExplorerView) {
+    setExplorerSelection(null);
     setExplorerView(view);
     setExplorerFilters((current) => ({
       ...current,
@@ -2651,11 +2654,48 @@ function App() {
           : activeNav === "Charts" && chartSelection?.kind === "albums" && chartSelection.entry.matchedAlbumId
             ? { kind: "album" as const, albumId: chartSelection.entry.matchedAlbumId, label: chartSelection.entry.title }
             : null;
-  const tagEditorTarget = tagSelectionKind === "album"
+  const explorerTagTarget = explorerSelection?.kind === "tracks"
+    ? explorerSelection.tracks.length === 0
+      ? null
+      : explorerSelection.tracks.length === 1
+        ? {
+            kind: "track" as const,
+            trackId: explorerSelection.tracks[0].id,
+            trackKey: explorerSelection.tracks[0].trackKey,
+            label: explorerSelection.tracks[0].title,
+          }
+        : {
+            kind: "tracks" as const,
+            tracks: explorerSelection.tracks.map((track) => ({ trackId: track.id, trackKey: track.trackKey })),
+            label: `${formatCount(explorerSelection.tracks.length)} tracks selected`,
+          }
+    : explorerSelection?.kind === "albums"
+      ? explorerSelection.albums.length === 0
+        ? null
+        : explorerSelection.albums.length === 1
+          ? { kind: "album" as const, albumId: explorerSelection.albums[0].id, label: explorerSelection.albums[0].title }
+          : {
+              kind: "albums" as const,
+              albumIds: explorerSelection.albums.map((album) => album.id),
+              label: `${formatCount(explorerSelection.albums.length)} albums selected`,
+            }
+      : undefined;
+  const tagEditorTarget = explorerTagTarget !== undefined
+    ? explorerTagTarget
+    : tagSelectionKind === "album"
     ? albumTagTarget
     : inspectorTrack
       ? { kind: "track" as const, trackId: inspectorTrack.id, trackKey: inspectorTrack.trackKey, label: inspectorTrack.title }
       : null;
+  const tagEditorKey = !tagEditorTarget
+    ? "none"
+    : tagEditorTarget.kind === "album"
+      ? `album:${tagEditorTarget.albumId}:${albumTracks.length}`
+      : tagEditorTarget.kind === "track"
+        ? `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`
+        : tagEditorTarget.kind === "albums"
+          ? `albums:${tagEditorTarget.albumIds.join("|")}`
+          : `tracks:${tagEditorTarget.tracks.map((track) => `${track.trackKey}:${inlineTagRevisions[track.trackKey] ?? 0}`).join("|")}`;
 
   const explorerLoaded = explorerView === "tracks"
     ? explorerTracks.length
@@ -2786,7 +2826,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.16</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.17</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3086,7 +3126,10 @@ function App() {
                 pageInfo={{ loaded: explorerLoaded, hasMore: explorerCursor !== null, isLoadingMore }}
                 busyTrackKeys={inlineSavingKeys}
                 onViewChange={changeExplorerView}
-                onFiltersChange={setExplorerFilters}
+                onFiltersChange={(filters) => {
+                  setExplorerSelection(null);
+                  setExplorerFilters(filters);
+                }}
                 onSelectTrack={selectTrack}
                 onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                 onSelectAlbum={selectAlbum}
@@ -3100,10 +3143,17 @@ function App() {
                     setExplorerReloadToken((value) => value + 1);
                   }
                 }}
-                onClearFilters={() => setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] })}
+                onClearFilters={() => {
+                  setExplorerSelection(null);
+                  setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] });
+                }}
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                 onDeleteTracks={deleteExplorerAlbumTracks}
+                onSelectionChange={(selection) => {
+                  setExplorerSelection(selection);
+                  setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
+                }}
               />
             </>
           ) : loadError ? (
@@ -3142,9 +3192,7 @@ function App() {
         {inspectorView === "tags" && tagEditorTarget ? (
           <div className="inspector-scroll inspector-scroll--tag-editor">
             <TagEditor
-              key={tagEditorTarget.kind === "album"
-                ? `album:${tagEditorTarget.albumId}:${albumTracks.length}`
-                : `track:${tagEditorTarget.trackKey}:${inlineTagRevisions[tagEditorTarget.trackKey] ?? 0}`}
+              key={tagEditorKey}
               target={tagEditorTarget}
               onTracksChange={applyTrackChanges}
               onCatalogSync={refreshTagEditorCatalogViews}

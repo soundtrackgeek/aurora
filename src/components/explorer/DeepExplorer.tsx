@@ -32,6 +32,7 @@ import {
 import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
+import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import "./DeepExplorer.css";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
@@ -91,6 +92,10 @@ export interface ExplorerPageInfo {
   isLoadingMore: boolean;
 }
 
+export type ExplorerSelection =
+  | { kind: "tracks"; tracks: readonly Track[] }
+  | { kind: "albums"; albums: readonly ExplorerAlbum[] };
+
 export interface DeepExplorerProps {
   view: ExplorerView;
   filters: ExplorerFilters;
@@ -121,6 +126,7 @@ export interface DeepExplorerProps {
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
+  onSelectionChange?: (selection: ExplorerSelection) => void;
 }
 
 const EMPTY_BUSY_TRACK_KEYS: ReadonlySet<string> = new Set();
@@ -441,7 +447,7 @@ function TrackTable({
         </thead>
         <tbody>
           {tracks.map((track, index) => {
-            const selected = multiSelectedTrackKeys && multiSelectedTrackKeys.size > 0
+            const selected = multiSelectedTrackKeys
               ? multiSelectedTrackKeys.has(track.trackKey)
               : track.id === selectedTrackId;
             const current = track.trackKey === currentTrackKey;
@@ -577,13 +583,17 @@ function ExplorerFeedback({
 function AlbumGrid({
   albums,
   selectedAlbumId,
+  selectedAlbumIds,
   onSelectAlbum,
+  onSelectionGesture,
   detailAlbumId,
   detail,
 }: {
   albums: readonly ExplorerAlbum[];
   selectedAlbumId: string | null;
+  selectedAlbumIds?: ReadonlySet<string>;
   onSelectAlbum: (album: ExplorerAlbum | null) => void;
+  onSelectionGesture?: (album: ExplorerAlbum, index: number, modifiers: SelectionModifiers) => boolean;
   detailAlbumId: string | null;
   detail: ReactNode;
 }) {
@@ -627,14 +637,22 @@ function AlbumGrid({
           key={row[0].id}
         >
           {row.map((album) => {
-            const selected = selectedAlbumId === album.id;
+            const index = albums.indexOf(album);
+            const selected = selectedAlbumIds ? selectedAlbumIds.has(album.id) : selectedAlbumId === album.id;
+            const expanded = selectedAlbumId === album.id;
             return (
               <button
                 type="button"
                 className={`deep-explorer-album${selected ? " is-selected" : ""}`}
                 aria-pressed={selected}
-                aria-expanded={selected}
-                onClick={() => onSelectAlbum(selected ? null : album)}
+                aria-expanded={expanded}
+                onClick={(event) => {
+                  const remainsSelected = onSelectionGesture?.(album, index, {
+                    ctrl: event.ctrlKey || event.metaKey,
+                    shift: event.shiftKey,
+                  }) ?? true;
+                  onSelectAlbum(remainsSelected ? album : null);
+                }}
                 key={album.id}
               >
                 <AlbumArtwork album={album} />
@@ -683,6 +701,7 @@ function AlbumDetail({
   onRatingChange,
   onLoveChange,
   onDeleteTracks,
+  onSelectionChange,
 }: {
   album: ExplorerAlbum;
   tracks: readonly Track[];
@@ -700,11 +719,14 @@ function AlbumDetail({
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
+  onSelectionChange?: (selection: ExplorerSelection) => void;
 }) {
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
     tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
   ));
-  const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
+  const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(() => (
+    tracks.find((track) => track.id === selectedTrackId)?.trackKey ?? null
+  ));
   const [deleteTargets, setDeleteTargets] = useState<readonly Track[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -714,29 +736,20 @@ function AlbumDetail({
     return new Set([...selectedTrackKeys].filter((key) => visibleKeys.has(key)));
   }, [selectedTrackKeys, tracks]);
 
-  function selectWithModifiers(track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) {
-    if (modifiers.shift && selectionAnchorKey) {
-      const anchorIndex = tracks.findIndex((candidate) => candidate.trackKey === selectionAnchorKey);
-      if (anchorIndex >= 0) {
-        const [start, end] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
-        const range = tracks.slice(start, end + 1).map((candidate) => candidate.trackKey);
-        setSelectedTrackKeys(modifiers.ctrl
-          ? (current) => new Set([...current, ...range])
-          : new Set(range));
-        return;
-      }
-    }
-    if (modifiers.ctrl) {
-      setSelectedTrackKeys((current) => {
-        const next = new Set(current);
-        if (next.has(track.trackKey)) next.delete(track.trackKey);
-        else next.add(track.trackKey);
-        return next;
-      });
-    } else {
-      setSelectedTrackKeys(new Set([track.trackKey]));
-    }
-    setSelectionAnchorKey(track.trackKey);
+  function selectWithModifiers(track: Track, _index: number, modifiers: { ctrl: boolean; shift: boolean }) {
+    const next = applyWindowsSelection(
+      tracks.map((candidate) => candidate.trackKey),
+      selectedTrackKeys,
+      selectionAnchorKey,
+      track.trackKey,
+      modifiers,
+    );
+    setSelectedTrackKeys(next.selectedKeys);
+    setSelectionAnchorKey(next.anchorKey);
+    onSelectionChange?.({
+      kind: "tracks",
+      tracks: tracks.filter((candidate) => next.selectedKeys.has(candidate.trackKey)),
+    });
   }
 
   function requestDelete(track?: Track) {
@@ -935,6 +948,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onRatingChange,
     onLoveChange,
     onDeleteTracks,
+    onSelectionChange,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
   const [closingDetail, setClosingDetail] = useState<{
@@ -945,6 +959,28 @@ export function DeepExplorer(props: DeepExplorerProps) {
   const closeTimerRef = useRef<number | null>(null);
   const detailAlbum = selectedAlbum ?? closingDetail?.album ?? null;
   const resultCount = resultCountForView(view, props);
+  const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
+    tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
+  ));
+  const [trackSelectionAnchorKey, setTrackSelectionAnchorKey] = useState<string | null>(() => (
+    tracks.find((track) => track.id === selectedTrackId)?.trackKey ?? null
+  ));
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState<ReadonlySet<string>>(() => new Set(
+    selectedAlbumId ? [selectedAlbumId] : [],
+  ));
+  const [albumSelectionAnchorId, setAlbumSelectionAnchorId] = useState<string | null>(selectedAlbumId);
+  const selectionResetReadyRef = useRef(false);
+
+  useEffect(() => {
+    if (!selectionResetReadyRef.current) {
+      selectionResetReadyRef.current = true;
+      return;
+    }
+    setSelectedTrackKeys(new Set());
+    setTrackSelectionAnchorKey(null);
+    setSelectedAlbumIds(new Set());
+    setAlbumSelectionAnchorId(null);
+  }, [filters, view]);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -955,7 +991,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
-    if (!album || album.id === selectedAlbumId) {
+    if (!album) {
       if (selectedAlbum) {
         setClosingDetail({ album: selectedAlbum, tracks: [...albumTracks], tracksTruncated: albumTracksTruncated });
         onSelectAlbum(null);
@@ -971,6 +1007,39 @@ export function DeepExplorer(props: DeepExplorerProps) {
     }
     setClosingDetail(null);
     onSelectAlbum(album);
+  }
+
+  function selectTracks(track: Track, _index: number, modifiers: SelectionModifiers) {
+    const next = applyWindowsSelection(
+      tracks.map((candidate) => candidate.trackKey),
+      selectedTrackKeys,
+      trackSelectionAnchorKey,
+      track.trackKey,
+      modifiers,
+    );
+    setSelectedTrackKeys(next.selectedKeys);
+    setTrackSelectionAnchorKey(next.anchorKey);
+    onSelectionChange?.({
+      kind: "tracks",
+      tracks: tracks.filter((candidate) => next.selectedKeys.has(candidate.trackKey)),
+    });
+  }
+
+  function selectAlbums(album: ExplorerAlbum, _index: number, modifiers: SelectionModifiers): boolean {
+    const next = applyWindowsSelection(
+      albums.map((candidate) => candidate.id),
+      selectedAlbumIds,
+      albumSelectionAnchorId,
+      album.id,
+      modifiers,
+    );
+    setSelectedAlbumIds(next.selectedKeys);
+    setAlbumSelectionAnchorId(next.anchorKey);
+    onSelectionChange?.({
+      kind: "albums",
+      albums: albums.filter((candidate) => next.selectedKeys.has(candidate.id)),
+    });
+    return next.selectedKeys.has(album.id);
   }
 
   function updateFilters(patch: Partial<ExplorerFilters>) {
@@ -1047,12 +1116,16 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onActivateTrack={onActivateTrack}
             onRatingChange={onRatingChange}
             onLoveChange={onLoveChange}
+            multiSelectedTrackKeys={selectedTrackKeys}
+            onSelectionGesture={selectTracks}
           />
         ) : view === "albums" ? (
           <AlbumGrid
             albums={albums}
             selectedAlbumId={selectedAlbumId}
+            selectedAlbumIds={selectedAlbumIds}
             onSelectAlbum={selectOrToggleAlbum}
+            onSelectionGesture={selectAlbums}
             detailAlbumId={detailAlbum?.id ?? null}
             detail={detailAlbum ? (
               <AlbumDetail
@@ -1073,6 +1146,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onRatingChange={onRatingChange}
                 onLoveChange={onLoveChange}
                 onDeleteTracks={onDeleteTracks}
+                onSelectionChange={onSelectionChange}
               />
             ) : null}
           />

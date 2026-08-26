@@ -135,7 +135,9 @@ export interface TagReconciliationReport {
 
 export type TagEditorTarget =
   | { kind: "track"; trackId: string; trackKey: string; label: string }
-  | { kind: "album"; albumId: string; label: string };
+  | { kind: "album"; albumId: string; label: string }
+  | { kind: "tracks"; tracks: readonly { trackId: string; trackKey: string }[]; label: string }
+  | { kind: "albums"; albumIds: readonly string[]; label: string };
 
 export const EDITABLE_TAG_FIELDS = [
   "albumArtist",
@@ -263,12 +265,17 @@ function browserRevision(track: Track): string {
 }
 
 function browserTracksForTarget(target: TagEditorTarget): Track[] {
+  const selectedTrackKeys = target.kind === "tracks" ? new Set(target.tracks.map((track) => track.trackKey)) : null;
+  const selectedAlbumIds = target.kind === "albums" ? new Set(target.albumIds) : null;
   const matches = browserPreview.tracks
     .map((track) => browserTracks.get(track.id) ?? currentBrowserPreviewTrack(track))
-    .filter((track) => target.kind === "album"
-      ? track.albumId === target.albumId
-      : track.id === target.trackId && track.trackKey === target.trackKey);
-  if (!matches.length) throw new Error(`${target.kind === "album" ? "Album" : "Track"} is no longer available.`);
+    .filter((track) => {
+      if (target.kind === "album") return track.albumId === target.albumId;
+      if (target.kind === "track") return track.id === target.trackId && track.trackKey === target.trackKey;
+      if (selectedTrackKeys) return selectedTrackKeys.has(track.trackKey);
+      return selectedAlbumIds?.has(track.albumId ?? "") ?? false;
+    });
+  if (!matches.length) throw new Error(`${target.kind === "album" || target.kind === "albums" ? "Album" : "Track"} selection is no longer available.`);
   return matches;
 }
 

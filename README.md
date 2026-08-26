@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.16 normalizes out-of-range Discogs track positions in Album Auto-Tagger.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.17 adds Windows-style multi-selection for Library tracks and albums.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.16 slice
+## Current 0.18.17 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Library track rows, album cards, and opened-album track rows follow Windows selection conventions: plain click replaces, Ctrl-click toggles, and Shift-click selects a contiguous range without browser-style text highlighting. Multi-track and multi-album selections flow into the Tags sidebar for verified batch editing of up to 500 MP3 files.
 - Album Auto-Tagger replaces Discogs track positions outside the release's track total with their sequential release-order number, so hidden-track positions such as `41` on a 13-track CD become track 13.
 - Album Auto-Tagger preserves MusicBrainz artist-credit join phrases such as `featuring`, `&`, and commas when applying Artist metadata and building renamed track filenames.
 - The Tags editor cannot horizontally scroll or grow beyond the right sidebar; long values retain native scrolling inside their fixed-width inputs.

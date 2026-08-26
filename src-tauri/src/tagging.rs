@@ -356,6 +356,50 @@ impl TagService {
             TagEditorTarget::Album { album_id, .. } => {
                 catalog::resolve_album_tracks(album_id, &self.store)
             }
+            TagEditorTarget::Tracks { tracks, .. } => {
+                if tracks.is_empty() || tracks.len() > MAX_TAG_EDITOR_ALBUM_TRACKS {
+                    return Err(format!(
+                        "Select between 1 and {MAX_TAG_EDITOR_ALBUM_TRACKS} tracks for tag editing."
+                    ));
+                }
+                let mut seen = HashSet::with_capacity(tracks.len());
+                tracks
+                    .iter()
+                    .map(|track| {
+                        if !seen.insert(track.track_key.as_str()) {
+                            return Err("The tag selection contains duplicate tracks.".to_owned());
+                        }
+                        catalog::resolve_track(&track.track_id, &track.track_key, &self.store)
+                    })
+                    .collect()
+            }
+            TagEditorTarget::Albums { album_ids, .. } => {
+                if album_ids.is_empty() || album_ids.len() > 100 {
+                    return Err("Select between 1 and 100 albums for tag editing.".to_owned());
+                }
+                let mut seen_albums = HashSet::with_capacity(album_ids.len());
+                let mut seen_tracks = HashSet::new();
+                let mut resolved = Vec::new();
+                for album_id in album_ids {
+                    if !seen_albums.insert(album_id.as_str()) {
+                        return Err("The tag selection contains duplicate albums.".to_owned());
+                    }
+                    for track in catalog::resolve_album_tracks(album_id, &self.store)? {
+                        if seen_tracks.insert(track.summary.track_key.clone()) {
+                            resolved.push(track);
+                        }
+                        if resolved.len() > MAX_TAG_EDITOR_ALBUM_TRACKS {
+                            return Err(format!(
+                                "The selected albums contain more than {MAX_TAG_EDITOR_ALBUM_TRACKS} tracks. Narrow the selection before editing tags."
+                            ));
+                        }
+                    }
+                }
+                if resolved.is_empty() {
+                    return Err("The selected albums no longer contain any tracks.".to_owned());
+                }
+                Ok(resolved)
+            }
         }
     }
 
@@ -365,6 +409,19 @@ impl TagService {
         expected: &TagEditorSnapshot,
     ) -> Result<Vec<ResolvedTrack>, String> {
         let primary = self.resolve_editor_target(target);
+        if matches!(
+            target,
+            TagEditorTarget::Tracks { .. } | TagEditorTarget::Albums { .. }
+        ) {
+            return primary.and_then(|resolved| {
+                editor_selection_matches_expected(&resolved, expected)
+                    .then_some(resolved)
+                    .ok_or_else(|| {
+                        "The tag selection changed after the editor opened. Reload before saving."
+                            .to_owned()
+                    })
+            });
+        }
         let TagEditorTarget::Album { album_id, .. } = target else {
             return primary;
         };
@@ -436,13 +493,46 @@ impl TagService {
         Ok(complete_album)
     }
 
+    fn resolve_expected_tracks(
+        &self,
+        expected: &TagEditorSnapshot,
+    ) -> Result<Vec<ResolvedTrack>, String> {
+        if expected.tracks.is_empty() || expected.tracks.len() > MAX_TAG_EDITOR_ALBUM_TRACKS {
+            return Err(format!(
+                "The saved selection must contain between 1 and {MAX_TAG_EDITOR_ALBUM_TRACKS} tracks."
+            ));
+        }
+        let mut seen_keys = HashSet::with_capacity(expected.tracks.len());
+        let mut seen_ids = HashSet::with_capacity(expected.tracks.len());
+        expected
+            .tracks
+            .iter()
+            .map(|track| {
+                if !seen_keys.insert(track.track_key.as_str())
+                    || !seen_ids.insert(track.track_id.as_str())
+                {
+                    return Err("The saved selection contains duplicate tracks.".to_owned());
+                }
+                catalog::resolve_track(&track.track_id, &track.track_key, &self.store)
+            })
+            .collect()
+    }
+
     fn editor_result(
         &self,
         target: &TagEditorTarget,
         expected: &TagEditorSnapshot,
         changed_keys: &HashSet<String>,
     ) -> Result<TagEditorUpdateResult, String> {
-        let resolved = self.resolve_editor_update_target(target, expected)?;
+        let resolved = match self.resolve_editor_update_target(target, expected) {
+            Ok(resolved) => resolved,
+            Err(primary_error) if matches!(target, TagEditorTarget::Albums { .. }) => {
+                self.resolve_expected_tracks(expected).map_err(|fallback_error| format!(
+                    "Aurora saved the selected files but could not safely rebind their refreshed album identities. Original lookup: {primary_error}. Stable-file lookup: {fallback_error}"
+                ))?
+            }
+            Err(error) => return Err(error),
+        };
         let mut states = Vec::with_capacity(resolved.len());
         let mut tracks = Vec::with_capacity(resolved.len());
         for resolved in resolved {

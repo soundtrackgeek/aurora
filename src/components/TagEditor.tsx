@@ -27,7 +27,7 @@ export interface ManualTagEditorSaveResult {
 }
 
 interface ManualTagEditorProps {
-  kind: TagEditorTarget["kind"];
+  kind: "track" | "album";
   label: string;
   loadSnapshot: () => Promise<TagEditorSnapshot>;
   saveSnapshot: (
@@ -426,15 +426,22 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
   const targetAlbumId = target.kind === "album" ? target.albumId : null;
   const targetTrackId = target.kind === "track" ? target.trackId : null;
   const targetTrackKey = target.kind === "track" ? target.trackKey : null;
+  const targetTrackSelectionJson = target.kind === "tracks" ? JSON.stringify(target.tracks) : "[]";
+  const targetAlbumSelectionJson = target.kind === "albums" ? JSON.stringify(target.albumIds) : "[]";
   const targetLabel = target.label;
-  const requestTarget = useMemo<TagEditorTarget>(() => targetKind === "album"
-    ? { kind: "album", albumId: targetAlbumId!, label: targetLabel }
-    : { kind: "track", trackId: targetTrackId!, trackKey: targetTrackKey!, label: targetLabel }, [
+  const requestTarget = useMemo<TagEditorTarget>(() => {
+    if (targetKind === "album") return { kind: "album", albumId: targetAlbumId!, label: targetLabel };
+    if (targetKind === "track") return { kind: "track", trackId: targetTrackId!, trackKey: targetTrackKey!, label: targetLabel };
+    if (targetKind === "albums") return { kind: "albums", albumIds: JSON.parse(targetAlbumSelectionJson) as string[], label: targetLabel };
+    return { kind: "tracks", tracks: JSON.parse(targetTrackSelectionJson) as Array<{ trackId: string; trackKey: string }>, label: targetLabel };
+  }, [
     targetAlbumId,
+    targetAlbumSelectionJson,
     targetKind,
     targetLabel,
     targetTrackId,
     targetTrackKey,
+    targetTrackSelectionJson,
   ]);
   const loadSnapshot = useCallback(() => readTagEditorState(requestTarget), [requestTarget]);
   const saveSnapshot = useCallback(async (
@@ -476,7 +483,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
   }, [onCatalogSync, onTracksChange, requestTarget]);
 
   return <ManualTagEditor
-    kind={target.kind}
+    kind={target.kind === "album" || target.kind === "albums" ? "album" : "track"}
     label={target.label}
     loadSnapshot={loadSnapshot}
     saveSnapshot={saveSnapshot}

@@ -107,6 +107,23 @@ pub(crate) enum TagEditorTarget {
         #[serde(default)]
         label: Option<String>,
     },
+    Tracks {
+        tracks: Vec<TagEditorTrackReference>,
+        #[serde(default)]
+        label: Option<String>,
+    },
+    Albums {
+        album_ids: Vec<String>,
+        #[serde(default)]
+        label: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TagEditorTrackReference {
+    pub(crate) track_id: String,
+    pub(crate) track_key: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

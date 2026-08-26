@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.17] - 2026-08-26
+
+### Changed
+
+- Added Windows-style selection to Library track rows, album cards, and opened-album track rows: a plain click replaces the selection, Ctrl-click toggles one item, and Shift-click selects an inclusive range without selecting page text.
+- Connected multi-track and multi-album selections to the Tags sidebar so a selected batch can be edited together, with the existing verified batch writer limiting a tag operation to 500 MP3 files.
+
 ## [0.18.16] - 2026-08-26
 
 ### Fixed

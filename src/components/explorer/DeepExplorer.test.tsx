@@ -224,7 +224,25 @@ describe("DeepExplorer", () => {
     expect(onActivateTrack).toHaveBeenCalledWith(tracks[1]);
   });
 
-  it("renders album detail under the selected cover row and toggles it from the cover", () => {
+  it("uses Windows Ctrl and Shift selection in the main track list", () => {
+    const onSelectionChange = vi.fn();
+    render(<DeepExplorer {...explorerProps({ onSelectionChange })} />);
+
+    const firstRow = screen.getByRole("row", { name: /Signal One/ });
+    const secondRow = screen.getByRole("row", { name: /Second Light/ });
+    fireEvent.click(firstRow);
+    fireEvent.click(secondRow, { shiftKey: true });
+    expect(firstRow).toHaveAttribute("aria-selected", "true");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "tracks", tracks });
+
+    fireEvent.click(firstRow, { ctrlKey: true });
+    expect(firstRow).toHaveAttribute("aria-selected", "false");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "tracks", tracks: [tracks[1]] });
+  });
+
+  it("renders album detail under the selected cover row without deselecting a plain-clicked album", () => {
     const onSelectAlbum = vi.fn();
     const onSelectTrack = vi.fn();
     render(
@@ -246,9 +264,36 @@ describe("DeepExplorer", () => {
     expect(albumRow).not.toBeNull();
     expect(within(albumRow as HTMLElement).getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
     fireEvent.click(albumButton);
-    expect(onSelectAlbum).toHaveBeenCalledWith(null);
+    expect(onSelectAlbum).toHaveBeenCalledWith(albums[0]);
     fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
+  });
+
+  it("uses Windows Ctrl and Shift selection in the album grid", () => {
+    const extraAlbums = [
+      ...albums,
+      { ...albums[0], id: "album-2", title: "Electric Dawn" },
+      { ...albums[0], id: "album-3", title: "Violet Static" },
+    ];
+    const onSelectionChange = vi.fn();
+    render(<DeepExplorer {...explorerProps({
+      view: "albums",
+      albums: extraAlbums,
+      onSelectionChange,
+      pageInfo: { loaded: 3, hasMore: false, isLoadingMore: false },
+    })} />);
+
+    const first = screen.getByRole("button", { name: /Night Geometry/ });
+    const third = screen.getByRole("button", { name: /Violet Static/ });
+    fireEvent.click(first);
+    fireEvent.click(third, { shiftKey: true });
+    expect(first).toHaveAttribute("aria-pressed", "true");
+    expect(third).toHaveAttribute("aria-pressed", "true");
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "albums", albums: extraAlbums });
+
+    fireEvent.click(first, { ctrlKey: true });
+    expect(first).toHaveAttribute("aria-pressed", "false");
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "albums", albums: extraAlbums.slice(1) });
   });
 
   it("shows each track's display artist beside its title in album detail", () => {
