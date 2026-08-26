@@ -250,6 +250,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
 };
 
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const explorerSearchDebounceMs = 2_000;
 const catalogSyncRetryIntervalMs = 5_000;
 
 function catalogSyncNeedsRetry(sync: CatalogSync | null): boolean {
@@ -1117,7 +1118,7 @@ function App() {
             setExplorerLoadState("error");
           }
         });
-    }, explorerFilters.query.trim() ? 160 : 0);
+    }, explorerFilters.query.trim() ? explorerSearchDebounceMs : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(clearDetailTimer);
@@ -2863,7 +2864,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.21</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.22</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

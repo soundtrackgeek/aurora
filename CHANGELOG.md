@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.22] - 2026-08-26
+
+### Changed
+
+- Library search now waits for a two-second pause after typing before filtering tracks, albums, or artists, while clearing the search remains immediate.
+
 ## [0.18.21] - 2026-08-26
 
 ### Fixed
