@@ -1,4 +1,4 @@
-# Ratings Studio contract (0.18.18)
+# Ratings Studio contract (0.18.19)
 
 Aurora gives Ratings its own bounded, read-only catalog surface while preserving Aurora's verified instant MP3 tag pipeline.
 

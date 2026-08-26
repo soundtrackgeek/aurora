@@ -2827,7 +2827,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.18</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.19</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2871,26 +2871,28 @@ function App() {
               )}
             </output>
           ) : null}
+          <div className="topbar__status">
+            {backgroundIntakeNotice && (
+              <span
+                className="tag-sync-message intake-background-message"
+                data-intake-status={backgroundIntakeNotice.status}
+                role={backgroundIntakeNotice.status === "failed" ? "alert" : "status"}
+                title={backgroundIntakeNotice.message}
+              >{backgroundIntakeNotice.message}</span>
+            )}
+            {!backgroundIntakeNotice && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+            {!backgroundIntakeNotice && catalogNoticeMessage && (
+              <span
+                className="tag-sync-message"
+                data-sync-status={catalogSyncNotice?.status}
+                role="status"
+                title={catalogNoticeMessage}
+              >{catalogNoticeMessage}</span>
+            )}
+          </div>
         </div>
         <div className="topbar__actions">
           <button type="button" className="add-music-action" disabled={backgroundIntakeNotice?.status === "running"} onClick={() => setAddFolderOpen(true)}><FolderPlus aria-hidden="true" /><span>{backgroundIntakeNotice?.status === "running" ? "Adding music" : "Add music"}</span></button>
-          {backgroundIntakeNotice && (
-            <span
-              className="tag-sync-message intake-background-message"
-              data-intake-status={backgroundIntakeNotice.status}
-              role={backgroundIntakeNotice.status === "failed" ? "alert" : "status"}
-              title={backgroundIntakeNotice.message}
-            >{backgroundIntakeNotice.message}</span>
-          )}
-          {!backgroundIntakeNotice && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
-          {!backgroundIntakeNotice && catalogNoticeMessage && (
-            <span
-              className="tag-sync-message"
-              data-sync-status={catalogSyncNotice?.status}
-              role="status"
-              title={catalogNoticeMessage}
-            >{catalogNoticeMessage}</span>
-          )}
           <LaptopModeButton
             status={laptopModeStatus}
             busy={laptopModeBusy}

@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.19] - 2026-08-26
+
+### Changed
+
+- Moved top-bar sync, intake, and catalog status messages to a dedicated line beneath search so they no longer reduce the space available to the search field.
+
 ## [0.18.18] - 2026-08-26
 
 ### Changed
