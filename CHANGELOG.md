@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-08-26
+
+### Fixed
+
+- Listening Report now deduplicates catalog references and resolves them in safe 200-track batches, preventing reports with more than 200 plays from collapsing Music by Decade into a single **Unknown** row.
+- Music by Decade remains strictly based on **Year**; the fix does not fall back to **Release Year**.
+
 ## [0.19.2] - 2026-08-26
 
 ### Changed

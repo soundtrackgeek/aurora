@@ -21,6 +21,7 @@ const MAX_PLAY_THRESHOLD_SECONDS: u32 = 3_600;
 const HISTORY_SYNC_INTERVAL_MS: i64 = 60_000;
 const MAX_HISTORY_SOURCES: usize = 16;
 const MAX_HISTORY_PAGE_SIZE: usize = 100;
+const REPORT_CATALOG_BATCH_SIZE: usize = 200;
 
 #[derive(Clone, Debug)]
 struct HistoryMetadata {
@@ -1019,22 +1020,7 @@ impl HistoryStore {
             .filter(|row| row.registered_play)
             .collect::<Vec<_>>();
 
-        let references = current_plays
-            .iter()
-            .map(|row| StoredQueueEntry {
-                track_id: String::new(),
-                track_key: Some(row.track_key.clone()),
-                directory: Some(row.directory.clone()),
-                filename: Some(row.filename.clone()),
-            })
-            .collect::<Vec<_>>();
-        let resolved = if references.is_empty() {
-            Vec::new()
-        } else {
-            catalog::load_tracks_by_references(&references, state_store)
-                .map(|(tracks, _, _)| tracks)
-                .unwrap_or_default()
-        };
+        let resolved = resolve_report_tracks(&current_plays, state_store);
         let resolved_by_key = resolved
             .into_iter()
             .map(|track| (track.track_key.clone(), track))
@@ -1658,6 +1644,30 @@ fn report_decade(track: Option<&TrackSummary>) -> String {
         .unwrap_or_else(|| "Unknown".to_owned())
 }
 
+fn report_track_references(rows: &[&HistoryRow]) -> Vec<StoredQueueEntry> {
+    let mut seen = HashSet::new();
+    rows.iter()
+        .filter(|row| seen.insert(row.track_key.clone()))
+        .map(|row| StoredQueueEntry {
+            track_id: String::new(),
+            track_key: Some(row.track_key.clone()),
+            directory: Some(row.directory.clone()),
+            filename: Some(row.filename.clone()),
+        })
+        .collect()
+}
+
+fn resolve_report_tracks(rows: &[&HistoryRow], state_store: &StateStore) -> Vec<TrackSummary> {
+    report_track_references(rows)
+        .chunks(REPORT_CATALOG_BATCH_SIZE)
+        .flat_map(|references| {
+            catalog::load_tracks_by_references(references, state_store)
+                .map(|(tracks, _, _)| tracks)
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 fn report_discovery(
     all_rows: &[HistoryRow],
     current_plays: &[&HistoryRow],
@@ -2270,6 +2280,36 @@ mod tests {
         assert_eq!(report_decade(Some(&summary)), "1980s");
         summary.original_year = None;
         assert_eq!(report_decade(Some(&summary)), "Unknown");
+    }
+
+    #[test]
+    fn report_catalog_references_deduplicate_before_bounded_batches() {
+        let rows = (0..371)
+            .map(|index| HistoryRow {
+                session_id: format!("session-{index}"),
+                track_key: format!("track-{}", index % 12),
+                title: "Track".to_owned(),
+                artist: "Artist".to_owned(),
+                album: "Album".to_owned(),
+                genre: None,
+                directory: r"D:\Music".to_owned(),
+                filename: format!("track-{}.mp3", index % 12),
+                duration_seconds: Some(240),
+                device_id: "device".to_owned(),
+                device_name: "Computer".to_owned(),
+                started_at_ms: index,
+                ended_at_ms: None,
+                listened_seconds: 30.0,
+                registered_play: true,
+                registered_at_ms: Some(index),
+                outcome: "completed".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let references = rows.iter().collect::<Vec<_>>();
+        let catalog_references = report_track_references(&references);
+
+        assert_eq!(catalog_references.len(), 12);
+        assert!(catalog_references.len() <= REPORT_CATALOG_BATCH_SIZE);
     }
 
     #[test]

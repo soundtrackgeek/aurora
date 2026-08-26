@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.2 turns the complete listening record into a period-aware Listening Report.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.3 turns the complete listening record into a period-aware Listening Report.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.19.2 slice
+## Current 0.19.3 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- Listening Report resolves every distinct catalog track in safe bounded batches, so reports with more than 200 plays retain their complete Year-based decade distribution.
 - Listening Rhythm uses a compact 24-hour activity ribbon, and Music by Decade always uses Aurora's **Year** field rather than **Release Year**.
 - CI enforces warning-free Rust with Clippy; the Listening Report history ordering uses the preferred keyed descending sort.
 - History now opens with a dedicated **Listening report** page for 7, 30, or 90 days and all time. It aggregates every matching session across all available device-history databases—not the 50 visible timeline rows—and reports period comparisons, daily activity, top artists/albums/tracks, listening hour, a personal listening fingerprint, release decades, discovery, and quick facts. The original searchable timeline remains available as the adjacent **History** page.
