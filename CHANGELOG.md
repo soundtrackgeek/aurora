@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.23] - 2026-08-26
+
+### Documentation
+
+- Added a dedicated search guide covering Aurora's catalog query language, destination-specific searches, fields, boolean operators, exclusions, exact values, year ranges, the Scores umbrella, shortcuts, examples, limitations, and troubleshooting.
+
 ## [0.18.22] - 2026-08-26
 
 ### Changed
