@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.11] - 2026-08-26
+
+### Changed
+
+- Increased the Album Auto-Tagger's maximum height from 720 px to 1100 px so release matches and track comparisons use more of tall application windows while retaining the existing viewport margin and fixed footer.
+
 ## [0.18.10] - 2026-08-26
 
 ### Fixed

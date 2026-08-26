@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.10 keeps multi-folder Inbox intake plans fresh while Music Library updates the catalog between folders.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.18.11 lets the Album Auto-Tagger use more of a tall window while preserving its viewport margin and fixed action footer.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.18.10 slice
+## Current 0.18.11 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- The Album Auto-Tagger grows up to 1100 px tall when the window allows it, giving release matches and track comparisons more visible room without sacrificing the viewport margin or fixed action footer.
 - All-folders Inbox intake re-previews each monitored root immediately before its apply, preventing an earlier folder's catalog update from making the next Music Library plan stale. Aurora compares that fresh plan with the reviewed album and destination list and stops for a new review if the source contents actually changed.
 - Ratings completion details reflow the selected album above its tracks at a wider content-pane threshold, so Maximum (+8 px) text remains readable with the right inspector open in smaller windows.
 - Every monitored Inbox folder now has an **Add to Library** action, as does **All folders**. A single reviewed dialog can assign General, Scores, or Synthwave independently to each non-empty monitored folder, refuses scopes containing albums with unresolved readiness issues, previews exact destinations, and then delegates moving, embedded-cover archiving, catalog updates, and added-date recording to the existing Music Library bridge.
