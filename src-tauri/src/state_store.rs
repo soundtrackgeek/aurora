@@ -1272,7 +1272,7 @@ impl StateStore {
                 SELECT directory, filename, updated_at_ms
                 FROM pending_library_folder_sync
                 WHERE attempt_count < ?2
-                ORDER BY updated_at_ms, directory COLLATE NOCASE
+                ORDER BY updated_at_ms DESC, directory COLLATE NOCASE
                 LIMIT ?1
                 "#,
             )
@@ -2468,6 +2468,32 @@ mod tests {
         assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
         assert_eq!(store.pending_library_folder_sync(1).unwrap().len(), 1);
 
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn automatic_folder_sync_prioritizes_the_newest_edit() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let connection = store.open().expect("open queue");
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO pending_library_folder_sync(directory, updated_at_ms)
+                VALUES ('D:\Music\Older Album', 100);
+                INSERT INTO pending_library_folder_sync(directory, updated_at_ms)
+                VALUES ('D:\Music\Newest Album', 200);
+                "#,
+            )
+            .expect("seed ordered queue");
+
+        let pending = store
+            .pending_library_folder_sync(1)
+            .expect("load newest pending folder");
+        assert_eq!(pending[0].directory, r"D:\Music\Newest Album");
+
+        drop(connection);
         drop(store);
         let _ = fs::remove_file(path);
     }

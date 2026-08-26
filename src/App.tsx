@@ -156,6 +156,7 @@ import {
   advanceCatalogProjectionToken,
   advanceCatalogTrackProjectionTokens,
   reconcilePendingTags,
+  retryPendingLibrarySync,
   tagValuesForTrack,
   trackWithReconciledTags,
   trackWithTagValues,
@@ -623,6 +624,7 @@ function App() {
   const selectedRatingAlbumRef = useRef<RatingAlbum | null>(selectedRatingAlbum);
   const genreRefillRunningRef = useRef(false);
   const reconciliationRunningRef = useRef(false);
+  const librarySyncRunningRef = useRef(false);
   const catalogSyncNoticeRef = useRef<CatalogSync | null>(null);
   const latestTagProjectionTokenRef = useRef(0);
   const latestTrackProjectionTokensRef = useRef<ReadonlyMap<string, number>>(new Map());
@@ -1532,17 +1534,13 @@ function App() {
       applyReconciliationChanges(report.changes.filter((change) => (
         projection.acceptedTrackKeys.has(change.trackKey)
       )));
-      await handleCatalogSync(report.catalogSync ? {
-        ...report.catalogSync,
-        projectionToken: report.projectionToken,
-      } : undefined);
       if (report.externalChanges > 0) {
         setSyncMessage(`Refreshed ${formatCount(report.externalChanges)} external tag ${report.externalChanges === 1 ? "change" : "changes"}`);
       } else if (report.issues.length > 0 || report.hasMore) {
         setSyncMessage(report.issues.length === 1 && report.issues[0]?.message
           ? report.issues[0].message
           : `${formatCount(report.issues.length)} tag ${report.issues.length === 1 ? "item needs" : "items need"} attention`);
-      } else if (!catalogSyncNeedsRetry(report.catalogSync ?? catalogSyncNoticeRef.current)) {
+      } else if (!catalogSyncNeedsRetry(catalogSyncNoticeRef.current)) {
         setSyncMessage(null);
       }
     } catch (error) {
@@ -1552,7 +1550,19 @@ function App() {
     } finally {
       reconciliationRunningRef.current = false;
     }
-  }, [acceptTrackProjectionKeys, applyReconciliationChanges, handleCatalogSync]);
+  }, [acceptTrackProjectionKeys, applyReconciliationChanges]);
+
+  const retryPendingLibrarySyncNow = useCallback(async () => {
+    if (librarySyncRunningRef.current) return;
+    librarySyncRunningRef.current = true;
+    try {
+      await handleCatalogSync(await retryPendingLibrarySync());
+    } catch (error) {
+      console.warn("Aurora could not retry the pending Music Library update", error);
+    } finally {
+      librarySyncRunningRef.current = false;
+    }
+  }, [handleCatalogSync]);
 
   useEffect(() => {
     if (!libraryReady) return;
@@ -1574,15 +1584,27 @@ function App() {
     };
   }, [libraryReady, reloadToken, refreshExternalTagChanges]);
 
-  const catalogSyncRetryPending = catalogSyncNeedsRetry(catalogSyncNotice)
-    || (reconciliationHasMore && catalogSyncNotice?.status !== "blocked");
   useEffect(() => {
-    if (!libraryReady || !catalogSyncRetryPending) return;
+    if (!libraryReady || !reconciliationHasMore) return;
     const interval = window.setInterval(() => {
       if (appFocusedRef.current) void refreshExternalTagChanges();
     }, catalogSyncRetryIntervalMs);
     return () => window.clearInterval(interval);
-  }, [catalogSyncRetryPending, libraryReady, refreshExternalTagChanges]);
+  }, [libraryReady, reconciliationHasMore, refreshExternalTagChanges]);
+
+  useEffect(() => {
+    if (!libraryReady) return;
+    const initialRetry = window.setTimeout(() => void retryPendingLibrarySyncNow(), 0);
+    return () => window.clearTimeout(initialRetry);
+  }, [libraryReady, reloadToken, retryPendingLibrarySyncNow]);
+
+  useEffect(() => {
+    if (!libraryReady || !catalogSyncNeedsRetry(catalogSyncNotice)) return;
+    const interval = window.setInterval(() => {
+      void retryPendingLibrarySyncNow();
+    }, catalogSyncRetryIntervalMs);
+    return () => window.clearInterval(interval);
+  }, [catalogSyncNotice, libraryReady, retryPendingLibrarySyncNow]);
 
   useEffect(() => {
     if (catalogSyncNotice?.status !== "synced") return;
@@ -2841,7 +2863,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.18.20</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.18.21</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

@@ -453,8 +453,14 @@ export async function reconcilePendingTags(): Promise<TagReconciliationReport> {
       changes: [],
       issues: [],
       projectionToken: null,
-      catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 },
     };
   }
   return invoke<TagReconciliationReport>("refresh_external_tag_changes");
+}
+
+export async function retryPendingLibrarySync(): Promise<CatalogSync> {
+  if (!isTauriRuntime()) {
+    return { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 };
+  }
+  return invoke<CatalogSync>("retry_pending_library_sync");
 }

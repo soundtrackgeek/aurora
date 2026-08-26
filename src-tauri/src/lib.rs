@@ -48,7 +48,7 @@ use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
     select_library_intake_folder,
 };
-use library_sync::LibrarySyncCoordinator;
+use library_sync::{CatalogSync, LibrarySyncCoordinator};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
 use playback::{PlaybackCatalogRebind, PlaybackRuntime, PlaybackSnapshot, RepeatMode};
 use publishers::{PublisherDetail, PublisherOverview, PublisherQueueRequest};
@@ -949,16 +949,13 @@ async fn refresh_external_tag_changes(
     tauri::async_runtime::spawn_blocking(move || {
         let coordinator = app.state::<LibrarySyncCoordinator>();
         let projection_token = coordinator.reserve_background_projection_token();
-        let sync = coordinator.retry_one(&app);
         let report = {
             let state = app.state::<TagState>();
             let service = state
                 .lock()
                 .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?
                 .clone();
-            let mut report = service.reconcile_pending_overlays(100)?;
-            report.catalog_sync = Some(sync.catalog_sync);
-            Ok::<TagReconciliationReport, String>(report)
+            service.reconcile_pending_overlays(100)
         };
         Ok(TagReconciliationProjection {
             report: report?,
@@ -967,6 +964,19 @@ async fn refresh_external_tag_changes(
     })
     .await
     .map_err(|error| format!("The external-tag refresh stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let projection_token = coordinator.reserve_background_projection_token();
+        let mut sync = coordinator.retry_one(&app).catalog_sync;
+        sync.projection_token = Some(projection_token);
+        Ok(sync)
+    })
+    .await
+    .map_err(|error| format!("The Music Library retry worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1231,6 +1241,7 @@ pub fn run() {
             update_tag_editor,
             undo_track_tag_edit,
             refresh_external_tag_changes,
+            retry_pending_library_sync,
             laptop_mode_status,
             set_laptop_mode,
             listening_history_page,

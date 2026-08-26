@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.18.21] - 2026-08-26
+
+### Fixed
+
+- Music Library folder retries now run independently from slower pending-tag reconciliation and continue while Aurora is unfocused, so a large overlay backlog cannot leave newly rated albums at **Pending tag import** without attempting the companion update.
+- Automatic synchronization prioritizes the most recently edited folder while retaining the existing three-attempt safety limit and durable retry queue.
+
 ## [0.18.20] - 2026-08-26
 
 ### Changed

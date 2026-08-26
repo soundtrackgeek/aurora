@@ -7,6 +7,7 @@ import {
   editableTagValuesForTrack,
   readTrackTagState,
   reconcilePendingTags,
+  retryPendingLibrarySync,
   tagValuesForTrack,
   trackWithReconciledTags,
   trackWithTagValues,
@@ -155,6 +156,14 @@ describe("tag editing preview boundary", () => {
       processed: 0,
       changes: [],
       hasMore: false,
+    });
+  });
+
+  it("keeps Music Library retry separate from tag reconciliation", async () => {
+    await expect(retryPendingLibrarySync()).resolves.toEqual({
+      status: "synced",
+      message: "Music Library updated.",
+      pendingFolderCount: 0,
     });
   });
 
