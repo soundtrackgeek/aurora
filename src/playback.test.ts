@@ -10,8 +10,20 @@ import {
   playTrackQueue,
   rebindPlaybackCatalog,
   seekPlayback,
+  shouldFollowPlaybackTransition,
   togglePlayback,
 } from "./playback";
+
+describe("playback selection synchronization", () => {
+  it("follows a queue transition when the playing track is still selected", () => {
+    expect(shouldFollowPlaybackTransition("track-one", "track-one", "track")).toBe(true);
+  });
+
+  it("preserves a deliberate track or album tag selection", () => {
+    expect(shouldFollowPlaybackTransition("track-one", "another-track", "track")).toBe(false);
+    expect(shouldFollowPlaybackTransition("track-one", "track-one", "album")).toBe(false);
+  });
+});
 
 describe("browser playback adapter", () => {
   it("exercises the same queue and transport contract as the native boundary", async () => {

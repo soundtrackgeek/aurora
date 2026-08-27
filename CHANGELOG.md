@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-08-27
+
+### Fixed
+
+- **Finish what you love** playback now advances the selected track with the unrated queue, so the Tags inspector changes to the second unrated song instead of remaining on the first. Deliberate album or unrelated track selections remain unchanged.
+
 ## [0.19.4] - 2026-08-27
 
 ### Fixed

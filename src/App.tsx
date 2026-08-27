@@ -109,7 +109,7 @@ import {
   type ArtistReviewItem,
   type ReleaseDecisionRequest,
 } from "./musicbrainz";
-import { usePlayback } from "./playback";
+import { shouldFollowPlaybackTransition, usePlayback } from "./playback";
 import {
   loadHistoryPage,
   loadTrackHistoryInsight,
@@ -636,6 +636,7 @@ function App() {
   const catalogRefreshRequestedRef = useRef(false);
   const appMountedRef = useRef(true);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
+  const previousPlaybackTrackKeyRef = useRef<string | null>(null);
   const selectedAlbumIdRef = useRef<string | null>(selectedAlbumId);
   const explorerRestorationPendingRef = useRef(true);
   const preserveExplorerOnReloadRef = useRef(false);
@@ -667,6 +668,24 @@ function App() {
       appMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const currentTrack = playback.state.currentTrack;
+    const previousTrackKey = previousPlaybackTrackKeyRef.current;
+    previousPlaybackTrackKeyRef.current = currentTrack?.trackKey ?? null;
+    if (
+      !currentTrack
+      || currentTrack.trackKey === previousTrackKey
+      || !shouldFollowPlaybackTransition(
+        previousTrackKey,
+        selectedTrackRef.current?.trackKey ?? null,
+        tagSelectionKind,
+      )
+    ) return;
+    artistRequestRef.current += 1;
+    setSelectedTrack(currentTrack);
+    setTagSelectionKind("track");
+  }, [playback.state.currentTrack, tagSelectionKind]);
 
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
@@ -2864,7 +2883,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.19.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.19.5</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

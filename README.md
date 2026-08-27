@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.4 makes empty exact completion filters explicit instead of leaving **Finish what you love** blank.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.5 keeps the Tags inspector synchronized as **Finish what you love** playback advances through unrated tracks.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.19.4 slice
+## Current 0.19.5 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- **Finish what you love** now advances the selected track with the unrated playback queue, keeping the Tags inspector on the song that is actually playing while preserving deliberate album or unrelated track selections.
 - Exact **Finish what you love** filters with zero live matches now say so directly and suggest another count or a later Refresh, while continuing to exclude completed ratings and confirmed-missing MP3s.
 - Listening Report resolves every distinct catalog track in safe bounded batches, so reports with more than 200 plays retain their complete Year-based decade distribution.
 - Listening Rhythm uses a compact 24-hour activity ribbon, and Music by Decade always uses Aurora's **Year** field rather than **Release Year**.
