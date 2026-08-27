@@ -145,6 +145,21 @@ function previewGenreNames(): string[] {
   return [...new Set(browserPreview.tracks.flatMap((track) => track.genre ? [track.genre] : []))];
 }
 
+let genreNamesRequest: Promise<string[]> | null = null;
+
+export function loadGenreNames(): Promise<string[]> {
+  if (!genreNamesRequest) {
+    genreNamesRequest = (isTauriRuntime()
+      ? invoke<string[]>("genre_names")
+      : Promise.resolve(previewGenreNames().sort((left, right) => left.localeCompare(right))))
+      .catch((error) => {
+        genreNamesRequest = null;
+        throw error;
+      });
+  }
+  return genreNamesRequest;
+}
+
 function previewGenreIndex(): GenreSummary[] {
   return previewGenreNames()
     .map(previewSummary)

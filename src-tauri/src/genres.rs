@@ -310,6 +310,31 @@ pub(crate) fn load_genre_index(
     query_genre_index(&connection, &history, Some(store))
 }
 
+fn query_genre_names(connection: &Connection) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+            SELECT DISTINCT TRIM(canonical_genre)
+            FROM albums
+            WHERE NULLIF(TRIM(canonical_genre), '') IS NOT NULL
+            ORDER BY TRIM(canonical_genre) COLLATE NOCASE
+            LIMIT ?1
+            "#,
+        )
+        .map_err(|error| format!("Could not prepare genre suggestions: {error}"))?;
+    statement
+        .query_map([MAX_GENRES as i64], |row| row.get(0))
+        .map_err(|error| format!("Could not read genre suggestions: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not decode genre suggestions: {error}"))
+}
+
+pub(crate) fn load_genre_names() -> Result<Vec<String>, String> {
+    let path = catalog::default_catalog_path()?;
+    let connection = catalog::open_catalog(&path)?;
+    query_genre_names(&connection)
+}
+
 fn query_decades(connection: &Connection, genre: &str) -> Result<Vec<GenreDecade>, String> {
     let mut statement = connection
         .prepare(
@@ -803,6 +828,27 @@ mod tests {
         assert_eq!(genres[0].average_rating, Some(4.3));
         assert_eq!(genres[0].first_year, Some(1985));
         assert_eq!(genres[0].last_year, Some(1999));
+    }
+
+    #[test]
+    fn genre_names_are_distinct_trimmed_and_alphabetical() {
+        let connection = fixture();
+        connection
+            .execute(
+                "INSERT INTO albums VALUES ('r1', 'Rock Album', 'Band', ' Rock ', 1, 0, 0, 100, 2000, 2000, NULL, NULL, NULL, NULL, NULL)",
+                [],
+            )
+            .expect("insert whitespace genre");
+        connection
+            .execute(
+                "INSERT INTO albums VALUES ('r2', 'Another Rock Album', 'Band', 'Rock', 1, 0, 0, 100, 2001, 2001, NULL, NULL, NULL, NULL, NULL)",
+                [],
+            )
+            .expect("insert duplicate genre");
+
+        let names = query_genre_names(&connection).expect("query genre names");
+
+        assert_eq!(names, vec!["Electronic", "Rock", "Synthwave"]);
     }
 
     #[test]

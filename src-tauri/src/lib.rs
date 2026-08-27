@@ -381,6 +381,13 @@ async fn genre_index(app: AppHandle) -> Result<Vec<GenreSummary>, String> {
 }
 
 #[tauri::command]
+async fn genre_names() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(genres::load_genre_names)
+        .await
+        .map_err(|error| format!("The genre-suggestion worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn genre_detail(app: AppHandle, genre: String) -> Result<GenreDetail, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let history = app.state::<HistoryStore>();
@@ -1214,6 +1221,7 @@ pub fn run() {
             delete_album_track,
             artist_detail,
             genre_index,
+            genre_names,
             genre_detail,
             genre_queue_tracks,
             year_overview,

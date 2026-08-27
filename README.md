@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.6 lets an open album close from the same cover that opened it.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.7 suggests canonical catalog genres while tags are edited.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.6 slice
+## Current 0.20.7 slice
+
+- Genre fields in the vertical Tags editor and Album Auto-Tagger suggest the catalog's existing canonical genres as you type while still allowing a new free-form value.
 
 - Clicking an already-open album cover in Albums closes its track detail, so the cover acts as a direct open/close toggle.
 

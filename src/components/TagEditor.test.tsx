@@ -83,6 +83,11 @@ describe("TagEditor", () => {
     render(<TagEditor target={target} onTracksChange={vi.fn()} />);
 
     expect(await screen.findByDisplayValue("America Town")).toBeInTheDocument();
+    const genre = screen.getByLabelText("Genre");
+    expect(genre).toHaveAttribute("list", "tag-editor-genre-suggestions");
+    await waitFor(() => expect(document.querySelector(
+      '#tag-editor-genre-suggestions option[value="Electronic"]',
+    )).toBeInTheDocument());
     expect(screen.getByLabelText("Track title")).toHaveAttribute("placeholder", "Mixed");
     expect(screen.getByLabelText("Write Track title")).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Save 0 fields to 2 MP3s" })).toBeDisabled();

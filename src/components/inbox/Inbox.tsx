@@ -42,6 +42,7 @@ import {
   type LibraryIntakePreview,
 } from "../../ingest";
 import type { EditableTagField, EditableTagValues } from "../../tags";
+import { loadGenreNames } from "../../genres";
 import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
 import "./Inbox.css";
@@ -360,6 +361,15 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const [busy, setBusy] = useState<"search" | "detail" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadGenreNames()
+      .then((names) => { if (!cancelled) setGenreSuggestions(names); })
+      .catch((nextError: unknown) => console.warn("Aurora could not load genre suggestions", nextError));
+    return () => { cancelled = true; };
+  }, []);
 
   const hydrateDetail = useCallback((next: ReleaseCandidateDetail) => {
     setValues({ albumArtist: next.albumArtist ?? "", album: next.album ?? "", genre: next.genre ?? "", publisher: next.publisher ?? "", year: next.year?.toString() ?? "" });
@@ -445,7 +455,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
         {!candidates.length && busy !== "search" ? <tr><td colSpan={8}>No release matches found. Broaden the artist or album spelling.</td></tr> : null}
       </tbody></table></section>
       <div className="inbox-tagger__editor">
-        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><label>Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label>Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label>Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label>Year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label>Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label>Genre<input value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label><label>Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label></div></section>
+        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><datalist id="inbox-auto-tagger-genre-suggestions">{genreSuggestions.map((genre) => <option value={genre} key={genre} />)}</datalist><label>Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label>Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label>Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label>Year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label>Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label>Genre<input list="inbox-auto-tagger-genre-suggestions" value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label><label>Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label></div></section>
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
       <section className="inbox-track-compare"><table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Match</th></tr></thead><tbody>{tracks.map((track, index) => {

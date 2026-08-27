@@ -26,6 +26,11 @@ describe("Inbox", () => {
 
     expect(await screen.findByRole("dialog", { name: "Album Auto-Tagger" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("MusicBrainz").length).toBeGreaterThan(0));
+    const genre = screen.getByRole("combobox", { name: "Genre" });
+    expect(genre).toHaveAttribute("list", "inbox-auto-tagger-genre-suggestions");
+    await waitFor(() => expect(document.querySelector(
+      '#inbox-auto-tagger-genre-suggestions option[value="Electronic"]',
+    )).toBeInTheDocument());
     expect(screen.getAllByText("Discogs").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling");
     expect(screen.getByRole("checkbox", { name: /Rename after tagging/ })).toBeChecked();
@@ -53,7 +58,7 @@ describe("Inbox", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
 
     expect(await screen.findByText("10 MP3s")).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Genre" }), { target: { value: "Hard Rock" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Genre" }), { target: { value: "Hard Rock" } });
     fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 10 MP3s" }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({

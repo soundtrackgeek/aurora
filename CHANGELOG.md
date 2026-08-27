@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.7] - 2026-08-27
+
+### Added
+
+- Added lightweight, catalog-backed genre suggestions to the vertical Tags editor and Album Auto-Tagger while preserving free-form genre entry.
+
 ## [0.20.6] - 2026-08-27
 
 ### Changed

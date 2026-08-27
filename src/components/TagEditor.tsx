@@ -2,6 +2,7 @@ import { RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { Track } from "../library";
+import { loadGenreNames } from "../genres";
 import {
   aggregateEditableTagValues,
   EDITABLE_TAG_FIELDS,
@@ -139,11 +140,12 @@ interface TagFieldProps {
   value: string;
   disabled: boolean;
   error: string | null;
+  suggestionListId?: string;
   onCheck: (field: EditableTagField, checked: boolean) => void;
   onChange: (field: EditableTagField, value: string) => void;
 }
 
-function TagField({ definition, aggregate, checked, value, disabled, error, onCheck, onChange }: TagFieldProps) {
+function TagField({ definition, aggregate, checked, value, disabled, error, suggestionListId, onCheck, onChange }: TagFieldProps) {
   const { field, label, kind } = definition;
   const placeholder = aggregate.mixed && !checked
     ? "Mixed"
@@ -183,6 +185,7 @@ function TagField({ definition, aggregate, checked, value, disabled, error, onCh
       ) : (
         <input
           {...controlProps}
+          list={field === "genre" ? suggestionListId : undefined}
           type={kind === "text" ? "text" : "number"}
           inputMode={kind === "text" ? undefined : "numeric"}
           min={kind === "year" ? 1000 : kind === "position" ? 1 : undefined}
@@ -206,9 +209,17 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
   const [phase, setPhase] = useState<EditorPhase>("loading");
   const [message, setMessage] = useState<string | null>(null);
+  const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
   const requestRef = useRef(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef(true);
+  useEffect(() => {
+    let cancelled = false;
+    void loadGenreNames()
+      .then((names) => { if (!cancelled) setGenreSuggestions(names); })
+      .catch((error: unknown) => console.warn("Aurora could not load genre suggestions", error));
+    return () => { cancelled = true; };
+  }, []);
   const acceptSnapshot = useCallback((next: TagEditorSnapshot, nextPhase: EditorPhase) => {
     setSnapshot(next);
     setDraft(draftForSnapshot(next));
@@ -368,6 +379,9 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
       </div>
 
       <div className="tag-editor__fields">
+        <datalist id="tag-editor-genre-suggestions">
+          {genreSuggestions.map((genre) => <option value={genre} key={genre} />)}
+        </datalist>
         {primaryFields.map((definition) => (
           <TagField
             key={definition.field}
@@ -377,6 +391,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
             value={draft[definition.field]}
             disabled={isWorking}
             error={validation[definition.field]}
+            suggestionListId="tag-editor-genre-suggestions"
             onCheck={checkField}
             onChange={editField}
           />
