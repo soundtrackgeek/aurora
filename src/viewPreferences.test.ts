@@ -3,6 +3,7 @@ import {
   defaultViewPreferences,
   loadViewPreferences,
   saveViewPreferences,
+  shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
   type ViewPreferences,
 } from "./viewPreferences";
@@ -11,6 +12,12 @@ describe("tag selection scope", () => {
   it("does not let a hidden Albums selection override the Ratings inspector", () => {
     expect(shouldUseExplorerTagSelection("Albums")).toBe(true);
     expect(shouldUseExplorerTagSelection("Ratings")).toBe(false);
+  });
+
+  it("preserves an explicit Tags target while browsing completion albums", () => {
+    expect(shouldRetargetTagsForAlbumSelection("tags")).toBe(false);
+    expect(shouldRetargetTagsForAlbumSelection("track")).toBe(true);
+    expect(shouldRetargetTagsForAlbumSelection("album")).toBe(true);
   });
 });
 

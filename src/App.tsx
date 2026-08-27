@@ -144,6 +144,7 @@ import {
   explorerSorts,
   loadViewPreferences,
   saveViewPreferences,
+  shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
 } from "./viewPreferences";
 import { mergeRefreshedExplorerPage } from "./explorerRefresh";
@@ -1934,8 +1935,10 @@ function App() {
   function openRatingAlbum(album: RatingAlbum) {
     const requestId = ++ratingsAlbumRequestRef.current;
     setSelectedRatingAlbum(album);
-    setTagSelectionKind("album");
-    if (inspectorViewRef.current !== "tags") setInspectorView("album");
+    if (shouldRetargetTagsForAlbumSelection(inspectorViewRef.current)) {
+      setTagSelectionKind("album");
+      setInspectorView("album");
+    }
     setRatingAlbumTracks([]);
     void loadRatingAlbumTracks(album)
       .then((tracks) => {
@@ -2886,7 +2889,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.20.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.20.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

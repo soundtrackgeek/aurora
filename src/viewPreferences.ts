@@ -21,6 +21,10 @@ export function shouldUseExplorerTagSelection(destination: SidebarDestination): 
   return explorerTagSelectionDestinations.has(destination);
 }
 
+export function shouldRetargetTagsForAlbumSelection(inspectorView: InspectorView): boolean {
+  return inspectorView !== "tags";
+}
+
 export type ViewPreferences = {
   activeNav: SidebarDestination;
   explorerView: ExplorerView;

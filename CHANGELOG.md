@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-08-27
+
+### Fixed
+
+- Kept an explicit track Tags context unchanged while browsing other **Finish what you love** albums, preventing album tag-read warnings from replacing the current song before **Play unrated tracks** is pressed.
+
 ## [0.20.0] - 2026-08-27
 
 ### Added
