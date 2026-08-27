@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-27
+
+### Added
+
+- Added Tonehavn as a first-class listening-history source. Aurora discovers the sanitized `Tonehavn local` and `Tonehavn iOS` device snapshots, includes their registered plays in Listening report totals, and exposes each source in the existing device dropdown.
+
 ## [0.19.7] - 2026-08-27
 
 ### Fixed

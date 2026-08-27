@@ -1350,21 +1350,13 @@ impl HistoryStore {
         if !self.remote_directory.is_dir() {
             return sources;
         }
-        let Ok(entries) = fs::read_dir(&self.remote_directory) else {
-            return sources;
-        };
-        let mut remote = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| {
-                        name.starts_with("aurora-history-") && name.ends_with(".sqlite3")
-                    })
-            })
-            .take(MAX_HISTORY_SOURCES)
-            .collect::<Vec<_>>();
+        let mut remote = history_snapshot_paths(&self.remote_directory);
+        remote.sort();
+        remote.truncate(MAX_HISTORY_SOURCES.saturating_sub(2));
+        let mut tonehavn = history_snapshot_paths(&self.remote_directory.join("tonehavn-history"));
+        tonehavn.sort();
+        tonehavn.truncate(2);
+        remote.extend(tonehavn);
         remote.sort();
         sources.extend(remote);
         sources
@@ -1468,6 +1460,23 @@ impl HistoryStore {
         }
         Ok("Saved this device's listening history to OneDrive.".to_owned())
     }
+}
+
+fn history_snapshot_paths(directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("aurora-history-") && name.ends_with(".sqlite3")
+                })
+        })
+        .collect()
 }
 
 pub(crate) fn genre_identity(genre: &str) -> String {
@@ -2310,6 +2319,26 @@ mod tests {
 
         assert_eq!(catalog_references.len(), 12);
         assert!(catalog_references.len() <= REPORT_CATALOG_BATCH_SIZE);
+    }
+
+    #[test]
+    fn discovers_tonehavn_device_snapshots_in_the_integration_directory() {
+        let root = temporary_root("tonehavn-sources");
+        let remote = root.join("remote");
+        let tonehavn = remote.join("tonehavn-history");
+        fs::create_dir_all(&tonehavn).expect("Tonehavn history directory");
+        let tonehavn_snapshot = tonehavn.join("aurora-history-tonehavn-ios.sqlite3");
+        fs::write(&tonehavn_snapshot, b"fixture").expect("Tonehavn snapshot fixture");
+        let store = HistoryStore::new(
+            root.join("history.sqlite3"),
+            remote,
+            "device-test-tonehavn".to_owned(),
+            "Test computer".to_owned(),
+        )
+        .expect("history store");
+
+        assert!(store.available_sources().contains(&tonehavn_snapshot));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

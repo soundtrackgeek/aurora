@@ -1,12 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.19.7 keeps Tags scoped to the visible page, so Ratings playback cannot be masked by a selection left behind in Albums.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.0 adds Tonehavn local and iOS plays to History and Listening report while retaining their originating device category.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.19.7 slice
+## Current 0.20.0 slice
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
+- History discovers sanitized Tonehavn peer journals from OneDrive's `_musicbackup\tonehavn-history` directory. Registered plays appear as **Tonehavn local** or **Tonehavn iOS** in the existing device dropdown and roll into **All devices** Listening report totals.
 - Ratings **Play unrated tracks** now replaces the Tags inspector with the playing unrated track even when an album selection remains stored from the Albums page. Explorer selections still control Tags while their own pages are visible.
 - Long Tags values once again autoscroll while they are selected with a left-mouse drag, without allowing the editor to grow beyond the right sidebar. At narrow window widths, Reset and Save stack so their full labels remain visible.
 - **Finish what you love** now advances the selected track with the unrated playback queue, keeping the Tags inspector on the song that is actually playing while preserving deliberate album or unrelated track selections.
