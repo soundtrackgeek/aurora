@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.2 keeps long Tags values and the complete Save action usable inside the fixed-width inspector.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.3 locks the Tags editor to the inspector width while keeping long input values horizontally navigable.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.2 slice
+## Current 0.20.3 slice
+
+- The Tags inspector scrolls vertically only; long values remain contained and horizontally navigable inside their own text inputs without moving the entire sidebar.
+- Every Tags editor grid track, including Reset and Save, is capped to the card's available width.
 
 - Long Tags text inputs keep their own horizontal viewport, so arrow-key caret movement and mouse drag-selection reveal the full value without moving the sidebar or hiding its checkboxes.
 - Tags Reset and Save actions stay stacked at every application width, keeping the complete Save control reachable inside the narrow inspector.

@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-08-27
+
+### Fixed
+
+- Constrained every Tags editor grid track to the inspector's available width, so long Save labels and metadata values cannot enlarge the card.
+- Locked the Tags inspector to vertical scrolling while preserving each text input's native horizontal viewport, preventing the entire sidebar from sliding right.
+
 ## [0.20.2] - 2026-08-27
 
 ### Fixed
