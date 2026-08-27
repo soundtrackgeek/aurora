@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-08-27
+
+### Fixed
+
+- Kept long Tags text inputs on their native horizontal viewport so keyboard caret movement and mouse drag-selection can reveal the full value without shifting or clipping the sidebar.
+- Stacked the Tags Reset and Save actions at every sidebar width, keeping the complete Save control reachable in wide application windows with a narrow inspector.
+
 ## [0.20.1] - 2026-08-27
 
 ### Fixed

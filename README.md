@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.1 keeps the open track Tags context stable while browsing other **Finish what you love** albums.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.2 keeps long Tags values and the complete Save action usable inside the fixed-width inspector.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.1 slice
+## Current 0.20.2 slice
+
+- Long Tags text inputs keep their own horizontal viewport, so arrow-key caret movement and mouse drag-selection reveal the full value without moving the sidebar or hiding its checkboxes.
+- Tags Reset and Save actions stay stacked at every application width, keeping the complete Save control reachable inside the narrow inspector.
 
 - Tauri 2, Rust, React, TypeScript, and Vite Windows application.
 - Selecting another **Finish what you love** album no longer redirects an open track Tags editor to the album batch. The Tags sidebar stays on the current song until **Play unrated tracks** starts the newly selected album queue.
