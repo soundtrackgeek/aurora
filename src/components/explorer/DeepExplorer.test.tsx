@@ -451,13 +451,33 @@ describe("DeepExplorer", () => {
     expect(playingRow).toHaveTextContent("Currently playing");
   });
 
-  it("exposes bounded loading, error, empty, and load-more states", () => {
+  it("loads the next bounded page when the scroll sentinel enters view", () => {
     const onLoadMore = vi.fn();
     const onRetry = vi.fn();
+    let intersect: (entries: IntersectionObserverEntry[]) => void = () => undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("IntersectionObserver", vi.fn(function (callback: IntersectionObserverCallback) {
+      intersect = (entries) => callback(entries, {} as IntersectionObserver);
+      return { observe, disconnect, unobserve: vi.fn(), takeRecords: () => [], root: null, rootMargin: "", thresholds: [] };
+    }));
     const { rerender } = render(<DeepExplorer {...explorerProps({ onLoadMore })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Load 50 more" }));
+    expect(screen.queryByRole("button", { name: "Load 50 more" })).not.toBeInTheDocument();
+    expect(screen.getByText("Scroll for the next 50")).toBeInTheDocument();
+    expect(observe).toHaveBeenCalledOnce();
+    intersect([{ isIntersecting: true } as IntersectionObserverEntry]);
     expect(onLoadMore).toHaveBeenCalledOnce();
+
+    intersect([{ isIntersecting: true } as IntersectionObserverEntry]);
+    expect(onLoadMore).toHaveBeenCalledOnce();
+
+    rerender(<DeepExplorer {...explorerProps({
+      onLoadMore,
+      filters: { ...filters, query: "new result set" },
+    })} />);
+    intersect([{ isIntersecting: true } as IntersectionObserverEntry]);
+    expect(onLoadMore).toHaveBeenCalledTimes(2);
 
     rerender(<DeepExplorer {...explorerProps({ loadState: "error", errorMessage: "Database busy", onRetry })} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Database busy");
@@ -469,5 +489,6 @@ describe("DeepExplorer", () => {
 
     rerender(<DeepExplorer {...explorerProps({ tracks: [], pageInfo: { loaded: 0, hasMore: false, isLoadingMore: false } })} />);
     expect(screen.getByText("No matches in this orbit")).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

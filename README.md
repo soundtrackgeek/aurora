@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.4 discovers Tonehavn's live local listening journal and keeps a validated backup in OneDrive.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.5 keeps paged album ordering stable across background refreshes and loads the next page automatically while scrolling.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.4 slice
+## Current 0.20.5 slice
+
+- Tracks, Albums, and Artists automatically load the next bounded 50-item page near the bottom of their result scroller; there is no separate load-more button.
+- Background catalog refreshes retain the continuation cursor for every already-loaded page, preventing an earlier alphabetical page from being appended after an open album detail.
 
 - The Tags inspector scrolls vertically only; long values remain contained and horizontally navigable inside their own text inputs without moving the entire sidebar.
 - Every Tags editor grid track, including Reset and Save, is capped to the card's available width.

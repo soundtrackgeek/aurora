@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeRefreshedExplorerPage } from "./explorerRefresh";
+import { mergeRefreshedExplorerPage, refreshedExplorerCursor } from "./explorerRefresh";
 
 describe("mergeRefreshedExplorerPage", () => {
   it("updates loaded items without moving the user's current position", () => {
@@ -20,5 +20,13 @@ describe("mergeRefreshedExplorerPage", () => {
       { id: "album-3", title: "Third" },
       { id: "album-new", title: "Imported" },
     ]);
+  });
+
+  it("keeps the continuation point when a background refresh only reloads the first page", () => {
+    const currentCursor = { value: "album-artist-asc:Dee Snider", id: "album-100" };
+    const refreshedCursor = { value: "album-artist-asc:Animal Collective", id: "album-50" };
+
+    expect(refreshedExplorerCursor(100, 50, currentCursor, refreshedCursor)).toBe(currentCursor);
+    expect(refreshedExplorerCursor(50, 50, currentCursor, refreshedCursor)).toBe(refreshedCursor);
   });
 });

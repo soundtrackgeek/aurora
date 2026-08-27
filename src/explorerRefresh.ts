@@ -9,3 +9,12 @@ export function mergeRefreshedExplorerPage<T extends { id: string }>(
     ...refreshed.filter((item) => !currentIds.has(item.id)),
   ];
 }
+
+export function refreshedExplorerCursor<T>(
+  currentLoaded: number,
+  refreshedLoaded: number,
+  currentCursor: T | null,
+  refreshedCursor: T | null,
+): T | null {
+  return currentLoaded > refreshedLoaded ? currentCursor : refreshedCursor;
+}

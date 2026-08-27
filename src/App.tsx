@@ -147,7 +147,7 @@ import {
   shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
 } from "./viewPreferences";
-import { mergeRefreshedExplorerPage } from "./explorerRefresh";
+import { mergeRefreshedExplorerPage, refreshedExplorerCursor } from "./explorerRefresh";
 import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
@@ -600,6 +600,9 @@ function App() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const exploreRequestRef = useRef(0);
+  const explorerCursorRef = useRef<ExplorerCursor | null>(null);
+  const explorerLoadedRef = useRef(0);
+  const explorerLoadingMoreRef = useRef(false);
   const albumRequestRef = useRef(0);
   const artistRequestRef = useRef(0);
   const reviewRequestRef = useRef(0);
@@ -656,6 +659,8 @@ function App() {
   selectedGenreRef.current = selectedGenre;
   selectedTrackRef.current = selectedTrack;
   selectedAlbumIdRef.current = selectedAlbumId;
+  explorerCursorRef.current = explorerCursor;
+  explorerLoadedRef.current = explorerTracks.length + explorerAlbums.length + explorerArtists.length;
   inspectorViewRef.current = inspectorView;
   inspectorArtistNameRef.current = inspectorArtistName;
   publisherDetailRef.current = publisherDetail;
@@ -1078,6 +1083,8 @@ function App() {
       ?? (preservingCurrentView && explorerView === "albums" ? selectedAlbumIdRef.current : null)
       ?? (restoringStoredView && explorerView === "albums" ? initialViewPreferences.selectedAlbumId : null);
     const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : null;
+    const preservedLoaded = explorerLoadedRef.current;
+    const preservedCursor = explorerCursorRef.current;
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -1100,7 +1107,9 @@ function App() {
           setExplorerTracks((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.tracks) : page.tracks);
           setExplorerAlbums((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.albums) : page.albums);
           setExplorerArtists((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.artists) : page.artists);
-          setExplorerCursor(page.nextCursor);
+          setExplorerCursor(preservingCurrentView
+            ? refreshedExplorerCursor(preservedLoaded, page.tracks.length + page.albums.length + page.artists.length, preservedCursor, page.nextCursor)
+            : page.nextCursor);
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
           if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
@@ -2612,8 +2621,9 @@ function App() {
   }
 
   async function loadMoreExplorerResults() {
-    if (!explorerCursor || isLoadingMore) return;
+    if (!explorerCursor || explorerLoadingMoreRef.current) return;
     const requestId = ++exploreRequestRef.current;
+    explorerLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
       const page = await loadExplorerPage(explorerView, explorerFilters, explorerCursor);
@@ -2629,6 +2639,7 @@ function App() {
         setExplorerLoadState("error");
       }
     } finally {
+      explorerLoadingMoreRef.current = false;
       if (requestId === exploreRequestRef.current) setIsLoadingMore(false);
     }
   }
@@ -2889,7 +2900,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.20.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.20.5</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

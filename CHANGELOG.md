@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.5] - 2026-08-27
+
+### Fixed
+
+- Preserved the true continuation cursor when a background catalog refresh updates only the first Explorer page, so opening an album and later loading more results cannot append an earlier alphabetical page.
+
+### Changed
+
+- Replaced the Tracks, Albums, and Artists **Load 50 more** button with automatic 50-item lazy loading near the bottom of the result scroller.
+
 ## [0.20.4] - 2026-08-27
 
 ### Fixed

@@ -7,7 +7,6 @@ import {
   Disc3,
   Gauge,
   Heart,
-  ListMusic,
   LoaderCircle,
   Music2,
   RefreshCw,
@@ -976,6 +975,21 @@ export function DeepExplorer(props: DeepExplorerProps) {
   ));
   const [albumSelectionAnchorId, setAlbumSelectionAnchorId] = useState<string | null>(selectedAlbumId);
   const selectionResetReadyRef = useRef(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreCallbackRef = useRef(onLoadMore);
+  const lastRequestedLoadedRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    loadMoreCallbackRef.current = onLoadMore;
+  }, [onLoadMore]);
+
+  useEffect(() => {
+    lastRequestedLoadedRef.current = null;
+  }, [filters, view]);
+
+  useEffect(() => {
+    if (loadState !== "ready") lastRequestedLoadedRef.current = null;
+  }, [loadState]);
 
   useEffect(() => {
     if (!selectionResetReadyRef.current) {
@@ -991,6 +1005,25 @@ export function DeepExplorer(props: DeepExplorerProps) {
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (
+      !sentinel
+      || loadState !== "ready"
+      || !pageInfo.hasMore
+      || pageInfo.isLoadingMore
+      || !loadMoreCallbackRef.current
+      || typeof IntersectionObserver === "undefined"
+    ) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting || lastRequestedLoadedRef.current === pageInfo.loaded) return;
+      lastRequestedLoadedRef.current = pageInfo.loaded;
+      loadMoreCallbackRef.current?.();
+    }, { rootMargin: "0px 0px 160px", threshold: 0 });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadState, pageInfo.hasMore, pageInfo.isLoadingMore, pageInfo.loaded]);
 
   function selectOrToggleAlbum(album: ExplorerAlbum | null) {
     if (closeTimerRef.current !== null) {
@@ -1159,6 +1192,9 @@ export function DeepExplorer(props: DeepExplorerProps) {
         ) : (
           <ArtistList artists={artists} selectedArtistId={selectedArtistId} onSelectArtist={onSelectArtist} />
         )}
+        {loadState === "ready" && resultCount > 0 && pageInfo.hasMore && onLoadMore ? (
+          <div className="deep-explorer-load-sentinel" ref={loadMoreSentinelRef} aria-hidden="true" />
+        ) : null}
       </div>
 
       {loadState === "ready" && resultCount > 0 ? (
@@ -1167,10 +1203,9 @@ export function DeepExplorer(props: DeepExplorerProps) {
             Loaded <strong>{formatCount(pageInfo.loaded)}</strong>{pageInfo.hasMore ? " · more available" : ""}
           </span>
           {pageInfo.hasMore && onLoadMore ? (
-            <button type="button" disabled={pageInfo.isLoadingMore} onClick={onLoadMore}>
-              {pageInfo.isLoadingMore ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <ListMusic aria-hidden="true" />}
-              {pageInfo.isLoadingMore ? "Loading next page…" : "Load 50 more"}
-            </button>
+            <span className="deep-explorer-pagination__loading" aria-live="polite">
+              {pageInfo.isLoadingMore ? <><LoaderCircle className="is-spinning" aria-hidden="true" />Loading next 50…</> : "Scroll for the next 50"}
+            </span>
           ) : (
             <span className="deep-explorer-pagination__end">End of this result set</span>
           )}
