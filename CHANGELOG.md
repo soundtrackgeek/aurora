@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.7] - 2026-08-27
+
+### Fixed
+
+- Scoped Songs, Albums, Artists, and Tags explorer selections to their visible pages, so a stored Albums selection can no longer override the track started by Ratings **Play unrated tracks** in the Tags inspector.
+
 ## [0.19.6] - 2026-08-27
 
 ### Fixed

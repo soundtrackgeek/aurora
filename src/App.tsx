@@ -144,6 +144,7 @@ import {
   explorerSorts,
   loadViewPreferences,
   saveViewPreferences,
+  shouldUseExplorerTagSelection,
 } from "./viewPreferences";
 import { mergeRefreshedExplorerPage } from "./explorerRefresh";
 import {
@@ -2711,7 +2712,9 @@ function App() {
           : activeNav === "Charts" && chartSelection?.kind === "albums" && chartSelection.entry.matchedAlbumId
             ? { kind: "album" as const, albumId: chartSelection.entry.matchedAlbumId, label: chartSelection.entry.title }
             : null;
-  const explorerTagTarget = explorerSelection?.kind === "tracks"
+  const explorerTagTarget = !shouldUseExplorerTagSelection(activeNav)
+    ? undefined
+    : explorerSelection?.kind === "tracks"
     ? explorerSelection.tracks.length === 0
       ? null
       : explorerSelection.tracks.length === 1
@@ -2883,7 +2886,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.19.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.19.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

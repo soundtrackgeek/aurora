@@ -3,8 +3,16 @@ import {
   defaultViewPreferences,
   loadViewPreferences,
   saveViewPreferences,
+  shouldUseExplorerTagSelection,
   type ViewPreferences,
 } from "./viewPreferences";
+
+describe("tag selection scope", () => {
+  it("does not let a hidden Albums selection override the Ratings inspector", () => {
+    expect(shouldUseExplorerTagSelection("Albums")).toBe(true);
+    expect(shouldUseExplorerTagSelection("Ratings")).toBe(false);
+  });
+});
 
 function memoryStorage(initial: string | null = null) {
   let value = initial;

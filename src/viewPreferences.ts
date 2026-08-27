@@ -9,6 +9,18 @@ import type { SidebarDestination } from "./components/navigation/SidebarNavigati
 export type InspectorView = "track" | "album" | "artist" | "tags";
 export type TagSelectionKind = "track" | "album";
 
+const explorerTagSelectionDestinations: ReadonlySet<SidebarDestination> = new Set([
+  "Universe",
+  "Songs",
+  "Albums",
+  "Artists",
+  "Tags",
+]);
+
+export function shouldUseExplorerTagSelection(destination: SidebarDestination): boolean {
+  return explorerTagSelectionDestinations.has(destination);
+}
+
 export type ViewPreferences = {
   activeNav: SidebarDestination;
   explorerView: ExplorerView;
