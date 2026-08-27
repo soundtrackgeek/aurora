@@ -7,6 +7,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, pa
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    env,
     fs::{self, File},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -22,6 +23,10 @@ const HISTORY_SYNC_INTERVAL_MS: i64 = 60_000;
 const MAX_HISTORY_SOURCES: usize = 16;
 const MAX_HISTORY_PAGE_SIZE: usize = 100;
 const REPORT_CATALOG_BATCH_SIZE: usize = 200;
+const TONEHAVN_HISTORY_DEVICES: [(&str, &str); 2] = [
+    ("tonehavn-local", "aurora-history-tonehavn-local.sqlite3"),
+    ("tonehavn-ios", "aurora-history-tonehavn-ios.sqlite3"),
+];
 
 #[derive(Clone, Debug)]
 struct HistoryMetadata {
@@ -273,6 +278,7 @@ pub(crate) struct HistoryStore {
     path: PathBuf,
     remote_directory: PathBuf,
     remote_path: PathBuf,
+    tonehavn_directory: Option<PathBuf>,
     device_id: String,
     device_name: String,
     shared: Arc<Mutex<SharedHistoryState>>,
@@ -291,6 +297,22 @@ impl HistoryStore {
         remote_directory: PathBuf,
         device_id: String,
         device_name: String,
+    ) -> Result<Self, String> {
+        Self::new_with_tonehavn_directory(
+            path,
+            remote_directory,
+            device_id,
+            device_name,
+            default_tonehavn_history_directory(),
+        )
+    }
+
+    fn new_with_tonehavn_directory(
+        path: PathBuf,
+        remote_directory: PathBuf,
+        device_id: String,
+        device_name: String,
+        tonehavn_directory: Option<PathBuf>,
     ) -> Result<Self, String> {
         if !valid_device_id(&device_id) {
             return Err("Aurora's listening-history device identity is invalid.".to_owned());
@@ -318,6 +340,7 @@ impl HistoryStore {
             path,
             remote_directory,
             remote_path,
+            tonehavn_directory,
             device_id,
             device_name,
             shared: Arc::new(Mutex::new(SharedHistoryState {
@@ -328,6 +351,7 @@ impl HistoryStore {
         };
         store.migrate()?;
         store.recover_interrupted_sessions()?;
+        store.refresh_tonehavn_backup();
         Ok(store)
     }
 
@@ -1346,20 +1370,52 @@ impl HistoryStore {
     }
 
     fn available_sources(&self) -> Vec<PathBuf> {
+        self.refresh_tonehavn_backup();
         let mut sources = vec![self.path.clone()];
         if !self.remote_directory.is_dir() {
+            if let Some(directory) = &self.tonehavn_directory {
+                sources.extend(tonehavn_snapshot_paths(directory));
+            }
             return sources;
         }
+        let local_tonehavn = self
+            .tonehavn_directory
+            .as_deref()
+            .map(tonehavn_snapshot_paths)
+            .unwrap_or_default();
+        let local_names = local_tonehavn
+            .iter()
+            .filter_map(|path| path.file_name().map(|name| name.to_owned()))
+            .collect::<HashSet<_>>();
+        let mut tonehavn = local_tonehavn;
+        tonehavn.extend(
+            tonehavn_snapshot_paths(&self.remote_directory.join("tonehavn-history"))
+                .into_iter()
+                .filter(|path| {
+                    path.file_name()
+                        .is_none_or(|name| !local_names.contains(name))
+                }),
+        );
+        tonehavn.sort();
+        tonehavn.truncate(TONEHAVN_HISTORY_DEVICES.len());
         let mut remote = history_snapshot_paths(&self.remote_directory);
         remote.sort();
-        remote.truncate(MAX_HISTORY_SOURCES.saturating_sub(2));
-        let mut tonehavn = history_snapshot_paths(&self.remote_directory.join("tonehavn-history"));
-        tonehavn.sort();
-        tonehavn.truncate(2);
+        remote.truncate(MAX_HISTORY_SOURCES.saturating_sub(1 + tonehavn.len()));
         remote.extend(tonehavn);
         remote.sort();
         sources.extend(remote);
         sources
+    }
+
+    fn refresh_tonehavn_backup(&self) {
+        let Some(local) = &self.tonehavn_directory else {
+            return;
+        };
+        if let Err(error) =
+            mirror_tonehavn_snapshots(local, &self.remote_directory.join("tonehavn-history"))
+        {
+            self.record_error(error);
+        }
     }
 
     pub(crate) fn publish_if_due(&self, force: bool) -> Result<String, String> {
@@ -1477,6 +1533,75 @@ fn history_snapshot_paths(directory: &Path) -> Vec<PathBuf> {
                 })
         })
         .collect()
+}
+
+fn default_tonehavn_history_directory() -> Option<PathBuf> {
+    env::var_os("APPDATA").map(|app_data| {
+        PathBuf::from(app_data)
+            .join("com.local.musiclibrary")
+            .join("tonehavn-history")
+    })
+}
+
+fn tonehavn_snapshot_paths(directory: &Path) -> Vec<PathBuf> {
+    TONEHAVN_HISTORY_DEVICES
+        .iter()
+        .map(|(_, filename)| directory.join(filename))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+fn mirror_tonehavn_snapshots(local: &Path, remote: &Path) -> Result<(), String> {
+    for (device_id, filename) in TONEHAVN_HISTORY_DEVICES {
+        let source = local.join(filename);
+        if !source.is_file() {
+            continue;
+        }
+        validate_history_database(&source, Some(device_id))?;
+        let source_metadata = read_history_metadata(&source)?;
+        let destination = remote.join(filename);
+        if destination.is_file()
+            && read_history_metadata(&destination).is_ok_and(|metadata| {
+                metadata.device_id == source_metadata.device_id
+                    && metadata.content_revision >= source_metadata.content_revision
+            })
+        {
+            continue;
+        }
+        fs::create_dir_all(remote).map_err(|error| {
+            format!("Could not create Tonehavn's OneDrive history folder: {error}")
+        })?;
+        let temporary = remote.join(format!(".{filename}-{}.tmp", state_sync::now_ms()));
+        if temporary.exists() {
+            return Err("Tonehavn's OneDrive history staging file already exists.".to_owned());
+        }
+        let result = (|| {
+            fs::copy(&source, &temporary).map_err(|error| {
+                format!("Could not stage Tonehavn's OneDrive history backup: {error}")
+            })?;
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&temporary)
+                .and_then(|file| file.sync_all())
+                .map_err(|error| {
+                    format!("Could not flush Tonehavn's OneDrive history backup: {error}")
+                })?;
+            validate_history_database(&temporary, Some(device_id))?;
+            if destination.is_file() {
+                state_sync::replace_file_atomic(&destination, &temporary)
+            } else {
+                fs::rename(&temporary, &destination).map_err(|error| {
+                    format!("Could not install Tonehavn's OneDrive history backup: {error}")
+                })
+            }
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result?;
+    }
+    Ok(())
 }
 
 pub(crate) fn genre_identity(genre: &str) -> String {
@@ -2325,19 +2450,36 @@ mod tests {
     fn discovers_tonehavn_device_snapshots_in_the_integration_directory() {
         let root = temporary_root("tonehavn-sources");
         let remote = root.join("remote");
-        let tonehavn = remote.join("tonehavn-history");
-        fs::create_dir_all(&tonehavn).expect("Tonehavn history directory");
+        let tonehavn = root.join("local-tonehavn");
+        fs::create_dir_all(&tonehavn).expect("local Tonehavn history directory");
         let tonehavn_snapshot = tonehavn.join("aurora-history-tonehavn-ios.sqlite3");
-        fs::write(&tonehavn_snapshot, b"fixture").expect("Tonehavn snapshot fixture");
-        let store = HistoryStore::new(
+        HistoryStore::new_with_tonehavn_directory(
+            tonehavn_snapshot.clone(),
+            root.join("unused-tonehavn-remote"),
+            "tonehavn-ios".to_owned(),
+            "Tonehavn iOS".to_owned(),
+            None,
+        )
+        .expect("valid Tonehavn snapshot fixture");
+        let store = HistoryStore::new_with_tonehavn_directory(
             root.join("history.sqlite3"),
-            remote,
+            remote.clone(),
             "device-test-tonehavn".to_owned(),
             "Test computer".to_owned(),
+            Some(tonehavn),
         )
         .expect("history store");
 
-        assert!(store.available_sources().contains(&tonehavn_snapshot));
+        let backup = remote
+            .join("tonehavn-history")
+            .join("aurora-history-tonehavn-ios.sqlite3");
+        let sources = store.available_sources();
+        assert!(sources.contains(&tonehavn_snapshot));
+        assert!(!sources.contains(&backup));
+        validate_history_database(&backup, Some("tonehavn-ios"))
+            .expect("validated OneDrive Tonehavn backup");
+        fs::remove_file(&tonehavn_snapshot).expect("remove local Tonehavn snapshot");
+        assert!(store.available_sources().contains(&backup));
         let _ = fs::remove_dir_all(root);
     }
 

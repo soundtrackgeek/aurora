@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.4] - 2026-08-27
+
+### Fixed
+
+- Discovered Tonehavn's live local listening-history snapshots from the Music Library AppData directory instead of requiring Tonehavn to publish directly into OneDrive.
+
+### Added
+
+- Added validated atomic backups of the two known Tonehavn device snapshots under OneDrive's `_musicbackup\tonehavn-history` directory, while preferring local journals to prevent duplicate report rows.
+
 ## [0.20.3] - 2026-08-27
 
 ### Fixed
