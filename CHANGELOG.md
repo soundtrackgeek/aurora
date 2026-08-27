@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.6] - 2026-08-27
+
+### Fixed
+
+- Restored native mouse drag-selection autoscrolling inside long Tags inputs by moving sidebar containment into a non-scrolling inner clip instead of clipping the input's editor container.
+- Stacked the Tags Reset and Save actions at narrow application widths so long album-batch labels remain fully visible inside the sidebar.
+
 ## [0.19.5] - 2026-08-27
 
 ### Fixed

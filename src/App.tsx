@@ -2883,7 +2883,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.19.5</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.19.6</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3252,12 +3252,14 @@ function App() {
         </div>
         {inspectorView === "tags" && tagEditorTarget ? (
           <div className="inspector-scroll inspector-scroll--tag-editor">
-            <TagEditor
-              key={tagEditorKey}
-              target={tagEditorTarget}
-              onTracksChange={applyTrackChanges}
-              onCatalogSync={refreshTagEditorCatalogViews}
-            />
+            <div className="inspector-scroll__tag-editor-clip">
+              <TagEditor
+                key={tagEditorKey}
+                target={tagEditorTarget}
+                onTracksChange={applyTrackChanges}
+                onCatalogSync={refreshTagEditorCatalogViews}
+              />
+            </div>
           </div>
         ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
           <div className="inspector-scroll">
