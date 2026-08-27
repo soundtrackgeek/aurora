@@ -87,4 +87,17 @@ describe("RatingsStudio", () => {
     rerender(<RatingsStudio {...callbacks} refreshing={false} />);
     expect(within(container).getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
+
+  it("explains when an exact tracks-left filter has no live albums", () => {
+    const { container } = render(<RatingsStudio
+      {...props()}
+      page={{ kind: "partiallyRated", total: 0, albums: [] }}
+      selectedAlbum={null}
+      remainingTracks={1}
+    />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("No albums have exactly 1 track left.");
+    expect(screen.getByText("Try another filter, or Refresh after your ratings change.")).toBeVisible();
+    expect(within(container).getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
 });

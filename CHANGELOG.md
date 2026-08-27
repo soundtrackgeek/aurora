@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-08-27
+
+### Fixed
+
+- **Finish what you love** now explains when an exact tracks-left filter has no albums in Aurora's live rating and available-file state, instead of showing unexplained blank space that makes Refresh appear broken.
+
 ## [0.19.3] - 2026-08-26
 
 ### Fixed

@@ -251,13 +251,21 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
       </label>
     </div> : null}
     {props.pageState !== "ready" || !page ? <Feedback detail error={props.pageError} onRetry={props.onRetryPage} /> : <>
-      <div className="completion-shelf" aria-label={`${formatCount(page.total)} ${completionTabs.find((tab) => tab.kind === page.kind)?.label.toLocaleLowerCase()} albums`}>
+      {page.albums.length === 0 ? <div className="completion-empty" role="status">
+        <Disc3 aria-hidden="true" />
+        <div>
+          <strong>{props.remainingTracks === null
+            ? "No albums match this completion view."
+            : `No albums have exactly ${props.remainingTracks} ${props.remainingTracks === 1 ? "track" : "tracks"} left.`}</strong>
+          <span>Try another filter, or Refresh after your ratings change.</span>
+        </div>
+      </div> : <div className="completion-shelf" aria-label={`${formatCount(page.total)} ${completionTabs.find((tab) => tab.kind === page.kind)?.label.toLocaleLowerCase()} albums`}>
         {page.albums.map((album) => <button type="button" className={selectedAlbum?.id === album.id ? "is-selected" : undefined} aria-pressed={selectedAlbum?.id === album.id} onClick={() => props.onSelectAlbum(album)} key={album.id}>
           <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
           <strong>{album.title}</strong><span>{album.artist}</span>
           <small>{album.remainingTracks} {album.remainingTracks === 1 ? "rating" : "ratings"} left</small>
         </button>)}
-      </div>
+      </div>}
       {selectedAlbum ? <div className="completion-detail">
         <div className="completion-detail__album">
           <Artwork track={albumAsTrack(selectedAlbum)} size="large" decorative={false} />
