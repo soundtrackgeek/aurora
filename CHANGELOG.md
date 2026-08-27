@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.6] - 2026-08-27
+
+### Changed
+
+- Made album covers in Albums toggle their track detail closed when the open cover is clicked again.
+
 ## [0.20.5] - 2026-08-27
 
 ### Fixed

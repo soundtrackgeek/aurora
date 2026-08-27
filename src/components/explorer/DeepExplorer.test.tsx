@@ -244,7 +244,7 @@ describe("DeepExplorer", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "tracks", tracks: [tracks[1]] });
   });
 
-  it("renders album detail under the selected cover row without deselecting a plain-clicked album", () => {
+  it("renders album detail under the selected cover row and closes it when the cover is clicked again", () => {
     const onSelectAlbum = vi.fn();
     const onSelectTrack = vi.fn();
     render(
@@ -266,8 +266,6 @@ describe("DeepExplorer", () => {
     expect(albumRow).not.toBeNull();
     expect(within(albumRow as HTMLElement).getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
     fireEvent.click(albumButton);
-    expect(onSelectAlbum).toHaveBeenCalledWith(albums[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });
 

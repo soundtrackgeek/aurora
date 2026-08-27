@@ -1065,6 +1065,12 @@ export function DeepExplorer(props: DeepExplorerProps) {
   }
 
   function selectAlbums(album: ExplorerAlbum, _index: number, modifiers: SelectionModifiers): boolean {
+    if (!modifiers.ctrl && !modifiers.shift && selectedAlbumId === album.id) {
+      setSelectedAlbumIds(new Set());
+      setAlbumSelectionAnchorId(null);
+      onSelectionChange?.({ kind: "albums", albums: [] });
+      return false;
+    }
     const next = applyWindowsSelection(
       albums.map((candidate) => candidate.id),
       selectedAlbumIds,

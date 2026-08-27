@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.5 keeps paged album ordering stable across background refreshes and loads the next page automatically while scrolling.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.6 lets an open album close from the same cover that opened it.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.5 slice
+## Current 0.20.6 slice
+
+- Clicking an already-open album cover in Albums closes its track detail, so the cover acts as a direct open/close toggle.
 
 - Tracks, Albums, and Artists automatically load the next bounded 50-item page near the bottom of their result scroller; there is no separate load-more button.
 - Background catalog refreshes retain the continuation cursor for every already-loaded page, preventing an earlier alphabetical page from being appended after an open album detail.
