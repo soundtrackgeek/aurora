@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-28
+
+### Added
+
+- Added cached Last.fm artist portraits to Listening Report and the Artists page, with initials retained as the safe fallback.
+- Added album cover images to Listening Report's top track rows.
+- Added Last.fm API key and shared-secret management to Metadata Settings. Credentials stay in the operating-system vault, while artist images are downloaded, validated, resized, and served through Aurora's local image protocol.
+
 ## [0.22.1] - 2026-08-28
 
 ### Fixed

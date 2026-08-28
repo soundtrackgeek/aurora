@@ -49,6 +49,11 @@ export function displayTrackArtist(track: Track): string {
   return track.displayArtist?.trim() || track.artist;
 }
 
+export function artistPortraitUrl(artist: string, size: 64 | 128 = 64): string | null {
+  if (!isTauriRuntime() || !artist.trim()) return null;
+  return `http://aurora-artist.localhost/artist/${encodeURIComponent(artist)}?size=${size}`;
+}
+
 export function catalogRefreshIsConsistent(
   detectedRevision: string,
   reboundRevision: string,

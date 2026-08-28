@@ -1,5 +1,5 @@
 use crate::{
-    state_sync,
+    lastfm, state_sync,
     tag_model::{EditableTagField, EditableTagValues},
     tagging::{
         apply_editor_tag_changes, audio_payload_hash, merge_editor_patch, read_editable_tag_values,
@@ -60,6 +60,8 @@ pub(crate) struct InboxSettingsStatus {
     discogs_configured: bool,
     discogs_auth_mode: Option<DiscogsAuthMode>,
     discogs_incomplete_consumer_key: bool,
+    last_fm_configured: bool,
+    last_fm_secret_configured: bool,
     warning: Option<String>,
 }
 
@@ -339,6 +341,8 @@ impl InboxRuntime {
                 DiscogsAuth::Consumer { .. } => DiscogsAuthMode::Consumer,
             }),
             discogs_incomplete_consumer_key: auth.is_none() && consumer_key().is_some(),
+            last_fm_configured: lastfm::configured(),
+            last_fm_secret_configured: lastfm::secret_configured(),
             warning: self.warning.clone(),
         }
     }

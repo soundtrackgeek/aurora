@@ -10,6 +10,7 @@ mod genres;
 mod history;
 mod inbox;
 mod laptop_mode;
+mod lastfm;
 mod library_bridge;
 mod library_sync;
 mod media_controls;
@@ -48,6 +49,7 @@ use inbox::{
     ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
+use lastfm::LastFmCredentialsRequest;
 use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
     preview_library_move_to_inbox, select_library_intake_folder,
@@ -154,6 +156,15 @@ fn update_discogs_credentials(
     request: DiscogsCredentialsRequest,
 ) -> Result<InboxSettingsStatus, String> {
     inbox::save_discogs_credentials(request)?;
+    inbox_settings(app)
+}
+
+#[tauri::command]
+fn update_last_fm_credentials(
+    app: AppHandle,
+    request: LastFmCredentialsRequest,
+) -> Result<InboxSettingsStatus, String> {
+    lastfm::save_credentials(request)?;
     inbox_settings(app)
 }
 
@@ -1140,6 +1151,9 @@ pub fn run() {
         .register_uri_scheme_protocol("aurora-cover", |context, request| {
             artwork::handle_cover_request(context.app_handle(), &request)
         })
+        .register_uri_scheme_protocol("aurora-artist", |context, request| {
+            lastfm::handle_artist_image_request(context.app_handle(), &request)
+        })
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
@@ -1305,6 +1319,7 @@ pub fn run() {
             add_inbox_monitor_folder,
             remove_inbox_monitor_folder,
             update_discogs_credentials,
+            update_last_fm_credentials,
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,

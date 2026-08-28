@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AudioSettingsStatus } from "../audio";
 import { defaultShortcutBindings, type GlobalShortcutStatus } from "../shortcuts";
 import { acceleratorFromEvent } from "../shortcutCapture";
 import { createDefaultDisplayPreferences } from "../displayPreferences";
 import { SettingsDialog } from "./SettingsDialog";
+import * as inbox from "../inbox";
 
 const shortcutStatus: GlobalShortcutStatus = {
   enabled: true,
@@ -28,7 +29,10 @@ const audioStatus: AudioSettingsStatus = {
   error: null,
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function renderSettings(overrides: Partial<Parameters<typeof SettingsDialog>[0]> = {}) {
   const props: Parameters<typeof SettingsDialog>[0] = {
@@ -132,6 +136,32 @@ describe("SettingsDialog", () => {
     renderSettings({ initialTab: "display", activeDisplayView: "observatory" });
 
     expect(screen.getByRole("combobox", { name: "Observatory cover size" })).toBeDisabled();
+  });
+
+  it("saves a complete Last.fm credential pair from Metadata settings", async () => {
+    const status: inbox.InboxSettingsStatus = {
+      monitoredFolders: [],
+      discogsConfigured: false,
+      discogsAuthMode: null,
+      discogsIncompleteConsumerKey: false,
+      lastFmConfigured: true,
+      lastFmSecretConfigured: true,
+      warning: null,
+    };
+    vi.spyOn(inbox, "loadInboxSettings").mockResolvedValue(status);
+    const update = vi.spyOn(inbox, "updateLastFmCredentials").mockResolvedValue(status);
+    renderSettings({ initialTab: "metadata" });
+
+    await screen.findByRole("heading", { name: "Metadata" });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "1234567890abcdef1234567890abcdef" } });
+    fireEvent.change(screen.getByLabelText("Shared secret"), { target: { value: "abcdef1234567890abcdef1234567890" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
+      mode: "save",
+      apiKey: "1234567890abcdef1234567890abcdef",
+      sharedSecret: "abcdef1234567890abcdef1234567890",
+    }));
   });
 });
 

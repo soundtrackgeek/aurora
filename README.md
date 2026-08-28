@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.22.1 safely flattens selected multi-disc Inbox releases into one canonical album folder.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.0 adds secure Last.fm artist portraits and richer Listening Report artwork.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.22.1 slice
+## Current 0.23.0 slice
+
+- Listening Report shows small Last.fm portraits for top artists and local album covers for top tracks. The Artists page uses the same portrait component by default and retains its initials fallback when Last.fm has no usable image.
+- Metadata Settings accepts a Last.fm API key and shared secret. Aurora keeps both in the operating-system credential vault, uses only the key for unsigned artist lookups, proxies bounded Last.fm images through a local protocol, and caches resized WebP portraits without exposing credentials to React.
 
 - Inbox `Ctrl+R` now coordinates selected sibling discs as one filesystem transaction. `CD1`, `CD2`, and a partially renamed canonical child are flattened into `Album Artist - Album (Year)` with `1-01`, `2-01`, and later disc prefixes, cover files are preserved, empty disc folders are removed, and any failure rolls the staged moves back.
 

@@ -22,6 +22,7 @@ import {
 } from "../../history";
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
+import { ArtistPortrait } from "../ArtistPortrait";
 import "./ListeningReport.css";
 
 type ReportPeriod = "7" | "30" | "90" | "all";
@@ -250,9 +251,9 @@ function TopMusic({ report, onPlayTrack }: { report: HistoryReport; onPlayTrack:
     <section className="report-section report-top" aria-labelledby="report-top-title">
       <div className="report-heading"><div><h2 id="report-top-title">Top music</h2><p>The artists, albums, and tracks that shaped this period.</p></div></div>
       <div className="report-top__columns">
-        <article><h3><UserRound aria-hidden="true" /> Artists</h3>{report.topArtists.map((item, index) => <div className="report-rank" key={item.artist}><strong>{index + 1}</strong><span className="report-artist-mark">{item.artist.slice(0, 1).toLocaleUpperCase()}</span><span><b>{item.artist}</b><small>{durationLabel(item.listenedSeconds)}</small></span><em>{item.plays} plays</em></div>)}</article>
+        <article><h3><UserRound aria-hidden="true" /> Artists</h3>{report.topArtists.map((item, index) => <div className="report-rank" key={item.artist}><strong>{index + 1}</strong><ArtistPortrait artist={item.artist} className="report-artist-mark" eager /><span><b>{item.artist}</b><small>{durationLabel(item.listenedSeconds)}</small></span><em>{item.plays} plays</em></div>)}</article>
         <article><h3><Disc3 aria-hidden="true" /> Albums</h3>{report.topAlbums.map((item, index) => <div className="report-rank" key={`${item.artist}-${item.album}`}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback"><Album aria-hidden="true" /></span>}<span><b>{item.album}</b><small>{item.artist}</small></span><em>{item.plays} plays</em></div>)}</article>
-        <article><h3><Music2 aria-hidden="true" /> Tracks</h3>{report.topTracks.map((item, index) => <div className="report-rank" key={item.trackKey}><strong>{index + 1}</strong><span><b>{item.title}</b><small>{item.artist}</small></span><em>{item.plays} plays</em><button type="button" disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)} aria-label={`Play ${item.title}`}><Play aria-hidden="true" /></button></div>)}</article>
+        <article><h3><Music2 aria-hidden="true" /> Tracks</h3>{report.topTracks.map((item, index) => <div className="report-rank" key={item.trackKey}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback report-artwork-fallback--track"><Music2 aria-hidden="true" /></span>}<span><b>{item.title}</b><small>{item.artist}</small></span><em>{item.plays} plays</em><button type="button" disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)} aria-label={`Play ${item.title}`}><Play aria-hidden="true" /></button></div>)}</article>
       </div>
     </section>
   );

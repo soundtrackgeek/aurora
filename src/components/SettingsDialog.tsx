@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Tags,
   Type,
+  UserRound,
   Volume2,
   Waves,
   X,
@@ -36,7 +37,7 @@ import {
   type DisplayViewKey,
   type TextSize,
 } from "../displayPreferences";
-import { loadInboxSettings, updateDiscogsCredentials, type InboxSettingsStatus } from "../inbox";
+import { loadInboxSettings, updateDiscogsCredentials, updateLastFmCredentials, type InboxSettingsStatus } from "../inbox";
 
 export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata";
 
@@ -85,6 +86,9 @@ export function SettingsDialog({
   const [discogsConsumerKey, setDiscogsConsumerKey] = useState("");
   const [discogsConsumerSecret, setDiscogsConsumerSecret] = useState("");
   const [removeDiscogsToken, setRemoveDiscogsToken] = useState(false);
+  const [lastFmApiKey, setLastFmApiKey] = useState("");
+  const [lastFmSharedSecret, setLastFmSharedSecret] = useState("");
+  const [removeLastFmCredentials, setRemoveLastFmCredentials] = useState(false);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
 
@@ -128,12 +132,17 @@ export function SettingsDialog({
   const audioDirty = outputDeviceId !== audioStatus.settings.outputDeviceId
     || replayGainMode !== audioStatus.settings.replayGainMode;
   const displayDirty = JSON.stringify(displayDraft) !== JSON.stringify(displayPreferences);
-  const metadataDirty = removeDiscogsToken
+  const discogsDirty = removeDiscogsToken
     || (discogsCredentialMode === "token" ? Boolean(discogsToken.trim()) : Boolean(discogsConsumerKey.trim() && discogsConsumerSecret.trim()));
+  const lastFmDirty = removeLastFmCredentials || Boolean(lastFmApiKey.trim() && lastFmSharedSecret.trim());
+  const metadataDirty = discogsDirty || lastFmDirty;
+  const metadataValidationError = Boolean(lastFmApiKey.trim()) !== Boolean(lastFmSharedSecret.trim())
+    ? "Enter both the Last.fm API key and shared secret."
+    : null;
   const activeTitle = tab === "display" ? "Display" : tab === "audio" ? "Audio" : tab === "metadata" ? "Metadata" : "Global shortcuts";
   const activeSaving = tab === "display" ? false : tab === "audio" ? audioSaving : tab === "metadata" ? metadataSaving : shortcutSaving;
   const activeDirty = tab === "display" ? displayDirty : tab === "audio" ? audioDirty : tab === "metadata" ? metadataDirty : shortcutsDirty;
-  const activeError = tab === "display" ? null : tab === "audio" ? audioError : tab === "metadata" ? metadataError : shortcutError;
+  const activeError = tab === "display" ? null : tab === "audio" ? audioError : tab === "metadata" ? metadataValidationError ?? metadataError : shortcutError;
 
   function saveActiveTab() {
     if (tab === "display") {
@@ -148,17 +157,30 @@ export function SettingsDialog({
     } else {
       setMetadataSaving(true);
       setMetadataError(null);
-      void updateDiscogsCredentials(removeDiscogsToken
-        ? { mode: "clear" }
-        : discogsCredentialMode === "token"
-          ? { mode: "token", token: discogsToken }
-          : { mode: "consumer", consumerKey: discogsConsumerKey, consumerSecret: discogsConsumerSecret })
+      let save = Promise.resolve();
+      if (discogsDirty) {
+        save = save.then(() => updateDiscogsCredentials(removeDiscogsToken
+          ? { mode: "clear" }
+          : discogsCredentialMode === "token"
+            ? { mode: "token", token: discogsToken }
+            : { mode: "consumer", consumerKey: discogsConsumerKey, consumerSecret: discogsConsumerSecret })).then(() => undefined);
+      }
+      if (lastFmDirty) {
+        save = save.then(() => updateLastFmCredentials(removeLastFmCredentials
+          ? { mode: "clear" }
+          : { mode: "save", apiKey: lastFmApiKey, sharedSecret: lastFmSharedSecret })).then(() => undefined);
+      }
+      void save
+        .then(loadInboxSettings)
         .then((status) => {
           setMetadataStatus(status);
           setDiscogsToken("");
           setDiscogsConsumerKey("");
           setDiscogsConsumerSecret("");
           setRemoveDiscogsToken(false);
+          setLastFmApiKey("");
+          setLastFmSharedSecret("");
+          setRemoveLastFmCredentials(false);
         })
         .catch((error: unknown) => setMetadataError(error instanceof Error ? error.message : String(error)))
         .finally(() => setMetadataSaving(false));
@@ -222,6 +244,12 @@ export function SettingsDialog({
               onConsumerKeyChange={(value) => { setDiscogsConsumerKey(value); setRemoveDiscogsToken(false); }}
               onConsumerSecretChange={(value) => { setDiscogsConsumerSecret(value); setRemoveDiscogsToken(false); }}
               onRemoveTokenChange={setRemoveDiscogsToken}
+              lastFmApiKey={lastFmApiKey}
+              lastFmSharedSecret={lastFmSharedSecret}
+              removeLastFmCredentials={removeLastFmCredentials}
+              onLastFmApiKeyChange={(value) => { setLastFmApiKey(value); setRemoveLastFmCredentials(false); }}
+              onLastFmSharedSecretChange={(value) => { setLastFmSharedSecret(value); setRemoveLastFmCredentials(false); }}
+              onRemoveLastFmCredentialsChange={setRemoveLastFmCredentials}
             />
           )}
           {((tab === "shortcuts" && validationError) || activeError) && (
@@ -234,7 +262,7 @@ export function SettingsDialog({
           <button
             type="button"
             className="button button--primary"
-            disabled={activeSaving || !activeDirty || (tab === "shortcuts" && (Boolean(validationError) || Boolean(recordingAction)))}
+            disabled={activeSaving || !activeDirty || (tab === "metadata" && Boolean(metadataValidationError)) || (tab === "shortcuts" && (Boolean(validationError) || Boolean(recordingAction)))}
             onClick={saveActiveTab}
           >{activeSaving ? "Saving…" : "Save changes"}</button>
         </footer>
@@ -255,6 +283,12 @@ function MetadataSettingsPanel({
   onConsumerKeyChange,
   onConsumerSecretChange,
   onRemoveTokenChange,
+  lastFmApiKey,
+  lastFmSharedSecret,
+  removeLastFmCredentials,
+  onLastFmApiKeyChange,
+  onLastFmSharedSecretChange,
+  onRemoveLastFmCredentialsChange,
 }: {
   status: InboxSettingsStatus | null;
   token: string;
@@ -267,6 +301,12 @@ function MetadataSettingsPanel({
   onConsumerKeyChange: (value: string) => void;
   onConsumerSecretChange: (value: string) => void;
   onRemoveTokenChange: (value: boolean) => void;
+  lastFmApiKey: string;
+  lastFmSharedSecret: string;
+  removeLastFmCredentials: boolean;
+  onLastFmApiKeyChange: (value: string) => void;
+  onLastFmSharedSecretChange: (value: string) => void;
+  onRemoveLastFmCredentialsChange: (value: boolean) => void;
 }) {
   return (
     <div className="metadata-settings">
@@ -282,6 +322,24 @@ function MetadataSettingsPanel({
         </label> : <div className="metadata-consumer-fields"><label className="metadata-token-field"><span>Consumer key</span><input type="password" autoComplete="off" value={consumerKey} disabled={removeToken} placeholder={status?.discogsAuthMode === "consumer" || status?.discogsIncompleteConsumerKey ? "Saved or detected · enter key to replace" : "Enter consumer key"} onChange={(event) => onConsumerKeyChange(event.target.value)} /></label><label className="metadata-token-field"><span>Consumer secret</span><input type="password" autoComplete="off" value={consumerSecret} disabled={removeToken} placeholder={status?.discogsAuthMode === "consumer" ? "Saved securely · enter secret to replace" : "Enter matching consumer secret"} onChange={(event) => onConsumerSecretChange(event.target.value)} /></label></div>}
         <p className="metadata-vault-note">Aurora stores production credentials in your operating system credential vault. Saved values are never displayed or written to Aurora settings files.</p>
         {status?.discogsConfigured ? <label className="metadata-remove"><input type="checkbox" checked={removeToken} onChange={(event) => onRemoveTokenChange(event.target.checked)} /> Remove the saved Discogs credentials</label> : null}
+      </section>
+      <section className="display-settings__section" aria-labelledby="last-fm-settings-heading">
+        <header>
+          <span><UserRound aria-hidden="true" /><span><strong id="last-fm-settings-heading">Last.fm</strong><small>Provides artist portraits now and supports future Last.fm metadata features.</small></span></span>
+          <span className={`metadata-connection${status?.lastFmConfigured ? " is-connected" : ""}`}>{status ? status.lastFmConfigured ? <><ShieldCheck aria-hidden="true" /> {status.lastFmSecretConfigured ? "Connected" : "Images ready · secret needed"}</> : "Not connected" : "Checking…"}</span>
+        </header>
+        <div className="metadata-consumer-fields">
+          <label className="metadata-token-field">
+            <span>API key</span>
+            <input type="password" autoComplete="off" value={lastFmApiKey} disabled={removeLastFmCredentials} placeholder={status?.lastFmConfigured ? "Saved securely · enter a replacement" : "Enter your Last.fm API key"} onChange={(event) => onLastFmApiKeyChange(event.target.value)} />
+          </label>
+          <label className="metadata-token-field">
+            <span>Shared secret</span>
+            <input type="password" autoComplete="off" value={lastFmSharedSecret} disabled={removeLastFmCredentials} placeholder={status?.lastFmSecretConfigured ? "Saved securely · enter a replacement" : "Enter the matching shared secret"} onChange={(event) => onLastFmSharedSecretChange(event.target.value)} />
+          </label>
+        </div>
+        <p className="metadata-vault-note">Artist lookups use only the API key. Aurora stores both values in your operating system credential vault so signed Last.fm features can be added without another setup step.</p>
+        {status?.lastFmConfigured ? <label className="metadata-remove"><input type="checkbox" checked={removeLastFmCredentials} onChange={(event) => onRemoveLastFmCredentialsChange(event.target.checked)} /> Remove the saved Last.fm credentials</label> : null}
       </section>
       <div className="metadata-settings__note"><ShieldCheck aria-hidden="true" /><span><strong>MusicBrainz needs no key.</strong><small>Aurora identifies itself and observes MusicBrainz's one-request-per-second limit.</small></span></div>
     </div>

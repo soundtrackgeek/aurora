@@ -31,6 +31,7 @@ import {
 } from "react";
 import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
+import { ArtistPortrait } from "../ArtistPortrait";
 import { libraryIntakeAdapter, type LibraryIntakePreview } from "../../ingest";
 import { loadInboxSettings } from "../../inbox";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
@@ -964,7 +965,7 @@ function ArtistList({
             onClick={() => onSelectArtist(artist)}
           >
             <span className="deep-explorer-artist__rank">{String(index + 1).padStart(2, "0")}</span>
-            <span className="deep-explorer-artist__avatar" aria-hidden="true">{artist.name.slice(0, 2).toLocaleUpperCase()}</span>
+            <ArtistPortrait artist={artist.name} className="deep-explorer-artist__avatar" />
             <span className="deep-explorer-artist__copy">
               <strong>{artist.name}</strong>
               <small>{formatCount(artist.albumCount)} albums · {formatCount(artist.trackCount)} tracks</small>

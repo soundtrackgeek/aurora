@@ -7,6 +7,8 @@ export interface InboxSettingsStatus {
   discogsConfigured: boolean;
   discogsAuthMode: "token" | "consumer" | null;
   discogsIncompleteConsumerKey: boolean;
+  lastFmConfigured: boolean;
+  lastFmSecretConfigured: boolean;
   warning: string | null;
 }
 
@@ -152,6 +154,8 @@ let previewSettings: InboxSettingsStatus = {
   discogsConfigured: true,
   discogsAuthMode: "token",
   discogsIncompleteConsumerKey: false,
+  lastFmConfigured: true,
+  lastFmSecretConfigured: true,
   warning: null,
 };
 
@@ -252,6 +256,22 @@ export async function updateDiscogsCredentials(request: DiscogsCredentialsReques
     return previewSettings;
   }
   return invoke<InboxSettingsStatus>("update_discogs_credentials", { request });
+}
+
+export type LastFmCredentialsRequest =
+  | { mode: "save"; apiKey: string; sharedSecret: string }
+  | { mode: "clear" };
+
+export async function updateLastFmCredentials(request: LastFmCredentialsRequest): Promise<InboxSettingsStatus> {
+  if (!isTauriRuntime()) {
+    previewSettings = {
+      ...previewSettings,
+      lastFmConfigured: request.mode !== "clear",
+      lastFmSecretConfigured: request.mode !== "clear",
+    };
+    return previewSettings;
+  }
+  return invoke<InboxSettingsStatus>("update_last_fm_credentials", { request });
 }
 
 export async function searchInboxReleases(artist: string, album: string, trackCount: number): Promise<ReleaseSearchResult> {

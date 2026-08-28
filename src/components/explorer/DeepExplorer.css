@@ -231,7 +231,7 @@
 .deep-explorer-artists button:focus-visible { box-shadow: inset 0 0 0 1px var(--explorer-cyan); }
 .deep-explorer-artists button.is-selected { background: linear-gradient(90deg, rgba(130, 55, 179, .24), transparent); box-shadow: inset 2px 0 var(--explorer-violet); }
 .deep-explorer-artist__rank { color: #5d6a78; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); font-variant-numeric: tabular-nums; }
-.deep-explorer-artist__avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: #d8c1e8; background: radial-gradient(circle at 35% 30%, #704092, #202c3a 65%); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); font-weight: 500; }
+.deep-explorer-artist__avatar { width: 32px; height: 32px; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); font-weight: 500; }
 .deep-explorer-artist__copy { min-width: 0; }
 .deep-explorer-artist__copy strong,
 .deep-explorer-artist__copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
