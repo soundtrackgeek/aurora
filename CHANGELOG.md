@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.10] - 2026-08-28
+
+### Fixed
+
+- Inbox destination previews now remove abandoned Aurora `.tmp.mp3` tag-staging copies older than five minutes before handing the selected folder to Music Library. Recent staging files block preview instead of racing an active edit, while recovery backups and ordinary MP3s remain untouched.
+
 ## [0.20.9] - 2026-08-28
 
 ### Fixed

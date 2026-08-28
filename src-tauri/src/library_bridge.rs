@@ -29,6 +29,8 @@ const APPLY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_SYNC_FOLDERS: usize = 32;
+const ABANDONED_INBOX_TEMP_AGE_MS: u64 = 5 * 60 * 1_000;
+const MAX_INTAKE_CLEANUP_ENTRIES: usize = 100_000;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -346,6 +348,7 @@ pub async fn preview_library_intake_batch(
         let coordinator = app.state::<LibrarySyncCoordinator>();
         coordinator.serialize_bridge_work(|| {
             let source_path = validate_source_path(&request.source_path)?;
+            cleanup_abandoned_inbox_temporary_files(Path::new(&source_path), current_time_ms())?;
             let result = invoke_bridge::<_, LibraryIntakePreview>(
                 &app,
                 "previewBatch",
@@ -465,6 +468,81 @@ fn validate_source_path(source_path: &str) -> Result<String, String> {
         return Err("The selected album source must be a folder.".to_owned());
     }
     Ok(source_path.to_owned())
+}
+
+fn cleanup_abandoned_inbox_temporary_files(root: &Path, current_ms: u64) -> Result<(), String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut visited_entries = 0usize;
+    let mut recent_temporary = None;
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory).map_err(|error| {
+            format!("Aurora could not inspect the Inbox folder before previewing it: {error}")
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!("Aurora could not inspect an Inbox entry before previewing it: {error}")
+            })?;
+            visited_entries += 1;
+            if visited_entries > MAX_INTAKE_CLEANUP_ENTRIES {
+                return Err(
+                    "Aurora stopped checking for abandoned Inbox staging files because the selected folder contains too many entries."
+                        .to_owned(),
+                );
+            }
+            let file_type = entry.file_type().map_err(|error| {
+                format!("Aurora could not inspect an Inbox entry before previewing it: {error}")
+            })?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let Some(created_ms) = inbox_temporary_timestamp(&entry.file_name()) else {
+                continue;
+            };
+            if current_ms.saturating_sub(created_ms) < ABANDONED_INBOX_TEMP_AGE_MS {
+                recent_temporary.get_or_insert_with(|| entry.path());
+                continue;
+            }
+            fs::remove_file(entry.path()).map_err(|error| {
+                format!(
+                    "Aurora found an abandoned Inbox staging file but could not remove it: {} ({error})",
+                    entry.path().display()
+                )
+            })?;
+        }
+    }
+    if let Some(path) = recent_temporary {
+        return Err(format!(
+            "Aurora is still finalizing an Inbox tag edit at {}. Wait a few minutes, then preview destinations again.",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn inbox_temporary_timestamp(name: &OsStr) -> Option<u64> {
+    let body = name
+        .to_str()?
+        .strip_prefix(".aurora-inbox-")?
+        .strip_suffix(".tmp.mp3")?;
+    let (timestamp, index) = body.rsplit_once('-')?;
+    let timestamp = timestamp.parse().ok()?;
+    index.parse::<usize>().ok()?;
+    Some(timestamp)
+}
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
 }
 
 fn validate_apply_request(request: &LibraryIntakeApplyRequest) -> Result<(), String> {
@@ -1076,6 +1154,46 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn preview_cleanup_removes_only_abandoned_inbox_temporary_mp3s() {
+        let directory = TempDir::new().expect("temp directory");
+        let nested = directory.path().join("Album");
+        fs::create_dir_all(&nested).expect("nested album");
+        let current_ms = 10 * ABANDONED_INBOX_TEMP_AGE_MS;
+        let abandoned_ms = current_ms - ABANDONED_INBOX_TEMP_AGE_MS;
+        let abandoned = nested.join(format!(".aurora-inbox-{abandoned_ms}-3.tmp.mp3"));
+        let recovery = nested.join(format!(".aurora-inbox-{abandoned_ms}-3.backup.mp3"));
+        let malformed = nested.join(".aurora-inbox-unknown-3.tmp.mp3");
+        let track = nested.join("03 - Track.mp3");
+        for path in [&abandoned, &recovery, &malformed, &track] {
+            fs::write(path, b"fixture").expect("fixture file");
+        }
+
+        cleanup_abandoned_inbox_temporary_files(directory.path(), current_ms)
+            .expect("cleanup succeeds");
+
+        assert!(!abandoned.exists());
+        assert!(recovery.exists());
+        assert!(malformed.exists());
+        assert!(track.exists());
+    }
+
+    #[test]
+    fn preview_cleanup_refuses_to_race_a_recent_inbox_tag_edit() {
+        let directory = TempDir::new().expect("temp directory");
+        let current_ms = 10 * ABANDONED_INBOX_TEMP_AGE_MS;
+        let recent = directory
+            .path()
+            .join(format!(".aurora-inbox-{}-0.tmp.mp3", current_ms - 1));
+        fs::write(&recent, b"fixture").expect("fixture file");
+
+        let error = cleanup_abandoned_inbox_temporary_files(directory.path(), current_ms)
+            .expect_err("recent staging file blocks preview");
+
+        assert!(recent.exists());
+        assert!(error.contains("still finalizing an Inbox tag edit"));
     }
 
     #[test]
