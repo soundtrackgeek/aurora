@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -256,6 +256,28 @@ pub(crate) struct InboxRenameResult {
     folder_renamed: bool,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InboxBatchRenameRequest {
+    album_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxRenameFailure {
+    album_path: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxBatchRenameResult {
+    renamed_tracks: usize,
+    renamed_albums: usize,
+    renamed_folders: usize,
+    failures: Vec<InboxRenameFailure>,
+}
+
 struct PreparedWrite {
     target: PathBuf,
     temporary: PathBuf,
@@ -266,6 +288,13 @@ struct PreparedRename {
     source: PathBuf,
     temporary: PathBuf,
     destination: PathBuf,
+}
+
+struct AlbumRenameCandidate {
+    requested_path: String,
+    path: PathBuf,
+    scanned: InboxAlbum,
+    folder_name: String,
 }
 
 impl InboxRuntime {
@@ -312,6 +341,14 @@ impl InboxRuntime {
             discogs_incomplete_consumer_key: auth.is_none() && consumer_key().is_some(),
             warning: self.warning.clone(),
         }
+    }
+
+    pub(crate) fn monitored_roots(&self) -> Vec<PathBuf> {
+        self.settings
+            .monitored_folders
+            .iter()
+            .filter_map(|root| fs::canonicalize(root).ok())
+            .collect()
     }
 
     pub(crate) fn resolve_cover_track(&self, value: &str) -> Result<PathBuf, String> {
@@ -616,6 +653,397 @@ pub(crate) fn apply_tags(request: InboxTagApplyRequest) -> Result<InboxTagApplyR
 pub(crate) fn rename_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
     let album = canonical_directory(&request.album_path)?;
     rename_album_path(&album)
+}
+
+pub(crate) fn rename_albums(
+    request: InboxBatchRenameRequest,
+    monitored_roots: &[PathBuf],
+) -> Result<InboxBatchRenameResult, String> {
+    if request.album_paths.len() > MAX_SCANNED_DIRECTORIES {
+        return Err("Too many Inbox albums were selected for one rename.".to_owned());
+    }
+    let mut failures = Vec::new();
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    for requested_path in request.album_paths {
+        match album_rename_candidate(requested_path.clone()) {
+            Ok(candidate) if seen.insert(path_key(&candidate.path)) => candidates.push(candidate),
+            Ok(_) => {}
+            Err(message) => failures.push(InboxRenameFailure {
+                album_path: requested_path,
+                message,
+            }),
+        }
+    }
+
+    let mut groups: Vec<Vec<AlbumRenameCandidate>> = Vec::new();
+    let mut group_indices = HashMap::new();
+    for candidate in candidates {
+        let parent = candidate
+            .path
+            .parent()
+            .ok_or_else(|| "The Inbox album has no parent folder.".to_owned())?;
+        let group_key = format!(
+            "{}\u{0}{}",
+            path_key(parent),
+            candidate.folder_name.to_lowercase()
+        );
+        let group_index = *group_indices.entry(group_key).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[group_index].push(candidate);
+    }
+
+    let mut renamed_tracks = 0;
+    let mut renamed_albums = 0;
+    let mut renamed_folders = 0;
+    for group in groups {
+        let result = if group.len() > 1 {
+            merge_album_group(&group, monitored_roots)
+        } else {
+            let candidate = &group[0];
+            let parent_is_monitored = candidate
+                .path
+                .parent()
+                .is_some_and(|parent| monitored_roots.iter().any(|root| path_eq(root, parent)));
+            if !parent_is_monitored && disc_folder_number(&candidate.path).is_some() {
+                Err("Select every disc folder for this release before renaming it. Aurora will merge the discs into one album folder.".to_owned())
+            } else {
+                rename_album_path(&candidate.path)
+            }
+        };
+        match result {
+            Ok(result) => {
+                renamed_tracks += result.renamed_tracks;
+                renamed_albums += group.len();
+                renamed_folders += usize::from(result.folder_renamed);
+            }
+            Err(message) => {
+                failures.extend(group.into_iter().map(|candidate| InboxRenameFailure {
+                    album_path: candidate.requested_path,
+                    message: message.clone(),
+                }))
+            }
+        }
+    }
+
+    Ok(InboxBatchRenameResult {
+        renamed_tracks,
+        renamed_albums,
+        renamed_folders,
+        failures,
+    })
+}
+
+fn album_rename_candidate(requested_path: String) -> Result<AlbumRenameCandidate, String> {
+    let path = canonical_directory(&requested_path)?;
+    let scanned = scan_album(&path)?;
+    let album_artist = required_component(scanned.artist.as_deref(), "Album Artist")?;
+    let album_title = required_component(scanned.album.as_deref(), "Album")?;
+    let year = scanned
+        .year
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "Add a Year tag before renaming this album.".to_owned())?;
+    let folder_name = sanitize_component(&format!("{album_artist} - {album_title} ({year})"))?;
+    Ok(AlbumRenameCandidate {
+        requested_path,
+        path,
+        scanned,
+        folder_name,
+    })
+}
+
+fn merge_album_group(
+    group: &[AlbumRenameCandidate],
+    monitored_roots: &[PathBuf],
+) -> Result<InboxRenameResult, String> {
+    let common_parent = group[0]
+        .path
+        .parent()
+        .ok_or_else(|| "The selected disc folder has no parent folder.".to_owned())?
+        .to_path_buf();
+    if group.iter().any(|candidate| {
+        candidate
+            .path
+            .parent()
+            .is_none_or(|parent| !path_eq(parent, &common_parent))
+    }) {
+        return Err(
+            "The selected discs must be sibling folders before Aurora can merge them.".to_owned(),
+        );
+    }
+
+    let selected_directories = group
+        .iter()
+        .map(|candidate| path_key(&candidate.path))
+        .collect::<HashSet<_>>();
+    let parent_is_monitored = monitored_roots
+        .iter()
+        .any(|root| path_eq(root, &common_parent));
+    if !parent_is_monitored {
+        for entry in fs::read_dir(&common_parent)
+            .map_err(|error| format!("Could not inspect the multi-disc album folder: {error}"))?
+        {
+            let entry = entry.map_err(|error| {
+                format!("Could not inspect the multi-disc album folder: {error}")
+            })?;
+            let kind = entry.file_type().map_err(|error| {
+                format!("Could not inspect the multi-disc album folder: {error}")
+            })?;
+            if kind.is_symlink() {
+                return Err(format!(
+                    "Aurora cannot flatten this release because it contains the folder link {}.",
+                    entry.path().display()
+                ));
+            }
+            if kind.is_dir() && !selected_directories.contains(&path_key(&entry.path())) {
+                return Err(format!(
+                    "Select every disc folder before renaming this release. The unselected folder is {}.",
+                    entry.path().display()
+                ));
+            }
+        }
+    }
+
+    let final_folder = if parent_is_monitored {
+        common_parent.join(&group[0].folder_name)
+    } else {
+        common_parent
+            .parent()
+            .ok_or_else(|| "The multi-disc album folder has no parent folder.".to_owned())?
+            .join(&group[0].folder_name)
+    };
+    let mut created_destination = false;
+    let destination_root = if parent_is_monitored {
+        if final_folder.exists() {
+            let canonical = fs::canonicalize(&final_folder).map_err(|error| {
+                format!("Could not inspect the destination album folder: {error}")
+            })?;
+            if !selected_directories.contains(&path_key(&canonical)) {
+                return Err(format!(
+                    "The destination album folder already exists: {}",
+                    final_folder.display()
+                ));
+            }
+            canonical
+        } else {
+            created_destination = true;
+            final_folder.clone()
+        }
+    } else {
+        if !path_eq(&common_parent, &final_folder) && final_folder.exists() {
+            return Err(format!(
+                "The destination album folder already exists: {}",
+                final_folder.display()
+            ));
+        }
+        common_parent.clone()
+    };
+
+    let mut extra_files = Vec::new();
+    let mut source_files = HashSet::new();
+    for candidate in group {
+        for entry in fs::read_dir(&candidate.path)
+            .map_err(|error| format!("Could not inspect a selected disc folder: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("Could not inspect a selected disc folder: {error}"))?;
+            let kind = entry
+                .file_type()
+                .map_err(|error| format!("Could not inspect a selected disc folder: {error}"))?;
+            if kind.is_symlink() || kind.is_dir() {
+                return Err(format!(
+                    "Aurora cannot flatten {} because it contains another folder or link.",
+                    candidate.path.display()
+                ));
+            }
+            if kind.is_file() {
+                source_files.insert(path_key(&entry.path()));
+                if !is_mp3(&entry.path()) {
+                    extra_files.push(entry.path());
+                }
+            }
+        }
+    }
+
+    let track_width = group
+        .iter()
+        .flat_map(|candidate| candidate.scanned.tracks.iter())
+        .filter_map(|track| track.track_number.or(track.track_total))
+        .max()
+        .map_or(2, decimal_width)
+        .max(2);
+    let sequence = now_ms();
+    let mut next_index = 0usize;
+    let mut destinations = HashSet::new();
+    let mut prepared = Vec::new();
+    let mut renamed_tracks = 0;
+    for candidate in group {
+        for track in &candidate.scanned.tracks {
+            let track_number = track.track_number.ok_or_else(|| {
+                format!(
+                    "Add a Track Number tag to {} before renaming.",
+                    track.file_name
+                )
+            })?;
+            let disc_number = track.disc_number.ok_or_else(|| {
+                format!(
+                    "Add a Disc Number tag to {} before merging this multi-disc release.",
+                    track.file_name
+                )
+            })?;
+            let artist = required_component(track.artist.as_deref(), "Artist")?;
+            let title = required_component(track.title.as_deref(), "Title")?;
+            let position = format!("{disc_number}-{track_number:0track_width$}");
+            let file_name = sanitize_component(&format!("{position} - {artist} - {title}"))?;
+            let source = PathBuf::from(&track.path);
+            let destination = destination_root.join(format!("{file_name}.mp3"));
+            if prepare_merged_file_rename(
+                &mut prepared,
+                &mut destinations,
+                &source_files,
+                source,
+                destination,
+                sequence,
+                next_index,
+            )? {
+                renamed_tracks += 1;
+            }
+            next_index += 1;
+        }
+    }
+    for source in extra_files {
+        let file_name = source
+            .file_name()
+            .ok_or_else(|| "A selected disc file has no filename.".to_owned())?;
+        let destination = destination_root.join(file_name);
+        prepare_merged_file_rename(
+            &mut prepared,
+            &mut destinations,
+            &source_files,
+            source,
+            destination,
+            sequence,
+            next_index,
+        )?;
+        next_index += 1;
+    }
+
+    if created_destination {
+        fs::create_dir(&destination_root)
+            .map_err(|error| format!("Could not create the destination album folder: {error}"))?;
+    }
+    if let Err(error) = stage_renames(&prepared) {
+        if created_destination {
+            let _ = fs::remove_dir(&destination_root);
+        }
+        return Err(error);
+    }
+
+    let directories_to_remove = group
+        .iter()
+        .map(|candidate| candidate.path.clone())
+        .filter(|path| !path_eq(path, &destination_root))
+        .collect::<Vec<_>>();
+    let mut removed_directories = Vec::new();
+    for directory in &directories_to_remove {
+        if let Err(error) = fs::remove_dir(directory) {
+            for removed in &removed_directories {
+                let _ = fs::create_dir_all(removed);
+            }
+            rollback_renames(&prepared, prepared.len());
+            if created_destination {
+                let _ = fs::remove_dir(&destination_root);
+            }
+            return Err(format!(
+                "Could not remove the empty disc folder {}: {error}",
+                directory.display()
+            ));
+        }
+        removed_directories.push(directory.clone());
+    }
+
+    let final_album = if parent_is_monitored || path_eq(&common_parent, &final_folder) {
+        destination_root.clone()
+    } else {
+        if let Err(error) = fs::rename(&common_parent, &final_folder) {
+            for removed in &removed_directories {
+                let _ = fs::create_dir_all(removed);
+            }
+            rollback_renames(&prepared, prepared.len());
+            return Err(format!(
+                "Could not rename the multi-disc album folder: {error}"
+            ));
+        }
+        final_folder
+    };
+
+    Ok(InboxRenameResult {
+        album_path: path_text(&final_album)?,
+        renamed_tracks,
+        folder_renamed: !directories_to_remove.is_empty()
+            || created_destination
+            || !path_eq(&common_parent, &final_album),
+    })
+}
+
+fn prepare_merged_file_rename(
+    prepared: &mut Vec<PreparedRename>,
+    destinations: &mut HashSet<String>,
+    sources: &HashSet<String>,
+    source: PathBuf,
+    destination: PathBuf,
+    sequence: u64,
+    index: usize,
+) -> Result<bool, String> {
+    let destination_key = path_key(&destination);
+    if !destinations.insert(destination_key.clone()) {
+        return Err(format!(
+            "More than one selected disc file would be named {}.",
+            destination.display()
+        ));
+    }
+    if destination.exists() && !sources.contains(&destination_key) {
+        return Err(format!(
+            "The destination file already exists: {}",
+            destination.display()
+        ));
+    }
+    if path_eq(&source, &destination) {
+        return Ok(false);
+    }
+    let temporary = source
+        .parent()
+        .ok_or_else(|| "A selected disc file has no parent folder.".to_owned())?
+        .join(format!(".aurora-rename-{sequence}-{index}.tmp"));
+    if temporary.exists() {
+        return Err(format!(
+            "Aurora's temporary rename file already exists: {}",
+            temporary.display()
+        ));
+    }
+    prepared.push(PreparedRename {
+        source,
+        temporary,
+        destination,
+    });
+    Ok(true)
+}
+
+fn disc_folder_number(path: &Path) -> Option<u32> {
+    let compact = path
+        .file_name()?
+        .to_str()?
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace() && !matches!(*character, '-' | '_'))
+        .collect::<String>()
+        .to_ascii_lowercase();
+    compact
+        .strip_prefix("cd")
+        .or_else(|| compact.strip_prefix("disc"))?
+        .parse()
+        .ok()
 }
 
 fn rename_album_path(album: &Path) -> Result<InboxRenameResult, String> {
@@ -1652,6 +2080,116 @@ mod tests {
         assert!(renamed.join("2-01 - Track Artist - Disc Two.mp3").is_file());
         assert_eq!(fs::read_dir(&renamed).expect("read album").count(), 2);
         fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    #[test]
+    fn batch_rename_flattens_selected_disc_folders_into_one_album() {
+        let monitored_root = std::env::temp_dir().join(format!(
+            "aurora-inbox-disc-folders-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let incoming = monitored_root.join("Test Album with CD folders");
+        let cd1 = incoming.join("CD1");
+        let cd2 = incoming.join("CD2");
+        fs::create_dir_all(&cd1).expect("create CD1");
+        fs::create_dir_all(&cd2).expect("create CD2");
+        File::create(incoming.join("cover.jpg")).expect("create cover");
+        write_rename_fixture(&cd1.join("one.mp3"), 1, Some(1), "Disc One First");
+        write_rename_fixture(&cd1.join("two.mp3"), 2, Some(1), "Disc One Second");
+        write_rename_fixture(&cd2.join("one.mp3"), 1, Some(2), "Disc Two First");
+        write_rename_fixture(&cd2.join("two.mp3"), 2, Some(2), "Disc Two Second");
+
+        let result = rename_albums(
+            InboxBatchRenameRequest {
+                album_paths: vec![
+                    path_text(&cd1).expect("CD1 path"),
+                    path_text(&cd2).expect("CD2 path"),
+                ],
+            },
+            std::slice::from_ref(&monitored_root),
+        )
+        .expect("rename selected discs");
+
+        let renamed = monitored_root.join("Test Artist - Test Album (1990)");
+        assert_eq!(result.renamed_albums, 2);
+        assert_eq!(result.renamed_tracks, 4);
+        assert_eq!(result.renamed_folders, 1);
+        assert!(result.failures.is_empty());
+        assert!(
+            renamed
+                .join("1-01 - Track Artist - Disc One First.mp3")
+                .is_file()
+        );
+        assert!(
+            renamed
+                .join("1-02 - Track Artist - Disc One Second.mp3")
+                .is_file()
+        );
+        assert!(
+            renamed
+                .join("2-01 - Track Artist - Disc Two First.mp3")
+                .is_file()
+        );
+        assert!(
+            renamed
+                .join("2-02 - Track Artist - Disc Two Second.mp3")
+                .is_file()
+        );
+        assert!(renamed.join("cover.jpg").is_file());
+        assert!(!renamed.join("CD1").exists());
+        assert!(!renamed.join("CD2").exists());
+        assert_eq!(
+            fs::read_dir(&renamed)
+                .expect("read merged album")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .count(),
+            0
+        );
+        fs::remove_dir_all(monitored_root).expect("remove fixture");
+    }
+
+    #[test]
+    fn batch_rename_recovers_a_partially_nested_multidisc_album() {
+        let monitored_root = std::env::temp_dir().join(format!(
+            "aurora-inbox-partial-disc-rename-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let incoming = monitored_root.join("Old multi-disc folder");
+        let cd1 = incoming.join("CD1");
+        let wrongly_nested = incoming.join("Test Artist - Test Album (1990)");
+        fs::create_dir_all(&cd1).expect("create CD1");
+        fs::create_dir_all(&wrongly_nested).expect("create partial rename");
+        write_rename_fixture(&cd1.join("one.mp3"), 1, Some(1), "Disc One");
+        write_rename_fixture(&wrongly_nested.join("two.mp3"), 1, Some(2), "Disc Two");
+
+        let result = rename_albums(
+            InboxBatchRenameRequest {
+                album_paths: vec![
+                    path_text(&cd1).expect("CD1 path"),
+                    path_text(&wrongly_nested).expect("nested path"),
+                ],
+            },
+            std::slice::from_ref(&monitored_root),
+        )
+        .expect("recover partial rename");
+
+        let renamed = monitored_root.join("Test Artist - Test Album (1990)");
+        assert_eq!(result.renamed_albums, 2);
+        assert_eq!(result.renamed_tracks, 2);
+        assert!(renamed.join("1-01 - Track Artist - Disc One.mp3").is_file());
+        assert!(renamed.join("2-01 - Track Artist - Disc Two.mp3").is_file());
+        assert_eq!(
+            fs::read_dir(&renamed)
+                .expect("read recovered album")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .count(),
+            0
+        );
+        fs::remove_dir_all(monitored_root).expect("remove fixture");
     }
 
     #[test]

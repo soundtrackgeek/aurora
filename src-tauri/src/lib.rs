@@ -42,9 +42,10 @@ use history::{
     TrackHistoryInsight,
 };
 use inbox::{
-    DiscogsCredentialsRequest, InboxRenameRequest, InboxRenameResult, InboxRuntime,
-    InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest, InboxTagApplyResult,
-    ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest, ReleaseSearchResult,
+    DiscogsCredentialsRequest, InboxBatchRenameRequest, InboxBatchRenameResult, InboxRenameRequest,
+    InboxRenameResult, InboxRuntime, InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest,
+    InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest,
+    ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use library_bridge::{
@@ -184,6 +185,21 @@ async fn apply_inbox_tags(request: InboxTagApplyRequest) -> Result<InboxTagApply
 #[tauri::command]
 async fn rename_inbox_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
     tauri::async_runtime::spawn_blocking(move || inbox::rename_album(request))
+        .await
+        .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn rename_inbox_albums(
+    app: AppHandle,
+    request: InboxBatchRenameRequest,
+) -> Result<InboxBatchRenameResult, String> {
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
+    tauri::async_runtime::spawn_blocking(move || inbox::rename_albums(request, &monitored_roots))
         .await
         .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
 }
@@ -1293,6 +1309,7 @@ pub fn run() {
             inbox_release_detail,
             apply_inbox_tags,
             rename_inbox_album,
+            rename_inbox_albums,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Aurora")

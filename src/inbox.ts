@@ -106,6 +106,13 @@ export interface InboxRenameResult {
   folderRenamed: boolean;
 }
 
+export interface InboxBatchRenameResult {
+  renamedTracks: number;
+  renamedAlbums: number;
+  renamedFolders: number;
+  failures: Array<{ albumPath: string; message: string }>;
+}
+
 export function inboxCoverUrl(
   album: Pick<InboxAlbum, "id" | "artworkPresent" | "modifiedAtMs" | "tracks">,
   size: 64 | 128 | 256,
@@ -265,4 +272,16 @@ export async function applyInboxTags(request: InboxTagApplyRequest): Promise<{ c
 export async function renameInboxAlbum(albumPath: string): Promise<InboxRenameResult> {
   if (!isTauriRuntime()) return { albumPath: `${albumPath} (renamed)`, renamedTracks: previewTracks.length, folderRenamed: true };
   return invoke<InboxRenameResult>("rename_inbox_album", { request: { albumPath } });
+}
+
+export async function renameInboxAlbums(albumPaths: string[]): Promise<InboxBatchRenameResult> {
+  if (!isTauriRuntime()) {
+    return {
+      renamedTracks: previewTracks.length * albumPaths.length,
+      renamedAlbums: albumPaths.length,
+      renamedFolders: albumPaths.length,
+      failures: [],
+    };
+  }
+  return invoke<InboxBatchRenameResult>("rename_inbox_albums", { request: { albumPaths } });
 }

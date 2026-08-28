@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.22.0 makes global playback and rating shortcuts respond immediately while durable work continues safely in the background.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.22.1 safely flattens selected multi-disc Inbox releases into one canonical album folder.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.22.0 slice
+## Current 0.22.1 slice
+
+- Inbox `Ctrl+R` now coordinates selected sibling discs as one filesystem transaction. `CD1`, `CD2`, and a partially renamed canonical child are flattened into `Album Artist - Album (Year)` with `1-01`, `2-01`, and later disc prefixes, cover files are preserved, empty disc folders are removed, and any failure rolls the staged moves back.
 
 - Global rating and Love shortcuts now project the chosen state into Aurora immediately, then persist MP3 and catalog work through an ordered background queue. Global playback shortcuts deliver their native snapshot directly to the player UI, and the next track is prepared asynchronously so background synchronization cannot leave stale player chrome or impose avoidable decoder startup delay.
 

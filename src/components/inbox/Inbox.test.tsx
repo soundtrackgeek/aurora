@@ -159,11 +159,12 @@ describe("Inbox", () => {
       })),
     };
     vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [first, second] });
-    const rename = vi.spyOn(inboxAdapter, "renameInboxAlbum").mockImplementation(async (albumPath) => ({
-      albumPath: `${albumPath} (renamed)`,
-      renamedTracks: 10,
-      folderRenamed: true,
-    }));
+    const rename = vi.spyOn(inboxAdapter, "renameInboxAlbums").mockResolvedValue({
+      renamedTracks: 20,
+      renamedAlbums: 2,
+      renamedFolders: 1,
+      failures: [],
+    });
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
     const firstRow = await screen.findByRole("row", { name: /Freak by/ });
@@ -174,10 +175,9 @@ describe("Inbox", () => {
 
     fireEvent.keyDown(window, { key: "r", ctrlKey: true });
 
-    await waitFor(() => expect(rename).toHaveBeenCalledTimes(2));
-    expect(rename).toHaveBeenNthCalledWith(1, first.path);
-    expect(rename).toHaveBeenNthCalledWith(2, secondPath);
-    expect(await screen.findByText("20 tracks renamed across 2 albums with 2 album folders renamed.")).toBeInTheDocument();
+    await waitFor(() => expect(rename).toHaveBeenCalledTimes(1));
+    expect(rename).toHaveBeenCalledWith([first.path, secondPath]);
+    expect(await screen.findByText("20 tracks renamed across 2 albums with 1 album folder renamed.")).toBeInTheDocument();
   });
 
   it("uses the vertical tag editor for album batches and individual Inbox tracks", async () => {

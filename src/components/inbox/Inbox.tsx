@@ -25,7 +25,7 @@ import {
   loadInboxReleaseDetail,
   loadInboxSnapshot,
   removeInboxMonitorFolder,
-  renameInboxAlbum,
+  renameInboxAlbums,
   searchInboxReleases,
   selectInboxMonitorFolder,
   type InboxAlbum,
@@ -210,35 +210,20 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setRenameBusy(true);
     setRenameMessage(null);
     setError(null);
-    let renamedTracks = 0;
-    let renamedFolders = 0;
-    let renamedAlbums = 0;
-    const failures: Array<{ album: InboxAlbum; message: string }> = [];
-    for (const album of albumsToRename) {
-      try {
-        const result = await renameInboxAlbum(album.path);
-        renamedAlbums += 1;
-        renamedTracks += result.renamedTracks;
-        if (result.folderRenamed) renamedFolders += 1;
-      } catch (nextError) {
-        failures.push({
-          album,
-          message: nextError instanceof Error ? nextError.message : String(nextError),
-        });
-      }
-    }
-    if (renamedAlbums) {
-      if (albumsToRename.length === 1 && failures.length === 0) {
-        setRenameMessage(`${renamedTracks} ${renamedTracks === 1 ? "track" : "tracks"} renamed${renamedFolders ? " with the album folder" : ""}.`);
-      } else {
-        setRenameMessage(`${renamedTracks} ${renamedTracks === 1 ? "track" : "tracks"} renamed across ${renamedAlbums} ${renamedAlbums === 1 ? "album" : "albums"}${renamedFolders ? ` with ${renamedFolders} album ${renamedFolders === 1 ? "folder" : "folders"} renamed` : ""}.`);
-      }
-    }
-    if (failures.length) {
-      const firstFailure = failures[0];
-      setError(`${failures.length} ${failures.length === 1 ? "album" : "albums"} could not be renamed. ${firstFailure.album.album ?? firstFailure.album.folderName}: ${firstFailure.message}`);
-    }
     try {
+      const result = await renameInboxAlbums(albumsToRename.map((album) => album.path));
+      if (result.renamedAlbums) {
+        if (albumsToRename.length === 1 && result.failures.length === 0) {
+          setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed${result.renamedFolders ? " with the album folder" : ""}.`);
+        } else {
+          setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed across ${result.renamedAlbums} ${result.renamedAlbums === 1 ? "album" : "albums"}${result.renamedFolders ? ` with ${result.renamedFolders} album ${result.renamedFolders === 1 ? "folder" : "folders"} renamed` : ""}.`);
+        }
+      }
+      if (result.failures.length) {
+        const firstFailure = result.failures[0];
+        const failedAlbum = albumsToRename.find((album) => album.path === firstFailure.albumPath);
+        setError(`${result.failures.length} ${result.failures.length === 1 ? "album" : "albums"} could not be renamed. ${failedAlbum?.album ?? failedAlbum?.folderName ?? leafName(firstFailure.albumPath)}: ${firstFailure.message}`);
+      }
       await refresh();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));

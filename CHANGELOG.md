@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-08-28
+
+### Fixed
+
+- Fixed multi-disc Inbox renames competing for the same destination and nesting one renamed disc inside the old release folder. Selected sibling discs now merge atomically into one flat `Album Artist - Album (Year)` folder with disc-prefixed track filenames, including recovery from the partially renamed `CD1` plus canonical-child state.
+
 ## [0.22.0] - 2026-08-28
 
 ### Changed
