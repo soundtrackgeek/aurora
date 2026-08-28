@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.8 brings Windows-style album multi-selection to Inbox.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.9 extends Inbox album multi-selection through the full manual tag-editing batch.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.8 slice
+## Current 0.20.9 slice
+
+- The Inbox Tags editor combines tracks from every selected album, shows the complete MP3 and album counts, and saves the shared field changes safely as one native batch per album folder.
 
 - Inbox album rows support plain-click replacement, Ctrl-click toggling, Shift-click ranges, and Ctrl+Shift additive ranges without selecting webpage text. The active album remains clearly marked as the inspector and per-album action target.
 

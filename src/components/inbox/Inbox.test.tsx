@@ -19,6 +19,11 @@ describe("Inbox", () => {
       album,
       folderName: album,
       path: `C:\\Music\\Inbox\\${album}`,
+      tracks: first.tracks.map((track) => ({
+        ...track,
+        album,
+        path: track.path.replace(first.path, `C:\\Music\\Inbox\\${album}`),
+      })),
     }));
     vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
@@ -47,6 +52,58 @@ describe("Inbox", () => {
     expect(freak).toHaveAttribute("aria-selected", "false");
     expect(afterglow).toHaveAttribute("aria-selected", "false");
     expect(staticBloom).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("edits and saves tracks from every selected Inbox album", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const secondPath = "C:\\Music\\Inbox\\Neon Nights";
+    const second = {
+      ...first,
+      id: "inbox-neon",
+      album: "Neon Nights",
+      folderName: "Neon Nights",
+      path: secondPath,
+      tracks: first.tracks.map((track) => ({
+        ...track,
+        album: "Neon Nights",
+        genre: "Electronic",
+        path: track.path.replace(first.path, secondPath),
+      })),
+    };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [first, second] });
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockImplementation(async (request) => ({
+      changedTracks: request.tracks.length,
+      renamedTracks: 0,
+      albumPath: request.albumPath,
+    }));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    const firstRow = await screen.findByRole("row", { name: /Freak by/ });
+    const secondRow = screen.getByRole("row", { name: /Neon Nights by/ });
+    fireEvent.click(firstRow);
+    fireEvent.click(secondRow, { shiftKey: true });
+    fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
+
+    expect(await screen.findByRole("heading", { name: "2 albums" })).toBeInTheDocument();
+    expect(screen.getByText("20 MP3s")).toBeInTheDocument();
+    expect(screen.getByText("20 of 20 selected across 2 albums")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Genre" }), { target: { value: "Soundtrack" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 20 MP3s" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(apply).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      albumPath: first.path,
+      fields: ["genre"],
+      tracks: expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining("Baltimoore - Freak") })]),
+    }));
+    expect(apply.mock.calls[0]?.[0].tracks).toHaveLength(10);
+    expect(apply).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      albumPath: secondPath,
+      fields: ["genre"],
+      tracks: expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining("Neon Nights") })]),
+    }));
+    expect(apply.mock.calls[1]?.[0].tracks).toHaveLength(10);
   });
 
   it("keeps staged albums outside the library and opens Auto-Tagger from Ctrl+Shift+T", async () => {

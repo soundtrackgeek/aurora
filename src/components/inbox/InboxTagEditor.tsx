@@ -11,17 +11,18 @@ import {
 } from "../TagEditor";
 
 interface InboxTagEditorProps {
-  album: InboxAlbum;
+  albums: InboxAlbum[];
   tracks: InboxTrack[];
   onApplied: () => void | Promise<void>;
 }
 
-function snapshotForTracks(album: InboxAlbum, tracks: InboxTrack[]): TagEditorSnapshot {
+function snapshotForTracks(albums: InboxAlbum[], tracks: InboxTrack[]): TagEditorSnapshot {
+  const revisions = new Map(albums.flatMap((album) => album.tracks.map((track) => [track.path, album.modifiedAtMs] as const)));
   return {
     tracks: tracks.map((track) => ({
       trackId: track.path,
       trackKey: track.path,
-      revision: `${album.modifiedAtMs}:${track.path}`,
+      revision: `${revisions.get(track.path) ?? 0}:${track.path}`,
       values: {
         albumArtist: track.albumArtist,
         artist: track.artist,
@@ -57,15 +58,15 @@ function updatedSnapshot(
   };
 }
 
-export function InboxTagEditor({ album, tracks, onApplied }: InboxTagEditorProps) {
-  const currentRef = useRef({ album, tracks, onApplied });
+export function InboxTagEditor({ albums, tracks, onApplied }: InboxTagEditorProps) {
+  const currentRef = useRef({ albums, tracks, onApplied });
   useEffect(() => {
-    currentRef.current = { album, tracks, onApplied };
-  }, [album, onApplied, tracks]);
+    currentRef.current = { albums, tracks, onApplied };
+  }, [albums, onApplied, tracks]);
 
   const loadSnapshot = useCallback(async () => {
     const current = currentRef.current;
-    return snapshotForTracks(current.album, current.tracks);
+    return snapshotForTracks(current.albums, current.tracks);
   }, []);
 
   const saveSnapshot = useCallback(async (
@@ -74,18 +75,24 @@ export function InboxTagEditor({ album, tracks, onApplied }: InboxTagEditorProps
     values: EditableTagValues,
   ): Promise<ManualTagEditorSaveResult> => {
     const current = currentRef.current;
-    const result = await applyInboxTags({
-      albumPath: current.album.path,
+    const selectedPaths = new Set(current.tracks.map((track) => track.path));
+    const batches = current.albums.map((album) => ({
+      album,
+      tracks: album.tracks.filter((track) => selectedPaths.has(track.path)),
+    })).filter((batch) => batch.tracks.length > 0);
+    const results = await Promise.all(batches.map(({ album, tracks: albumTracks }) => applyInboxTags({
+      albumPath: album.path,
       fields,
-      tracks: current.tracks.map((track) => ({ path: track.path, values })),
+      tracks: albumTracks.map((track) => ({ path: track.path, values })),
       renameAfterApply: false,
-    });
+    })));
     await current.onApplied();
     const fieldLabel = `${fields.length} ${fields.length === 1 ? "field" : "fields"}`;
     const fileLabel = `${current.tracks.length} ${current.tracks.length === 1 ? "MP3" : "MP3s"}`;
-    const changed = result.changedTracks === current.tracks.length
+    const changedTrackCount = results.reduce((total, result) => total + result.changedTracks, 0);
+    const changed = changedTrackCount === current.tracks.length
       ? ""
-      : ` ${result.changedTracks} contained changes.`;
+      : ` ${changedTrackCount} contained changes.`;
     return {
       state: updatedSnapshot(expected, fields, values),
       message: `Saved ${fieldLabel} directly to ${fileLabel}.${changed}`,
@@ -93,9 +100,12 @@ export function InboxTagEditor({ album, tracks, onApplied }: InboxTagEditorProps
   }, []);
 
   const singleTrack = tracks.length === 1 ? tracks[0] : null;
+  const label = singleTrack?.title ?? singleTrack?.fileName
+    ?? (albums.length === 1 ? albums[0]?.album ?? albums[0]?.folderName : `${albums.length} albums`)
+    ?? "Inbox selection";
   return <ManualTagEditor
     kind={singleTrack ? "track" : "album"}
-    label={singleTrack?.title ?? singleTrack?.fileName ?? album.album ?? album.folderName}
+    label={label}
     loadSnapshot={loadSnapshot}
     saveSnapshot={saveSnapshot}
   />;

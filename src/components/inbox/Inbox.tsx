@@ -149,6 +149,14 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
 
   const albums = useMemo(() => snapshot?.albums.filter((album) => !selectedFolder || albumInFolder(album, selectedFolder)) ?? [], [selectedFolder, snapshot]);
   const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? null;
+  const selectedAlbums = useMemo(
+    () => albums.filter((album) => selectedAlbumIds.has(album.id)),
+    [albums, selectedAlbumIds],
+  );
+  const selectedAlbumTrackRows = useMemo(
+    () => selectedAlbums.flatMap((album) => album.tracks.map((track, index) => ({ album, track, index }))),
+    [selectedAlbums],
+  );
 
   function selectFolder(folder: string | null) {
     const folderAlbums = snapshot?.albums.filter((album) => !folder || albumInFolder(album, folder)) ?? [];
@@ -184,6 +192,10 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const selectedTracks = useMemo(
     () => selectedAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [],
     [excludedTrackPaths, selectedAlbum],
+  );
+  const tagEditorTracks = useMemo(
+    () => selectedAlbumTrackRows.filter(({ track }) => !excludedTrackPaths.has(track.path)).map(({ track }) => track),
+    [excludedTrackPaths, selectedAlbumTrackRows],
   );
   const taggerTracks = useMemo(
     () => taggerAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [],
@@ -364,11 +376,11 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             <button type="button" role="tab" aria-selected={inspectorView === "tags"} onClick={() => setInspectorView("tags")}>Tags</button>
           </div> : null}
           {selectedAlbum && inspectorView === "tags" ? <div className="inbox-manual-tags">
-            <section className="inbox-track-selection"><header><h3>Tracks to edit</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
-            {selectedTracks.length ? <InboxTagEditor
-              key={`${selectedAlbum.id}:${selectedTracks.map((track) => track.path).join("|")}`}
-              album={selectedAlbum}
-              tracks={selectedTracks}
+            <section className="inbox-track-selection"><header><h3>Tracks to edit</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbumTrackRows.map(({ track }) => track.path)))}>None</button></span></header><div>{selectedAlbumTrackRows.map(({ album, track, index }) => <label key={track.path}><input type="checkbox" aria-label={`${album.album ?? album.folderName} — ${track.discNumber ? `${track.discNumber}-` : ""}${String(track.trackNumber ?? index + 1).padStart(2, "0")} ${track.title ?? track.fileName}`} checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{tagEditorTracks.length} of {selectedAlbumTrackRows.length} selected across {selectedAlbums.length} {selectedAlbums.length === 1 ? "album" : "albums"}</small></section>
+            {tagEditorTracks.length ? <InboxTagEditor
+              key={`${selectedAlbums.map((album) => album.id).join("|")}:${tagEditorTracks.map((track) => track.path).join("|")}`}
+              albums={selectedAlbums}
+              tracks={tagEditorTracks}
               onApplied={() => refresh()}
             /> : <p className="inbox-manual-tags__empty">Select one or more tracks to edit their tags.</p>}
           </div> : selectedAlbum ? <>

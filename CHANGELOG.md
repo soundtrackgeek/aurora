@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.9] - 2026-08-28
+
+### Fixed
+
+- Fixed the Inbox Tags editor so a multi-album selection includes every selected album's tracks and saves the complete edit as per-album native tag batches instead of editing only the active album.
+
 ## [0.20.8] - 2026-08-28
 
 ### Added
