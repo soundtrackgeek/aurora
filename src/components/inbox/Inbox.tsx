@@ -45,6 +45,7 @@ import type { EditableTagField, EditableTagValues } from "../../tags";
 import { loadGenreNames } from "../../genres";
 import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
+import { applyWindowsSelection } from "../explorer/windowsSelection";
 import "./Inbox.css";
 
 type LoadState = "loading" | "ready" | "error";
@@ -102,6 +103,8 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [error, setError] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState<ReadonlySet<string>>(new Set());
+  const [albumSelectionAnchorId, setAlbumSelectionAnchorId] = useState<string | null>(null);
   const [taggerAlbum, setTaggerAlbum] = useState<InboxAlbum | null>(null);
   const [moveCategory, setMoveCategory] = useState<LibraryIntakeCategoryId | "">("");
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
@@ -122,6 +125,13 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
       setError(null);
       setLoadState("ready");
       setSelectedAlbumId((current) => current && next.albums.some((album) => album.id === current) ? current : next.albums[0]?.id ?? null);
+      setSelectedAlbumIds((current) => {
+        const availableIds = new Set(next.albums.map((album) => album.id));
+        const retained = new Set([...current].filter((id) => availableIds.has(id)));
+        if (!retained.size && next.albums[0]) retained.add(next.albums[0].id);
+        return retained;
+      });
+      setAlbumSelectionAnchorId((current) => current && next.albums.some((album) => album.id === current) ? current : next.albums[0]?.id ?? null);
       setSelectedFolder((current) => current && next.settings.monitoredFolders.includes(current) ? current : null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -138,7 +148,38 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   }, [refresh]);
 
   const albums = useMemo(() => snapshot?.albums.filter((album) => !selectedFolder || albumInFolder(album, selectedFolder)) ?? [], [selectedFolder, snapshot]);
-  const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? albums[0] ?? null;
+  const selectedAlbum = snapshot?.albums.find((album) => album.id === selectedAlbumId) ?? null;
+
+  function selectFolder(folder: string | null) {
+    const folderAlbums = snapshot?.albums.filter((album) => !folder || albumInFolder(album, folder)) ?? [];
+    const firstId = folderAlbums[0]?.id ?? null;
+    setSelectedFolder(folder);
+    setSelectedAlbumId(firstId);
+    setSelectedAlbumIds(firstId ? new Set([firstId]) : new Set());
+    setAlbumSelectionAnchorId(firstId);
+    setExcludedTrackPaths(new Set());
+    setMovePreview(null);
+    setMoveMessage(null);
+  }
+
+  function selectAlbum(album: InboxAlbum, ctrl: boolean, shift: boolean) {
+    const selection = applyWindowsSelection(
+      albums.map((candidate) => candidate.id),
+      selectedAlbumIds,
+      albumSelectionAnchorId,
+      album.id,
+      { ctrl, shift },
+    );
+    const activeId = selection.selectedKeys.has(album.id)
+      ? album.id
+      : albums.find((candidate) => selection.selectedKeys.has(candidate.id))?.id ?? null;
+    setSelectedAlbumIds(selection.selectedKeys);
+    setAlbumSelectionAnchorId(selection.anchorKey);
+    setSelectedAlbumId(activeId);
+    setExcludedTrackPaths(new Set());
+    setMovePreview(null);
+    setMoveMessage(null);
+  }
 
   const selectedTracks = useMemo(
     () => selectedAlbum?.tracks.filter((track) => !excludedTrackPaths.has(track.path)) ?? [],
@@ -192,7 +233,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   async function removeFolder(folder: string) {
     try {
       await removeInboxMonitorFolder(folder);
-      if (selectedFolder === folder) setSelectedFolder(null);
+      if (selectedFolder === folder) selectFolder(null);
       await refresh();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -276,13 +317,13 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         <aside className="inbox-folders" aria-label="Monitored folders">
           <header><strong>Monitored folders</strong><button type="button" disabled={snapshot.settings.monitoredFolders.length >= 10} onClick={() => void addFolder()}><FolderPlus /> Add folder</button></header>
           <div className={`inbox-folder-row inbox-folder-row--all${!selectedFolder ? " is-selected" : ""}`}>
-            <button type="button" onClick={() => setSelectedFolder(null)}><InboxIcon /><span><strong>All folders</strong><small>{snapshot.albums.length} albums</small></span></button>
+            <button type="button" onClick={() => selectFolder(null)}><InboxIcon /><span><strong>All folders</strong><small>{snapshot.albums.length} albums</small></span></button>
             <button type="button" className="inbox-folder-add" aria-label="Add All folders to library" title="Add All folders to library" disabled={!snapshot.albums.length} onClick={() => openAllFoldersIntake()}><FolderInput /></button>
           </div>
           {snapshot.settings.monitoredFolders.map((folder) => {
             const count = snapshot.albums.filter((album) => albumInFolder(album, folder)).length;
             return <div className={`inbox-folder-row${selectedFolder === folder ? " is-selected" : ""}`} key={folder}>
-              <button type="button" onClick={() => setSelectedFolder(folder)} title={folder}><Folder /><span><strong>{leafName(folder)}</strong><small>{folder}</small></span><output>{count}</output></button>
+              <button type="button" onClick={() => selectFolder(folder)} title={folder}><Folder /><span><strong>{leafName(folder)}</strong><small>{folder}</small></span><output>{count}</output></button>
               <span className="inbox-folder-actions">
                 <button type="button" className="inbox-folder-add" aria-label={`Add ${leafName(folder)} to library`} title="Add folder to library" disabled={!count} onClick={() => openFolderIntake(folder)}><FolderInput /></button>
                 <button type="button" aria-label={`Stop monitoring ${folder}`} title="Stop monitoring" onClick={() => void removeFolder(folder)}><Trash2 /></button>
@@ -294,14 +335,26 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </aside>
 
         <section className="inbox-albums" aria-label="Staged albums">
-          <header><strong>{selectedFolder ? leafName(selectedFolder) : "All staged albums"}</strong><span>{albums.length} {albums.length === 1 ? "album" : "albums"} outside the library</span></header>
+          <header><strong>{selectedFolder ? leafName(selectedFolder) : "All staged albums"}</strong><span aria-live="polite">{selectedAlbumIds.size} selected · {albums.length} {albums.length === 1 ? "album" : "albums"} outside the library</span></header>
           {albums.length ? <div className="inbox-table-wrap"><table><thead><tr><th>Album</th><th>Artist</th><th>Year</th><th>Tracks</th><th>Status</th><th>Updated</th></tr></thead><tbody>
-            {albums.map((album) => <tr key={album.id} className={selectedAlbum?.id === album.id ? "is-selected" : ""} onClick={() => { setSelectedAlbumId(album.id); setMovePreview(null); setMoveMessage(null); }}>
+            {albums.map((album) => {
+              const isSelected = selectedAlbumIds.has(album.id);
+              const isActive = selectedAlbum?.id === album.id;
+              return <tr
+                key={album.id}
+                className={`${isSelected ? "is-selected" : ""}${isActive ? " is-active" : ""}`.trim()}
+                aria-label={`${album.album ?? album.folderName} by ${album.artist ?? "Unknown artist"}`}
+                aria-selected={isSelected}
+                aria-current={isActive ? "true" : undefined}
+                onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}
+                onClick={(event) => selectAlbum(album, event.ctrlKey || event.metaKey, event.shiftKey)}
+              >
               <td><InboxArtwork album={album} size={64} /><span><strong>{album.album ?? album.folderName}</strong><small>{album.folderName}</small></span></td>
               <td>{album.artist ?? "Unknown artist"}</td><td>{album.year ?? "—"}</td><td>{album.trackCount}</td>
               <td><span className={album.readiness.ready ? "inbox-status is-ready" : "inbox-status"}>{album.readiness.ready ? <CheckCircle2 /> : <AlertTriangle />}{album.readiness.ready ? "Ready" : `${album.readiness.issues.length} ${album.readiness.issues.length === 1 ? "issue" : "issues"}`}</span></td>
               <td>{formatTime(album.modifiedAtMs)}</td>
-            </tr>)}
+            </tr>;
+            })}
           </tbody></table></div> : <div className="inbox-albums__empty"><CheckCircle2 /><strong>Nothing is waiting here.</strong><span>New album folders will appear on the next scan.</span></div>}
         </section>
 

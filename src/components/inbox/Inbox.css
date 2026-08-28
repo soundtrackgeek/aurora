@@ -51,9 +51,10 @@
 .inbox-albums table, .inbox-candidates table, .inbox-track-compare table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .inbox-albums th, .inbox-candidates th, .inbox-track-compare th { padding: 8px 10px; color: var(--subtle); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); font-weight: 500; text-align: left; }
 .inbox-albums td { height: 48px; padding: 5px 10px; border-top: 1px solid rgba(151,180,211,.08); overflow: hidden; color: #aeb9c7; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-overflow: ellipsis; white-space: nowrap; }
-.inbox-albums tr { cursor: pointer; }
+.inbox-albums tr { cursor: pointer; user-select: none; }
 .inbox-albums tbody tr:hover { background: rgba(255,255,255,.025); }
 .inbox-albums tbody tr.is-selected { background: linear-gradient(90deg, rgba(119,49,174,.21), rgba(33,25,54,.14)); }
+.inbox-albums tbody tr.is-active { box-shadow: inset 2px 0 #c85dff; }
 .inbox-albums th:first-child { width: 31%; }.inbox-albums th:nth-child(2) { width: 20%; }.inbox-albums th:nth-child(3) { width: 10%; }.inbox-albums th:nth-child(4) { width: 9%; }.inbox-albums th:nth-child(5) { width: 18%; }.inbox-albums th:last-child { width: 12%; }
 .inbox-albums td:first-child { display: flex; align-items: center; gap: 9px; }
 .inbox-table-art { display: grid; place-items: center; width: 33px; height: 33px; flex: 0 0 auto; border: 1px solid rgba(168,85,247,.2); border-radius: 5px; background: radial-gradient(circle, rgba(168,85,247,.18), rgba(12,20,30,.9)); color: #ba7df0; }

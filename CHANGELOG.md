@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.20.8] - 2026-08-28
+
+### Added
+
+- Added Windows-style plain, Ctrl, Shift, and Ctrl+Shift album selection to Inbox, with an explicit selected count and active inspector row.
+
+### Fixed
+
+- Prevented Shift-clicking Inbox albums from selecting page text.
+
 ## [0.20.7] - 2026-08-27
 
 ### Added

@@ -10,11 +10,50 @@ afterEach(() => {
 });
 
 describe("Inbox", () => {
+  it("selects Inbox album ranges with Shift and toggles albums with Ctrl", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const albums = ["Freak", "Neon Nights", "Afterglow", "Static Bloom"].map((album, index) => ({
+      ...first,
+      id: `inbox-${index}`,
+      album,
+      folderName: album,
+      path: `C:\\Music\\Inbox\\${album}`,
+    }));
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    const freak = await screen.findByRole("row", { name: /Freak by/ });
+    const neon = screen.getByRole("row", { name: /Neon Nights by/ });
+    const afterglow = screen.getByRole("row", { name: /Afterglow by/ });
+    const staticBloom = screen.getByRole("row", { name: /Static Bloom by/ });
+
+    expect(freak).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(afterglow, { shiftKey: true });
+    expect(freak).toHaveAttribute("aria-selected", "true");
+    expect(neon).toHaveAttribute("aria-selected", "true");
+    expect(afterglow).toHaveAttribute("aria-selected", "true");
+    expect(staticBloom).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText("3 selected · 4 albums outside the library")).toBeInTheDocument();
+    expect(afterglow).toHaveAttribute("aria-current", "true");
+
+    fireEvent.click(neon, { ctrlKey: true });
+    expect(freak).toHaveAttribute("aria-selected", "true");
+    expect(neon).toHaveAttribute("aria-selected", "false");
+    expect(afterglow).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("2 selected · 4 albums outside the library")).toBeInTheDocument();
+
+    fireEvent.click(staticBloom);
+    expect(freak).toHaveAttribute("aria-selected", "false");
+    expect(afterglow).toHaveAttribute("aria-selected", "false");
+    expect(staticBloom).toHaveAttribute("aria-selected", "true");
+  });
+
   it("keeps staged albums outside the library and opens Auto-Tagger from Ctrl+Shift+T", async () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
-    expect(screen.getByText("1 album outside the library")).toBeInTheDocument();
+    expect(screen.getByText("1 selected · 1 album outside the library")).toBeInTheDocument();
     expect(screen.getByText("1 issue")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Freak cover" })).toHaveAttribute(
       "src",
