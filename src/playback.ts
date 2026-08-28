@@ -409,6 +409,13 @@ export function usePlayback() {
     }));
   }, []);
 
+  const applySnapshot = useCallback((snapshot: PlaybackSnapshot) => {
+    commandSequenceRef.current += 1;
+    setCommandError(null);
+    setDismissedError(null);
+    setState(snapshot);
+  }, []);
+
   const append = useCallback(
     (tracks: Track[]) => run(() => appendTrackQueue(tracks)),
     [run],
@@ -440,5 +447,6 @@ export function usePlayback() {
     move: (from: number, to: number) => run(() => moveQueueItem(from, to)),
     clear: () => run(clearPlaybackQueue),
     refreshTrack,
+    applySnapshot,
   };
 }

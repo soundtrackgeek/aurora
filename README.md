@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.21.1 makes Inbox organization apply consistently to the full album selection.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.22.0 makes global playback and rating shortcuts respond immediately while durable work continues safely in the background.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.21.1 slice
+## Current 0.22.0 slice
+
+- Global rating and Love shortcuts now project the chosen state into Aurora immediately, then persist MP3 and catalog work through an ordered background queue. Global playback shortcuts deliver their native snapshot directly to the player UI, and the next track is prepared asynchronously so background synchronization cannot leave stale player chrome or impose avoidable decoder startup delay.
 
 - Inbox **Rename from tags** and `Ctrl+R` now rename every selected album, aggregate the renamed track and folder counts, and identify any album that could not be renamed while continuing the remaining selection.
 

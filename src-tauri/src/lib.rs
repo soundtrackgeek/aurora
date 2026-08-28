@@ -1184,6 +1184,7 @@ pub fn run() {
             )));
             app.manage(WaveformWorkCoordinator::default());
             app.manage(LibrarySyncCoordinator::default());
+            app.manage(shortcuts::ShortcutTagQueue::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
                 state_directory.join("aurora-shortcuts.json"),
             )));

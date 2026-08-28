@@ -2,16 +2,18 @@ use crate::{
     GlobalShortcutState, PlaybackState, TagState,
     catalog::TrackSummary,
     library_sync::{CatalogSync, LibrarySyncCoordinator},
+    playback::PlaybackSnapshot,
     state_sync,
-    tag_model::{LoveState, TagEditRequest, TagValues},
+    tag_model::{LoveState, TagEditRequest, TagSyncState, TagValues},
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
     str::FromStr,
+    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
@@ -152,6 +154,66 @@ pub(crate) struct GlobalShortcutResult {
     track: Option<TrackSummary>,
     previous_track: Option<TrackSummary>,
     catalog_sync: Option<CatalogSync>,
+    playback: Option<PlaybackSnapshot>,
+}
+
+#[derive(Clone, Copy)]
+enum ShortcutTagIntent {
+    Rating(Option<f64>),
+    Love(LoveState),
+}
+
+struct ShortcutTagTask {
+    track_id: String,
+    track_key: String,
+    title: String,
+    intent: ShortcutTagIntent,
+}
+
+#[derive(Default)]
+struct ShortcutTagQueueState {
+    tasks: VecDeque<ShortcutTagTask>,
+    running: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct ShortcutTagQueue {
+    state: Mutex<ShortcutTagQueueState>,
+}
+
+impl ShortcutTagQueue {
+    fn enqueue(&self, app: &AppHandle, task: ShortcutTagTask) {
+        let should_start = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.tasks.push_back(task);
+            if state.running {
+                false
+            } else {
+                state.running = true;
+                true
+            }
+        };
+        if !should_start {
+            return;
+        }
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || drain_tag_queue(&app));
+    }
+
+    fn next(&self) -> Option<ShortcutTagTask> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let task = state.tasks.pop_front();
+        if task.is_none() {
+            state.running = false;
+        }
+        task
+    }
 }
 
 pub(crate) struct GlobalShortcutRuntime {
@@ -489,6 +551,11 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
     let Some(action) = action else {
         return;
     };
+    if matches!(action, ShortcutAction::Rating(_) | ShortcutAction::Love) {
+        let result = optimistic_tag_action(app, action);
+        let _ = app.emit(RESULT_EVENT, result);
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = match execute_action(&app, action) {
@@ -500,6 +567,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                 track: None,
                 previous_track: None,
                 catalog_sync: None,
+                playback: None,
             },
         };
         let _ = app.emit(RESULT_EVENT, result);
@@ -526,113 +594,182 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                 ShortcutAction::Next => "Playing next track",
                 _ => unreachable!(),
             };
+            crate::media_controls::publish(app, &snapshot);
             Ok(GlobalShortcutResult {
                 action: action_name(action).to_owned(),
                 success: true,
                 message: message.to_owned(),
-                track: snapshot.current_track,
+                track: snapshot.current_track.clone(),
                 previous_track: None,
                 catalog_sync: None,
+                playback: Some(snapshot),
             })
         }
-        ShortcutAction::Rating(_) | ShortcutAction::Love => {
-            let coordinator = app.state::<LibrarySyncCoordinator>();
-            let (result, projection_token) = coordinator.serialize_tag_edit(|| {
-                let (previous_track, mut updated) = {
-                    let state = app.state::<TagState>();
-                    let service = state
-                        .lock()
-                        .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-                    let playback_track = {
-                        let state = app.state::<PlaybackState>();
-                        let mut playback = state.lock().map_err(|_| {
-                            "Aurora's playback engine stopped unexpectedly.".to_owned()
-                        })?;
-                        playback.snapshot().current_track.ok_or_else(|| {
-                            "Start a track in Aurora before using rating or Love shortcuts."
-                                .to_owned()
-                        })?
-                    };
-                    let track = service
-                        .inspect(&playback_track.id, &playback_track.track_key)?
-                        .track;
-                    let expected = track.catalog_tag_values();
-                    let desired = desired_tag_values(&track, action)
-                        .ok_or_else(|| "This shortcut does not edit track tags.".to_owned())?;
-                    let updated = service.update(TagEditRequest {
-                        track_id: track.id.clone(),
-                        track_key: track.track_key.clone(),
-                        expected,
-                        desired,
-                    })?;
-                    (track, updated)
-                };
-                {
-                    let state = app.state::<PlaybackState>();
-                    let mut playback = state
-                        .lock()
-                        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                    playback.refresh_track_tags(&updated.track);
-                }
-                let directory = updated.track.directory.clone();
-                let sync = coordinator.queue_after_edit(app, std::slice::from_ref(&directory));
-                if sync.completed(&directory) {
-                    updated.track.tag_sync_state = None;
-                    updated.tag_state.sync_state = None;
-                }
-                {
-                    let state = app.state::<PlaybackState>();
-                    let mut playback = state
-                        .lock()
-                        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-                    playback.refresh_track_tags(&updated.track);
-                }
-                let message = match action {
-                    ShortcutAction::Rating(0) => {
-                        format!("Cleared rating for {}", updated.track.title)
-                    }
-                    ShortcutAction::Rating(rating) => {
-                        format!("Rated {} {} stars", updated.track.title, rating)
-                    }
-                    ShortcutAction::Love if updated.track.love_state == LoveState::Loved => {
-                        format!("Loved {}", updated.track.title)
-                    }
-                    ShortcutAction::Love => format!("Removed Love from {}", updated.track.title),
-                    _ => unreachable!(),
-                };
-                Ok::<GlobalShortcutResult, String>(GlobalShortcutResult {
+        ShortcutAction::Rating(_) | ShortcutAction::Love => unreachable!(),
+    }
+}
+
+fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShortcutResult {
+    let result = (|| -> Result<(TrackSummary, TrackSummary, ShortcutTagTask), String> {
+        let state = app.state::<PlaybackState>();
+        let mut playback = state
+            .lock()
+            .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+        let previous = playback.current_track_for_shortcut().ok_or_else(|| {
+            "Start a track in Aurora before using rating or Love shortcuts.".to_owned()
+        })?;
+        let intent = tag_intent(&previous, action)
+            .ok_or_else(|| "This shortcut does not edit track tags.".to_owned())?;
+        let mut optimistic = previous.clone();
+        apply_tag_intent_to_track(&mut optimistic, intent);
+        optimistic.tag_sync_state = Some(TagSyncState::PendingImport);
+        playback.refresh_track_tags(&optimistic);
+        let task = ShortcutTagTask {
+            track_id: previous.id.clone(),
+            track_key: previous.track_key.clone(),
+            title: previous.title.clone(),
+            intent,
+        };
+        Ok((previous, optimistic, task))
+    })();
+
+    match result {
+        Ok((previous, optimistic, task)) => {
+            let message = intent_message(&optimistic.title, task.intent);
+            app.state::<ShortcutTagQueue>().enqueue(app, task);
+            GlobalShortcutResult {
+                action: action_name(action).to_owned(),
+                success: true,
+                message,
+                track: Some(optimistic),
+                previous_track: Some(previous),
+                catalog_sync: None,
+                playback: None,
+            }
+        }
+        Err(message) => GlobalShortcutResult {
+            action: action_name(action).to_owned(),
+            success: false,
+            message,
+            track: None,
+            previous_track: None,
+            catalog_sync: None,
+            playback: None,
+        },
+    }
+}
+
+fn drain_tag_queue(app: &AppHandle) {
+    loop {
+        let Some(task) = app.state::<ShortcutTagQueue>().next() else {
+            return;
+        };
+        let action = match task.intent {
+            ShortcutTagIntent::Rating(None) => ShortcutAction::Rating(0),
+            ShortcutTagIntent::Rating(Some(rating)) => ShortcutAction::Rating(rating as u8),
+            ShortcutTagIntent::Love(_) => ShortcutAction::Love,
+        };
+        let result = persist_tag_task(app, &task);
+        let event = match result {
+            Ok((mut sync, projection_token)) => {
+                sync.projection_token = Some(projection_token);
+                GlobalShortcutResult {
                     action: action_name(action).to_owned(),
                     success: true,
-                    message,
-                    track: Some(updated.track),
-                    previous_track: Some(previous_track),
-                    catalog_sync: Some(sync.catalog_sync),
-                })
-            });
-            let mut result = result?;
-            if let Some(sync) = &mut result.catalog_sync {
-                sync.projection_token = Some(projection_token);
+                    message: format!("Saved {}", task.title),
+                    track: None,
+                    previous_track: None,
+                    catalog_sync: Some(sync),
+                    playback: None,
+                }
             }
-            Ok(result)
+            Err(message) => GlobalShortcutResult {
+                action: action_name(action).to_owned(),
+                success: false,
+                message: format!("{} could not be saved: {message}", task.title),
+                track: None,
+                previous_track: None,
+                catalog_sync: None,
+                playback: None,
+            },
+        };
+        let _ = app.emit(RESULT_EVENT, event);
+    }
+}
+
+fn persist_tag_task(app: &AppHandle, task: &ShortcutTagTask) -> Result<(CatalogSync, u64), String> {
+    let coordinator = app.state::<LibrarySyncCoordinator>();
+    let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+        let mut updated = {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            let track = service.inspect(&task.track_id, &task.track_key)?.track;
+            let expected = track.catalog_tag_values();
+            let mut desired = expected.clone();
+            apply_tag_intent_to_values(&mut desired, task.intent);
+            service.update(TagEditRequest {
+                track_id: track.id,
+                track_key: track.track_key,
+                expected,
+                desired,
+            })?
+        };
+        let directory = updated.track.directory.clone();
+        let sync = coordinator.queue_after_edit(app, std::slice::from_ref(&directory));
+        if sync.completed(&directory) {
+            updated.track.tag_sync_state = None;
+            updated.tag_state.sync_state = None;
+        }
+        Ok::<CatalogSync, String>(sync.catalog_sync)
+    });
+    Ok((result?, projection_token))
+}
+
+fn tag_intent(track: &TrackSummary, action: ShortcutAction) -> Option<ShortcutTagIntent> {
+    match action {
+        ShortcutAction::Rating(0) => Some(ShortcutTagIntent::Rating(None)),
+        ShortcutAction::Rating(rating @ 1..=5) => {
+            Some(ShortcutTagIntent::Rating(Some(f64::from(rating))))
+        }
+        ShortcutAction::Love => Some(ShortcutTagIntent::Love(
+            if track.love_state == LoveState::Loved {
+                LoveState::Neutral
+            } else {
+                LoveState::Loved
+            },
+        )),
+        _ => None,
+    }
+}
+
+fn apply_tag_intent_to_values(values: &mut TagValues, intent: ShortcutTagIntent) {
+    match intent {
+        ShortcutTagIntent::Rating(rating) => values.rating = rating,
+        ShortcutTagIntent::Love(love_state) => values.love_state = love_state,
+    }
+}
+
+fn apply_tag_intent_to_track(track: &mut TrackSummary, intent: ShortcutTagIntent) {
+    match intent {
+        ShortcutTagIntent::Rating(rating) => track.rating = rating,
+        ShortcutTagIntent::Love(love_state) => {
+            track.love_state = love_state;
+            track.loved = love_state == LoveState::Loved;
         }
     }
 }
 
-fn desired_tag_values(track: &TrackSummary, action: ShortcutAction) -> Option<TagValues> {
-    let mut values = track.catalog_tag_values();
-    match action {
-        ShortcutAction::Rating(0) => values.rating = None,
-        ShortcutAction::Rating(rating @ 1..=5) => values.rating = Some(f64::from(rating)),
-        ShortcutAction::Love => {
-            values.love_state = if values.love_state == LoveState::Loved {
-                LoveState::Neutral
-            } else {
-                LoveState::Loved
-            };
+fn intent_message(title: &str, intent: ShortcutTagIntent) -> String {
+    match intent {
+        ShortcutTagIntent::Rating(None) => format!("Cleared rating for {title}"),
+        ShortcutTagIntent::Rating(Some(rating)) => {
+            format!("Rated {title} {} stars", rating as u8)
         }
-        _ => return None,
+        ShortcutTagIntent::Love(LoveState::Loved) => format!("Loved {title}"),
+        ShortcutTagIntent::Love(_) => format!("Removed Love from {title}"),
     }
-    Some(values)
 }
 
 fn action_name(action: ShortcutAction) -> &'static str {
@@ -759,12 +896,20 @@ mod tests {
     #[test]
     fn rating_zero_clears_and_whole_star_shortcuts_preserve_other_tags() {
         let current = track(Some(4.5), LoveState::Loved);
-        let cleared = desired_tag_values(&current, ShortcutAction::Rating(0)).expect("clear");
+        let mut cleared = current.catalog_tag_values();
+        apply_tag_intent_to_values(
+            &mut cleared,
+            tag_intent(&current, ShortcutAction::Rating(0)).expect("clear"),
+        );
         assert_eq!(cleared.rating, None);
         assert_eq!(cleared.love_state, LoveState::Loved);
         assert_eq!(cleared.release_year, Some(2026));
 
-        let rated = desired_tag_values(&current, ShortcutAction::Rating(3)).expect("rate");
+        let mut rated = current.catalog_tag_values();
+        apply_tag_intent_to_values(
+            &mut rated,
+            tag_intent(&current, ShortcutAction::Rating(3)).expect("rate"),
+        );
         assert_eq!(rated.rating, Some(3.0));
         assert_eq!(rated.love_state, LoveState::Loved);
         assert_eq!(rated.release_year, Some(2026));
@@ -772,13 +917,23 @@ mod tests {
 
     #[test]
     fn love_shortcut_toggles_the_current_tracks_love_state() {
-        let loved = desired_tag_values(&track(Some(2.0), LoveState::Neutral), ShortcutAction::Love)
-            .expect("love");
+        let neutral = track(Some(2.0), LoveState::Neutral);
+        let mut loved = neutral.clone();
+        apply_tag_intent_to_track(
+            &mut loved,
+            tag_intent(&neutral, ShortcutAction::Love).expect("love"),
+        );
         assert_eq!(loved.love_state, LoveState::Loved);
+        assert!(loved.loved);
 
-        let neutral = desired_tag_values(&track(Some(2.0), LoveState::Loved), ShortcutAction::Love)
-            .expect("unlove");
+        let loved = track(Some(2.0), LoveState::Loved);
+        let mut neutral = loved.clone();
+        apply_tag_intent_to_track(
+            &mut neutral,
+            tag_intent(&loved, ShortcutAction::Love).expect("unlove"),
+        );
         assert_eq!(neutral.love_state, LoveState::Neutral);
+        assert!(!neutral.loved);
     }
 
     #[test]

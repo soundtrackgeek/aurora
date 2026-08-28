@@ -21,11 +21,12 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
     },
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const PRELOAD_WINDOW_SECONDS: f64 = 15.0;
 const PLAYBACK_STATE_CHECKPOINT_SECONDS: f64 = 30.0;
 const OUTPUT_BUFFER_FRAMES: u32 = 4_096;
 const PLAYBACK_FILE_BUFFER_BYTES: usize = 1024 * 1024;
@@ -102,6 +103,15 @@ pub(crate) struct PlaybackCatalogRebind {
 struct PreparedTrack {
     index: usize,
     gain: ReplayGainAdjustment,
+}
+
+type PreparedSource = (Box<dyn Source + Send>, ReplayGainAdjustment);
+
+struct PendingTrackPreparation {
+    current_index: usize,
+    next_index: usize,
+    next_track_key: String,
+    receiver: Receiver<Result<PreparedSource, String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,6 +229,33 @@ impl PlaybackMediaCache {
     }
 }
 
+fn prepare_track_source(
+    store: &StateStore,
+    track_id: &str,
+    track_key: &str,
+    target_sample_rate: SampleRate,
+    replay_gain_mode: ReplayGainMode,
+    underrun_count: Arc<AtomicU64>,
+) -> Result<PreparedSource, String> {
+    let audio_path = catalog::resolve_audio_path(track_id, track_key, store)?;
+    let mut media_cache = PlaybackMediaCache::default();
+    let (media, byte_len) = media_cache.open(&audio_path)?;
+    let decoder = Decoder::builder()
+        .with_data(media)
+        .with_byte_len(byte_len)
+        .with_hint("mp3")
+        .with_seekable(true)
+        .with_gapless(true)
+        .build()
+        .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
+    let gain = replay_gain::adjustment_for_path(&audio_path, replay_gain_mode);
+    let source = decoder
+        .amplify(gain.linear)
+        .resample(target_sample_rate, ResampleConfig::balanced());
+    let source = PcmBufferSource::spawn(Box::new(source), underrun_count)?;
+    Ok((Box::new(source), gain))
+}
+
 #[derive(Debug, PartialEq)]
 struct CatalogRebindPlan {
     key_order_unchanged: bool,
@@ -329,6 +366,7 @@ pub(crate) struct PlaybackRuntime {
     current_gain: ReplayGainAdjustment,
     media_cache: PlaybackMediaCache,
     prepared_next: Option<PreparedTrack>,
+    pending_next: Option<PendingTrackPreparation>,
     preparation_attempted: bool,
     store: StateStore,
     history: HistoryStore,
@@ -411,6 +449,7 @@ impl PlaybackRuntime {
             },
             media_cache: PlaybackMediaCache::default(),
             prepared_next: None,
+            pending_next: None,
             preparation_attempted: false,
             store,
             history,
@@ -424,7 +463,15 @@ impl PlaybackRuntime {
         self.current_index.and_then(|index| self.queue.get(index))
     }
 
+    pub(crate) fn current_track_for_shortcut(&mut self) -> Option<TrackSummary> {
+        self.synchronize_audio_runtime();
+        self.current_track().cloned()
+    }
+
     fn close_output(&mut self) {
+        self.prepared_next = None;
+        self.pending_next = None;
+        self.preparation_attempted = false;
         self.player = None;
         self.output = None;
         self.active_device_id = None;
@@ -553,8 +600,10 @@ impl PlaybackRuntime {
         self.position_seconds = position_seconds.max(0.0);
         self.current_gain = gain;
         self.prepared_next = None;
+        self.pending_next = None;
         self.preparation_attempted = false;
         self.error = None;
+        self.start_next_preparation();
         Ok(())
     }
 
@@ -632,6 +681,7 @@ impl PlaybackRuntime {
         let should_play = self.status == PlaybackStatus::Playing;
         self.close_output();
         self.prepared_next = None;
+        self.pending_next = None;
         if let Err(error) = self.load_current_on_device(should_play, position, true) {
             self.set_error(format!(
                 "Aurora lost the selected audio output and could not continue on the Windows default: {error}"
@@ -716,30 +766,18 @@ impl PlaybackRuntime {
         }
     }
 
-    fn prepare_next_if_due(&mut self) {
-        if self.prepared_next.is_some()
-            || self.preparation_attempted
-            || self.status != PlaybackStatus::Playing
+    fn start_next_preparation(&mut self) {
+        if self.prepared_next.is_some() || self.pending_next.is_some() || self.preparation_attempted
         {
             return;
         }
-        let Some(duration) = self
-            .current_track()
-            .and_then(|track| track.duration_seconds)
-            .map(|duration| duration.max(0) as f64)
-        else {
+        let Some(current_index) = self.current_index else {
             return;
         };
-        if duration <= 0.0 || duration - self.position_seconds > PRELOAD_WINDOW_SECONDS {
-            return;
-        }
-        let Some(player) = self.player.as_ref() else {
-            return;
-        };
-        if player.len() != 1 {
-            return;
-        }
         let Some(next_index) = self.intended_next_index() else {
+            return;
+        };
+        let Some(track) = self.queue.get(next_index) else {
             return;
         };
         let Some(target_sample_rate) = self
@@ -749,16 +787,79 @@ impl PlaybackRuntime {
         else {
             return;
         };
+        let track_id = track.id.clone();
+        let track_key = track.track_key.clone();
+        let result_track_key = track_key.clone();
+        let store = self.store.clone();
+        let replay_gain_mode = self.audio_store.settings().replay_gain_mode;
+        let underrun_count = Arc::clone(&self.audio_underrun_count);
+        let (sender, receiver) = mpsc::sync_channel(1);
         self.preparation_attempted = true;
-        let Ok((source, gain)) = self.build_source_for_index(next_index, target_sample_rate) else {
+        if thread::Builder::new()
+            .name("aurora-next-track-preloader".to_owned())
+            .spawn(move || {
+                let result = prepare_track_source(
+                    &store,
+                    &track_id,
+                    &track_key,
+                    target_sample_rate,
+                    replay_gain_mode,
+                    underrun_count,
+                );
+                let _ = sender.send(result);
+            })
+            .is_err()
+        {
+            self.preparation_attempted = false;
+            return;
+        }
+        self.pending_next = Some(PendingTrackPreparation {
+            current_index,
+            next_index,
+            next_track_key: result_track_key,
+            receiver,
+        });
+    }
+
+    fn collect_prepared_next(&mut self) {
+        let result = match self.pending_next.as_ref() {
+            Some(pending) => match pending.receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err(
+                    "Aurora's next-track preloader stopped unexpectedly.".to_owned(),
+                )),
+            },
+            None => None,
+        };
+        let Some(result) = result else {
+            return;
+        };
+        let pending = self
+            .pending_next
+            .take()
+            .expect("pending preparation exists");
+        let still_current = self.current_index == Some(pending.current_index)
+            && self
+                .queue
+                .get(pending.next_index)
+                .is_some_and(|track| track.track_key == pending.next_track_key);
+        if !still_current {
+            self.preparation_attempted = false;
+            return;
+        }
+        let Ok((source, gain)) = result else {
             return;
         };
         let Some(player) = self.player.as_ref() else {
             return;
         };
+        if player.len() != 1 {
+            return;
+        }
         player.append(source);
         self.prepared_next = Some(PreparedTrack {
-            index: next_index,
+            index: pending.next_index,
             gain,
         });
     }
@@ -780,6 +881,7 @@ impl PlaybackRuntime {
         self.begin_history();
         self.capture_position();
         self.observe_history();
+        self.start_next_preparation();
         let _ = self.persist();
     }
 
@@ -792,12 +894,13 @@ impl PlaybackRuntime {
     }
 
     fn synchronize_audio_runtime(&mut self) {
+        self.collect_prepared_next();
         self.reconcile_current_source();
         self.recover_audio_output_if_needed();
     }
 
     fn invalidate_prepared_queue(&mut self) -> Result<(), String> {
-        if self.prepared_next.is_none() {
+        if self.prepared_next.is_none() && self.pending_next.is_none() {
             return Ok(());
         }
         self.capture_position();
@@ -843,7 +946,7 @@ impl PlaybackRuntime {
             } else {
                 self.capture_position();
                 self.observe_history();
-                self.prepare_next_if_due();
+                self.start_next_preparation();
             }
         }
         let bucket = (self.position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS).floor() as u64;
@@ -909,6 +1012,9 @@ impl PlaybackRuntime {
             ));
         }
         self.synchronize_audio_runtime();
+        if self.pending_next.take().is_some() {
+            self.preparation_attempted = false;
+        }
         let mut current_index = self
             .current_index
             .ok_or_else(|| "Choose a track before extending its queue.".to_owned())?;
@@ -965,6 +1071,7 @@ impl PlaybackRuntime {
         self.queue = refreshed_queue;
         self.current_index = plan.current_index;
         self.prepared_next = None;
+        self.pending_next = None;
         self.preparation_attempted = false;
 
         if plan.current_removed {
@@ -1069,12 +1176,31 @@ impl PlaybackRuntime {
 
     pub(crate) fn next(&mut self) -> Result<PlaybackSnapshot, String> {
         self.synchronize_audio_runtime();
-        let next = self
-            .choose_next_index(self.repeat_mode == RepeatMode::All)
+        let prepared_index = self.prepared_next.as_ref().map(|prepared| prepared.index);
+        let next = prepared_index
+            .or_else(|| self.pending_next.as_ref().map(|pending| pending.next_index))
+            .or_else(|| self.choose_next_index(self.repeat_mode == RepeatMode::All))
             .ok_or_else(|| "There is no next track in the queue.".to_owned())?;
         self.capture_position();
         self.observe_history();
         self.finish_history("skipped");
+        if prepared_index == Some(next)
+            && self.player.as_ref().is_some_and(|player| player.len() >= 2)
+        {
+            let prepared = self.prepared_next.take().expect("prepared track exists");
+            self.current_index = Some(next);
+            self.current_gain = prepared.gain;
+            self.position_seconds = 0.0;
+            self.preparation_attempted = false;
+            let player = self.player.as_ref().expect("prepared track has a player");
+            player.skip_one();
+            player.play();
+            self.status = PlaybackStatus::Playing;
+            self.begin_history();
+            self.start_next_preparation();
+            self.persist()?;
+            return Ok(self.snapshot());
+        }
         self.current_index = Some(next);
         if let Err(error) = self.load_current(true, 0.0) {
             let error = self.set_error(error);
@@ -1127,6 +1253,7 @@ impl PlaybackRuntime {
         self.status = PlaybackStatus::Stopped;
         self.position_seconds = 0.0;
         self.prepared_next = None;
+        self.pending_next = None;
         self.preparation_attempted = false;
         self.persist()?;
         Ok(self.snapshot())
@@ -1274,6 +1401,7 @@ impl PlaybackRuntime {
         self.status = PlaybackStatus::Stopped;
         self.error = None;
         self.prepared_next = None;
+        self.pending_next = None;
         self.preparation_attempted = false;
         self.current_gain = ReplayGainAdjustment {
             linear: 1.0,
@@ -1341,6 +1469,7 @@ impl PlaybackRuntime {
         self.close_output();
         let _ = self.take_stream_error();
         self.prepared_next = None;
+        self.pending_next = None;
         self.preparation_attempted = false;
         if had_player && self.current_index.is_some() {
             self.load_current(should_play, position)

@@ -2192,6 +2192,7 @@ function App() {
   }
 
   shortcutResultHandlerRef.current = (result) => {
+    if (result.playback) playback.applySnapshot(result.playback);
     const projection = result.success && result.catalogSync
       ? acceptTrackProjectionKeys(
         result.track ? [result.track.trackKey] : [],
@@ -2900,7 +2901,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.21.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.22.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

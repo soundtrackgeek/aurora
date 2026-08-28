@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-28
+
+### Changed
+
+- Global rating and Love shortcuts now update Aurora optimistically at keypress time and persist their ordered MP3 edits in the background, so slow hashing, drive flushes, and Music Library synchronization no longer delay visible feedback.
+- Aurora prepares the next playback source asynchronously from the start of the current track and applies global playback shortcut snapshots directly to the player UI, eliminating the two-second stale-title polling window and using the prepared source for immediate next-track transitions.
+
 ## [0.21.1] - 2026-08-28
 
 ### Fixed
