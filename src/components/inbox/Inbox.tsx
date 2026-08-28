@@ -205,13 +205,40 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     [excludedTrackPaths, taggerAlbum],
   );
 
-  const renameSelectedAlbum = useCallback(async (album: InboxAlbum) => {
+  const renameSelectedAlbums = useCallback(async (albumsToRename: InboxAlbum[]) => {
+    if (!albumsToRename.length) return;
     setRenameBusy(true);
     setRenameMessage(null);
     setError(null);
+    let renamedTracks = 0;
+    let renamedFolders = 0;
+    let renamedAlbums = 0;
+    const failures: Array<{ album: InboxAlbum; message: string }> = [];
+    for (const album of albumsToRename) {
+      try {
+        const result = await renameInboxAlbum(album.path);
+        renamedAlbums += 1;
+        renamedTracks += result.renamedTracks;
+        if (result.folderRenamed) renamedFolders += 1;
+      } catch (nextError) {
+        failures.push({
+          album,
+          message: nextError instanceof Error ? nextError.message : String(nextError),
+        });
+      }
+    }
+    if (renamedAlbums) {
+      if (albumsToRename.length === 1 && failures.length === 0) {
+        setRenameMessage(`${renamedTracks} ${renamedTracks === 1 ? "track" : "tracks"} renamed${renamedFolders ? " with the album folder" : ""}.`);
+      } else {
+        setRenameMessage(`${renamedTracks} ${renamedTracks === 1 ? "track" : "tracks"} renamed across ${renamedAlbums} ${renamedAlbums === 1 ? "album" : "albums"}${renamedFolders ? ` with ${renamedFolders} album ${renamedFolders === 1 ? "folder" : "folders"} renamed` : ""}.`);
+      }
+    }
+    if (failures.length) {
+      const firstFailure = failures[0];
+      setError(`${failures.length} ${failures.length === 1 ? "album" : "albums"} could not be renamed. ${firstFailure.album.album ?? firstFailure.album.folderName}: ${firstFailure.message}`);
+    }
     try {
-      const result = await renameInboxAlbum(album.path);
-      setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed${result.folderRenamed ? " with the album folder" : ""}.`);
       await refresh();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -225,14 +252,14 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
       if (event.ctrlKey && event.shiftKey && event.key.toLocaleLowerCase() === "t" && selectedAlbum && selectedTracks.length) {
         event.preventDefault();
         setTaggerAlbum(selectedAlbum);
-      } else if (event.ctrlKey && !event.shiftKey && event.key.toLocaleLowerCase() === "r" && selectedAlbum && !taggerAlbum && !renameBusy) {
+      } else if (event.ctrlKey && !event.shiftKey && event.key.toLocaleLowerCase() === "r" && selectedAlbums.length && !taggerAlbum && !renameBusy) {
         event.preventDefault();
-        void renameSelectedAlbum(selectedAlbum);
+        void renameSelectedAlbums(selectedAlbums);
       }
     }
     window.addEventListener("keydown", handleInboxShortcut);
     return () => window.removeEventListener("keydown", handleInboxShortcut);
-  }, [renameBusy, renameSelectedAlbum, selectedAlbum, selectedTracks.length, taggerAlbum]);
+  }, [renameBusy, renameSelectedAlbums, selectedAlbum, selectedAlbums, selectedTracks.length, taggerAlbum]);
 
   async function addFolder() {
     try {
@@ -319,7 +346,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         <div><h1>Inbox</h1><p>Review and tag new music before adding it to your library.</p></div>
         <div>
           <button type="button" onClick={() => void refresh()} disabled={loadState === "loading"}><RefreshCw className={loadState === "loading" ? "is-spinning" : ""} /> Rescan</button>
-          <button type="button" disabled={!selectedAlbum || renameBusy} onClick={() => selectedAlbum && void renameSelectedAlbum(selectedAlbum)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename <kbd>Ctrl R</kbd></button>
+          <button type="button" disabled={!selectedAlbums.length || renameBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename{selectedAlbums.length > 1 ? ` ${selectedAlbums.length} albums` : ""} <kbd>Ctrl R</kbd></button>
           <button type="button" className="button button--primary" disabled={!selectedAlbum || !selectedTracks.length || renameBusy} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag {selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl Shift T</kbd></button>
         </div>
       </header>
@@ -393,7 +420,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
             <button type="button" className="inbox-autotag" disabled={!selectedTracks.length} onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl Shift T</kbd></button>
-            <button type="button" className="inbox-autotag inbox-rename" disabled={renameBusy} onClick={() => void renameSelectedAlbum(selectedAlbum)}><FilePenLine /><span><strong>Rename from tags</strong><small>Standardize the album folder and track filenames</small></span><kbd>Ctrl R</kbd></button>
+            <button type="button" className="inbox-autotag inbox-rename" disabled={!selectedAlbums.length || renameBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}><FilePenLine /><span><strong>Rename from tags</strong><small>{selectedAlbums.length > 1 ? `Standardize ${selectedAlbums.length} selected album folders and track filenames` : "Standardize the album folder and track filenames"}</small></span><kbd>Ctrl R</kbd></button>
             <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); setReplacementConfirmed(false); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
               {movePreview?.albums.some((album) => album.action === "replace") ? <label className="inbox-move__replacement"><AlertTriangle /><span><strong>Replace existing release</strong><small>{movePreview.albums[0].existingTrackCount} existing → {movePreview.albums[0].trackCount} new tracks · old release preserved for recovery</small></span><input type="checkbox" aria-label="Confirm replacement" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /></label> : null}

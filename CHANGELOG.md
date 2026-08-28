@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-28
+
+### Fixed
+
+- Fixed Inbox **Rename from tags** and `Ctrl+R` processing only the active album. Rename now processes every selected album, reports aggregate track/folder results, and continues past an individual album failure while identifying it.
+
 ## [0.21.0] - 2026-08-28
 
 ### Added

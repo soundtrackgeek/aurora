@@ -142,6 +142,44 @@ describe("Inbox", () => {
     expect(await screen.findByText("10 tracks renamed with the album folder.")).toBeInTheDocument();
   });
 
+  it("renames every selected Inbox album from Ctrl+R", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const secondPath = "C:\\Music\\Inbox\\Neon Nights";
+    const second = {
+      ...first,
+      id: "inbox-neon",
+      album: "Neon Nights",
+      folderName: "Neon Nights",
+      path: secondPath,
+      tracks: first.tracks.map((track) => ({
+        ...track,
+        album: "Neon Nights",
+        path: track.path.replace(first.path, secondPath),
+      })),
+    };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [first, second] });
+    const rename = vi.spyOn(inboxAdapter, "renameInboxAlbum").mockImplementation(async (albumPath) => ({
+      albumPath: `${albumPath} (renamed)`,
+      renamedTracks: 10,
+      folderRenamed: true,
+    }));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    const firstRow = await screen.findByRole("row", { name: /Freak by/ });
+    fireEvent.click(firstRow);
+    fireEvent.click(screen.getByRole("row", { name: /Neon Nights by/ }), { shiftKey: true });
+    expect(screen.getByRole("button", { name: /Rename 2 albums.*Ctrl R/ })).toBeEnabled();
+    expect(screen.getByText("Standardize 2 selected album folders and track filenames")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "r", ctrlKey: true });
+
+    await waitFor(() => expect(rename).toHaveBeenCalledTimes(2));
+    expect(rename).toHaveBeenNthCalledWith(1, first.path);
+    expect(rename).toHaveBeenNthCalledWith(2, secondPath);
+    expect(await screen.findByText("20 tracks renamed across 2 albums with 2 album folders renamed.")).toBeInTheDocument();
+  });
+
   it("uses the vertical tag editor for album batches and individual Inbox tracks", async () => {
     const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockResolvedValue({
       changedTracks: 10,

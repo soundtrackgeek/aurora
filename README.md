@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.21.0 connects Inbox organization, release replacement, and moving an existing library album back to Inbox without MusicBee.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.21.1 makes Inbox organization apply consistently to the full album selection.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.21.0 slice
+## Current 0.21.1 slice
+
+- Inbox **Rename from tags** and `Ctrl+R` now rename every selected album, aggregate the renamed track and folder counts, and identify any album that could not be renamed while continuing the remaining selection.
 
 - Inbox destination previews discard only Aurora-owned `.tmp.mp3` tag-staging copies that are at least five minutes old before Music Library scans the selected folder. A recent staging file blocks preview until the edit finishes; recovery backups and ordinary MP3s are preserved.
 - Inbox albums cannot become ready for Add to Library until Year is valid, the folder is `Album Artist - Album (Year)`, and track filenames match the tag-derived naming rule. **Rename from tags** fixes the organization and the next scan unlocks intake.
@@ -13,7 +15,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 
 - The Inbox Tags editor combines tracks from every selected album, shows the complete MP3 and album counts, and saves the shared field changes safely as one native batch per album folder.
 
-- Inbox album rows support plain-click replacement, Ctrl-click toggling, Shift-click ranges, and Ctrl+Shift additive ranges without selecting webpage text. The active album remains clearly marked as the inspector and per-album action target.
+- Inbox album rows support plain-click replacement, Ctrl-click toggling, Shift-click ranges, and Ctrl+Shift additive ranges without selecting webpage text. The active album remains clearly marked for the inspector, while selection-wide actions apply to every selected album.
 
 - Genre fields in the vertical Tags editor and Album Auto-Tagger suggest the catalog's existing canonical genres as you type while still allowing a new free-form value.
 
