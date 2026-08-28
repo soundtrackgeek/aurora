@@ -110,6 +110,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveMessage, setMoveMessage] = useState<string | null>(null);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameMessage, setRenameMessage] = useState<string | null>(null);
   const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
@@ -167,6 +168,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setAlbumSelectionAnchorId(firstId);
     setExcludedTrackPaths(new Set());
     setMovePreview(null);
+    setReplacementConfirmed(false);
     setMoveMessage(null);
   }
 
@@ -186,6 +188,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setSelectedAlbumId(activeId);
     setExcludedTrackPaths(new Set());
     setMovePreview(null);
+    setReplacementConfirmed(false);
     setMoveMessage(null);
   }
 
@@ -281,6 +284,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setMoveMessage(null);
     try {
       setMovePreview(await libraryIntakeAdapter.preview({ sourcePath: selectedAlbum.path, category: moveCategory }));
+      setReplacementConfirmed(false);
     } catch (nextError) {
       setMoveMessage(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {
@@ -289,7 +293,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   }
 
   async function applyMove() {
-    if (!movePreview) return;
+    if (!movePreview || (movePreview.albums.some((album) => album.action === "replace") && !replacementConfirmed)) return;
     setMoveBusy(true);
     try {
       const result = await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
@@ -390,10 +394,11 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
             <button type="button" className="inbox-autotag" disabled={!selectedTracks.length} onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl Shift T</kbd></button>
             <button type="button" className="inbox-autotag inbox-rename" disabled={renameBusy} onClick={() => void renameSelectedAlbum(selectedAlbum)}><FilePenLine /><span><strong>Rename from tags</strong><small>Standardize the album folder and track filenames</small></span><kbd>Ctrl R</kbd></button>
-            <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
+            <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); setReplacementConfirmed(false); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
+              {movePreview?.albums.some((album) => album.action === "replace") ? <label className="inbox-move__replacement"><AlertTriangle /><span><strong>Replace existing release</strong><small>{movePreview.albums[0].existingTrackCount} existing → {movePreview.albums[0].trackCount} new tracks · old release preserved for recovery</small></span><input type="checkbox" aria-label="Confirm replacement" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /></label> : null}
               {moveMessage ? <p className="inbox-move__message" role="status">{moveMessage}</p> : null}
-              <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || !selectedAlbum.readiness.ready} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview ? "Move and catalog" : "Preview move"}</button>
+              <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || !selectedAlbum.readiness.ready || Boolean(movePreview?.albums.some((album) => album.action === "replace") && !replacementConfirmed)} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview?.albums.some((album) => album.action === "replace") ? "Replace and catalog" : movePreview ? "Move and catalog" : "Preview move"}</button>
             </section>
           </> : <div className="inbox-inspector__empty"><InboxIcon /><span>Select an album to review it.</span></div>}
         </aside>

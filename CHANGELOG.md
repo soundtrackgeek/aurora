@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-28
+
+### Added
+
+- Added one reviewed workflow for replacing an existing same-named release. Aurora shows old/new track counts, matched tracks, and existing rated/loved counts, requires explicit confirmation, preserves the album identity, and reports Music Library's retained recovery folder.
+- Added **Move to Inbox** to album detail. Aurora targets only a configured monitored Inbox folder, previews the exact catalog removal, and delegates the verified copy, commit, and post-commit source cleanup to Music Library.
+
+### Changed
+
+- Inbox readiness now requires a valid year plus the canonical `Album Artist - Album (Year)` folder and tag-derived track filenames. **Rename from tags** remains the one-step repair action before Add to Library becomes available.
+
 ## [0.20.10] - 2026-08-28
 
 ### Fixed

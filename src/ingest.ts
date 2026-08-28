@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./library";
 
 export type LibraryIntakeCategoryId = "general" | "scores" | "synthwave";
+export type LibraryIntakeAction = "add" | "replace" | "remove";
 
 export interface LibraryIntakeCategory {
   id: LibraryIntakeCategoryId;
@@ -18,6 +19,8 @@ export interface LibraryBridgeCapabilities {
     batchFolders: boolean;
     crossVolumeCopy: boolean;
     previewRequired: boolean;
+    replaceExistingAlbums: boolean;
+    moveAlbumsToInbox: boolean;
   };
 }
 
@@ -37,13 +40,22 @@ export interface LibraryIntakeAlbumPreview {
   album: string;
   year: string;
   trackCount: number;
+  action: LibraryIntakeAction;
+  existingTrackCount: number;
+  matchedTrackCount: number;
+  existingRatedTrackCount: number;
+  existingLovedTrackCount: number;
 }
 
 export interface LibraryIntakePreview {
   planId: string;
   sessionId: number;
   sourcePath: string;
-  category: Omit<LibraryIntakeCategory, "available">;
+  category: Omit<LibraryIntakeCategory, "available"> | {
+    id: "inbox";
+    label: string;
+    destinationRoot: string;
+  };
   albumCount: number;
   trackCount: number;
   delta: LibraryIntakeDelta;
@@ -57,6 +69,8 @@ export interface LibraryIntakePreview {
 export interface LibraryIntakeApplyAlbum {
   sourcePath: string;
   destinationPath: string;
+  action: LibraryIntakeAction;
+  recoveryPath: string | null;
   cleanupStatus: "removed" | "retained";
 }
 
@@ -83,10 +97,16 @@ export interface LibraryIntakeApplyRequest {
   sessionId: number;
 }
 
+export interface LibraryMoveToInboxPreviewRequest {
+  albumId: string;
+  inboxPath: string;
+}
+
 export interface LibraryIntakeAdapter {
   capabilities: () => Promise<LibraryBridgeCapabilities>;
   selectFolder: () => Promise<string | null>;
   preview: (request: LibraryIntakePreviewRequest) => Promise<LibraryIntakePreview>;
+  previewMoveToInbox: (request: LibraryMoveToInboxPreviewRequest) => Promise<LibraryIntakePreview>;
   apply: (request: LibraryIntakeApplyRequest) => Promise<LibraryIntakeApplyResult>;
 }
 
@@ -125,6 +145,8 @@ const browserCapabilities: LibraryBridgeCapabilities = {
     batchFolders: false,
     crossVolumeCopy: false,
     previewRequired: true,
+    replaceExistingAlbums: false,
+    moveAlbumsToInbox: false,
   },
 };
 
@@ -156,9 +178,19 @@ export async function applyLibraryIntakeBatch(
   return invoke<LibraryIntakeApplyResult>("apply_library_intake_batch", { request });
 }
 
+export async function previewLibraryMoveToInbox(
+  request: LibraryMoveToInboxPreviewRequest,
+): Promise<LibraryIntakePreview> {
+  if (!isTauriRuntime()) {
+    throw new Error("Moving an album back to Inbox is available in the native Aurora app.");
+  }
+  return invoke<LibraryIntakePreview>("preview_library_move_to_inbox", { request });
+}
+
 export const libraryIntakeAdapter: LibraryIntakeAdapter = {
   capabilities: loadLibraryBridgeCapabilities,
   selectFolder: selectLibraryIntakeFolder,
   preview: previewLibraryIntakeBatch,
+  previewMoveToInbox: previewLibraryMoveToInbox,
   apply: applyLibraryIntakeBatch,
 };

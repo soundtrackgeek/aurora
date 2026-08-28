@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Disc3,
   Gauge,
+  FolderOutput,
   Heart,
   LoaderCircle,
   Music2,
@@ -30,6 +31,8 @@ import {
 } from "react";
 import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
+import { libraryIntakeAdapter, type LibraryIntakePreview } from "../../ingest";
+import { loadInboxSettings } from "../../inbox";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import "./DeepExplorer.css";
@@ -125,6 +128,7 @@ export interface DeepExplorerProps {
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
+  onAlbumMovedToInbox?: () => boolean | void | Promise<boolean | void>;
   onSelectionChange?: (selection: ExplorerSelection) => void;
 }
 
@@ -706,6 +710,7 @@ function AlbumDetail({
   onRatingChange,
   onLoveChange,
   onDeleteTracks,
+  onAlbumMovedToInbox,
   onSelectionChange,
 }: {
   album: ExplorerAlbum;
@@ -724,6 +729,7 @@ function AlbumDetail({
   onRatingChange?: (track: Track, rating: number) => void;
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
+  onAlbumMovedToInbox?: () => boolean | void | Promise<boolean | void>;
   onSelectionChange?: (selection: ExplorerSelection) => void;
 }) {
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
@@ -735,6 +741,9 @@ function AlbumDetail({
   const [deleteTargets, setDeleteTargets] = useState<readonly Track[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const visibleSelectedTrackKeys = useMemo(() => {
     const visibleKeys = new Set(tracks.map((track) => track.trackKey));
@@ -783,6 +792,47 @@ function AlbumDetail({
     }
   }
 
+  async function requestMoveToInbox() {
+    if (!onAlbumMovedToInbox || moveBusy) return;
+    setMoveBusy(true);
+    setMoveError(null);
+    try {
+      const settings = await loadInboxSettings();
+      if (settings.monitoredFolders.length === 0) {
+        throw new Error("Add a monitored folder in Aurora Inbox before moving an album back.");
+      }
+      const inboxPath = settings.monitoredFolders.length === 1
+        ? settings.monitoredFolders[0]
+        : await libraryIntakeAdapter.selectFolder();
+      if (!inboxPath) return;
+      const normalized = (value: string) => value.replace(/\//g, "\\").replace(/\\+$/, "").toLocaleLowerCase();
+      if (!settings.monitoredFolders.some((folder) => normalized(folder) === normalized(inboxPath))) {
+        throw new Error("Choose one of the monitored folders configured in Aurora Inbox.");
+      }
+      setMovePreview(await libraryIntakeAdapter.previewMoveToInbox({ albumId: album.id, inboxPath }));
+    } catch (error) {
+      setMoveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMoveBusy(false);
+    }
+  }
+
+  async function applyMoveToInbox() {
+    if (!movePreview || moveBusy) return;
+    setMoveBusy(true);
+    setMoveError(null);
+    try {
+      await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
+      setMovePreview(null);
+      await onAlbumMovedToInbox?.();
+      onClose();
+    } catch (error) {
+      setMoveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMoveBusy(false);
+    }
+  }
+
   return (
     <aside className={`deep-explorer-album-detail${closing ? " is-closing" : ""}`} aria-label={`${album.title} album details`}>
       <header>
@@ -804,6 +854,7 @@ function AlbumDetail({
             <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(1)}</span>
           </span>
         </div>
+        {onAlbumMovedToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={moveBusy} onClick={() => void requestMoveToInbox()}><FolderOutput aria-hidden="true" />{moveBusy && !movePreview ? "Preparing…" : "Move to Inbox"}</button> : null}
         <button type="button" className="deep-explorer-icon-button" aria-label="Close album details" onClick={onClose}>
           <X aria-hidden="true" />
         </button>
@@ -872,6 +923,20 @@ function AlbumDetail({
           </div>
         </dialog>
       ) : null}
+      {movePreview ? (
+        <dialog className="deep-explorer-delete-dialog deep-explorer-move-dialog" open aria-modal="true" aria-labelledby="move-album-title">
+          <span className="deep-explorer-delete-dialog__icon"><FolderOutput aria-hidden="true" /></span>
+          <div>
+            <h4 id="move-album-title">Move “{album.title}” back to Inbox?</h4>
+            <p>Aurora will copy and verify all {movePreview.trackCount} tracks at <strong>{movePreview.albums[0]?.destinationPath}</strong>, remove this album from the Music Library catalog, then delete the old library folder only after the catalog commit succeeds.</p>
+            {moveError ? <p className="deep-explorer-delete-dialog__error" role="alert">{moveError}</p> : null}
+          </div>
+          <div className="deep-explorer-delete-dialog__actions">
+            <button type="button" disabled={moveBusy} onClick={() => { setMovePreview(null); setMoveError(null); }}>Cancel</button>
+            <button type="button" disabled={moveBusy} autoFocus onClick={() => void applyMoveToInbox()}>{moveBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FolderOutput aria-hidden="true" />}{moveBusy ? "Moving…" : "Move album to Inbox"}</button>
+          </div>
+        </dialog>
+      ) : moveError ? <p className="deep-explorer-album-detail__error" role="alert">{moveError}</p> : null}
     </aside>
   );
 }
@@ -953,6 +1018,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onRatingChange,
     onLoveChange,
     onDeleteTracks,
+    onAlbumMovedToInbox,
     onSelectionChange,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
@@ -1191,6 +1257,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onRatingChange={onRatingChange}
                 onLoveChange={onLoveChange}
                 onDeleteTracks={onDeleteTracks}
+                onAlbumMovedToInbox={onAlbumMovedToInbox}
                 onSelectionChange={onSelectionChange}
               />
             ) : null}

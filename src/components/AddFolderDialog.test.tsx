@@ -21,6 +21,8 @@ const capabilities: LibraryBridgeCapabilities = {
     batchFolders: true,
     crossVolumeCopy: true,
     previewRequired: true,
+    replaceExistingAlbums: true,
+    moveAlbumsToInbox: true,
   },
 };
 
@@ -51,6 +53,11 @@ const preview: LibraryIntakePreview = {
       album: "Example",
       year: "2026",
       trackCount: 10,
+      action: "add",
+      existingTrackCount: 0,
+      matchedTrackCount: 0,
+      existingRatedTrackCount: 0,
+      existingLovedTrackCount: 0,
     },
     {
       sourcePath: "C:\\Intake\\Bear McCreary - Another (2026)",
@@ -59,6 +66,11 @@ const preview: LibraryIntakePreview = {
       album: "Another",
       year: "2026",
       trackCount: 9,
+      action: "add",
+      existingTrackCount: 0,
+      matchedTrackCount: 0,
+      existingRatedTrackCount: 0,
+      existingLovedTrackCount: 0,
     },
   ],
   canApply: true,
@@ -76,6 +88,8 @@ const applyResult: LibraryIntakeApplyResult = {
   albums: preview.albums.map((album) => ({
     sourcePath: album.sourcePath,
     destinationPath: album.destinationPath,
+    action: album.action,
+    recoveryPath: null,
     cleanupStatus: "removed" as const,
   })),
   cleanupWarnings: [],
@@ -88,6 +102,7 @@ function createAdapter(overrides: Partial<LibraryIntakeAdapter> = {}): LibraryIn
     capabilities: vi.fn().mockResolvedValue(capabilities),
     selectFolder: vi.fn().mockResolvedValue("C:\\Intake"),
     preview: vi.fn().mockResolvedValue(preview),
+    previewMoveToInbox: vi.fn().mockRejectedValue(new Error("not used")),
     apply: vi.fn().mockResolvedValue(applyResult),
     ...overrides,
   };
@@ -191,6 +206,35 @@ describe("AddFolderDialog", () => {
     expect(screen.getAllByText("removed")).toHaveLength(2);
   });
 
+  it("requires explicit confirmation before replacing an existing release", async () => {
+    const replacementPreview: LibraryIntakePreview = {
+      ...preview,
+      albumCount: 1,
+      trackCount: 10,
+      albums: [{
+        ...preview.albums[0],
+        action: "replace",
+        existingTrackCount: 8,
+        matchedTrackCount: 7,
+        existingRatedTrackCount: 3,
+        existingLovedTrackCount: 2,
+      }],
+    };
+    renderDialog(createAdapter({ preview: vi.fn().mockResolvedValue(replacementPreview) }));
+    await screen.findByText("Music Library companion ready");
+    fireEvent.click(screen.getByRole("button", { name: "Choose folder" }));
+    await screen.findByText("C:\\Intake");
+    fireEvent.click(screen.getByRole("radio", { name: /Movie \/ TV \/ game music/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview batch" }));
+    await screen.findByText(/REPLACE/);
+    fireEvent.click(screen.getByRole("button", { name: "Review apply" }));
+
+    const replaceButton = screen.getByRole("button", { name: "Replace and catalog" });
+    expect(replaceButton).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "I reviewed the replacements above." }));
+    expect(replaceButton).toBeEnabled();
+  });
+
   it("makes a multi-album plan a keyboard-accessible scroll region", async () => {
     const scrollPreview: LibraryIntakePreview = {
       ...preview,
@@ -205,6 +249,11 @@ describe("AddFolderDialog", () => {
           album: "Last Album",
           year: "2026",
           trackCount: 1,
+          action: "add",
+          existingTrackCount: 0,
+          matchedTrackCount: 0,
+          existingRatedTrackCount: 0,
+          existingLovedTrackCount: 0,
         },
       ],
     };

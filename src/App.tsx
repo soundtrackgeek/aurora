@@ -2900,7 +2900,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.20.10</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.21.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3228,6 +3228,7 @@ function App() {
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                 onDeleteTracks={deleteExplorerAlbumTracks}
+                onAlbumMovedToInbox={refreshCatalogIfChanged}
                 onSelectionChange={(selection) => {
                   setExplorerSelection(selection);
                   setTagSelectionKind(selection.kind === "albums" ? "album" : "track");

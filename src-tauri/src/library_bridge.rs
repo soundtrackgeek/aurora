@@ -43,6 +43,15 @@ pub enum LibraryCategoryId {
     General,
     Scores,
     Synthwave,
+    Inbox,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LibraryIntakeAction {
+    Add,
+    Replace,
+    Remove,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +71,10 @@ pub struct LibraryBridgeSupports {
     pub cross_volume_copy: bool,
     pub preview_required: bool,
     #[serde(default)]
+    pub replace_existing_albums: bool,
+    #[serde(default)]
+    pub move_albums_to_inbox: bool,
+    #[serde(default)]
     pub sync_existing_folders: bool,
     #[serde(default)]
     pub default_popm_rating_fallback: bool,
@@ -80,6 +93,13 @@ pub struct LibraryBridgeCapabilities {
 pub struct LibraryIntakePreviewRequest {
     pub source_path: String,
     pub category: LibraryCategoryId,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryMoveToInboxPreviewRequest {
+    pub album_id: String,
+    pub inbox_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,6 +130,11 @@ pub struct LibraryIntakePreviewAlbum {
     pub album: String,
     pub year: String,
     pub track_count: u64,
+    pub action: LibraryIntakeAction,
+    pub existing_track_count: u64,
+    pub matched_track_count: u64,
+    pub existing_rated_track_count: u64,
+    pub existing_loved_track_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +177,8 @@ pub enum LibraryIntakeCleanupStatus {
 pub struct LibraryIntakeAppliedAlbum {
     pub source_path: String,
     pub destination_path: String,
+    pub action: LibraryIntakeAction,
+    pub recovery_path: Option<String>,
     pub cleanup_status: LibraryIntakeCleanupStatus,
 }
 
@@ -201,6 +228,13 @@ struct EmptyPayload {}
 struct PreviewPayload<'a> {
     source_path: &'a str,
     category: LibraryCategoryId,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveToInboxPreviewPayload<'a> {
+    album_id: &'a str,
+    inbox_path: &'a str,
 }
 
 #[derive(Debug, Serialize)]
@@ -364,6 +398,40 @@ pub async fn preview_library_intake_batch(
     })
     .await
     .map_err(|error| format!("The album preview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+pub async fn preview_library_move_to_inbox(
+    app: AppHandle,
+    request: LibraryMoveToInboxPreviewRequest,
+) -> Result<LibraryIntakePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| {
+            if request.album_id.trim().is_empty() {
+                return Err("Choose a library album to move back to Inbox.".to_owned());
+            }
+            let inbox_path = validate_source_path(&request.inbox_path)?;
+            let result = invoke_bridge::<_, LibraryIntakePreview>(
+                &app,
+                "previewMoveToInbox",
+                MoveToInboxPreviewPayload {
+                    album_id: request.album_id.trim(),
+                    inbox_path: &inbox_path,
+                },
+                PREVIEW_TIMEOUT,
+            )?;
+            validate_preview(&result, LibraryCategoryId::Inbox)?;
+            if result.albums.len() != 1 || result.albums[0].action != LibraryIntakeAction::Remove {
+                return Err(update_music_library_message(
+                    "Music Library returned an invalid move-back preview.".to_owned(),
+                ));
+            }
+            Ok(result)
+        })
+    })
+    .await
+    .map_err(|error| format!("The move-back preview worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -675,9 +743,12 @@ fn validate_capabilities(result: &LibraryBridgeCapabilities) -> Result<(), Strin
         || !result.supports.batch_folders
         || !result.supports.cross_volume_copy
         || !result.supports.preview_required
+        || !result.supports.replace_existing_albums
+        || !result.supports.move_albums_to_inbox
     {
         return Err(update_music_library_message(
-            "The installed bridge does not support Aurora's safe batch-import workflow.".to_owned(),
+            "The installed bridge does not support Aurora's add, replace, and move-back workflow."
+                .to_owned(),
         ));
     }
 
@@ -747,6 +818,13 @@ fn validate_apply_result(
         .iter()
         .filter(|album| album.cleanup_status == LibraryIntakeCleanupStatus::Removed)
         .count() as u64;
+    let invalid_recovery = result.albums.iter().any(|album| match album.action {
+        LibraryIntakeAction::Replace => album
+            .recovery_path
+            .as_deref()
+            .is_none_or(|path| path.trim().is_empty()),
+        LibraryIntakeAction::Add | LibraryIntakeAction::Remove => album.recovery_path.is_some(),
+    });
     if result.plan_id != request.plan_id
         || result.session_id != request.session_id
         || result.import_run_id <= 0
@@ -755,6 +833,7 @@ fn validate_apply_result(
         || result.albums.len() as u64 != result.album_count
         || result.moved_album_count > result.album_count
         || result.moved_album_count != removed_sources
+        || invalid_recovery
     {
         return Err(update_music_library_message(
             "Music Library returned an invalid import receipt.".to_owned(),
@@ -767,8 +846,17 @@ fn record_album_additions(
     app: &AppHandle,
     result: &LibraryIntakeApplyResult,
 ) -> Result<(), String> {
+    let added_albums = result
+        .albums
+        .iter()
+        .filter(|album| album.action == LibraryIntakeAction::Add)
+        .cloned()
+        .collect::<Vec<_>>();
+    if added_albums.is_empty() {
+        return Ok(());
+    }
     let connection = open_catalog(&default_catalog_path()?)?;
-    let additions = resolve_album_additions(&connection, &result.albums)?;
+    let additions = resolve_album_additions(&connection, &added_albums)?;
     let added_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -1111,11 +1199,15 @@ mod tests {
             LibraryIntakeAppliedAlbum {
                 source_path: r"C:\Inbox\Album".to_owned(),
                 destination_path: r"Y:\Music\Artist\Album".to_owned(),
+                action: LibraryIntakeAction::Add,
+                recovery_path: None,
                 cleanup_status: LibraryIntakeCleanupStatus::Removed,
             },
             LibraryIntakeAppliedAlbum {
                 source_path: r"C:\Inbox\Score".to_owned(),
                 destination_path: r"Y:\Music\Artist\100% Score".to_owned(),
+                action: LibraryIntakeAction::Add,
+                recovery_path: None,
                 cleanup_status: LibraryIntakeCleanupStatus::Removed,
             },
         ];
@@ -1230,7 +1322,12 @@ mod tests {
                         "artist": "Composer",
                         "album": "Score",
                         "year": "2026",
-                        "trackCount": 12
+                        "trackCount": 12,
+                        "action": "add",
+                        "existingTrackCount": 0,
+                        "matchedTrackCount": 0,
+                        "existingRatedTrackCount": 0,
+                        "existingLovedTrackCount": 0
                     }],
                     "canApply": true
                 }
@@ -1264,7 +1361,9 @@ mod tests {
                         "singleAlbum": true,
                         "batchFolders": true,
                         "crossVolumeCopy": true,
-                        "previewRequired": true
+                        "previewRequired": true,
+                        "replaceExistingAlbums": true,
+                        "moveAlbumsToInbox": true
                     }
                 }
             }),
@@ -1289,6 +1388,8 @@ mod tests {
                 batch_folders: true,
                 cross_volume_copy: true,
                 preview_required: true,
+                replace_existing_albums: true,
+                move_albums_to_inbox: true,
                 sync_existing_folders: true,
                 default_popm_rating_fallback: true,
             },
@@ -1453,6 +1554,8 @@ mod tests {
                     "albums": [{
                         "sourcePath": r"C:\Inbox\Album",
                         "destinationPath": r"D:\Scores\Album",
+                        "action": "add",
+                        "recoveryPath": null,
                         "cleanupStatus": "retained"
                     }],
                     "cleanupWarnings": ["The empty source folder was retained."]
@@ -1600,6 +1703,8 @@ mod tests {
             albums: vec![LibraryIntakeAppliedAlbum {
                 source_path: r"C:\Inbox\Album".to_owned(),
                 destination_path: r"D:\MUSIC\Album".to_owned(),
+                action: LibraryIntakeAction::Add,
+                recovery_path: None,
                 cleanup_status: LibraryIntakeCleanupStatus::Retained,
             }],
             cleanup_warnings: vec!["Source retained".to_owned()],

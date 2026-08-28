@@ -852,6 +852,16 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     if publisher.is_none() {
         issues.push("Publisher is missing or inconsistent".to_owned());
     }
+    if year.is_none() || year.is_some_and(|value| value <= 0) {
+        issues.push("Year is missing or inconsistent".to_owned());
+    }
+    issues.extend(organization_issues(
+        &canonical,
+        artist.as_deref(),
+        album.as_deref(),
+        year,
+        &tracks,
+    ));
     let path = path_text(&canonical)?;
     let id = hex_hash(path.as_bytes());
     Ok(InboxAlbum {
@@ -876,6 +886,53 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
         },
         tracks,
     })
+}
+
+fn organization_issues(
+    album_path: &Path,
+    album_artist: Option<&str>,
+    album_title: Option<&str>,
+    year: Option<i32>,
+    tracks: &[InboxTrack],
+) -> Vec<String> {
+    let mut issues = Vec::new();
+    if let (Some(album_artist), Some(album_title), Some(year)) =
+        (album_artist, album_title, year.filter(|value| *value > 0))
+        && let Ok(expected) =
+            sanitize_component(&format!("{album_artist} - {album_title} ({year})"))
+        && album_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_none_or(|actual| !actual.eq_ignore_ascii_case(&expected))
+    {
+        issues.push("Album folder is not organized as Album Artist - Album (Year)".to_owned());
+    }
+
+    let track_width = tracks
+        .iter()
+        .filter_map(|track| track.track_number.or(track.track_total))
+        .max()
+        .map_or(2, decimal_width)
+        .max(2);
+    let filenames_ready = tracks.iter().all(|track| {
+        let (Some(track_number), Some(artist), Some(title)) = (
+            track.track_number,
+            track.artist.as_deref(),
+            track.title.as_deref(),
+        ) else {
+            return true;
+        };
+        let position = match track.disc_number {
+            Some(disc) => format!("{disc}-{track_number:0track_width$}"),
+            None => format!("{track_number:0track_width$}"),
+        };
+        sanitize_component(&format!("{position} - {artist} - {title}"))
+            .is_ok_and(|stem| track.file_name.eq_ignore_ascii_case(&format!("{stem}.mp3")))
+    });
+    if !filenames_ready {
+        issues.push("One or more track filenames are not organized from their tags".to_owned());
+    }
+    issues
 }
 
 fn scan_track(path: &Path) -> Result<InboxTrack, String> {
@@ -1563,6 +1620,14 @@ mod tests {
         assert!(renamed.join("01 - Track Artist - First.mp3").is_file());
         assert!(renamed.join("02 - Track Artist - Second.mp3").is_file());
         assert_eq!(result.renamed_tracks, 2);
+        let organized = scan_album(&renamed).expect("scan organized album");
+        assert!(
+            organized
+                .readiness
+                .issues
+                .iter()
+                .all(|issue| !issue.contains("not organized"))
+        );
         fs::remove_dir_all(parent).expect("remove fixture");
     }
 

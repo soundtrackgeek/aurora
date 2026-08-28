@@ -66,6 +66,7 @@ export function AddFolderDialog({
   const [error, setError] = useState<string | null>(null);
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const requestGenerationRef = useRef(0);
   const applyInFlightRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
@@ -128,6 +129,7 @@ export function AddFolderDialog({
     setPreview(null);
     setResult(null);
     setConfirming(false);
+    setReplacementConfirmed(false);
     setRefreshWarning(null);
   }, []);
 
@@ -156,6 +158,7 @@ export function AddFolderDialog({
     && previewProblems.length === 0
     && !isBusy,
   );
+  const replacements = preview?.albums.filter((album) => album.action === "replace") ?? [];
 
   async function chooseSourceFolder() {
     if (isBusy) return;
@@ -354,7 +357,7 @@ export function AddFolderDialog({
               >
                 {preview.albums.map((album) => (
                   <li key={`${album.sourcePath}\n${album.destinationPath}`}>
-                    <span><strong>{album.album}</strong><small>{album.artist} · {album.year || "Year unknown"} · {album.trackCount} tracks</small></span>
+                    <span><strong>{album.album}{album.action === "replace" ? " · REPLACE" : ""}</strong><small>{album.artist} · {album.year || "Year unknown"} · {album.trackCount} tracks{album.action === "replace" ? ` · ${album.existingTrackCount} existing · ${album.matchedTrackCount} matched · ${album.existingRatedTrackCount} rated · ${album.existingLovedTrackCount} loved` : ""}</small></span>
                     <span className="intake-album-paths"><code title={album.sourcePath}>{album.sourcePath}</code><ArrowRight aria-label="moves to" /><code title={album.destinationPath}>{album.destinationPath}</code></span>
                   </li>
                 ))}
@@ -371,8 +374,8 @@ export function AddFolderDialog({
           {confirming && preview && busyAction !== "applying" ? (
             <section className="intake-confirmation" role="alertdialog" aria-label="Confirm album move">
               <ShieldCheck aria-hidden="true" />
-              <span><strong>Move and catalog {preview.albumCount} {preview.albumCount === 1 ? "album" : "albums"}?</strong><small>Destination root: {preview.category.destinationRoot}</small></span>
-              <button type="button" className="button button--primary" onClick={() => void applyPreview()}>Move and catalog {preview.albumCount}</button>
+              <span><strong>{replacements.length ? `Replace ${replacements.length} existing ${replacements.length === 1 ? "release" : "releases"} and catalog the batch?` : `Move and catalog ${preview.albumCount} ${preview.albumCount === 1 ? "album" : "albums"}?`}</strong><small>{replacements.length ? "Each old release is preserved in a recovery folder after commit." : `Destination root: ${preview.category.destinationRoot}`}</small>{replacements.length ? <label><input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /> I reviewed the replacements above.</label> : null}</span>
+              <button type="button" className="button button--primary" disabled={replacements.length > 0 && !replacementConfirmed} onClick={() => void applyPreview()}>{replacements.length ? "Replace and catalog" : `Move and catalog ${preview.albumCount}`}</button>
               <button type="button" className="button button--quiet" onClick={() => setConfirming(false)}>Not yet</button>
             </section>
           ) : null}

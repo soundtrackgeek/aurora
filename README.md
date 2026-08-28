@@ -1,12 +1,15 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.20.10 keeps abandoned Inbox tag-staging copies from breaking Music Library destination previews.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.21.0 connects Inbox organization, release replacement, and moving an existing library album back to Inbox without MusicBee.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.20.10 slice
+## Current 0.21.0 slice
 
 - Inbox destination previews discard only Aurora-owned `.tmp.mp3` tag-staging copies that are at least five minutes old before Music Library scans the selected folder. A recent staging file blocks preview until the edit finishes; recovery backups and ordinary MP3s are preserved.
+- Inbox albums cannot become ready for Add to Library until Year is valid, the folder is `Album Artist - Album (Year)`, and track filenames match the tag-derived naming rule. **Rename from tags** fixes the organization and the next scan unlocks intake.
+- A same-named destination is reviewed as a replacement only when Album Artist, Album, and Year match. Aurora displays track/rating/Love comparison counts and requires explicit confirmation; Music Library keeps the stable album identity and retains the verified old release in a hidden recovery folder.
+- Album detail includes **Move to Inbox**. The destination must be one of Aurora's monitored Inbox folders; Music Library copies and verifies it first, commits the catalog removal through its snapshot importer, and removes the old library folder only after commit.
 
 - The Inbox Tags editor combines tracks from every selected album, shows the complete MP3 and album counts, and saves the shared field changes safely as one native batch per album folder.
 

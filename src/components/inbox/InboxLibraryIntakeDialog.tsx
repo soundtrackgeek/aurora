@@ -27,11 +27,13 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
   const [previews, setPreviews] = useState<LibraryIntakePreview[] | null>(null);
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
 
   const albumCount = useMemo(() => targets.reduce((total, target) => total + target.albumCount, 0), [targets]);
   const unreadyAlbumCount = useMemo(() => targets.reduce((total, target) => total + target.unreadyAlbumCount, 0), [targets]);
   const destinationsSelected = targets.every((target) => destinations[target.sourcePath]);
   const canApply = previews?.length === targets.length && previews.every((preview) => preview.canApply);
+  const replacements = previews?.flatMap((preview) => preview.albums.filter((album) => album.action === "replace")) ?? [];
 
   async function previewTargets() {
     if (!destinationsSelected || unreadyAlbumCount > 0) return;
@@ -46,6 +48,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
         }));
       }
       setPreviews(next);
+      setReplacementConfirmed(false);
     } catch (nextError) {
       setPreviews(null);
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -111,11 +114,18 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
           })}
         </div>
         {error ? <p className="inbox-intake-dialog__error" role="alert"><AlertTriangle />{error}</p> : null}
+        {replacements.length ? <section className="inbox-intake-dialog__replacements" role="alert">
+          <AlertTriangle />
+          <div><strong>{replacements.length} existing {replacements.length === 1 ? "release" : "releases"} will be replaced</strong>
+            {replacements.map((album) => <p key={album.destinationPath}><span>{album.artist} — {album.album} ({album.year})</span><small>{album.existingTrackCount} existing → {album.trackCount} new tracks · {album.matchedTrackCount} matched · {album.existingRatedTrackCount} rated · {album.existingLovedTrackCount} loved</small></p>)}
+            <label><input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /> I reviewed these replacements. Preserve each old release in the recovery folder.</label>
+          </div>
+        </section> : null}
       </div>
 
       <footer>
         <button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button>
-        <button type="button" className="button button--primary" disabled={Boolean(busy) || !destinationsSelected || unreadyAlbumCount > 0 || (Boolean(previews) && !canApply)} onClick={() => void (previews ? applyTargets() : previewTargets())}>
+        <button type="button" className="button button--primary" disabled={Boolean(busy) || !destinationsSelected || unreadyAlbumCount > 0 || (Boolean(previews) && (!canApply || (replacements.length > 0 && !replacementConfirmed)))} onClick={() => void (previews ? applyTargets() : previewTargets())}>
           {busy ? <LoaderCircle className="is-spinning" /> : previews ? <FolderInput /> : <ArrowRight />}
           {busy === "preview" ? "Building preview…" : busy === "apply" ? "Adding to library…" : previews ? `Add ${albumCount} ${albumCount === 1 ? "album" : "albums"}` : "Preview destinations"}
         </button>
@@ -140,6 +150,11 @@ function sameReviewedIntake(reviewed: LibraryIntakePreview, fresh: LibraryIntake
         && album.artist === candidate.artist
         && album.album === candidate.album
         && album.year === candidate.year
-        && album.trackCount === candidate.trackCount;
+        && album.trackCount === candidate.trackCount
+        && album.action === candidate.action
+        && album.existingTrackCount === candidate.existingTrackCount
+        && album.matchedTrackCount === candidate.matchedTrackCount
+        && album.existingRatedTrackCount === candidate.existingRatedTrackCount
+        && album.existingLovedTrackCount === candidate.existingLovedTrackCount;
     });
 }

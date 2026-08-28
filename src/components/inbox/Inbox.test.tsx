@@ -111,7 +111,7 @@ describe("Inbox", () => {
 
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     expect(screen.getByText("1 selected · 1 album outside the library")).toBeInTheDocument();
-    expect(screen.getByText("1 issue")).toBeInTheDocument();
+    expect(screen.getByText("3 issues")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Freak cover" })).toHaveAttribute(
       "src",
       "/__aurora-preview-cover/preview-freak?size=128",
@@ -238,7 +238,7 @@ describe("Inbox", () => {
     const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockResolvedValue({
       planId: "folder-plan-2", sessionId: 42, status: "completed", albumCount: 1, trackCount: 10,
       movedAlbumCount: 1, importRunId: 7, backupPath: null, cleanupWarnings: [],
-      albums: [{ sourcePath: "C:\\Music\\Inbox\\Baltimoore - Freak", destinationPath: "D:\\Music\\Baltimoore - Freak", cleanupStatus: "removed" }],
+      albums: [{ sourcePath: "C:\\Music\\Inbox\\Baltimoore - Freak", destinationPath: "D:\\Music\\Baltimoore - Freak", action: "add", recoveryPath: null, cleanupStatus: "removed" }],
     });
     const catalogChanged = vi.fn();
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={catalogChanged} />);
@@ -279,7 +279,7 @@ describe("Inbox", () => {
     const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockImplementation(async ({ planId, sessionId }) => ({
       planId, sessionId, status: "completed", albumCount: 1, trackCount: 10, movedAlbumCount: 1,
       importRunId: sessionId, backupPath: null, cleanupWarnings: [],
-      albums: [{ sourcePath: "source", destinationPath: "destination", cleanupStatus: "removed" }],
+      albums: [{ sourcePath: "source", destinationPath: "destination", action: "add", recoveryPath: null, cleanupStatus: "removed" }],
     }));
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 

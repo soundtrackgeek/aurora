@@ -160,7 +160,14 @@ const previewAlbum: InboxAlbum = {
   trackCount: 10,
   artworkPresent: true,
   modifiedAtMs: Date.now() - 5 * 60_000,
-  readiness: { ready: false, issues: ["Genre is missing"] },
+  readiness: {
+    ready: false,
+    issues: [
+      "Genre is missing",
+      "Album folder is not organized as Album Artist - Album (Year)",
+      "One or more track filenames are not organized from their tags",
+    ],
+  },
   tracks: previewTracks,
 };
 

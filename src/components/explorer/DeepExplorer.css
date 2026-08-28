@@ -186,7 +186,11 @@
 
 .deep-explorer-album-detail { grid-column: 1 / -1; min-width: 0; margin: 4px -10px 8px; overflow: visible; border-top: 1px solid var(--explorer-border-strong); border-bottom: 1px solid var(--explorer-border); background: rgba(5, 11, 17, .82); box-shadow: inset 0 14px 28px rgba(0, 0, 0, .18); transform-origin: top; animation: deep-explorer-detail-open .2s ease-out both; }
 .deep-explorer-album-detail.is-closing { pointer-events: none; animation: deep-explorer-detail-close .18s ease-in both; }
-.deep-explorer-album-detail > header { position: sticky; z-index: 3; top: 0; display: grid; grid-template-columns: var(--aurora-album-detail-cover) 1fr auto; gap: 12px; align-items: center; min-height: calc(var(--aurora-album-detail-cover) + 24px); padding: 12px; border-bottom: 1px solid var(--explorer-border); background: rgba(8, 15, 23, .96); backdrop-filter: blur(12px); }
+.deep-explorer-album-detail > header { position: sticky; z-index: 3; top: 0; display: grid; grid-template-columns: var(--aurora-album-detail-cover) 1fr auto auto; gap: 12px; align-items: center; min-height: calc(var(--aurora-album-detail-cover) + 24px); padding: 12px; border-bottom: 1px solid var(--explorer-border); background: rgba(8, 15, 23, .96); backdrop-filter: blur(12px); }
+.deep-explorer-move-inbox { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 1px solid rgba(125, 211, 252, .26); border-radius: 6px; color: #bfe9fb; background: rgba(14, 84, 112, .18); cursor: pointer; }
+.deep-explorer-move-inbox svg { width: 14px; height: 14px; }
+.deep-explorer-move-inbox:disabled { cursor: wait; opacity: .6; }
+.deep-explorer-album-detail__error { margin: 10px 12px; color: #ff9eb2; }
 .deep-explorer-album-detail header .deep-explorer-album-artwork { width: var(--aurora-album-detail-cover); }
 .deep-explorer-album-detail h3 { margin: 3px 0 4px; font-size: max(var(--aurora-font-min), calc(15px + var(--aurora-font-offset))); font-weight: 500; }
 .deep-explorer-album-detail p { margin: 0; color: #b8c2cd; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
@@ -216,6 +220,9 @@
 .deep-explorer-delete-dialog__actions button.is-destructive { border-color: rgba(222, 94, 126, .55); color: #fff0f3; background: #9e2947; }
 .deep-explorer-delete-dialog__actions button:disabled { cursor: wait; opacity: .6; }
 .deep-explorer-delete-dialog__actions svg { width: 13px; height: 13px; }
+.deep-explorer-move-dialog { border-color: rgba(125, 211, 252, .35); }
+.deep-explorer-move-dialog .deep-explorer-delete-dialog__icon { color: #9bdcf7; background: rgba(14, 116, 144, .18); }
+.deep-explorer-move-dialog strong { color: #d8f3ff; overflow-wrap: anywhere; }
 
 .deep-explorer-artists { margin: 0; padding: 5px 0; list-style: none; }
 .deep-explorer-artists li { border-bottom: 1px solid rgba(142, 166, 189, .075); }
