@@ -137,6 +137,7 @@ describe("Inbox", () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
     await screen.findByRole("heading", { name: "Inbox" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Rename\s+Ctrl R$/u })).toBeEnabled());
     fireEvent.keyDown(window, { key: "r", ctrlKey: true });
 
     expect(await screen.findByText("10 tracks renamed with the album folder.")).toBeInTheDocument();

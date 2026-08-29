@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.7 gives album chart rankings a dedicated card row and represents their countries with bundled SVG flags.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.8 stabilizes the Inbox keyboard-rename verification across local and CI runner speeds.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.7 slice
+## Current 0.23.8 slice
+
+- Inbox `Ctrl+R` verification now waits for the asynchronously loaded album selection to make Rename available before exercising the shortcut, eliminating a runner-speed-dependent false failure.
 
 - Available album chart rankings now sit between the track-duration line and rating line on album cards, keeping ratings and scores visible even when all three rankings exist.
 - Album chart ranks use the shared United States, United Kingdom, and Norway SVG flags followed by their numeric position. Single chart ranks retain the `BB`, `UK`, `VG`, `TI`, and `NT` abbreviations.

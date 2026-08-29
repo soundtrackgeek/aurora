@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.8] - 2026-08-29
+
+### Fixed
+
+- Stabilized the Inbox `Ctrl+R` rename verification by waiting for the asynchronously loaded selection to enable Rename before sending the shortcut, preventing runner-speed-dependent CI failures.
+
 ## [0.23.7] - 2026-08-29
 
 ### Fixed
