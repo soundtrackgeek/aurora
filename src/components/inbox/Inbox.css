@@ -96,6 +96,8 @@
 .inbox-autotag > svg { width: 16px; color: #bd7cff; }.inbox-autotag span { min-width: 0; flex: 1; }.inbox-autotag strong, .inbox-autotag small { display: block; }.inbox-autotag strong { font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }.inbox-autotag small { margin-top: 2px; color: var(--subtle); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }.inbox-autotag kbd { color: #a990bc; font-size: 8px; }
 .inbox-rename { margin-top: 7px; border-color: rgba(93,167,217,.2); background: rgba(35,93,130,.1); color: #bfd8e8; }
 .inbox-rename > svg { color: #74b9e5; }
+.inbox-convert { margin-bottom: 7px; border-color: rgba(34,197,94,.28); background: rgba(22,101,52,.14); color: #bcebd0; }
+.inbox-convert > svg { color: #65d899; }
 .inbox-move p { margin: -3px 0 8px; color: var(--subtle); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); line-height: 1.4; }
 .inbox-move select { width: 100%; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #0b141f; color: #dbe1ea; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
 .inbox-move > button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; margin-top: 8px; }.inbox-move > button svg { width: 14px; }

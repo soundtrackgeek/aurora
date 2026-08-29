@@ -47,9 +47,10 @@ use history::{
 };
 use inbox::{
     DiscogsCredentialsRequest, InboxBatchRenameRequest, InboxBatchRenameResult,
-    InboxCoverEmbedRequest, InboxCoverEmbedResult, InboxRenameRequest, InboxRenameResult,
-    InboxRuntime, InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest, InboxTagApplyResult,
-    ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest, ReleaseSearchResult,
+    InboxConvertRequest, InboxConvertResult, InboxCoverEmbedRequest, InboxCoverEmbedResult,
+    InboxRenameRequest, InboxRenameResult, InboxRuntime, InboxSettingsStatus, InboxSnapshot,
+    InboxTagApplyRequest, InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest,
+    ReleaseSearchRequest, ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use lastfm::{AlbumPopularity, LastFmCredentialsRequest};
@@ -253,6 +254,23 @@ async fn rename_inbox_albums(
     tauri::async_runtime::spawn_blocking(move || inbox::rename_albums(request, &monitored_roots))
         .await
         .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn convert_inbox_lossless(
+    app: AppHandle,
+    request: InboxConvertRequest,
+) -> Result<InboxConvertResult, String> {
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
+    tauri::async_runtime::spawn_blocking(move || {
+        inbox::convert_lossless_album(request, &monitored_roots)
+    })
+    .await
+    .map_err(|error| format!("Aurora's Inbox converter stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1396,6 +1414,7 @@ pub fn run() {
             embed_inbox_album_cover,
             rename_inbox_album,
             rename_inbox_albums,
+            convert_inbox_lossless,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Aurora")

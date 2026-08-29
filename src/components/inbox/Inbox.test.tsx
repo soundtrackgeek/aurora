@@ -135,6 +135,47 @@ describe("Inbox", () => {
     expect(screen.getByRole("button", { name: "Apply & rename" })).toBeEnabled();
   });
 
+  it("converts a lossless Inbox album before enabling MP3 preparation", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const original = snapshot.albums[0];
+    const lossless = {
+      ...original,
+      artist: null,
+      album: null,
+      formats: ["FLAC", "APE"],
+      losslessTrackCount: 2,
+      artworkPresent: false,
+      artworkSourcePath: null,
+      artworkTrackCount: 0,
+      artworkReady: false,
+      readiness: { ready: false, issues: ["Convert 2 FLAC/APE tracks to 320 kbps MP3"] },
+      tracks: original.tracks.slice(0, 2).map((track, index) => ({
+        ...track,
+        path: track.path.replace(/\.mp3$/u, index === 0 ? ".flac" : ".ape"),
+        fileName: track.fileName.replace(/\.mp3$/u, index === 0 ? ".flac" : ".ape"),
+        format: index === 0 ? "FLAC" : "APE",
+      })),
+      trackCount: 2,
+    };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot")
+      .mockResolvedValueOnce({ ...snapshot, albums: [lossless] })
+      .mockResolvedValue({ ...snapshot, albums: [original] });
+    const convert = vi.spyOn(inboxAdapter, "convertInboxLossless").mockResolvedValue({
+      convertedTracks: 2,
+      deletedSources: 2,
+      failures: [],
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    expect(await screen.findByText("FLAC · APE")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Tags" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Auto-tag/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Convert to 320 kbps MP3/ }));
+
+    await waitFor(() => expect(convert).toHaveBeenCalledWith(lossless.path));
+    expect(await screen.findByText("2 tracks converted to 320 kbps MP3; 2 source files deleted.")).toBeInTheDocument();
+  });
+
   it("repairs partial embedded artwork before intake", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     const album = {

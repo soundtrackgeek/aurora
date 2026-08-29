@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.11 replaces Music Doctor for new music: Inbox scans staged MP3 quality, and intake saves it to Music Library's existing quality tables.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.12 prepares FLAC and APE finds for the MP3-only library with one fixed, verified 320 kbps conversion.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.11 slice
+## Current 0.23.12 slice
+
+- Inbox discovers FLAC- and APE-only album folders and blocks Ready until their lossless tracks are converted. **Convert to 320 kbps MP3** writes each MP3 beside its source with FFmpeg, verifies the output format, duration, and 320 kbps bitrate, and only then deletes that source file. Existing same-name MP3s are never overwritten. Aurora finds FFmpeg beside the app, on `PATH`, or at `C:\ffmpeg\bin\ffmpeg.exe`.
 
 - Inbox scans staged MP3 format, size, bitrate, and duration, caches unchanged probes, and blocks intake when audio properties cannot be read. The selected-album inspector shows the resulting aggregate before the move.
 - Successful reviewed intake writes the final published files' quality into Music Library's existing Music Doctor tables. The completed historical Music Doctor scan remains the baseline; Aurora owns new additions from this release onward.

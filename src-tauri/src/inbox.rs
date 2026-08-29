@@ -22,10 +22,14 @@ use std::{
     fs::{self, File},
     io::{Cursor, Write},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 const SETTINGS_VERSION: u8 = 1;
 const MAX_MONITORED_FOLDERS: usize = 10;
@@ -41,6 +45,8 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (https://github.com/soundtrackgeek/aurora)"
 );
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -130,6 +136,7 @@ pub(crate) struct InboxAlbum {
     avg_bitrate_kbps: Option<u32>,
     duration_ms: u64,
     audio_scan_error_count: usize,
+    lossless_track_count: usize,
     artwork_present: bool,
     artwork_source_path: Option<String>,
     artwork_track_count: usize,
@@ -323,6 +330,27 @@ pub(crate) struct InboxBatchRenameResult {
     renamed_albums: usize,
     renamed_folders: usize,
     failures: Vec<InboxRenameFailure>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InboxConvertRequest {
+    album_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxConversionFailure {
+    file_name: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxConvertResult {
+    converted_tracks: usize,
+    deleted_sources: usize,
+    failures: Vec<InboxConversionFailure>,
 }
 
 struct PreparedWrite {
@@ -826,6 +854,200 @@ pub(crate) fn embed_album_cover(
         changed_tracks: installed,
         track_count: verified.track_count,
     })
+}
+
+pub(crate) fn convert_lossless_album(
+    request: InboxConvertRequest,
+    monitored_roots: &[PathBuf],
+) -> Result<InboxConvertResult, String> {
+    static CONVERSION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = CONVERSION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "Aurora's Inbox converter stopped unexpectedly.".to_owned())?;
+    let album = canonical_directory(&request.album_path)?;
+    let allowed = monitored_roots.iter().any(|root| {
+        fs::canonicalize(root).is_ok_and(|canonical_root| album.starts_with(canonical_root))
+    });
+    if !allowed {
+        return Err("The Inbox album is outside the monitored folders.".to_owned());
+    }
+
+    let mut sources = fs::read_dir(&album)
+        .map_err(|error| format!("Could not read the Inbox album: {error}"))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|kind| kind.is_file() && !kind.is_symlink())
+                .map(|_| entry.path())
+        })
+        .filter(|path| is_lossless_source(path))
+        .collect::<Vec<_>>();
+    sources.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+    if sources.is_empty() {
+        return Err("The Inbox album contains no FLAC or APE files to convert.".to_owned());
+    }
+
+    let ffmpeg = discover_ffmpeg_executable()?;
+    let sequence = now_ms();
+    let mut result = InboxConvertResult {
+        converted_tracks: 0,
+        deleted_sources: 0,
+        failures: Vec::new(),
+    };
+    for (index, source) in sources.iter().enumerate() {
+        let file_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("lossless track")
+            .to_owned();
+        match convert_lossless_track(&ffmpeg, source, &album, sequence, index) {
+            Ok(()) => {
+                result.converted_tracks += 1;
+                result.deleted_sources += 1;
+            }
+            Err(message) => result
+                .failures
+                .push(InboxConversionFailure { file_name, message }),
+        }
+    }
+    Ok(result)
+}
+
+fn convert_lossless_track(
+    ffmpeg: &Path,
+    source: &Path,
+    album: &Path,
+    sequence: u64,
+    index: usize,
+) -> Result<(), String> {
+    let destination = source.with_extension("mp3");
+    if destination.exists() {
+        return Err("An MP3 with the same name already exists; nothing was changed.".to_owned());
+    }
+    let temporary = album.join(format!(
+        ".aurora-convert-{}-{sequence}-{index}.tmp.mp3",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&temporary);
+    let output = hidden_command(ffmpeg)
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-n", "-i"])
+        .arg(source)
+        .args([
+            "-map",
+            "0:a:0",
+            "-map",
+            "0:v?",
+            "-map_metadata",
+            "0",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "320k",
+            "-c:v",
+            "copy",
+            "-id3v2_version",
+            "3",
+            "-write_id3v1",
+            "1",
+        ])
+        .arg(&temporary)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    if !output.status.success() {
+        let _ = fs::remove_file(&temporary);
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .chars()
+            .take(800)
+            .collect::<String>();
+        return Err(if detail.is_empty() {
+            "FFmpeg could not convert this track; the source was kept.".to_owned()
+        } else {
+            format!("FFmpeg could not convert this track; the source was kept: {detail}")
+        });
+    }
+
+    let quality = inspect_audio_quality(&temporary, &mut HashMap::new());
+    let verified = temporary.is_file()
+        && quality.size_bytes > 0
+        && quality.duration_ms.is_some_and(|duration| duration > 0)
+        && quality
+            .bitrate_kbps
+            .is_some_and(|bitrate| (300..=340).contains(&bitrate))
+        && quality.scan_error.is_none();
+    if !verified {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!(
+            "Aurora could not verify a 320 kbps MP3 output; the source was kept (size {}, duration {:?}, bitrate {:?}, scan error {:?}).",
+            quality.size_bytes, quality.duration_ms, quality.bitrate_kbps, quality.scan_error
+        ));
+    }
+    fs::rename(&temporary, &destination).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        format!("Could not install the verified MP3; the source was kept: {error}")
+    })?;
+    if let Err(error) = fs::remove_file(source) {
+        let rollback = fs::remove_file(&destination);
+        return Err(match rollback {
+            Ok(()) => format!("Could not delete the source, so the new MP3 was removed: {error}"),
+            Err(rollback_error) => format!(
+                "Could not delete the source or roll back the new MP3: {error}; rollback failed: {rollback_error}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn discover_ffmpeg_executable() -> Result<PathBuf, String> {
+    let executable_name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    let mut candidates = Vec::new();
+    if let Some(override_path) = std::env::var_os("AURORA_FFMPEG_PATH") {
+        candidates.push(PathBuf::from(override_path));
+    }
+    if let Ok(current) = std::env::current_exe()
+        && let Some(parent) = current.parent()
+    {
+        candidates.push(parent.join(executable_name));
+    }
+    if let Some(path_value) = std::env::var_os("PATH") {
+        candidates.extend(
+            std::env::split_paths(&path_value).map(|directory| directory.join(executable_name)),
+        );
+    }
+    #[cfg(windows)]
+    candidates.push(PathBuf::from(r"C:\ffmpeg\bin\ffmpeg.exe"));
+
+    for candidate in candidates {
+        let available = hidden_command(&candidate)
+            .arg("-version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if available {
+            return Ok(candidate);
+        }
+    }
+    Err(
+        "Aurora needs FFmpeg to convert FLAC or APE files. Install FFmpeg or place ffmpeg.exe beside Aurora, then try again."
+            .to_owned(),
+    )
+}
+
+fn hidden_command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
 }
 
 pub(crate) fn rename_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
@@ -1499,7 +1721,7 @@ fn collect_album_directories(
             Ok(entries) => entries,
             Err(_) => continue,
         };
-        let mut has_mp3 = false;
+        let mut has_audio = false;
         let mut children = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1511,11 +1733,11 @@ fn collect_album_directories(
             }
             if kind.is_dir() {
                 children.push(path);
-            } else if kind.is_file() && is_mp3(&path) {
-                has_mp3 = true;
+            } else if kind.is_file() && is_inbox_audio(&path) {
+                has_audio = true;
             }
         }
-        if has_mp3 {
+        if has_audio {
             albums.insert(directory);
         }
         pending.extend(children);
@@ -1537,7 +1759,7 @@ fn scan_album_cached(
         .map_err(|error| error.to_string())?
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && is_mp3(path))
+        .filter(|path| path.is_file() && is_inbox_audio(path))
         .map(|path| scan_track(&path, quality_cache, active_tracks))
         .collect::<Result<Vec<_>, _>>()?;
     tracks.sort_by(|left, right| {
@@ -1556,6 +1778,17 @@ fn scan_album_cached(
     let mut modified_at_ms = 0;
     for track in &tracks {
         let path = Path::new(&track.path);
+        if !is_mp3(path) {
+            tags.push(EditableTagValues::default());
+            modified_at_ms = modified_at_ms.max(
+                fs::metadata(path)
+                    .ok()
+                    .and_then(|value| value.modified().ok())
+                    .and_then(system_time_ms)
+                    .unwrap_or(0),
+            );
+            continue;
+        }
         let (tag, _) = read_tag_for_write(path)?;
         let front_pictures = tag
             .pictures()
@@ -1618,76 +1851,94 @@ fn scan_album_cached(
         .iter()
         .filter(|track| track.scan_error.is_some())
         .count();
-    let mut issues = Vec::new();
-    if artist.is_none() {
-        issues.push("Album artist is missing or inconsistent".to_owned());
-    }
-    if album.is_none() {
-        issues.push("Album title is missing or inconsistent".to_owned());
-    }
-    if tracks.iter().any(|track| track.title.is_none()) {
-        issues.push("One or more track titles are missing".to_owned());
-    }
-    if tracks.iter().any(|track| track.track_number.is_none()) {
-        issues.push("Track numbers are incomplete".to_owned());
-    }
-    if tracks.len() > 1 && tracks.iter().any(|track| track.track_total.is_none()) {
-        issues.push("Track totals are incomplete".to_owned());
-    }
-    let has_disc_numbers = tracks.iter().any(|track| track.disc_number.is_some());
-    if has_disc_numbers && tracks.iter().any(|track| track.disc_number.is_none()) {
-        issues.push("Disc numbers are incomplete".to_owned());
-    }
-    if genre.is_none() {
-        issues.push("Genre is missing or inconsistent".to_owned());
-    }
-    if publisher.is_none() {
-        issues.push("Publisher is missing or inconsistent".to_owned());
-    }
-    if year.is_none() || year.is_some_and(|value| value <= 0) {
-        issues.push("Year is missing or inconsistent".to_owned());
-    }
-    if audio_scan_error_count > 0 {
-        issues.push(format!(
-            "Audio properties could not be read from {audio_scan_error_count} {}",
-            if audio_scan_error_count == 1 {
-                "track"
-            } else {
-                "tracks"
-            }
-        ));
-    }
-    let missing_artwork_tracks = tracks.len().saturating_sub(artwork_track_count);
-    if missing_artwork_tracks == tracks.len() {
-        issues.push("Embedded front cover is missing".to_owned());
-    } else if missing_artwork_tracks > 0 {
-        issues.push(format!(
-            "Embedded front cover is missing or invalid on {missing_artwork_tracks} {}",
-            if missing_artwork_tracks == 1 {
-                "track"
-            } else {
-                "tracks"
-            }
-        ));
-    }
-    if duplicate_front_cover {
-        issues.push("One or more tracks contain multiple embedded front covers".to_owned());
-    }
+    let lossless_track_count = tracks
+        .iter()
+        .filter(|track| !track.format.eq_ignore_ascii_case("MP3"))
+        .count();
     let inconsistent_artwork = artwork_digests.len() > 1;
-    if inconsistent_artwork {
-        issues.push("Embedded front covers are inconsistent".to_owned());
-    }
-    let artwork_ready =
-        artwork_track_count == tracks.len() && !duplicate_front_cover && !inconsistent_artwork;
+    let artwork_ready = lossless_track_count == 0
+        && artwork_track_count == tracks.len()
+        && !duplicate_front_cover
+        && !inconsistent_artwork;
     let artwork_source_path = front_cover_source.or(fallback_cover_source);
     let artwork_present = artwork_source_path.is_some();
-    issues.extend(organization_issues(
-        &canonical,
-        artist.as_deref(),
-        album.as_deref(),
-        year,
-        &tracks,
-    ));
+    let mut issues = Vec::new();
+    if lossless_track_count > 0 {
+        issues.push(format!(
+            "Convert {lossless_track_count} FLAC/APE {} to 320 kbps MP3",
+            if lossless_track_count == 1 {
+                "track"
+            } else {
+                "tracks"
+            }
+        ));
+    }
+    if lossless_track_count == 0 {
+        if artist.is_none() {
+            issues.push("Album artist is missing or inconsistent".to_owned());
+        }
+        if album.is_none() {
+            issues.push("Album title is missing or inconsistent".to_owned());
+        }
+        if tracks.iter().any(|track| track.title.is_none()) {
+            issues.push("One or more track titles are missing".to_owned());
+        }
+        if tracks.iter().any(|track| track.track_number.is_none()) {
+            issues.push("Track numbers are incomplete".to_owned());
+        }
+        if tracks.len() > 1 && tracks.iter().any(|track| track.track_total.is_none()) {
+            issues.push("Track totals are incomplete".to_owned());
+        }
+        let has_disc_numbers = tracks.iter().any(|track| track.disc_number.is_some());
+        if has_disc_numbers && tracks.iter().any(|track| track.disc_number.is_none()) {
+            issues.push("Disc numbers are incomplete".to_owned());
+        }
+        if genre.is_none() {
+            issues.push("Genre is missing or inconsistent".to_owned());
+        }
+        if publisher.is_none() {
+            issues.push("Publisher is missing or inconsistent".to_owned());
+        }
+        if year.is_none() || year.is_some_and(|value| value <= 0) {
+            issues.push("Year is missing or inconsistent".to_owned());
+        }
+        if audio_scan_error_count > 0 {
+            issues.push(format!(
+                "Audio properties could not be read from {audio_scan_error_count} {}",
+                if audio_scan_error_count == 1 {
+                    "track"
+                } else {
+                    "tracks"
+                }
+            ));
+        }
+        let missing_artwork_tracks = tracks.len().saturating_sub(artwork_track_count);
+        if missing_artwork_tracks == tracks.len() {
+            issues.push("Embedded front cover is missing".to_owned());
+        } else if missing_artwork_tracks > 0 {
+            issues.push(format!(
+                "Embedded front cover is missing or invalid on {missing_artwork_tracks} {}",
+                if missing_artwork_tracks == 1 {
+                    "track"
+                } else {
+                    "tracks"
+                }
+            ));
+        }
+        if duplicate_front_cover {
+            issues.push("One or more tracks contain multiple embedded front covers".to_owned());
+        }
+        if inconsistent_artwork {
+            issues.push("Embedded front covers are inconsistent".to_owned());
+        }
+        issues.extend(organization_issues(
+            &canonical,
+            artist.as_deref(),
+            album.as_deref(),
+            year,
+            &tracks,
+        ));
+    }
     let path = path_text(&canonical)?;
     let id = hex_hash(path.as_bytes());
     Ok(InboxAlbum {
@@ -1709,6 +1960,7 @@ fn scan_album_cached(
         avg_bitrate_kbps,
         duration_ms,
         audio_scan_error_count,
+        lossless_track_count,
         artwork_present,
         artwork_source_path,
         artwork_track_count,
@@ -1777,16 +2029,20 @@ fn scan_track(
     let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
     active_tracks.insert(canonical.clone());
     let quality = inspect_audio_quality(&canonical, quality_cache);
-    let (tag, _) = read_tag_for_write(&canonical)?;
-    let values = read_editable_tag_values(&tag)?;
+    let values = if is_mp3(&canonical) {
+        let (tag, _) = read_tag_for_write(&canonical)?;
+        read_editable_tag_values(&tag)?
+    } else {
+        EditableTagValues::default()
+    };
     Ok(InboxTrack {
         path: path_text(&canonical)?,
         file_name: canonical
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or("track.mp3")
+            .unwrap_or("track")
             .to_owned(),
-        format: "MP3".to_owned(),
+        format: audio_format(&canonical).unwrap_or("Unknown").to_owned(),
         size_bytes: quality.size_bytes,
         bitrate_kbps: quality.bitrate_kbps,
         duration_ms: quality.duration_ms,
@@ -2353,6 +2609,24 @@ fn is_mp3(path: &Path) -> bool {
             .and_then(|value| value.to_str())
             .is_some_and(|value| value.eq_ignore_ascii_case("mp3"))
 }
+fn is_lossless_source(path: &Path) -> bool {
+    audio_format(path).is_some_and(|format| matches!(format, "FLAC" | "APE"))
+}
+fn is_inbox_audio(path: &Path) -> bool {
+    !path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.starts_with(".aurora-"))
+        && audio_format(path).is_some()
+}
+fn audio_format(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "mp3" => Some("MP3"),
+        "flac" => Some("FLAC"),
+        "ape" => Some("APE"),
+        _ => None,
+    }
+}
 fn system_time_ms(value: SystemTime) -> Option<u64> {
     value
         .duration_since(UNIX_EPOCH)
@@ -2494,6 +2768,115 @@ mod tests {
         assert_eq!(sanitize_component("CON").unwrap(), "_CON");
         assert_eq!(decimal_width(9).max(2), 2);
         assert_eq!(decimal_width(101).max(2), 3);
+    }
+
+    #[test]
+    fn inbox_audio_detection_accepts_mp3_flac_and_ape_only() {
+        assert!(is_inbox_audio(Path::new("track.mp3")));
+        assert!(is_inbox_audio(Path::new("track.FLAC")));
+        assert!(is_inbox_audio(Path::new("track.Ape")));
+        assert!(!is_inbox_audio(Path::new("track.wav")));
+        assert!(!is_inbox_audio(Path::new(".aurora-convert.tmp.mp3")));
+    }
+
+    #[test]
+    fn converting_flac_installs_verified_mp3_before_deleting_source() {
+        let Ok(ffmpeg) = discover_ffmpeg_executable() else {
+            return;
+        };
+        let root = tempfile::tempdir().expect("temporary Inbox root");
+        let album = root.path().join("Lossless Album");
+        fs::create_dir(&album).expect("album folder");
+        let source = album.join("01 - Test Track.flac");
+        let generated = hidden_command(&ffmpeg)
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:a",
+                "flac",
+                "-metadata",
+                "album_artist=Test Artist",
+                "-metadata",
+                "artist=Test Artist",
+                "-metadata",
+                "album=Test Album",
+                "-metadata",
+                "title=Test Track",
+                "-metadata",
+                "date=1990",
+                "-metadata",
+                "track=1/1",
+            ])
+            .arg(&source)
+            .stdin(Stdio::null())
+            .status()
+            .expect("generate FLAC fixture");
+        assert!(generated.success());
+
+        let before = scan_album(&album).expect("scan lossless album");
+        assert_eq!(before.lossless_track_count, 1);
+        assert_eq!(before.formats, vec!["FLAC"]);
+        assert_eq!(
+            before.readiness.issues,
+            vec!["Convert 1 FLAC/APE track to 320 kbps MP3"]
+        );
+
+        let result = convert_lossless_album(
+            InboxConvertRequest {
+                album_path: path_text(&album).expect("album path"),
+            },
+            &[root.path().to_path_buf()],
+        )
+        .expect("convert FLAC album");
+        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        assert_eq!(result.converted_tracks, 1);
+        assert_eq!(result.deleted_sources, 1);
+        assert!(!source.exists());
+
+        let destination = album.join("01 - Test Track.mp3");
+        assert!(destination.is_file());
+        let quality = inspect_audio_quality(&destination, &mut HashMap::new());
+        assert!(
+            quality
+                .bitrate_kbps
+                .is_some_and(|bitrate| (300..=340).contains(&bitrate))
+        );
+        assert!(quality.duration_ms.is_some_and(|duration| duration > 0));
+        let after = scan_album(&album).expect("scan converted album");
+        assert_eq!(after.lossless_track_count, 0);
+        assert_eq!(after.formats, vec!["MP3"]);
+        assert_eq!(after.artist.as_deref(), Some("Test Artist"));
+        assert_eq!(after.album.as_deref(), Some("Test Album"));
+        assert_eq!(after.year, Some(1990));
+        assert_eq!(after.tracks[0].title.as_deref(), Some("Test Track"));
+    }
+
+    #[test]
+    fn conversion_never_overwrites_an_existing_mp3() {
+        let root = tempfile::tempdir().expect("temporary Inbox root");
+        let source = root.path().join("track.flac");
+        let destination = root.path().join("track.mp3");
+        fs::write(&source, b"lossless source").expect("source fixture");
+        fs::write(&destination, b"existing mp3").expect("destination fixture");
+
+        let error = convert_lossless_track(
+            Path::new("missing-ffmpeg"),
+            &source,
+            root.path(),
+            now_ms(),
+            0,
+        )
+        .expect_err("collision must fail");
+
+        assert!(error.contains("already exists"));
+        assert_eq!(fs::read(&source).expect("source kept"), b"lossless source");
+        assert_eq!(fs::read(&destination).expect("MP3 kept"), b"existing mp3");
     }
 
     #[test]

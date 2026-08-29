@@ -50,6 +50,7 @@ export interface InboxAlbum {
   avgBitrateKbps?: number | null;
   durationMs?: number;
   audioScanErrorCount?: number;
+  losslessTrackCount: number;
   artworkPresent: boolean;
   artworkSourcePath: string | null;
   artworkTrackCount: number;
@@ -133,6 +134,12 @@ export interface InboxCoverEmbedResult {
   trackCount: number;
 }
 
+export interface InboxConvertResult {
+  convertedTracks: number;
+  deletedSources: number;
+  failures: Array<{ fileName: string; message: string }>;
+}
+
 export function inboxCoverUrl(
   album: Pick<InboxAlbum, "id" | "artworkPresent" | "artworkSourcePath" | "modifiedAtMs">,
   size: 64 | 128 | 256,
@@ -197,6 +204,7 @@ const previewAlbum: InboxAlbum = {
   avgBitrateKbps: 320,
   durationMs: previewTracks.reduce((total, track) => total + (track.durationMs ?? 0), 0),
   audioScanErrorCount: 0,
+  losslessTrackCount: 0,
   artworkPresent: true,
   artworkSourcePath: previewTracks[0].path,
   artworkTrackCount: 10,
@@ -332,6 +340,13 @@ export async function embedInboxAlbumCover(
   if (!isTauriRuntime()) return { changedTracks: previewTracks.length, trackCount: previewTracks.length };
   return invoke<InboxCoverEmbedResult>("embed_inbox_album_cover", {
     request: { albumPath, imagePath },
+  });
+}
+
+export async function convertInboxLossless(albumPath: string): Promise<InboxConvertResult> {
+  if (!isTauriRuntime()) return { convertedTracks: 1, deletedSources: 1, failures: [] };
+  return invoke<InboxConvertResult>("convert_inbox_lossless", {
+    request: { albumPath },
   });
 }
 

@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.12] - 2026-08-29
+
+### Added
+
+- Inbox now discovers FLAC and APE album folders and offers one fixed **Convert to 320 kbps MP3** action before tagging or intake.
+- Each conversion uses a same-folder temporary MP3, preserves source metadata and attached artwork through FFmpeg, verifies a readable 320 kbps output with duration, installs it without overwriting an existing MP3, and deletes the source only after verification succeeds.
+
 ## [0.23.11] - 2026-08-29
 
 ### Added

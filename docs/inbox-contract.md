@@ -1,14 +1,21 @@
 # Inbox contract
 
-Aurora 0.23.9 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
+Aurora 0.23.12 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
 
 ## Monitoring and identity
 
 - Inbox stores at most ten canonical folder paths in `%APPDATA%\com.soundtrackgeek.aurora\aurora-inbox.json`. The setting is device-local and is not copied into Aurora's shared state or OneDrive snapshots.
-- Aurora performs a bounded recursive scan on entry, every 15 seconds while visible, and whenever the window regains focus. Directory symlinks and reparse-style links are not followed; one directory containing MP3 files is one staged album.
+- Aurora performs a bounded recursive scan on entry, every 15 seconds while visible, and whenever the window regains focus. Directory symlinks and reparse-style links are not followed; one directory containing MP3, FLAC, or APE files is one staged album.
 - Scanning never opens the Music Library database for writes and never moves, renames, or catalogs a file. A SHA-256 of the canonical album path provides React's stable selection identity without exposing it as catalog identity.
 - Aurora scans every track's embedded ID3 pictures and uses the first usable front cover in disc/track/filename order as the album display and repair source, falling back to another valid embedded picture only as a repair source. Bounded cached WebP thumbnails still pass through the contained local cover protocol.
 - Readiness requires exactly one valid embedded front cover in every MP3 and identical image bytes across the album. It also reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, Genre, and Publisher. Disc numbering is optional, but a partially numbered multidisc album is reported as incomplete. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
+
+## Lossless conversion
+
+- Any FLAC or APE track blocks Ready and keeps the MP3-only tag, artwork, rename, and intake tools disabled until conversion completes.
+- **Convert to 320 kbps MP3** has no format options. Aurora finds FFmpeg beside the executable, on `PATH`, or at the standard local `C:\ffmpeg\bin\ffmpeg.exe` location, then maps the first audio stream, source metadata, and optional attached artwork into a 320 kbps `libmp3lame` output beside the source.
+- Aurora writes a uniquely named same-folder temporary MP3 with FFmpeg's fixed `-b:a 320k` setting and requires a non-empty, readable output with duration and a measured bitrate in the narrow range expected around 320 kbps (including short-track container overhead). It never overwrites a same-name MP3. Only after the verified temporary file is installed does Aurora delete the corresponding FLAC or APE source; if source deletion fails, Aurora removes the new MP3 to keep that track unchanged.
+- Conversion is isolated per track. Successful tracks stay converted and have their sources removed, while a failed track retains its source and reports the first actionable FFmpeg or filesystem error in Inbox.
 
 ## Metadata providers
 
