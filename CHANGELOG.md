@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-08-29
+
+### Added
+
+- Album detail now marks the three tracks with the highest available global Last.fm popularity using a small 🔥 indicator. Tracks without imported Last.fm play counts remain unmarked.
+
 ## [0.23.0] - 2026-08-28
 
 ### Added

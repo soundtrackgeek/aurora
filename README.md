@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.0 adds secure Last.fm artist portraits and richer Listening Report artwork.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.1 highlights each album's most popular Last.fm tracks.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.0 slice
+## Current 0.23.1 slice
+
+- Opening an album marks up to three tracks with the highest available global Last.fm play counts using a small 🔥 indicator. Sparse or unmatched Last.fm data stays unmarked instead of inventing a ranking.
 
 - Listening Report shows small Last.fm portraits for top artists and local album covers for top tracks. The Artists page uses the same portrait component by default and retains its initials fallback when Last.fm has no usable image.
 - Metadata Settings accepts a Last.fm API key and shared secret. Aurora keeps both in the operating-system credential vault, uses only the key for unsigned artist lookups, proxies bounded Last.fm images through a local protocol, and caches resized WebP portraits without exposing credentials to React.

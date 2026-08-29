@@ -337,6 +337,34 @@ describe("DeepExplorer", () => {
     expect(albumTracks.getByText("02")).toBeVisible();
   });
 
+  it("marks the three album tracks with the highest available Last.fm popularity", () => {
+    const popularityTracks = [
+      { ...tracks[0], id: "track-1", trackKey: "file:track-1", title: "First", playCount: 84 },
+      { ...tracks[0], id: "track-2", trackKey: "file:track-2", title: "Second", playCount: 210 },
+      { ...tracks[0], id: "track-3", trackKey: "file:track-3", title: "Third", playCount: null },
+      { ...tracks[0], id: "track-4", trackKey: "file:track-4", title: "Fourth", playCount: 109 },
+      { ...tracks[0], id: "track-5", trackKey: "file:track-5", title: "Fifth", playCount: 97 },
+    ];
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: popularityTracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const albumTracks = within(screen.getByRole("grid", { name: "Album tracks" }));
+    expect(albumTracks.getAllByLabelText("One of this album's top 3 Last.fm tracks")).toHaveLength(3);
+    expect(albumTracks.getByRole("row", { name: /Second/ })).toHaveTextContent("🔥");
+    expect(albumTracks.getByRole("row", { name: /Fourth/ })).toHaveTextContent("🔥");
+    expect(albumTracks.getByRole("row", { name: /Fifth/ })).toHaveTextContent("🔥");
+    expect(albumTracks.getByRole("row", { name: /First/ })).not.toHaveTextContent("🔥");
+    expect(albumTracks.getByRole("row", { name: /Third/ })).not.toHaveTextContent("🔥");
+  });
+
   it("shows half-star Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer
