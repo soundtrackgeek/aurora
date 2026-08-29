@@ -1,6 +1,13 @@
 import { Flag } from "lucide-react";
 import type { CatalogChartRank } from "../../charts";
+import { CountryFlag } from "../CountryFlag";
 import "./CatalogChartRanks.css";
+
+const albumChartCountries: Partial<Record<CatalogChartRank["source"], { code: string; name: string }>> = {
+  billboard: { code: "US", name: "United States" },
+  officialUk: { code: "GB", name: "United Kingdom" },
+  vgLista: { code: "NO", name: "Norway" },
+};
 
 export function CatalogChartRanks({
   ranks,
@@ -13,12 +20,18 @@ export function CatalogChartRanks({
   const description = ranks.map((rank) => `${rank.label} number ${rank.rank}`).join(", ");
   return (
     <span className={`catalog-chart-ranks catalog-chart-ranks--${kind}`} aria-label={`Chart rankings: ${description}`}>
-      <Flag aria-hidden="true" />
-      {ranks.map((rank) => (
-        <span key={rank.source} title={`${rank.label} #${rank.rank}`}>
-          <strong>{rank.shortLabel}</strong>:#{rank.rank}
-        </span>
-      ))}
+      {kind === "track" ? <Flag aria-hidden="true" /> : null}
+      {ranks.map((rank) => {
+        const country = kind === "album" ? albumChartCountries[rank.source] : undefined;
+        return (
+          <span key={rank.source} title={`${rank.label} #${rank.rank}`}>
+            {country
+              ? <CountryFlag code={country.code} name={country.name} ariaLabel={`${country.name} chart`} />
+              : <><strong>{rank.shortLabel}</strong>:</>}
+            #{rank.rank}
+          </span>
+        );
+      })}
     </span>
   );
 }

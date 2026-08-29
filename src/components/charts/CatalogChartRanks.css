@@ -3,4 +3,6 @@
 .catalog-chart-ranks > span { color: #a7b2bd; }
 .catalog-chart-ranks > span > strong { display: inline; overflow: visible; color: #dc77f1; font-weight: 560; white-space: nowrap; }
 .catalog-chart-ranks--album { margin-left: 3px; }
+.catalog-chart-ranks--album > span { display: inline-flex; align-items: center; gap: 3px; }
+.catalog-chart-ranks--album .aurora-country-flag { width: 14px; border-radius: 1px; }
 .metadata-list .catalog-chart-ranks { justify-content: flex-end; flex-wrap: wrap; white-space: normal; }

@@ -5,6 +5,7 @@ interface CountryFlagProps {
   code?: string | null;
   name?: string | null;
   className?: string;
+  ariaLabel?: string;
 }
 
 function flagCode(value?: string | null): string | null {
@@ -38,15 +39,15 @@ function loadFlag(code: string): Promise<string> | null {
   });
 }
 
-export function CountryFlag({ code, name, className = "" }: CountryFlagProps) {
+export function CountryFlag({ code, name, className = "", ariaLabel }: CountryFlagProps) {
   const normalizedCode = flagCode(code);
   if (!normalizedCode) return null;
 
   const countryName = name?.trim() || code?.trim().toLocaleUpperCase() || "Unknown country";
-  return <LoadedCountryFlag code={normalizedCode} countryName={countryName} className={className} />;
+  return <LoadedCountryFlag code={normalizedCode} countryName={countryName} className={className} ariaLabel={ariaLabel} />;
 }
 
-function LoadedCountryFlag({ code, countryName, className }: { code: string; countryName: string; className: string }) {
+function LoadedCountryFlag({ code, countryName, className, ariaLabel }: { code: string; countryName: string; className: string; ariaLabel?: string }) {
   const [loaded, setLoaded] = useState<{ code: string; url: string } | null>(() => (
     loadedFlags.has(code) ? { code, url: loadedFlags.get(code) ?? "" } : null
   ));
@@ -68,7 +69,7 @@ function LoadedCountryFlag({ code, countryName, className }: { code: string; cou
     <span
       className={`aurora-country-flag${url ? " is-loaded" : ""}${className ? ` ${className}` : ""}`}
       role="img"
-      aria-label={`${countryName} origin country`}
+      aria-label={ariaLabel ?? `${countryName} origin country`}
       title={countryName}
     >
       {url ? <img src={url} alt="" aria-hidden="true" /> : null}

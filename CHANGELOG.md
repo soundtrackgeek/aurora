@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.7] - 2026-08-29
+
+### Fixed
+
+- Moved available album chart rankings onto their own card row between duration and rating so dense chart data cannot hide the album rating or score.
+- Replaced `US`, `UK`, and `NO` album-chart abbreviations with the shared bundled country SVG flags while retaining compact numeric ranks and leaving single-chart abbreviations unchanged.
+
 ## [0.23.6] - 2026-08-29
 
 ### Added

@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.6 brings Music Library's artist-origin country flags to album-level views and adds country-aware catalog search.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.7 gives album chart rankings a dedicated card row and represents their countries with bundled SVG flags.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.6 slice
+## Current 0.23.7 slice
+
+- Available album chart rankings now sit between the track-duration line and rating line on album cards, keeping ratings and scores visible even when all three rankings exist.
+- Album chart ranks use the shared United States, United Kingdom, and Norway SVG flags followed by their numeric position. Single chart ranks retain the `BB`, `UK`, `VG`, `TI`, and `NT` abbreviations.
 
 - Albums now show Music Library's bundled SVG origin-country flag beside the Album Artist on each album card, in opened album detail, and in the Album inspector. Track rows remain deliberately unchanged.
 - Catalog search now supports `country:` by imported origin-country name or two-letter code, including boolean and inherited alternatives such as `country:norway OR sweden`, exact values, `NOT`, and leading `-` exclusions.

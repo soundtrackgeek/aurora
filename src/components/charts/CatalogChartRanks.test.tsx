@@ -16,4 +16,22 @@ describe("CatalogChartRanks", () => {
     const { container } = render(<CatalogChartRanks kind="album" ranks={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("uses country flags instead of abbreviations for album charts", () => {
+    const ranks = [
+      { source: "billboard", label: "Billboard", shortLabel: "US", rank: 1 },
+      { source: "officialUk", label: "Official UK", shortLabel: "UK", rank: 2 },
+      { source: "vgLista", label: "VG Lista", shortLabel: "NO", rank: 3 },
+    ] as const;
+    render(<CatalogChartRanks kind="album" ranks={ranks} />);
+
+    const group = screen.getByLabelText("Chart rankings: Billboard number 1, Official UK number 2, VG Lista number 3");
+    expect(screen.getByRole("img", { name: "United States chart" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "United Kingdom chart" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Norway chart" })).toBeInTheDocument();
+    expect(group).toHaveTextContent("#1");
+    expect(group).toHaveTextContent("#2");
+    expect(group).toHaveTextContent("#3");
+    expect(group).not.toHaveTextContent(/US|UK|NO/u);
+  });
 });

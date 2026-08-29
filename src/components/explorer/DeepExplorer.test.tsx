@@ -272,6 +272,23 @@ describe("DeepExplorer", () => {
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });
 
+  it("keeps album charts on their own card row before rating", () => {
+    render(<DeepExplorer {...explorerProps({
+      view: "albums",
+      albumChartRanks: {
+        "album-1": [{ source: "billboard", label: "Billboard", shortLabel: "US", rank: 1 }],
+      },
+      pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+    })} />);
+
+    const albumButton = screen.getByRole("button", { name: /Night Geometry/ });
+    const lengthRow = albumButton.querySelector(".deep-explorer-album__length");
+    const chartRow = albumButton.querySelector(".deep-explorer-album__charts");
+    const ratingRow = albumButton.querySelector(".deep-explorer-album__metrics");
+    expect(chartRow?.previousElementSibling).toBe(lengthRow);
+    expect(chartRow?.nextElementSibling).toBe(ratingRow);
+  });
+
   it("uses Windows Ctrl and Shift selection in the album grid", () => {
     const extraAlbums = [
       ...albums,

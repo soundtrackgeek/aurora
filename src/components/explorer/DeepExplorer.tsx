@@ -698,8 +698,8 @@ function AlbumGrid({
                   </small>
                   <small className="deep-explorer-album__length">
                     {formatCount(album.totalTracks)} tracks <span aria-hidden="true">—</span> {formatDuration(album.durationSeconds)}
-                    <CatalogChartRanks kind="album" ranks={chartRanks?.[album.id]} />
                   </small>
+                  {chartRanks?.[album.id]?.length ? <span className="deep-explorer-album__charts"><CatalogChartRanks kind="album" ranks={chartRanks[album.id]} /></span> : null}
                   <span className="deep-explorer-album__metrics">
                     <AlbumRatingStars rating={album.rating} />
                     <span aria-hidden="true">·</span>

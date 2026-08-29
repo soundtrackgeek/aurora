@@ -178,6 +178,8 @@
 .deep-explorer-album__artist > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .deep-explorer-album__artist .aurora-country-flag { width: 16px; }
 .deep-explorer-album__copy small { margin-top: 3px; color: #697789; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
+.deep-explorer-album__copy > .deep-explorer-album__charts { display: flex; align-items: center; margin-top: 4px; overflow: hidden; }
+.deep-explorer-album__charts .catalog-chart-ranks--album { margin-left: 0; }
 .deep-explorer-album__copy > .deep-explorer-album__metrics { display: flex; align-items: center; gap: 3px; margin-top: 5px; overflow: hidden; color: #8896a5; font-size: max(var(--aurora-font-min), calc(7px + var(--aurora-font-offset))); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .deep-explorer-album-rating { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: #d8b363; font-variant-numeric: tabular-nums; }
 .deep-explorer-album-rating.is-unrated { color: #657282; }
