@@ -35,6 +35,8 @@ import { ArtistPortrait } from "../ArtistPortrait";
 import { libraryIntakeAdapter, type LibraryIntakePreview } from "../../ingest";
 import { loadInboxSettings } from "../../inbox";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
+import type { CatalogChartRank } from "../../charts";
+import { CatalogChartRanks } from "../charts/CatalogChartRanks";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import "./DeepExplorer.css";
 
@@ -111,6 +113,8 @@ export interface DeepExplorerProps {
   selectedAlbumId: string | null;
   selectedArtistId: string | null;
   albumTracks: readonly Track[];
+  trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  albumChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
   albumTracksTruncated?: boolean;
   loadState: ExplorerLoadState;
   errorMessage?: string | null;
@@ -382,6 +386,7 @@ function TrackTable({
   multiSelectedTrackKeys,
   onSelectionGesture,
   compact = false,
+  chartRanks,
 }: {
   tracks: readonly Track[];
   selectedTrackId: string | null;
@@ -396,6 +401,7 @@ function TrackTable({
   multiSelectedTrackKeys?: ReadonlySet<string>;
   onSelectionGesture?: (track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) => void;
   compact?: boolean;
+  chartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
 }) {
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const selectionIsVisible = tracks.some((track) => multiSelectedTrackKeys?.has(track.trackKey) || track.id === selectedTrackId);
@@ -481,6 +487,7 @@ function TrackTable({
                     <span>
                       <span className="deep-explorer-track-heading">
                         <strong>{track.title}</strong>
+                        <CatalogChartRanks kind="track" ranks={chartRanks?.[track.id]} />
                         {compact && track.lastFmAlbumRank ? (
                           <span
                             className="deep-explorer-track-popular"
@@ -607,6 +614,7 @@ function AlbumGrid({
   onSelectionGesture,
   detailAlbumId,
   detail,
+  chartRanks,
 }: {
   albums: readonly ExplorerAlbum[];
   selectedAlbumId: string | null;
@@ -615,6 +623,7 @@ function AlbumGrid({
   onSelectionGesture?: (album: ExplorerAlbum, index: number, modifiers: SelectionModifiers) => boolean;
   detailAlbumId: string | null;
   detail: ReactNode;
+  chartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [columnCount, setColumnCount] = useState(1);
@@ -683,6 +692,7 @@ function AlbumGrid({
                   </small>
                   <small className="deep-explorer-album__length">
                     {formatCount(album.totalTracks)} tracks <span aria-hidden="true">—</span> {formatDuration(album.durationSeconds)}
+                    <CatalogChartRanks kind="album" ranks={chartRanks?.[album.id]} />
                   </small>
                   <span className="deep-explorer-album__metrics">
                     <AlbumRatingStars rating={album.rating} />
@@ -722,6 +732,8 @@ function AlbumDetail({
   onDeleteTracks,
   onAlbumMovedToInbox,
   onSelectionChange,
+  trackChartRanks,
+  albumChartRanks,
 }: {
   album: ExplorerAlbum;
   tracks: readonly Track[];
@@ -741,6 +753,8 @@ function AlbumDetail({
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onAlbumMovedToInbox?: () => boolean | void | Promise<boolean | void>;
   onSelectionChange?: (selection: ExplorerSelection) => void;
+  trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  albumChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
 }) {
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
     tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
@@ -857,6 +871,7 @@ function AlbumDetail({
           <small>
             {album.originalYear ?? "Year unknown"} · {formatCount(album.totalTracks)} tracks · {formatDuration(album.durationSeconds)}
             {tracksTruncated ? " · first 100 shown" : ""}
+            <CatalogChartRanks kind="album" ranks={albumChartRanks?.[album.id]} />
           </small>
           <span className="deep-explorer-album-score">
             <AlbumRatingStars rating={album.rating} />
@@ -898,6 +913,7 @@ function AlbumDetail({
             onDeleteTrack={onDeleteTracks ? requestDelete : undefined}
             multiSelectedTrackKeys={visibleSelectedTrackKeys}
             onSelectionGesture={selectWithModifiers}
+            chartRanks={trackChartRanks}
             compact
           />
         </>
@@ -1010,6 +1026,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
     selectedAlbumId,
     selectedArtistId,
     albumTracks,
+    trackChartRanks = {},
+    albumChartRanks = {},
     albumTracksTruncated = false,
     loadState,
     errorMessage,
@@ -1239,6 +1257,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onLoveChange={onLoveChange}
             multiSelectedTrackKeys={selectedTrackKeys}
             onSelectionGesture={selectTracks}
+            chartRanks={trackChartRanks}
           />
         ) : view === "albums" ? (
           <AlbumGrid
@@ -1248,6 +1267,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onSelectAlbum={selectOrToggleAlbum}
             onSelectionGesture={selectAlbums}
             detailAlbumId={detailAlbum?.id ?? null}
+            chartRanks={albumChartRanks}
             detail={detailAlbum ? (
               <AlbumDetail
                 key={detailAlbum.id}
@@ -1269,6 +1289,8 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onDeleteTracks={onDeleteTracks}
                 onAlbumMovedToInbox={onAlbumMovedToInbox}
                 onSelectionChange={onSelectionChange}
+                trackChartRanks={trackChartRanks}
+                albumChartRanks={albumChartRanks}
               />
             ) : null}
           />

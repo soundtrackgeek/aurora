@@ -24,6 +24,8 @@ import {
   type YearsMode,
 } from "../../years";
 import { Artwork } from "../Artwork";
+import type { CatalogChartRank } from "../../charts";
+import { CatalogChartRanks } from "../charts/CatalogChartRanks";
 import "./YearsExplorer.css";
 
 export type YearsLoadState = "loading" | "ready" | "error";
@@ -357,7 +359,7 @@ function YearsToolbar({ mode, stats, onModeChange }: { mode: YearsMode; stats: Y
   </header>;
 }
 
-export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy, onPlay }: { album: T; busy: boolean; onPlay: (album: T) => void }) {
+export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy, onPlay, chartRanks }: { album: T; busy: boolean; onPlay: (album: T) => void; chartRanks?: readonly CatalogChartRank[] }) {
   return <div className="year-album-inspector">
     <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
     <div className="year-album-inspector__heading"><div><h2>{album.title}</h2><p>{album.artist}</p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>
@@ -368,6 +370,7 @@ export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy,
       <div><dt>Format</dt><dd>Album · local edition</dd></div>
       <div><dt>Tracks</dt><dd>{formatCount(album.totalTracks)}</dd></div>
       <div><dt>Duration</dt><dd>{formatDuration(album.durationSeconds)}</dd></div>
+      {chartRanks?.length ? <div><dt>Charts</dt><dd><CatalogChartRanks kind="album" ranks={chartRanks} /></dd></div> : null}
       <div><dt>Rating</dt><dd>{album.rating === null ? "—" : <><Star aria-hidden="true" /> {album.rating.toFixed(1)}</>}</dd></div>
       <div><dt>Genre</dt><dd>{album.genre ?? "Unknown"}</dd></div>
     </dl>

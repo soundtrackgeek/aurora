@@ -2,7 +2,7 @@ use crate::{
     catalog::{self, TrackSummary},
     state_store::StateStore,
 };
-use rusqlite::{Connection, Row, named_params};
+use rusqlite::{Connection, Row, named_params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap};
 
@@ -163,6 +163,31 @@ pub(crate) struct ChartItemDetail {
     pub(crate) source_ranks: Vec<ChartSourceRank>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CatalogChartRankRequest {
+    #[serde(default)]
+    pub(crate) track_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) album_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogChartRank {
+    pub(crate) source: ChartSource,
+    pub(crate) label: &'static str,
+    pub(crate) short_label: &'static str,
+    pub(crate) rank: i64,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogChartRankings {
+    pub(crate) tracks: HashMap<String, Vec<CatalogChartRank>>,
+    pub(crate) albums: HashMap<String, Vec<CatalogChartRank>>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SourceShape {
     Weekly,
@@ -215,6 +240,23 @@ fn source_shape(source: ChartSource) -> SourceShape {
         ChartSource::Billboard => SourceShape::Annual,
         ChartSource::AuroraScore => SourceShape::Score,
         _ => SourceShape::Weekly,
+    }
+}
+
+fn catalog_rank_sources(kind: ChartKind) -> &'static [(ChartSource, &'static str)] {
+    match kind {
+        ChartKind::Singles => &[
+            (ChartSource::Billboard, "BB"),
+            (ChartSource::OfficialUk, "UK"),
+            (ChartSource::VgLista, "VG"),
+            (ChartSource::TiISkuddet, "TI"),
+            (ChartSource::Norsktoppen, "NT"),
+        ],
+        ChartKind::Albums => &[
+            (ChartSource::Billboard, "US"),
+            (ChartSource::OfficialUk, "UK"),
+            (ChartSource::VgLista, "NO"),
+        ],
     }
 }
 
@@ -896,6 +938,94 @@ fn query_item_detail(
     Ok(ChartItemDetail { source_ranks })
 }
 
+fn validate_catalog_rank_request(request: &CatalogChartRankRequest) -> Result<(), String> {
+    if request.track_ids.len() + request.album_ids.len() > 200 {
+        return Err(
+            "Chart rankings can be loaded for at most 200 library items at once.".to_owned(),
+        );
+    }
+    if request
+        .track_ids
+        .iter()
+        .any(|id| id.is_empty() || id.len() > 24 || !id.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err("One or more track identities are invalid.".to_owned());
+    }
+    if request
+        .album_ids
+        .iter()
+        .any(|id| id.trim().is_empty() || id.chars().count() > 512)
+    {
+        return Err("One or more album identities are invalid.".to_owned());
+    }
+    Ok(())
+}
+
+fn query_catalog_kind_rankings(
+    connection: &Connection,
+    ids: &[String],
+    kind: ChartKind,
+) -> Result<HashMap<String, Vec<CatalogChartRank>>, String> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = match kind {
+        ChartKind::Singles => format!(
+            "SELECT CAST(id AS TEXT), billboard_single_rank, official_uk_rank, \
+                    vg_lista_rank, ti_i_skuddet_rank, norsktoppen_rank \
+             FROM tracks WHERE CAST(id AS TEXT) IN ({placeholders})"
+        ),
+        ChartKind::Albums => format!(
+            "SELECT id, billboard_rank, official_uk_rank, vg_lista_rank \
+             FROM albums WHERE id IN ({placeholders})"
+        ),
+    };
+    let parameters = ids.iter().cloned().map(Value::Text).collect::<Vec<_>>();
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("Could not prepare catalog chart rankings: {error}"))?;
+    let sources = catalog_rank_sources(kind);
+    let rows = statement
+        .query_map(params_from_iter(parameters), |row| {
+            let entity_id = row.get(0)?;
+            let mut ranks = Vec::new();
+            for (index, (source, short_label)) in sources.iter().enumerate() {
+                if let Some(rank) = row
+                    .get::<_, Option<i64>>(index + 1)?
+                    .filter(|rank| *rank > 0)
+                {
+                    ranks.push(CatalogChartRank {
+                        source: *source,
+                        label: source_label(*source),
+                        short_label,
+                        rank,
+                    });
+                }
+            }
+            Ok((entity_id, ranks))
+        })
+        .map_err(|error| format!("Could not read catalog chart rankings: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not decode catalog chart rankings: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, ranks)| !ranks.is_empty())
+        .collect())
+}
+
+fn query_catalog_rankings(
+    connection: &Connection,
+    request: CatalogChartRankRequest,
+) -> Result<CatalogChartRankings, String> {
+    validate_catalog_rank_request(&request)?;
+    let tracks = query_catalog_kind_rankings(connection, &request.track_ids, ChartKind::Singles)?;
+    let albums = query_catalog_kind_rankings(connection, &request.album_ids, ChartKind::Albums)?;
+    Ok(CatalogChartRankings { tracks, albums })
+}
+
 fn track_select_sql() -> &'static str {
     r#"
     SELECT t.id, t.title, t.album_artist_display, t.album, t.release_year,
@@ -1001,6 +1131,14 @@ pub(crate) fn load_chart_item_detail(
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
     query_item_detail(&connection, request)
+}
+
+pub(crate) fn load_catalog_chart_rankings(
+    request: CatalogChartRankRequest,
+) -> Result<CatalogChartRankings, String> {
+    let path = catalog::default_catalog_path()?;
+    let connection = catalog::open_catalog(&path)?;
+    query_catalog_rankings(&connection, request)
 }
 
 pub(crate) fn load_chart_entry_track(
@@ -1111,6 +1249,57 @@ mod tests {
         request.source = ChartSource::OfficialUk;
         request.period.to_year = 2026;
         assert!(validate_request(&request).is_err());
+    }
+
+    #[test]
+    fn catalog_rankings_read_music_library_materialized_values_directly() {
+        let connection = Connection::open_in_memory().expect("chart ranking database");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks (
+                  id INTEGER PRIMARY KEY,
+                  billboard_single_rank INTEGER,
+                  official_uk_rank INTEGER,
+                  vg_lista_rank INTEGER,
+                  ti_i_skuddet_rank INTEGER,
+                  norsktoppen_rank INTEGER
+                );
+                CREATE TABLE albums (
+                  id TEXT PRIMARY KEY,
+                  billboard_rank INTEGER,
+                  official_uk_rank INTEGER,
+                  vg_lista_rank INTEGER
+                );
+                INSERT INTO tracks VALUES (7, 4, 14, 1, 10, 15);
+                INSERT INTO albums VALUES ('album-7', 14, 4, 1);
+                "#,
+            )
+            .expect("chart ranking fixtures");
+
+        let rankings = query_catalog_rankings(
+            &connection,
+            CatalogChartRankRequest {
+                track_ids: vec!["7".to_owned()],
+                album_ids: vec!["album-7".to_owned()],
+            },
+        )
+        .expect("catalog chart rankings");
+
+        assert_eq!(
+            rankings.tracks["7"]
+                .iter()
+                .map(|rank| (rank.short_label, rank.rank))
+                .collect::<Vec<_>>(),
+            vec![("BB", 4), ("UK", 14), ("VG", 1), ("TI", 10), ("NT", 15)]
+        );
+        assert_eq!(
+            rankings.albums["album-7"]
+                .iter()
+                .map(|rank| (rank.short_label, rank.rank))
+                .collect::<Vec<_>>(),
+            vec![("US", 14), ("UK", 4), ("NO", 1)]
+        );
     }
 
     fn score_request(year_basis: ChartYearBasis) -> ChartPageRequest {

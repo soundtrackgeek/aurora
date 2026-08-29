@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.5] - 2026-08-29
+
+### Added
+
+- Added Music Library's materialized album chart ranks to album cards, Album Detail, and the Album inspector, using compact `US:#14`, `UK:#4`, and `NO:#1` labels only when the corresponding rank exists.
+- Added materialized single chart ranks to Library and opened-album track rows plus the Track inspector. Aurora shows only available `BB`, `UK`, `VG`, `TI`, and `NT` values and never fills missing charts with placeholders.
+
 ## [0.23.4] - 2026-08-29
 
 ### Fixed

@@ -86,6 +86,23 @@ export interface ChartItemDetail {
   sourceRanks: ChartSourceRank[];
 }
 
+export interface CatalogChartRank {
+  source: ChartSource;
+  label: string;
+  shortLabel: string;
+  rank: number;
+}
+
+export interface CatalogChartRankings {
+  tracks: Record<string, CatalogChartRank[]>;
+  albums: Record<string, CatalogChartRank[]>;
+}
+
+export interface CatalogChartRankRequest {
+  trackIds: string[];
+  albumIds: string[];
+}
+
 export interface ChartItemDetailRequest {
   page: ChartPageRequest;
   artistKey: string;
@@ -234,6 +251,33 @@ export async function loadChartItemDetail(request: ChartItemDetailRequest): Prom
     ] };
   }
   return invoke<ChartItemDetail>("chart_item_detail", { request });
+}
+
+export async function loadCatalogChartRankings(request: CatalogChartRankRequest): Promise<CatalogChartRankings> {
+  if (!isTauriRuntime()) {
+    const tracks = Object.fromEntries(request.trackIds.flatMap((id, index) => {
+      if (index % 3 !== 0) return [];
+      const ranks = [
+        { source: "billboard", label: "Billboard", shortLabel: "BB", rank: 4 + index },
+        { source: "officialUk", label: "Official UK", shortLabel: "UK", rank: 14 + index },
+        { source: "vgLista", label: "VG Lista", shortLabel: "VG", rank: 1 + index },
+        { source: "tiISkuddet", label: "Ti i Skuddet", shortLabel: "TI", rank: 10 + index },
+        { source: "norsktoppen", label: "Norsktoppen", shortLabel: "NT", rank: 15 + index },
+      ] satisfies CatalogChartRank[];
+      return [[id, index === 0 ? ranks : ranks.slice(0, 1)]];
+    }));
+    const albums = Object.fromEntries(request.albumIds.flatMap((id, index) => {
+      if (index % 2 !== 0) return [];
+      const ranks = [
+        { source: "billboard", label: "Billboard", shortLabel: "US", rank: 14 + index },
+        { source: "officialUk", label: "Official UK", shortLabel: "UK", rank: 4 + index },
+        { source: "vgLista", label: "VG Lista", shortLabel: "NO", rank: 1 + index },
+      ] satisfies CatalogChartRank[];
+      return [[id, index === 0 ? ranks : ranks.slice(0, 1)]];
+    }));
+    return { tracks, albums };
+  }
+  return invoke<CatalogChartRankings>("catalog_chart_rankings", { request });
 }
 
 export async function loadChartEntryTrack(trackId: string): Promise<Track> {

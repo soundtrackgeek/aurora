@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.4 keeps reviewed Inbox album moves reliable while Music Library finishes pending catalog synchronization.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.5 brings Music Library's canonical album and single chart rankings into Library rows, album detail, and the inspector.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.4 slice
+## Current 0.23.5 slice
+
+- Album cards and detail show only their available US, UK, and Norway chart ranks. Track rows and the Track inspector show only the available Billboard, Official UK, VG Lista, Ti i Skuddet, and Norsktoppen abbreviations, such as `BB:#37`; missing charts take no space.
+- Aurora reads Music Library's materialized rank columns directly, preserving its one canonical rank per album or song instead of recalculating weekly chart history.
 
 - Inbox album intake now retries a bounded number of times when Music Library reports that an apply-time plan became stale. Every retry rebuilds the plan and verifies that the reviewed albums, actions, and destinations are still identical before applying it.
 

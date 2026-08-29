@@ -31,7 +31,10 @@ mod years;
 
 use audio_settings::{AudioSettingsRequest, AudioSettingsStatus, AudioSettingsStore};
 use catalog::{LibrarySnapshot, TrackReference, TrackSummary};
-use charts::{ChartItemDetail, ChartItemDetailRequest, ChartPage, ChartPageRequest};
+use charts::{
+    CatalogChartRankRequest, CatalogChartRankings, ChartItemDetail, ChartItemDetailRequest,
+    ChartPage, ChartPageRequest,
+};
 use curation::{ArtistDecisionRequest, CurationExportResult, ReleaseDecisionRequest};
 use explorer::{
     AlbumDetail, AlbumPage, AlbumPageRequest, ArtistDetail, ArtistPage, ArtistPageRequest,
@@ -496,6 +499,15 @@ async fn chart_item_detail(request: ChartItemDetailRequest) -> Result<ChartItemD
     tauri::async_runtime::spawn_blocking(move || charts::load_chart_item_detail(request))
         .await
         .map_err(|error| format!("The chart-detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn catalog_chart_rankings(
+    request: CatalogChartRankRequest,
+) -> Result<CatalogChartRankings, String> {
+    tauri::async_runtime::spawn_blocking(move || charts::load_catalog_chart_rankings(request))
+        .await
+        .map_err(|error| format!("The catalog-chart worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1279,6 +1291,7 @@ pub fn run() {
             year_queue_tracks,
             chart_page,
             chart_item_detail,
+            catalog_chart_rankings,
             chart_entry_track,
             chart_queue_tracks,
             ratings_overview,

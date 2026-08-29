@@ -31,6 +31,7 @@ import {
   ChartStudio,
   type ChartSelectionContext,
 } from "./components/charts/ChartStudio";
+import { CatalogChartRanks } from "./components/charts/CatalogChartRanks";
 import { LaptopModeButton } from "./components/LaptopModeButton";
 import {
   DeepExplorer,
@@ -199,7 +200,9 @@ import {
   type AudioSettingsStatus,
 } from "./audio";
 import {
+  loadCatalogChartRankings,
   loadChartEntryTrack,
+  type CatalogChartRankings,
 } from "./charts";
 import {
   loadYearAlbumTracks,
@@ -509,6 +512,7 @@ function App() {
   const [explorerSelection, setExplorerSelection] = useState<ExplorerSelection | null>(null);
   const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
   const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
+  const [catalogChartRanks, setCatalogChartRanks] = useState<CatalogChartRankings>({ tracks: {}, albums: {} });
   const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -803,6 +807,33 @@ function App() {
       });
     return () => { cancelled = true; };
   }, [reloadToken]);
+
+  useEffect(() => {
+    const visibleTracks = explorerView === "tracks" ? explorerTracks : albumTracks;
+    const trackIds = [...new Set([
+      ...visibleTracks.map((track) => track.id),
+      ...(selectedTrack ? [selectedTrack.id] : []),
+    ])].slice(0, 100);
+    const albumIds = [...new Set([
+      ...explorerAlbums.map((album) => album.id),
+      ...(selectedAlbumId ? [selectedAlbumId] : []),
+      ...(selectedYearAlbum ? [selectedYearAlbum.id] : []),
+    ])].slice(0, 200 - trackIds.length);
+    if (trackIds.length === 0 && albumIds.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void loadCatalogChartRankings({ trackIds, albumIds })
+      .then((rankings) => {
+        if (!cancelled) setCatalogChartRanks(rankings);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setCatalogChartRanks({ tracks: {}, albums: {} });
+        console.warn("Aurora could not load Music Library chart rankings", error);
+      });
+    return () => { cancelled = true; };
+  }, [albumTracks, explorerAlbums, explorerTracks, explorerView, selectedAlbumId, selectedTrack, selectedYearAlbum]);
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
@@ -2914,7 +2945,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.23.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.23.5</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3212,6 +3243,8 @@ function App() {
                 selectedArtistId={selectedArtistId}
                 albumTracks={albumTracks}
                 albumTracksTruncated={albumTracksTruncated}
+                trackChartRanks={catalogChartRanks.tracks}
+                albumChartRanks={catalogChartRanks.albums}
                 loadState={explorerLoadState}
                 errorMessage={explorerError}
                 albumDetailState={albumDetailState}
@@ -3309,6 +3342,7 @@ function App() {
               album={explorerAlbumInspectorContext.album}
               busy={albumDetailState === "loading"}
               onPlay={(album) => void playExplorerAlbum(album)}
+              chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
             />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
@@ -3321,7 +3355,7 @@ function App() {
           </div>
         ) : inspectorView === "album" && activeNav === "Years" && selectedYearAlbum ? (
           <div className="inspector-scroll">
-            <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} />
+            <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} chartRanks={catalogChartRanks.albums[selectedYearAlbum.id]} />
           </div>
         ) : inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">
@@ -3348,6 +3382,7 @@ function App() {
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
+              {catalogChartRanks.tracks[inspectorTrack.id]?.length ? <div><dt>Charts</dt><dd><CatalogChartRanks kind="track" ranks={catalogChartRanks.tracks[inspectorTrack.id]} /></dd></div> : null}
               <div className="publisher-metadata"><dt>Publisher</dt><dd>{inspectorTrack.publisher ?? "Unknown"}</dd></div>
               <div><dt>Genre</dt><dd>{inspectorTrack.genre ?? "Unknown"}</dd></div>
               <div><dt>Last.fm popularity</dt><dd>{inspectorTrack.playCount === null ? "—" : formatCount(inspectorTrack.playCount)}</dd></div>
