@@ -338,6 +338,39 @@ describe("Inbox", () => {
     expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
   });
 
+  it("retries an unchanged Inbox intake when catalog synchronization makes the fresh plan stale", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({
+      ...snapshot,
+      albums: snapshot.albums.map((album) => ({ ...album, genre: "Hard Rock", readiness: { ready: true, issues: [] } })),
+    });
+    let previewSequence = 0;
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => {
+      previewSequence += 1;
+      return libraryPreview(`retry-plan-${previewSequence}`, 70 + previewSequence, sourcePath, category, 1);
+    });
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply")
+      .mockRejectedValueOnce(new Error("The source albums or active catalog changed after preview. Prepare the batch again (stalePlan)"))
+      .mockResolvedValue({
+        planId: "retry-plan-3", sessionId: 73, status: "completed", albumCount: 1, trackCount: 10,
+        movedAlbumCount: 1, importRunId: 7, backupPath: null, cleanupWarnings: [],
+        albums: [{ sourcePath: "source", destinationPath: "destination", action: "add", recoveryPath: null, cleanupStatus: "removed" }],
+      });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    fireEvent.click(screen.getByRole("button", { name: "Add Inbox to library" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Library destination for Inbox" }), { target: { value: "general" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add 1 album" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(preview).toHaveBeenCalledTimes(3);
+    expect(apply).toHaveBeenNthCalledWith(1, { planId: "retry-plan-2", sessionId: 72 });
+    expect(apply).toHaveBeenNthCalledWith(2, { planId: "retry-plan-3", sessionId: 73 });
+    expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+  });
+
   it("stops when a fresh apply-time preview no longer matches the reviewed intake", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({

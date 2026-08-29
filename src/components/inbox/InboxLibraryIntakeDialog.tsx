@@ -65,14 +65,11 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     try {
       for (const [index, reviewedPreview] of previews.entries()) {
         const target = targets[index];
-        const freshPreview = await libraryIntakeAdapter.preview({
-          sourcePath: target.sourcePath,
-          category: destinations[target.sourcePath] as LibraryIntakeCategoryId,
-        });
-        if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
-          throw new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
-        }
-        const result = await libraryIntakeAdapter.apply({ planId: freshPreview.planId, sessionId: freshPreview.sessionId });
+        const result = await applyReviewedTarget(
+          target,
+          destinations[target.sourcePath] as LibraryIntakeCategoryId,
+          reviewedPreview,
+        );
         completedAlbums += result.albumCount;
       }
       await onApplied();
@@ -132,6 +129,39 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       </footer>
     </section>
   </div>;
+}
+
+const MAX_STALE_PLAN_RETRIES = 2;
+
+async function applyReviewedTarget(
+  target: InboxLibraryIntakeTarget,
+  category: LibraryIntakeCategoryId,
+  reviewedPreview: LibraryIntakePreview,
+) {
+  for (let stalePlanRetries = 0; ; stalePlanRetries += 1) {
+    const freshPreview = await libraryIntakeAdapter.preview({
+      sourcePath: target.sourcePath,
+      category,
+    });
+    if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
+      throw new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
+    }
+    try {
+      return await libraryIntakeAdapter.apply({ planId: freshPreview.planId, sessionId: freshPreview.sessionId });
+    } catch (error) {
+      if (!isStalePlanError(error)) throw error;
+      if (stalePlanRetries >= MAX_STALE_PLAN_RETRIES) {
+        const retryError = new Error("Music Library's catalog kept changing while Aurora prepared the move. Wait for tag synchronization to finish, then preview destinations again. (stalePlan)");
+        (retryError as Error & { cause: unknown }).cause = error;
+        throw retryError;
+      }
+    }
+  }
+}
+
+function isStalePlanError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("(staleplan)");
 }
 
 function sameReviewedIntake(reviewed: LibraryIntakePreview, fresh: LibraryIntakePreview): boolean {

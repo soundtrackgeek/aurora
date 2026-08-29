@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.3 gives Genre more editing space in Album Auto-Tagger while keeping disc numbering compact.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.4 keeps reviewed Inbox album moves reliable while Music Library finishes pending catalog synchronization.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.3 slice
+## Current 0.23.4 slice
+
+- Inbox album intake now retries a bounded number of times when Music Library reports that an apply-time plan became stale. Every retry rebuilds the plan and verifies that the reviewed albums, actions, and destinations are still identical before applying it.
 
 - Album Auto-Tagger gives Genre the same wide field length as Album. Disc total and Disc # override now use compact neighboring inputs on the top metadata row.
 

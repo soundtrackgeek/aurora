@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.4] - 2026-08-29
+
+### Fixed
+
+- Fixed Inbox album intake failing when a pending Music Library catalog synchronization landed between Aurora's apply-time preview and apply request. Aurora now retries only `stalePlan` failures, revalidating the exact reviewed albums and destinations before each bounded retry.
+
 ## [0.23.3] - 2026-08-29
 
 ### Fixed
