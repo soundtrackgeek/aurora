@@ -62,6 +62,8 @@ const albums: ExplorerAlbum[] = [
     originalYear: 1985,
     releaseYear: 2024,
     publisher: "EMI Records",
+    originCountryCode: "NO",
+    originCountryName: "Norway",
     rating: 4.5,
     totalTracks: 12,
     durationSeconds: 2_844,
@@ -265,6 +267,7 @@ describe("DeepExplorer", () => {
     const albumRow = albumButton.closest(".deep-explorer-album-row");
     expect(albumRow).not.toBeNull();
     expect(within(albumRow as HTMLElement).getByRole("complementary", { name: "Night Geometry album details" })).toBeInTheDocument();
+    expect(within(albumRow as HTMLElement).getAllByRole("img", { name: "Norway origin country" })).toHaveLength(2);
     fireEvent.click(albumButton);
     expect(onSelectAlbum).toHaveBeenCalledWith(null);
   });

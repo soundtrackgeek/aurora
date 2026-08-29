@@ -16,8 +16,8 @@ import {
 } from "./library";
 
 const tracks: Track[] = [
-  { id: "1", trackKey: "c:/music/sigur ros/takk/saeglopur.mp3", albumId: "album-1", title: "Sæglópur", artist: "Sigur Rós", displayArtist: "Jónsi", album: "Takk...", originalYear: 1999, releaseYear: 2005, publisher: "EMI Records", rating: 5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 473, genre: "Post-rock", playCount: 12 },
-  { id: "2", trackKey: "c:/music/m83/hurry up/midnight city.mp3", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, rating: 4.5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 243, genre: "Electronic", playCount: 42 },
+  { id: "1", trackKey: "c:/music/sigur ros/takk/saeglopur.mp3", albumId: "album-1", title: "Sæglópur", artist: "Sigur Rós", displayArtist: "Jónsi", album: "Takk...", originalYear: 1999, releaseYear: 2005, publisher: "EMI Records", originCountryCode: "IS", originCountryName: "Iceland", rating: 5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 473, genre: "Post-rock", playCount: 12 },
+  { id: "2", trackKey: "c:/music/m83/hurry up/midnight city.mp3", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 243, genre: "Electronic", playCount: 42 },
 ];
 
 const similarlyNamedArtists: Track[] = [
@@ -150,6 +150,8 @@ describe("library presentation", () => {
       releaseYear: 2006,
       publisher: "Krúnk",
       genre: "Art rock",
+      originCountryCode: null,
+      originCountryName: null,
     });
   });
 
@@ -186,6 +188,17 @@ describe("library presentation", () => {
     expect(formatCount(12_846)).toMatch(/12.846|12,846|12 846/);
   });
 
+  it("does not keep an old origin flag after an album-artist edit", () => {
+    const album: AlbumSummary = {
+      id: "album-1", title: "Takk...", artist: "Sigur Rós", originalYear: 1999,
+      releaseYear: 2005, publisher: "EMI Records", originCountryCode: "IS",
+      originCountryName: "Iceland", genre: "Post-rock", totalTracks: 1,
+      ratedTracks: 1, lovedTracks: 1, durationSeconds: 473, rating: 5, albumScore: 95,
+    };
+    const projected = applyAlbumTrackTagProjection(album, [{ ...tracks[0], artist: "Jónsi" }]);
+    expect(projected).toMatchObject({ artist: "Jónsi", originCountryCode: null, originCountryName: null });
+  });
+
   it("filters with Unicode-aware user text and selected artist", () => {
     expect(filterTracks(tracks, "sægl", null)).toHaveLength(1);
     expect(filterTracks(tracks, "", "M83")).toEqual([tracks[1]]);
@@ -198,6 +211,8 @@ describe("library presentation", () => {
     expect(filterTracks(tracks, "aartist:sigur rós,genre:post rock", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "album:takk,year:1999,ryear:2005", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "publisher:emi,title:sæglópur", null)).toEqual([tracks[0]]);
+    expect(filterTracks(tracks, "country:iceland OR france", null)).toEqual(tracks);
+    expect(filterTracks(tracks, "country:is", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "year:2011", null)).toEqual([]);
     expect(filterTracks(tracks, "ryear:2011", null)).toEqual([tracks[1]]);
   });

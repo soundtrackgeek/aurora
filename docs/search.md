@@ -13,7 +13,7 @@ Aurora has one persistent search box at the top of the window, but the search be
 
 ## Catalog search: Songs, Albums, and Artists
 
-An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring.
+An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through the explicit `country:` field.
 
 | Query | What it finds |
 | --- | --- |
@@ -35,9 +35,12 @@ Punctuation in an unquoted value separates words. Use quotes when the entire sto
 | `year:` | Original Year | `year:1985` |
 | `ryear:` | Release Year | `ryear:2004` |
 | `publisher:` | Publisher or label | `publisher:varèse` |
+| `country:` | Imported Album Artist origin-country name or two-letter code | `country:norway OR sweden` |
 | `title:` | Track title | `title:"Running Up That Hill"` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
+
+`country:` uses Music Library's imported artist-origin record for the Album Artist. It accepts country names or two-letter codes, so `country:norway`, `country:NO`, and exact `country:"Norway"` all target the same origin data. Artists without an imported origin do not match.
 
 There are no `rating:`, `love:`, or `unrated:` search fields. Those are Aurora collection filters and handoffs, not query-language keywords.
 
@@ -79,6 +82,7 @@ Use uppercase `OR` between alternatives. Alternatives after `OR` inherit the pre
 aartist:bon jovi OR def leppard OR kiss
 year:1985 OR 1987 OR 1991
 genre:synthpop OR new wave
+country:norway OR sweden
 ```
 
 Combine an alternative group with another requirement by using a comma or `AND`:
@@ -152,6 +156,7 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | Score genres excluding games | `genre:scores NOT genre:"video game"` |
 | A song title prefix, excluding live albums | `title:heroes NOT album:live` |
 | Everything from a publisher except one artist | `publisher:decca,-aartist:"Various Artists"` |
+| Artists originating in Norway or Sweden | `country:norway OR sweden` |
 
 ### Differences between Songs, Albums, and Artists
 

@@ -4,8 +4,8 @@ use crate::{
     tag_model::{LoveState, TagSyncState, TagValues},
 };
 use rusqlite::{
-    Connection, OpenFlags, OptionalExtension, Row, named_params, params, params_from_iter,
-    types::Value,
+    Connection, OpenFlags, OptionalExtension, Row, functions::FunctionFlags, named_params, params,
+    params_from_iter, types::Value,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -157,6 +157,7 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = Connection::open_with_flags(path, flags)
         .map_err(|error| format!("Could not open the music catalog read-only: {error}"))?;
+    register_catalog_functions(&connection)?;
     connection
         .busy_timeout(Duration::from_secs(2))
         .map_err(|error| format!("Could not configure the read-only catalog: {error}"))?;
@@ -164,6 +165,17 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         .pragma_update(None, "query_only", true)
         .map_err(|error| format!("Could not enforce read-only catalog access: {error}"))?;
     Ok(connection)
+}
+
+pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), String> {
+    connection
+        .create_scalar_function(
+            "unicode_lower",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| context.get::<String>(0).map(|value| value.to_lowercase()),
+        )
+        .map_err(|error| format!("Could not configure Unicode catalog matching: {error}"))
 }
 
 fn completed_import_revision_for_connection(connection: &Connection) -> Result<String, String> {
@@ -585,13 +597,14 @@ enum CatalogSearchField {
     Year,
     ReleaseYear,
     Publisher,
+    Country,
     Title,
 }
 
 impl CatalogSearchField {
     fn fts_column(self) -> Option<&'static str> {
         match self {
-            Self::Any | Self::Year | Self::ReleaseYear => None,
+            Self::Any | Self::Year | Self::ReleaseYear | Self::Country => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -603,7 +616,7 @@ impl CatalogSearchField {
 
     fn sql_column(self) -> Option<&'static str> {
         match self {
-            Self::Any | Self::Year | Self::ReleaseYear => None,
+            Self::Any | Self::Year | Self::ReleaseYear | Self::Country => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -618,6 +631,7 @@ impl CatalogSearchField {
 enum CatalogSearchMatch {
     Prefix(String),
     Exact(String),
+    Country { value: String, exact: bool },
     ScoreGenreGroup,
     YearRange { from: Option<i32>, to: Option<i32> },
 }
@@ -656,6 +670,7 @@ impl CatalogSearch {
         match &alternative.matcher {
             CatalogSearchMatch::Prefix(query) => Some(query),
             CatalogSearchMatch::Exact(_)
+            | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. } => None,
         }
@@ -765,6 +780,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "year" => Some(CatalogSearchField::Year),
         "ryear" => Some(CatalogSearchField::ReleaseYear),
         "publisher" => Some(CatalogSearchField::Publisher),
+        "country" => Some(CatalogSearchField::Country),
         "title" => Some(CatalogSearchField::Title),
         _ => None,
     }
@@ -927,6 +943,30 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                     {
                         CatalogSearchMatch::ScoreGenreGroup
                     }
+                    CatalogSearchField::Country => match exact {
+                        Some(value) => CatalogSearchMatch::Country { value, exact: true },
+                        None => {
+                            let terms = value
+                                .split(|character: char| !character.is_alphanumeric())
+                                .filter(|term| !term.is_empty())
+                                .count();
+                            if terms == 0 {
+                                return Err(
+                                    "Search needs a word or an exact quoted value.".to_owned()
+                                );
+                            }
+                            term_count += terms;
+                            if term_count > MAX_FTS_SEARCH_TERMS {
+                                return Err(format!(
+                                    "Search can contain at most {MAX_FTS_SEARCH_TERMS} words."
+                                ));
+                            }
+                            CatalogSearchMatch::Country {
+                                value: value.trim().to_owned(),
+                                exact: false,
+                            }
+                        }
+                    },
                     _ => match exact {
                         Some(value) => CatalogSearchMatch::Exact(value),
                         None => CatalogSearchMatch::Prefix(build_fts_prefix_query(
@@ -1060,6 +1100,30 @@ fn non_prefix_predicate(
             value,
             params,
         )),
+        CatalogSearchMatch::Country { value, exact } => {
+            let artist_key = artist_key_sql(&format!("{alias}.album_artist_display"));
+            let normalized = value.trim().to_lowercase();
+            let country_match = if *exact {
+                params.push(Value::Text(normalized.clone()));
+                params.push(Value::Text(normalized));
+                "(unicode_lower(TRIM(COALESCE(search_origin.country_name, ''))) = ? OR unicode_lower(TRIM(COALESCE(search_origin.country_code, ''))) = ?)".to_owned()
+            } else {
+                normalized
+                    .split(|character: char| !character.is_alphanumeric())
+                    .filter(|term| !term.is_empty())
+                    .map(|term| {
+                        let pattern = format!("% {}%", escape_like(term));
+                        params.push(Value::Text(pattern.clone()));
+                        params.push(Value::Text(pattern));
+                        "((' ' || unicode_lower(REPLACE(TRIM(COALESCE(search_origin.country_name, '')), '-', ' '))) LIKE ? ESCAPE '\\' OR (' ' || unicode_lower(TRIM(COALESCE(search_origin.country_code, '')))) LIKE ? ESCAPE '\\')".to_owned()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" AND ")
+            };
+            Some(format!(
+                "EXISTS (SELECT 1 FROM musicbrainz_artist_origin_countries AS search_origin WHERE search_origin.local_artist_key = {artist_key} AND ({country_match}))"
+            ))
+        }
         CatalogSearchMatch::ScoreGenreGroup => Some(format!(
             "LOWER(TRIM(COALESCE({alias}.canonical_genre, ''))) IN ({})",
             SCORE_GENRE_GROUP
@@ -1103,11 +1167,28 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
         .filter_map(|alternative| match &alternative.matcher {
             CatalogSearchMatch::Prefix(query) => Some(format!("({query})")),
             CatalogSearchMatch::Exact(_)
+            | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. } => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+pub(crate) fn artist_key_sql(field: &str) -> String {
+    let normalized = [8208, 8209, 8210, 8211, 8212, 8722]
+        .iter()
+        .fold(format!("COALESCE({field}, '')"), |expression, codepoint| {
+            format!("REPLACE({expression}, CHAR({codepoint}), '-')")
+        });
+    format!("COALESCE(NULLIF(TRIM(unicode_lower({normalized})), ''), 'unknown')")
 }
 
 pub(crate) fn push_track_search_predicates(
@@ -2431,6 +2512,49 @@ mod tests {
             exact.groups[0].alternatives[0].matcher,
             CatalogSearchMatch::Exact("scores".to_owned())
         );
+    }
+
+    #[test]
+    fn catalog_search_parses_country_prefix_exact_and_inherited_or_values() {
+        let search = parse_catalog_search("country:norway OR sweden").expect("country search");
+        assert_eq!(search.groups.len(), 1);
+        assert_eq!(search.groups[0].alternatives.len(), 2);
+        assert!(
+            search.groups[0]
+                .alternatives
+                .iter()
+                .all(|alternative| alternative.field == CatalogSearchField::Country)
+        );
+        assert_eq!(
+            search.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::Country {
+                value: "norway".to_owned(),
+                exact: false,
+            }
+        );
+
+        let exact = parse_catalog_search("country:\"Norway\"").expect("exact country");
+        assert_eq!(
+            exact.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::Country {
+                value: "Norway".to_owned(),
+                exact: true,
+            }
+        );
+    }
+
+    #[test]
+    fn artist_origin_keys_use_music_library_unicode_normalization() {
+        let connection = Connection::open_in_memory().expect("catalog fixture");
+        register_catalog_functions(&connection).expect("Unicode catalog function");
+        let key = connection
+            .query_row(
+                &format!("SELECT {}", artist_key_sql("'ÁRSTÍÐIR'")),
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("normalized artist key");
+        assert_eq!(key, "árstíðir");
     }
 
     #[test]

@@ -37,6 +37,7 @@ import { loadInboxSettings } from "../../inbox";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import type { CatalogChartRank } from "../../charts";
 import { CatalogChartRanks } from "../charts/CatalogChartRanks";
+import { CountryFlag } from "../CountryFlag";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import "./DeepExplorer.css";
 
@@ -82,6 +83,8 @@ export interface ExplorerAlbum {
   originalYear?: number | null;
   releaseYear: number | null;
   publisher?: string | null;
+  originCountryCode?: string | null;
+  originCountryName?: string | null;
   rating: number | null;
   totalTracks: number;
   durationSeconds: number | null;
@@ -686,7 +689,10 @@ function AlbumGrid({
                 <AlbumArtwork album={album} />
                 <span className="deep-explorer-album__copy">
                   <strong>{album.title}</strong>
-                  <span>{album.artist}</span>
+                  <span className="deep-explorer-album__artist">
+                    <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
+                    <span>{album.artist}</span>
+                  </span>
                   <small className="deep-explorer-album__metadata">
                     {album.originalYear ?? "Year unknown"} <span aria-hidden="true">—</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
                   </small>
@@ -864,7 +870,10 @@ function AlbumDetail({
         <div>
           <span className="deep-explorer-kicker">Album detail</span>
           <h3>{album.title}</h3>
-          <p>{album.artist}</p>
+          <p className="deep-explorer-album-detail__artist">
+            <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
+            <span>{album.artist}</span>
+          </p>
           <span className="deep-explorer-album-publisher">
             {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
           </span>

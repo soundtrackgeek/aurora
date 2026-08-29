@@ -26,6 +26,7 @@ import {
 import { Artwork } from "../Artwork";
 import type { CatalogChartRank } from "../../charts";
 import { CatalogChartRanks } from "../charts/CatalogChartRanks";
+import { CountryFlag } from "../CountryFlag";
 import "./YearsExplorer.css";
 
 export type YearsLoadState = "loading" | "ready" | "error";
@@ -62,6 +63,8 @@ interface AlbumInspectorAlbum {
   originalYear?: number | null;
   releaseYear: number | null;
   publisher?: string | null;
+  originCountryCode?: string | null;
+  originCountryName?: string | null;
   totalTracks: number;
   lovedTracks: number;
   durationSeconds: number | null;
@@ -362,7 +365,7 @@ function YearsToolbar({ mode, stats, onModeChange }: { mode: YearsMode; stats: Y
 export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy, onPlay, chartRanks }: { album: T; busy: boolean; onPlay: (album: T) => void; chartRanks?: readonly CatalogChartRank[] }) {
   return <div className="year-album-inspector">
     <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
-    <div className="year-album-inspector__heading"><div><h2>{album.title}</h2><p>{album.artist}</p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>
+    <div className="year-album-inspector__heading"><div><h2>{album.title}</h2><p><CountryFlag code={album.originCountryCode} name={album.originCountryName} /><span>{album.artist}</span></p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>
     <dl className="metadata-list">
       <div><dt>Original Year</dt><dd className="year-original">{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd className="year-release">{album.releaseYear ?? "—"}</dd></div>

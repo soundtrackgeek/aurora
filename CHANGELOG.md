@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.6] - 2026-08-29
+
+### Added
+
+- Added Music Library's bundled SVG origin-country flags beside Album Artist in album cards, opened album detail, and the Album inspector without adding flags to individual track rows.
+- Added `country:` catalog search by imported origin-country name or two-letter code, with exact matching, exclusions, and inherited boolean alternatives such as `country:norway OR sweden` across Songs, Albums, and Artists.
+
 ## [0.23.5] - 2026-08-29
 
 ### Added

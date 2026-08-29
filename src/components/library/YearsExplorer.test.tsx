@@ -9,6 +9,8 @@ const album = {
   id: "album-1",
   title: "Blade Runner (Expanded Edition)",
   artist: "Vangelis",
+  originCountryCode: "GR",
+  originCountryName: "Greece",
   originalYear: 1982,
   releaseYear: 2025,
   totalTracks: 32,
@@ -109,6 +111,7 @@ describe("YearAlbumInspector", () => {
     render(<YearAlbumInspector album={album} busy={false} onPlay={onPlay} />);
     expect(screen.getByText("Original Year").nextSibling).toHaveTextContent("1982");
     expect(screen.getByText("Release Year").nextSibling).toHaveTextContent("2025");
+    expect(screen.getByRole("img", { name: "Greece origin country" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Play album" }));
     expect(onPlay).toHaveBeenCalledWith(album);
   });

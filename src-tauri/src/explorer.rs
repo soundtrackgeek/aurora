@@ -1,7 +1,7 @@
 use crate::{
     catalog::{
-        ArtistSummary, TrackSummary, apply_overlays, default_catalog_path, map_track_row,
-        open_catalog, parse_catalog_search, push_album_search_predicates,
+        ArtistSummary, TrackSummary, apply_overlays, artist_key_sql, default_catalog_path,
+        map_track_row, open_catalog, parse_catalog_search, push_album_search_predicates,
         push_track_search_predicates,
     },
     ratings,
@@ -140,6 +140,8 @@ pub(crate) struct AlbumSummary {
     pub(crate) release_year: Option<i64>,
     pub(crate) original_year: Option<i64>,
     pub(crate) publisher: Option<String>,
+    pub(crate) origin_country_code: Option<String>,
+    pub(crate) origin_country_name: Option<String>,
     pub(crate) genre: Option<String>,
     pub(crate) total_tracks: i64,
     pub(crate) rated_tracks: i64,
@@ -714,6 +716,14 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
             Ok(index) => row.get(index)?,
             Err(_) => None,
         },
+        origin_country_code: match row.as_ref().column_index("origin_country_code") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
+        origin_country_name: match row.as_ref().column_index("origin_country_name") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
         genre: row.get(4)?,
         total_tracks: row.get(5)?,
         rated_tracks: row.get(6)?,
@@ -827,8 +837,9 @@ fn album_page_from_connection(
         .and_then(|search| search.plain_fts_query().map(str::to_owned));
     let sort = album_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
+    let origin_key = artist_key_sql("a.album_artist_display");
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key}",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -893,7 +904,7 @@ fn album_page_from_connection(
         mapped.push((
             map_album_row(row)
                 .map_err(|error| format!("Could not decode the album explorer: {error}"))?,
-            row.get(13)
+            row.get(15)
                 .map_err(|error| format!("Could not decode the album cursor: {error}"))?,
         ));
     }
@@ -1086,7 +1097,7 @@ fn album_detail_from_connection(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher FROM albums AS a WHERE a.id = ?",
+            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} WHERE a.id = ?", artist_key_sql("a.album_artist_display")),
             [album_id],
             map_album_row,
         )
@@ -1176,6 +1187,7 @@ mod tests {
 
     fn fixture() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory explorer database");
+        crate::catalog::register_catalog_functions(&connection).expect("Unicode catalog functions");
         connection
             .execute_batch(
                 r#"
@@ -1196,6 +1208,10 @@ mod tests {
                   artist_key TEXT, track_key TEXT, play_count INTEGER,
                   PRIMARY KEY (artist_key, track_key)
                 );
+                CREATE TABLE musicbrainz_artist_origin_countries (
+                  local_artist_key TEXT PRIMARY KEY, display_artist TEXT NOT NULL, mbid TEXT,
+                  country_code TEXT, country_name TEXT
+                );
                 CREATE VIRTUAL TABLE track_search_fts USING fts5(
                   track_id UNINDEXED, album_id UNINDEXED, title, display_artist, album,
                   album_artist_display, canonical_genre, publisher, file_path, filename
@@ -1211,6 +1227,9 @@ mod tests {
                   ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999, 'EMI Records'),
                   ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999, 'FatCat'),
                   ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80, 2001, 'Virgin');
+                INSERT INTO musicbrainz_artist_origin_countries VALUES
+                  ('sigur rós', 'Sigur Rós', 'f2fdb8a7-eec6-447d-bb70-10c2e93eec17', 'IS', 'Iceland'),
+                  ('daft punk', 'Daft Punk', '056e4f3e-d505-4dad-8ec1-d04f521cbb56', 'FR', 'France');
                 INSERT INTO tracks VALUES
                   (7, 1, 'a1', 'Sæglópur', 'Jónsi', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', 'L', '5', 100, 2005, 473, 'H:\Music\Sigur Rós', '01.mp3', 1, 1, 1999),
                   (8, 1, 'a1', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', NULL, '', NULL, 2005, 268, 'H:\Music\Sigur Rós', '02.mp3', 1, 2, 1999),
@@ -1518,6 +1537,31 @@ mod tests {
         assert_eq!(page.items[0].display_artist.as_deref(), Some("Jónsi"));
         assert_eq!(page.items[0].original_year, Some(1999));
         assert_eq!(page.items[0].release_year, Some(2005));
+
+        let country = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("country:iceland OR france".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("country track search");
+        assert_eq!(country.items.len(), 4);
+
+        let country_code = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("country:is".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("country album search");
+        assert_eq!(country_code.items.len(), 2);
+        assert!(country_code.items.iter().all(|album| {
+            album.origin_country_code.as_deref() == Some("IS")
+                && album.origin_country_name.as_deref() == Some("Iceland")
+        }));
 
         let publisher_year = track_page_from_connection(
             &connection,

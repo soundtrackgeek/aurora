@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.5 brings Music Library's canonical album and single chart rankings into Library rows, album detail, and the inspector.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.6 brings Music Library's artist-origin country flags to album-level views and adds country-aware catalog search.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.5 slice
+## Current 0.23.6 slice
+
+- Albums now show Music Library's bundled SVG origin-country flag beside the Album Artist on each album card, in opened album detail, and in the Album inspector. Track rows remain deliberately unchanged.
+- Catalog search now supports `country:` by imported origin-country name or two-letter code, including boolean and inherited alternatives such as `country:norway OR sweden`, exact values, `NOT`, and leading `-` exclusions.
 
 - Album cards and detail show only their available US, UK, and Norway chart ranks. Track rows and the Track inspector show only the available Billboard, Official UK, VG Lista, Ti i Skuddet, and Norsktoppen abbreviations, such as `BB:#37`; missing charts take no space.
 - Aurora reads Music Library's materialized rank columns directly, preserving its one canonical rank per album or song instead of recalculating weekly chart history.
@@ -168,7 +171,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Keyset-paged Tracks, Albums, and Artists views that request 50 rows at a time and never hold a million-row result in the WebView.
 - The top search reports the exact filtered Songs, Albums, or Artists total even when only the current 50-row page is loaded.
 - Songs, Albums, and Artists keep a compact Sort and Reset row while catalog filtering happens through the persistent top search. Songs and Albums can sort by when they were added. Successful Add Music batches record a durable, synchronized album-added timestamp; older albums fall back to the newest catalog track's insertion order. The active sort remains an enabled menu choice, so re-selecting it always reverses newest/oldest or A–Z/Z–A direction even after moving across other choices. Existing collection handoffs can still apply exact rating, Love, year, genre, and artist scopes, and Reset clears them.
-- Field-aware search supports `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, and `title:`. Year fields accept exact years and inclusive closed or open ranges such as `year:1985..1987`, `year:1985..`, and `ryear:..1987`. Commas or uppercase `AND` combine groups; uppercase `OR` adds alternatives and inherits the preceding field; `NOT` or a leading `-` excludes a group. A complete quoted value is exact, while unquoted text remains prefix-based. `genre:scores` expands to the Music Library film, TV, animation, anime, and game-score genres.
+- Field-aware search supports `artist:` (Display Artist), `aartist:` (Album Artist display), `album:`, `genre:`, `year:` (Year), `ryear:` (Release Year), `publisher:`, `country:` (Album Artist origin), and `title:`. Country accepts imported names or two-letter codes. Year fields accept exact years and inclusive closed or open ranges such as `year:1985..1987`, `year:1985..`, and `ryear:..1987`. Commas or uppercase `AND` combine groups; uppercase `OR` adds alternatives and inherits the preceding field; `NOT` or a leading `-` excludes a group. A complete quoted value is exact, while unquoted text remains prefix-based. `genre:scores` expands to the Music Library film, TV, animation, anime, and game-score genres.
 - Validated sorts for newest, title, artist, album, year, release year, rating, and artist track count; opaque cursors cannot be reused with a different sort.
 - Clickable artist planets open an exact artist focus in Songs, while artist results open the artist's Albums by default; both retain an exact artist scope that can be switched between Songs and Albums.
 - A functional Constellations artist inspector opened from universe planets, Artist results, the selected track, or the Observatory review queue.

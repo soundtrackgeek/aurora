@@ -120,7 +120,7 @@
 .year-album-inspector > .artwork { width: 100% !important; height: auto !important; aspect-ratio: 1; border-radius: 10px; }
 .year-album-inspector__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; padding: 14px 1px 12px; border-bottom: 1px solid var(--border); }
 .year-album-inspector__heading h2 { margin: 0; font-size: max(var(--aurora-font-min), calc(17px + var(--aurora-font-offset))); font-weight: 520; line-height: 1.25; }
-.year-album-inspector__heading p { margin: 5px 0 0; color: #aab4bf; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
+.year-album-inspector__heading p { display: flex; align-items: center; gap: 7px; margin: 5px 0 0; color: #aab4bf; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
 .year-album-inspector__heading > span { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; color: #dc68ec; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
 .year-album-inspector__heading svg { width: 13px; height: 13px; fill: currentColor; }
 .year-album-inspector .metadata-list .year-original { color: var(--years-cyan); }

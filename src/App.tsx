@@ -256,7 +256,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   History: "history",
 };
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), and title. Years accept inclusive ranges such as year:1985..1987, year:1985.., and year:..1987; the same syntax works for ryear. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 const explorerSearchDebounceMs = 2_000;
 const catalogSyncRetryIntervalMs = 5_000;
 
@@ -2945,7 +2945,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.23.5</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.23.6</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
