@@ -215,6 +215,7 @@ pub(crate) struct AlbumDetail {
     pub(crate) album: AlbumSummary,
     pub(crate) tracks: Vec<TrackSummary>,
     pub(crate) tracks_truncated: bool,
+    pub(crate) popularity: crate::lastfm::AlbumPopularity,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1123,6 +1124,7 @@ fn album_detail_from_connection(
         album,
         tracks,
         tracks_truncated,
+        popularity: crate::lastfm::AlbumPopularity::default(),
     })
 }
 

@@ -113,6 +113,10 @@ impl StateStore {
         Ok(connection)
     }
 
+    pub(crate) fn lastfm_cache_path(&self) -> PathBuf {
+        self.path.with_file_name("aurora-lastfm-cache.sqlite3")
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
@@ -384,6 +388,7 @@ impl StateStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_album_additions_added_at
                   ON album_additions(added_at_ms DESC, album_id DESC);
+
                 "#,
             )
             .map_err(|error| format!("Could not ensure Aurora's state-sync metadata: {error}"))?;

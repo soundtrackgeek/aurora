@@ -83,10 +83,12 @@ import {
   catalogRefreshIsConsistent,
   deleteAlbumTracks,
   loadAlbumDetail,
+  loadAlbumPopularity,
   loadArtistDetail,
   loadCatalogRevision,
   loadLibrarySnapshot,
   applyAlbumTrackTagProjection,
+  applyAlbumPopularity,
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
   type AlbumSummary,
@@ -1122,10 +1124,11 @@ function App() {
                 setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
                   ? current.map((album) => album.id === detail.album.id ? detail.album : album)
                   : [detail.album, ...current]);
-                setAlbumTracks(detail.tracks);
+                setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
                 setAlbumTracksTruncated(detail.tracksTruncated);
                 setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
                 setAlbumDetailState("ready");
+                refreshSelectedAlbumPopularity(restoredAlbumId, albumDetailRequestId);
               })
               .catch((error: unknown) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
@@ -2138,7 +2141,7 @@ function App() {
       const detail = await loadAlbumDetail(albumId);
       if (requestId !== albumRequestRef.current) return;
       setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
-      setAlbumTracks(detail.tracks);
+      setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
       setAlbumTracksTruncated(detail.tracksTruncated);
       setSelectedTrack((current) => {
         if (!current || current.albumId !== albumId) return current;
@@ -2270,7 +2273,7 @@ function App() {
           const detail = await loadAlbumDetail(albumId);
           if (requestId === albumRequestRef.current) {
             setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
-            setAlbumTracks(detail.tracks);
+            setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
             setAlbumTracksTruncated(detail.tracksTruncated);
             setSelectedTrack((current) => {
               if (!current || current.albumId !== albumId) return current;
@@ -2522,16 +2525,26 @@ function App() {
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
         setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? detail.album : candidate));
-        setAlbumTracks(detail.tracks);
+        setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
         setAlbumTracksTruncated(detail.tracksTruncated);
         setSelectedTrack(detail.tracks[0] ?? null);
         setAlbumDetailState("ready");
+        refreshSelectedAlbumPopularity(album.id, requestId);
       })
       .catch((error: unknown) => {
         if (requestId !== albumRequestRef.current) return;
         console.warn("Aurora could not open album details", error);
         setAlbumDetailState("error");
       });
+  }
+
+  function refreshSelectedAlbumPopularity(albumId: string, requestId: number) {
+    void loadAlbumPopularity(albumId).then((popularity) => {
+      if (requestId !== albumRequestRef.current) return;
+      setAlbumTracks((current) => applyAlbumPopularity(current, popularity));
+    }).catch(() => {
+      // Cached evidence remains visible when Last.fm is offline or not configured.
+    });
   }
 
   async function playExplorerAlbum(album: ExplorerAlbum) {
@@ -2901,7 +2914,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.23.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.23.2</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

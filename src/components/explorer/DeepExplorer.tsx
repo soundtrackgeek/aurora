@@ -399,20 +399,6 @@ function TrackTable({
 }) {
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const selectionIsVisible = tracks.some((track) => multiSelectedTrackKeys?.has(track.trackKey) || track.id === selectedTrackId);
-  const popularTrackKeys = useMemo(() => {
-    if (!compact) return new Set<string>();
-    return new Set(
-      tracks
-        .map((track, index) => ({ track, index }))
-        .filter(({ track }) => track.playCount !== null)
-        .sort((left, right) => (
-          (right.track.playCount ?? 0) - (left.track.playCount ?? 0)
-          || left.index - right.index
-        ))
-        .slice(0, 3)
-        .map(({ track }) => track.trackKey),
-    );
-  }, [compact, tracks]);
 
   function selectTrack(track: Track, index: number, event?: Pick<MouseEvent | KeyboardEvent, "ctrlKey" | "metaKey" | "shiftKey">) {
     onSelectTrack(track);
@@ -495,11 +481,11 @@ function TrackTable({
                     <span>
                       <span className="deep-explorer-track-heading">
                         <strong>{track.title}</strong>
-                        {popularTrackKeys.has(track.trackKey) ? (
+                        {compact && track.lastFmAlbumRank ? (
                           <span
                             className="deep-explorer-track-popular"
-                            aria-label="One of this album's top 3 Last.fm tracks"
-                            title="Top 3 on Last.fm"
+                            aria-label={`Number ${track.lastFmAlbumRank} of this album's top 3 Last.fm tracks`}
+                            title={`#${track.lastFmAlbumRank} on Last.fm`}
                           >
                             🔥
                           </span>

@@ -49,7 +49,7 @@ use inbox::{
     ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
-use lastfm::LastFmCredentialsRequest;
+use lastfm::{AlbumPopularity, LastFmCredentialsRequest};
 use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
     preview_library_move_to_inbox, select_library_intake_folder,
@@ -283,10 +283,28 @@ async fn explore_artists(request: ArtistPageRequest) -> Result<ArtistPage, Strin
 async fn album_detail(app: AppHandle, album_id: String) -> Result<AlbumDetail, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        explorer::load_album_detail(album_id, &store)
+        let mut detail = explorer::load_album_detail(album_id, &store)?;
+        detail.popularity =
+            lastfm::cached_album_popularity(&detail.album.artist, &detail.tracks, &store);
+        Ok(detail)
     })
     .await
     .map_err(|error| format!("The album detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn album_popularity(app: AppHandle, album_id: String) -> Result<AlbumPopularity, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        let detail = explorer::load_album_detail(album_id, &store)?;
+        Ok(lastfm::refresh_album_popularity(
+            &detail.album.artist,
+            &detail.tracks,
+            &store,
+        ))
+    })
+    .await
+    .map_err(|error| format!("The Last.fm album worker stopped unexpectedly: {error}"))?
 }
 
 #[derive(serde::Serialize)]
@@ -1249,6 +1267,7 @@ pub fn run() {
             explore_albums,
             explore_artists,
             album_detail,
+            album_popularity,
             delete_album_track,
             artist_detail,
             genre_index,

@@ -43,6 +43,7 @@ export interface Track {
   trackTotal?: number | null;
   discNumber?: number | null;
   discTotal?: number | null;
+  lastFmAlbumRank?: number | null;
 }
 
 export function displayTrackArtist(track: Track): string {
@@ -267,6 +268,16 @@ export interface AlbumDetail {
   album: AlbumSummary;
   tracks: Track[];
   tracksTruncated: boolean;
+  popularity: AlbumPopularity;
+}
+
+export interface AlbumPopularity {
+  tracks: Array<{ trackKey: string; rank: number }>;
+}
+
+export function applyAlbumPopularity(tracks: readonly Track[], popularity: AlbumPopularity): Track[] {
+  const ranks = new Map(popularity.tracks.map((track) => [track.trackKey, track.rank]));
+  return tracks.map((track) => ({ ...track, lastFmAlbumRank: ranks.get(track.trackKey) ?? null }));
 }
 
 export interface TrackDeletionResult {
@@ -551,9 +562,16 @@ export async function loadAlbumDetail(albumId: string): Promise<AlbumDetail> {
   if (!isTauriRuntime()) {
     const album = browserAlbumSummaries().find((candidate) => candidate.id === albumId);
     if (!album) throw new Error("That album is no longer available.");
-    return { album, tracks: browserPreview.tracks.filter((track) => track.albumId === albumId), tracksTruncated: false };
+    const tracks = browserPreview.tracks.filter((track) => track.albumId === albumId);
+    const popularity = { tracks: tracks.filter((track) => track.playCount !== null).sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0)).slice(0, 3).map((track, index) => ({ trackKey: track.trackKey, rank: index + 1 })) };
+    return { album, tracks: applyAlbumPopularity(tracks, popularity), tracksTruncated: false, popularity };
   }
   return invoke<AlbumDetail>("album_detail", { albumId });
+}
+
+export async function loadAlbumPopularity(albumId: string): Promise<AlbumPopularity> {
+  if (!isTauriRuntime()) return (await loadAlbumDetail(albumId)).popularity;
+  return invoke<AlbumPopularity>("album_popularity", { albumId });
 }
 
 export async function deleteAlbumTracks(albumId: string, tracks: readonly Track[]): Promise<TrackDeletionResult> {

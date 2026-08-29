@@ -3,12 +3,13 @@ use keyring::Entry;
 use percent_encoding::percent_decode_str;
 use reqwest::{Url, blocking::Client};
 use serde::Deserialize;
+use serde::Serialize;
 use std::{
     fs,
     io::{Cursor, Read},
     path::Path,
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, Runtime, http};
 
@@ -30,6 +31,327 @@ const USER_AGENT: &str = concat!(
 
 static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
 static IMAGE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static POPULARITY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+const AVAILABLE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
+const UNAVAILABLE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumPopularity {
+    pub(crate) tracks: Vec<AlbumPopularTrack>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumPopularTrack {
+    pub(crate) track_key: String,
+    pub(crate) rank: u8,
+}
+
+#[derive(Clone, Debug)]
+struct PopularityRecord {
+    track_key: String,
+    track_name: String,
+    listeners: Option<i64>,
+    play_count: Option<i64>,
+    available: bool,
+    fresh: bool,
+}
+
+fn popularity_key(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|character| match character {
+            '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2212}' => '-',
+            '\u{2018}' | '\u{2019}' => '\'',
+            other => other,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn loose_popularity_key(value: &str) -> String {
+    popularity_key(value)
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn matching_record<'a>(
+    records: &'a [PopularityRecord],
+    title: &str,
+) -> Option<&'a PopularityRecord> {
+    let exact = popularity_key(title);
+    if let Some(record) = records.iter().find(|record| record.track_key == exact) {
+        return Some(record);
+    }
+    let loose = loose_popularity_key(title);
+    let mut matches = records
+        .iter()
+        .filter(|record| loose_popularity_key(&record.track_name) == loose);
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn popularity_cache(
+    store: &crate::state_store::StateStore,
+) -> Result<rusqlite::Connection, String> {
+    let connection = rusqlite::Connection::open(store.lastfm_cache_path())
+        .map_err(|error| format!("Could not open Aurora's Last.fm cache: {error}"))?;
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS track_popularity (
+              artist_key TEXT NOT NULL,
+              track_key TEXT NOT NULL,
+              track_name TEXT NOT NULL,
+              listeners INTEGER,
+              play_count INTEGER,
+              state TEXT NOT NULL CHECK (state IN ('available', 'unavailable')),
+              expires_at_ms INTEGER NOT NULL,
+              PRIMARY KEY (artist_key, track_key)
+            );",
+        )
+        .map_err(|error| format!("Could not prepare Aurora's Last.fm cache: {error}"))?;
+    Ok(connection)
+}
+
+fn local_records(artist: &str, store: &crate::state_store::StateStore) -> Vec<PopularityRecord> {
+    let Ok(connection) = popularity_cache(store) else {
+        return Vec::new();
+    };
+    let Ok(mut statement) = connection.prepare(
+        "SELECT track_key, track_name, listeners, play_count, state, expires_at_ms FROM track_popularity WHERE artist_key = ?",
+    ) else { return Vec::new() };
+    let cutoff = now_ms();
+    statement
+        .query_map([popularity_key(artist)], |row| {
+            Ok(PopularityRecord {
+                track_key: row.get(0)?,
+                track_name: row.get(1)?,
+                listeners: row.get(2)?,
+                play_count: row.get(3)?,
+                available: row.get::<_, String>(4)? == "available",
+                fresh: row.get::<_, i64>(5)? > cutoff,
+            })
+        })
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+fn catalog_records(artist: &str) -> Vec<PopularityRecord> {
+    let Ok(path) = crate::catalog::default_catalog_path() else {
+        return Vec::new();
+    };
+    let Ok(connection) = crate::catalog::open_catalog(&path) else {
+        return Vec::new();
+    };
+    let Ok(mut statement) = connection.prepare(
+        "SELECT track_key, track_name, listeners, play_count, state FROM lastfm_track_popularity WHERE artist_key = lower(trim(?))",
+    ) else { return Vec::new() };
+    statement
+        .query_map([artist.trim()], |row| {
+            Ok(PopularityRecord {
+                track_key: popularity_key(&row.get::<_, String>(0)?),
+                track_name: row.get(1)?,
+                listeners: row.get(2)?,
+                play_count: row.get(3)?,
+                available: row.get::<_, String>(4)? == "available",
+                fresh: true,
+            })
+        })
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+fn combined_records(artist: &str, store: &crate::state_store::StateStore) -> Vec<PopularityRecord> {
+    let mut records = catalog_records(artist);
+    for local in local_records(artist, store) {
+        if matching_record(&records, &local.track_name).is_none() {
+            records.push(local);
+        }
+    }
+    records
+}
+
+fn rank_album(
+    tracks: &[crate::catalog::TrackSummary],
+    records: &[PopularityRecord],
+) -> AlbumPopularity {
+    let mut ranked = tracks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, track)| {
+            let record = matching_record(records, &track.title)?;
+            (record.available && record.listeners.unwrap_or(0) > 0).then_some((
+                track.track_key.clone(),
+                record.listeners.unwrap_or(0),
+                record.play_count.unwrap_or(0),
+                index,
+            ))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.3.cmp(&right.3))
+    });
+    AlbumPopularity {
+        tracks: ranked
+            .into_iter()
+            .take(3)
+            .enumerate()
+            .map(|(index, (track_key, ..))| AlbumPopularTrack {
+                track_key,
+                rank: (index + 1) as u8,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn cached_album_popularity(
+    artist: &str,
+    tracks: &[crate::catalog::TrackSummary],
+    store: &crate::state_store::StateStore,
+) -> AlbumPopularity {
+    rank_album(tracks, &combined_records(artist, store))
+}
+
+fn json_count(value: &serde_json::Value, key: &str) -> Option<i64> {
+    value
+        .get(key)
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+fn fetch_popularity(artist: &str, title: &str, api_key: &str) -> Result<PopularityRecord, String> {
+    let response = client()?
+        .get(LAST_FM_API_URL)
+        .query(&[
+            ("method", "track.getInfo"),
+            ("artist", artist),
+            ("track", title),
+            ("autocorrect", "1"),
+            ("api_key", api_key),
+            ("format", "json"),
+        ])
+        .send()
+        .map_err(|error| format!("Last.fm track lookup failed: {error}"))?;
+    let status = response.status();
+    let value: serde_json::Value = response
+        .json()
+        .map_err(|_| "Last.fm returned invalid track metadata.".to_owned())?;
+    if value.get("error").and_then(serde_json::Value::as_i64) == Some(6) {
+        return Ok(PopularityRecord {
+            track_key: popularity_key(title),
+            track_name: title.to_owned(),
+            listeners: None,
+            play_count: None,
+            available: false,
+            fresh: true,
+        });
+    }
+    if value.get("error").is_some() {
+        return Err(value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Last.fm rejected the track lookup.")
+            .to_owned());
+    }
+    if !status.is_success() {
+        return Err(format!("Last.fm returned {status}."));
+    }
+    let track = value
+        .get("track")
+        .ok_or_else(|| "Last.fm omitted track metadata.".to_owned())?;
+    Ok(PopularityRecord {
+        track_key: popularity_key(title),
+        track_name: track
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(title)
+            .to_owned(),
+        listeners: json_count(track, "listeners"),
+        play_count: json_count(track, "playcount"),
+        available: true,
+        fresh: true,
+    })
+}
+
+fn save_record(artist: &str, record: &PopularityRecord, store: &crate::state_store::StateStore) {
+    let Ok(connection) = popularity_cache(store) else {
+        return;
+    };
+    let ttl = if record.available {
+        AVAILABLE_TTL_MS
+    } else {
+        UNAVAILABLE_TTL_MS
+    };
+    let _ = connection.execute(
+        "INSERT INTO track_popularity(artist_key, track_key, track_name, listeners, play_count, state, expires_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(artist_key, track_key) DO UPDATE SET track_name=excluded.track_name, listeners=excluded.listeners, play_count=excluded.play_count, state=excluded.state, expires_at_ms=excluded.expires_at_ms",
+        rusqlite::params![popularity_key(artist), record.track_key, record.track_name, record.listeners, record.play_count, if record.available { "available" } else { "unavailable" }, now_ms() + ttl],
+    );
+}
+
+pub(crate) fn refresh_album_popularity(
+    artist: &str,
+    tracks: &[crate::catalog::TrackSummary],
+    store: &crate::state_store::StateStore,
+) -> AlbumPopularity {
+    let Ok(_guard) = POPULARITY_LOCK.get_or_init(|| Mutex::new(())).lock() else {
+        return cached_album_popularity(artist, tracks, store);
+    };
+    let Some(api_key) = api_key() else {
+        return cached_album_popularity(artist, tracks, store);
+    };
+    let mut records = combined_records(artist, store);
+    for track in tracks {
+        if matching_record(&records, &track.title).is_some_and(|record| record.fresh) {
+            continue;
+        }
+        let lookup_artist = track
+            .display_artist
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(artist);
+        match fetch_popularity(lookup_artist, &track.title, &api_key) {
+            Ok(record) => {
+                save_record(artist, &record, store);
+                records.push(record);
+            }
+            Err(_) => break,
+        }
+        std::thread::sleep(Duration::from_millis(210));
+    }
+    rank_album(tracks, &combined_records(artist, store))
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(
@@ -458,6 +780,22 @@ pub(crate) fn handle_artist_image_request<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn popularity_matching_handles_music_metadata_punctuation_without_guessing_ambiguously() {
+        let records = vec![PopularityRecord {
+            track_key: popularity_key("Love–Song"),
+            track_name: "Love–Song".to_owned(),
+            listeners: Some(42),
+            play_count: Some(99),
+            available: true,
+            fresh: true,
+        }];
+        assert_eq!(
+            matching_record(&records, " LOVE-SONG ").map(|record| record.listeners),
+            Some(Some(42))
+        );
+    }
 
     #[test]
     fn artist_image_protocol_accepts_only_bounded_names_and_sizes() {

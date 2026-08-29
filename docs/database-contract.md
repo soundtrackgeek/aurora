@@ -1,6 +1,6 @@
 # Database contract
 
-Verified read-only on 2026-08-23. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 7.
+Verified read-only on 2026-08-23. All three imported databases passed `PRAGMA quick_check` during the initial audit; the live catalog counts below were refreshed for 0.3.0. Aurora's separate writable state database is now schema version 11.
 
 ## Sources
 
@@ -58,7 +58,7 @@ The overlay's current live rows already match the copies in the main database, s
 
 The shared Music Library catalog keeps its desktop paths. Laptop Mode translates complete roots only when Rust crosses a filesystem boundary: `D:\MUSIC` to `Y:\MUSIC`, `G:\_BACKUP\SCORES` to `V:\_BACKUP\SCORES`, and `H:\Synthwave` to `U:\Synthwave`. Queries, imported rows, normalized track keys, and the catalog itself remain unchanged. Shared tag-journal paths are translated back to the active device before recovery or undo.
 
-Aurora's writable source of truth remains `%APPDATA%\com.soundtrackgeek.aurora\aurora-state.sqlite3` while the process is running. Schema version 6 added a single sync-lineage row and mutation triggers for Aurora-owned playback, tag, and curation tables. Schema version 7 makes those triggers authority-aware: playback position, transient catalog track IDs, and overlay reconciliation bookkeeping do not create shared revisions. The OneDrive file is a verified point-in-time snapshot, not a second live SQLite connection.
+Aurora's writable source of truth remains `%APPDATA%\com.soundtrackgeek.aurora\aurora-state.sqlite3` while the process is running. Last.fm album enrichment is cached separately in device-local `aurora-lastfm-cache.sqlite3`, so it is neither copied into OneDrive state snapshots nor written to Music Library's shared catalog. The OneDrive file is a verified point-in-time snapshot, not a second live SQLite connection.
 
 Publishing uses `VACUUM INTO`, seals a new generation in the staged snapshot, runs `PRAGMA quick_check`, retains `aurora-state.previous.sqlite3`, and then uses Windows atomic replacement. Local metadata is marked mirrored only after the remote snapshot is installed and re-read. A missing local file is restored before open; a newer remote generation replaces only a clean, closed local database and first retains `aurora-state.pre-onedrive.sqlite3`.
 

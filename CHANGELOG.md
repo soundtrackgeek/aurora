@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-08-29
+
+### Fixed
+
+- Album detail no longer treats Music Library's sparse artist-popularity snapshot as a complete album ranking. Aurora now reuses read-only catalog evidence, refreshes missing tracks from Last.fm in the background, caches results in device-local state, ranks by listeners then global play count, and consistently marks the top three tracks.
+
 ## [0.23.1] - 2026-08-29
 
 ### Added
