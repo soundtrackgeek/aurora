@@ -115,8 +115,6 @@
 .deep-explorer-table-wrap.is-compact td:nth-child(6),
 .deep-explorer-table-wrap.is-compact th:nth-child(7),
 .deep-explorer-table-wrap.is-compact td:nth-child(7),
-.deep-explorer-table-wrap.is-compact th:nth-child(8),
-.deep-explorer-table-wrap.is-compact td:nth-child(8),
 .deep-explorer-table-wrap.is-compact th:nth-child(9),
 .deep-explorer-table-wrap.is-compact td:nth-child(9) { display: none; }
 .deep-explorer-table td { height: 43px; padding: 4px 8px; overflow: hidden; border-bottom: 1px solid rgba(140, 164, 189, .075); color: #aeb8c4; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-overflow: ellipsis; white-space: nowrap; }

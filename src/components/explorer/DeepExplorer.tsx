@@ -451,7 +451,7 @@ function TrackTable({
             <th className="deep-explorer-table__position is-numeric">{compact ? "Track" : "Year"}</th>
             <th>Genre</th>
             <th>Publisher</th>
-            <th className="is-numeric">Time</th>
+            <th className="deep-explorer-table__time is-numeric">Time</th>
             <th className="is-numeric">Plays</th>
             <th>Rating</th>
             <th aria-label="Love" />
@@ -517,7 +517,7 @@ function TrackTable({
                 </td>
                 <td>{track.genre ?? "—"}</td>
                 <td>{track.publisher ?? "—"}</td>
-                <td className="is-numeric">{formatDuration(track.durationSeconds)}</td>
+                <td className="deep-explorer-table__time is-numeric">{formatDuration(track.durationSeconds)}</td>
                 <td className="is-numeric">{track.playCount === null ? "—" : formatCount(track.playCount)}</td>
                 <td className="deep-explorer-table__rating">
                   {onRatingChange ? (

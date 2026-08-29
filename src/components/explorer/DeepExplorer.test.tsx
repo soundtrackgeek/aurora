@@ -338,7 +338,7 @@ describe("DeepExplorer", () => {
     expect(within(albumDetail).queryByText("[Various Artists]")).not.toBeInTheDocument();
   });
 
-  it("uses track numbers instead of the repeated year in album detail", () => {
+  it("shows track numbers and durations before rating in album detail", () => {
     render(
       <DeepExplorer
         {...explorerProps({
@@ -355,6 +355,14 @@ describe("DeepExplorer", () => {
     expect(albumTracks.queryByRole("columnheader", { name: "Year" })).not.toBeInTheDocument();
     expect(albumTracks.getByText("01")).toBeVisible();
     expect(albumTracks.getByText("02")).toBeVisible();
+    expect(albumTracks.getByRole("columnheader", { name: "Time" })).toHaveClass("deep-explorer-table__time");
+    expect(albumTracks.getByText("4:03")).toHaveClass("deep-explorer-table__time");
+    expect(albumTracks.getByText("3:18")).toHaveClass("deep-explorer-table__time");
+    const trackHeader = albumTracks.getByRole("columnheader", { name: "Track" });
+    const timeHeader = albumTracks.getByRole("columnheader", { name: "Time" });
+    const ratingHeader = albumTracks.getByRole("columnheader", { name: "Rating" });
+    expect(trackHeader.compareDocumentPosition(timeHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timeHeader.compareDocumentPosition(ratingHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("marks the three album tracks with the highest available Last.fm popularity", () => {

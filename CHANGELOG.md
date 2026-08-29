@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.13] - 2026-08-30
+
+### Added
+
+- Opened albums now show each track's duration in a **Time** column between **Track** and **Rating**.
+
 ## [0.23.12] - 2026-08-29
 
 ### Added
