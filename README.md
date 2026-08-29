@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.9 makes identical embedded front covers mandatory across every Inbox album track and adds a verified one-step repair.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.10 reads MusicBee user-text values correctly when their ID3 encoding includes a trailing null terminator.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.9 slice
+## Current 0.23.10 slice
+
+- The tag editor now accepts MusicBee `LOVE RATING`, Release Time, and display-artist user-text values that end with an ID3 null terminator. Valid loved tracks no longer make the containing album fail to open.
 
 - Inbox `Ctrl+R` verification now waits for the asynchronously loaded album selection to make Rename available before exercising the shortcut, eliminating a runner-speed-dependent false failure.
 

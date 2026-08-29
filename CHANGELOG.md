@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.10] - 2026-08-29
+
+### Fixed
+
+- Accepted MusicBee `LOVE RATING` and other compatible user-text values with a trailing ID3 null terminator, so albums containing those valid frames open in the tag editor instead of reporting an unsupported Love value.
+
 ## [0.23.9] - 2026-08-29
 
 ### Added

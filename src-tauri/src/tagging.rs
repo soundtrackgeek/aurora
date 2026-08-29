@@ -1589,7 +1589,12 @@ fn unique_extended_text_value(
     let values = tag
         .extended_texts()
         .filter(|text| text.description.eq_ignore_ascii_case(description))
-        .map(|text| text.value.trim().to_owned())
+        .map(|text| {
+            text.value
+                .trim_start()
+                .trim_end_matches(|character: char| character == '\0' || character.is_whitespace())
+                .to_owned()
+        })
         .collect::<Vec<_>>();
     if values.len() > 1 {
         return Err(format!(
@@ -3286,6 +3291,23 @@ mod tests {
                 .expect_err("case-insensitive duplicate Love fields")
                 .contains("duplicate MusicBee Love")
         );
+    }
+
+    #[test]
+    fn musicbee_extended_text_values_ignore_trailing_null_terminators() {
+        let mut tag = Tag::with_version(Version::Id3v24);
+        tag.add_frame(ExtendedText {
+            description: LOVE_RATING_DESCRIPTION.to_owned(),
+            value: "L\0".to_owned(),
+        });
+        tag.add_frame(ExtendedText {
+            description: RELEASE_TIME_DESCRIPTION.to_owned(),
+            value: "1988\0".to_owned(),
+        });
+
+        let values = read_tag_values(&tag).expect("read null-terminated MusicBee fields");
+        assert_eq!(values.love_state, LoveState::Loved);
+        assert_eq!(values.release_year, Some(1988));
     }
 
     #[test]
