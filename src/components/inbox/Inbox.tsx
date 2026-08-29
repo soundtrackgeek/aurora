@@ -46,6 +46,7 @@ import {
 } from "../../ingest";
 import type { EditableTagField, EditableTagValues } from "../../tags";
 import { loadGenreNames } from "../../genres";
+import { formatDuration } from "../../library";
 import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
 import { applyWindowsSelection } from "../explorer/windowsSelection";
@@ -94,6 +95,12 @@ function albumInFolder(album: InboxAlbum, folder: string): boolean {
 
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp);
+}
+
+function formatInboxSize(bytes: number): string {
+  if (bytes <= 0) return "Unknown size";
+  const megabytes = bytes / (1024 * 1024);
+  return `${megabytes >= 100 ? megabytes.toFixed(0) : megabytes.toFixed(1)} MB`;
 }
 
 function sourceLabel(source: MetadataSource): string {
@@ -426,7 +433,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             /> : <p className="inbox-manual-tags__empty">Select one or more tracks to edit their tags.</p>}
           </div> : selectedAlbum ? <>
             <header><InboxArtwork album={selectedAlbum} size={128} decorative={false} /><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
-            <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Artwork</dt><dd className={selectedAlbum.artworkReady ? "is-ready" : "has-issues"}>{selectedAlbum.artworkTrackCount} / {selectedAlbum.trackCount} embedded</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
+            <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Format</dt><dd>{selectedAlbum.formats?.length ? selectedAlbum.formats.join(" · ") : "Unknown"}</dd></div><div><dt>Bitrate</dt><dd>{selectedAlbum.avgBitrateKbps ? `${selectedAlbum.avgBitrateKbps} kbps average` : "Unknown"}</dd></div><div><dt>Audio</dt><dd>{formatInboxSize(selectedAlbum.totalSizeBytes ?? 0)} · {formatDuration(Math.round((selectedAlbum.durationMs ?? 0) / 1000))}</dd></div><div><dt>Artwork</dt><dd className={selectedAlbum.artworkReady ? "is-ready" : "has-issues"}>{selectedAlbum.artworkTrackCount} / {selectedAlbum.trackCount} embedded</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
             <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags and embedded artwork are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
             {!selectedAlbum.artworkReady ? <button type="button" className="inbox-autotag inbox-artwork" disabled={coverBusy} onClick={() => void repairAlbumCover()}>{coverBusy ? <LoaderCircle className="is-spinning" /> : <ImagePlus />}<span><strong>{selectedAlbum.artworkPresent ? "Embed cover in all tracks" : "Choose album cover"}</strong><small>{selectedAlbum.artworkPresent ? `Use the displayed cover for all ${selectedAlbum.trackCount} MP3s` : "Select a JPG, PNG, GIF, BMP, or WebP image"}</small></span></button> : null}
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>

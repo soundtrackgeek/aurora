@@ -12,6 +12,7 @@ use id3::{
 };
 use image::ImageReader;
 use keyring::Entry;
+use lofty::{config::ParseOptions, file::AudioFile, probe::Probe};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -58,6 +59,16 @@ pub(crate) struct InboxRuntime {
     path: PathBuf,
     settings: InboxSettings,
     warning: Option<String>,
+    quality_cache: HashMap<PathBuf, CachedAudioQuality>,
+}
+
+#[derive(Clone)]
+struct CachedAudioQuality {
+    size_bytes: u64,
+    modified_ns: u64,
+    bitrate_kbps: Option<u32>,
+    duration_ms: Option<u64>,
+    scan_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -114,6 +125,11 @@ pub(crate) struct InboxAlbum {
     publisher: Option<String>,
     year: Option<i32>,
     track_count: usize,
+    formats: Vec<String>,
+    total_size_bytes: u64,
+    avg_bitrate_kbps: Option<u32>,
+    duration_ms: u64,
+    audio_scan_error_count: usize,
     artwork_present: bool,
     artwork_source_path: Option<String>,
     artwork_track_count: usize,
@@ -135,6 +151,11 @@ pub(crate) struct InboxReadiness {
 pub(crate) struct InboxTrack {
     path: String,
     file_name: String,
+    format: String,
+    size_bytes: u64,
+    bitrate_kbps: Option<u32>,
+    duration_ms: Option<u64>,
+    scan_error: Option<String>,
     album_artist: Option<String>,
     title: Option<String>,
     artist: Option<String>,
@@ -358,6 +379,7 @@ impl InboxRuntime {
             path,
             settings,
             warning,
+            quality_cache: HashMap::new(),
         }
     }
 
@@ -429,22 +451,27 @@ impl InboxRuntime {
         Ok(self.status())
     }
 
-    pub(crate) fn scan(&self) -> Result<InboxSnapshot, String> {
+    pub(crate) fn scan(&mut self) -> Result<InboxSnapshot, String> {
         let mut album_directories = HashSet::new();
         let mut visited = 0usize;
         for root in &self.settings.monitored_folders {
             collect_album_directories(Path::new(root), &mut album_directories, &mut visited)?;
         }
+        let mut active_tracks = HashSet::new();
         let mut albums = album_directories
             .into_iter()
-            .filter_map(|path| match scan_album(&path) {
-                Ok(album) => Some(album),
-                Err(error) => {
-                    eprintln!("Inbox skipped {}: {error}", path.display());
-                    None
+            .filter_map(|path| {
+                match scan_album_cached(&path, &mut self.quality_cache, &mut active_tracks) {
+                    Ok(album) => Some(album),
+                    Err(error) => {
+                        eprintln!("Inbox skipped {}: {error}", path.display());
+                        None
+                    }
                 }
             })
             .collect::<Vec<_>>();
+        self.quality_cache
+            .retain(|path, _| active_tracks.contains(path));
         albums.sort_by(|left, right| {
             right
                 .modified_at_ms
@@ -1497,13 +1524,21 @@ fn collect_album_directories(
 }
 
 fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
+    scan_album_cached(directory, &mut HashMap::new(), &mut HashSet::new())
+}
+
+fn scan_album_cached(
+    directory: &Path,
+    quality_cache: &mut HashMap<PathBuf, CachedAudioQuality>,
+    active_tracks: &mut HashSet<PathBuf>,
+) -> Result<InboxAlbum, String> {
     let canonical = fs::canonicalize(directory).map_err(|error| error.to_string())?;
     let mut tracks = fs::read_dir(&canonical)
         .map_err(|error| error.to_string())?
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| path.is_file() && is_mp3(path))
-        .map(|path| scan_track(&path))
+        .map(|path| scan_track(&path, quality_cache, active_tracks))
         .collect::<Result<Vec<_>, _>>()?;
     tracks.sort_by(|left, right| {
         left.disc_number
@@ -1561,6 +1596,28 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     let genre = common_text(tags.iter().map(|tag| tag.genre.as_deref()));
     let publisher = common_text(tags.iter().map(|tag| tag.publisher.as_deref()));
     let year = common_value(tags.iter().map(|tag| tag.year));
+    let formats = {
+        let mut values = tracks
+            .iter()
+            .map(|track| track.format.clone())
+            .collect::<Vec<_>>();
+        values.sort();
+        values.dedup();
+        values
+    };
+    let total_size_bytes = tracks.iter().map(|track| track.size_bytes).sum();
+    let duration_ms = tracks.iter().filter_map(|track| track.duration_ms).sum();
+    let bitrates = tracks
+        .iter()
+        .filter_map(|track| track.bitrate_kbps)
+        .collect::<Vec<_>>();
+    let avg_bitrate_kbps = (!bitrates.is_empty()).then(|| {
+        (bitrates.iter().map(|value| u64::from(*value)).sum::<u64>() / bitrates.len() as u64) as u32
+    });
+    let audio_scan_error_count = tracks
+        .iter()
+        .filter(|track| track.scan_error.is_some())
+        .count();
     let mut issues = Vec::new();
     if artist.is_none() {
         issues.push("Album artist is missing or inconsistent".to_owned());
@@ -1589,6 +1646,16 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     }
     if year.is_none() || year.is_some_and(|value| value <= 0) {
         issues.push("Year is missing or inconsistent".to_owned());
+    }
+    if audio_scan_error_count > 0 {
+        issues.push(format!(
+            "Audio properties could not be read from {audio_scan_error_count} {}",
+            if audio_scan_error_count == 1 {
+                "track"
+            } else {
+                "tracks"
+            }
+        ));
     }
     let missing_artwork_tracks = tracks.len().saturating_sub(artwork_track_count);
     if missing_artwork_tracks == tracks.len() {
@@ -1637,6 +1704,11 @@ fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
         publisher,
         year,
         track_count: tracks.len(),
+        formats,
+        total_size_bytes,
+        avg_bitrate_kbps,
+        duration_ms,
+        audio_scan_error_count,
         artwork_present,
         artwork_source_path,
         artwork_track_count,
@@ -1697,8 +1769,14 @@ fn organization_issues(
     issues
 }
 
-fn scan_track(path: &Path) -> Result<InboxTrack, String> {
+fn scan_track(
+    path: &Path,
+    quality_cache: &mut HashMap<PathBuf, CachedAudioQuality>,
+    active_tracks: &mut HashSet<PathBuf>,
+) -> Result<InboxTrack, String> {
     let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
+    active_tracks.insert(canonical.clone());
+    let quality = inspect_audio_quality(&canonical, quality_cache);
     let (tag, _) = read_tag_for_write(&canonical)?;
     let values = read_editable_tag_values(&tag)?;
     Ok(InboxTrack {
@@ -1708,6 +1786,11 @@ fn scan_track(path: &Path) -> Result<InboxTrack, String> {
             .and_then(|name| name.to_str())
             .unwrap_or("track.mp3")
             .to_owned(),
+        format: "MP3".to_owned(),
+        size_bytes: quality.size_bytes,
+        bitrate_kbps: quality.bitrate_kbps,
+        duration_ms: quality.duration_ms,
+        scan_error: quality.scan_error,
         album_artist: values.album_artist,
         title: values.title,
         artist: values.artist,
@@ -1722,6 +1805,73 @@ fn scan_track(path: &Path) -> Result<InboxTrack, String> {
         disc_number: values.disc_number,
         disc_total: values.disc_total,
     })
+}
+
+fn inspect_audio_quality(
+    path: &Path,
+    cache: &mut HashMap<PathBuf, CachedAudioQuality>,
+) -> CachedAudioQuality {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return CachedAudioQuality {
+                size_bytes: 0,
+                modified_ns: 0,
+                bitrate_kbps: None,
+                duration_ms: None,
+                scan_error: Some(format!("Could not read file metadata: {error}")),
+            };
+        }
+    };
+    let size_bytes = metadata.len();
+    let modified_ns = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos().min(u64::MAX as u128) as u64)
+        .unwrap_or_default();
+    if let Some(cached) = cache.get(path)
+        && cached.size_bytes == size_bytes
+        && cached.modified_ns == modified_ns
+    {
+        return cached.clone();
+    }
+    let inspected = (|| {
+        let options = ParseOptions::new()
+            .read_properties(true)
+            .read_tags(false)
+            .read_cover_art(false);
+        let tagged = Probe::open(path)
+            .map_err(|error| error.to_string())?
+            .options(options)
+            .read()
+            .map_err(|error| error.to_string())?;
+        let properties = tagged.properties();
+        Ok::<_, String>((
+            properties
+                .audio_bitrate()
+                .or_else(|| properties.overall_bitrate()),
+            u64::try_from(properties.duration().as_millis()).ok(),
+        ))
+    })();
+    let quality = match inspected {
+        Ok((bitrate_kbps, duration_ms)) => CachedAudioQuality {
+            size_bytes,
+            modified_ns,
+            bitrate_kbps,
+            duration_ms,
+            scan_error: (size_bytes == 0).then(|| "The MP3 file is empty".to_owned()),
+        },
+        Err(error) => CachedAudioQuality {
+            size_bytes,
+            modified_ns,
+            bitrate_kbps: None,
+            duration_ms: None,
+            scan_error: Some(error),
+        },
+    };
+    cache.insert(path.to_path_buf(), quality.clone());
+    quality
 }
 
 fn search_musicbrainz(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandidate>, String> {

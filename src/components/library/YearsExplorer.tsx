@@ -70,6 +70,7 @@ interface AlbumInspectorAlbum {
   durationSeconds: number | null;
   genre: string | null;
   rating: number | null;
+  formats?: string[];
 }
 
 function albumAsTrack(album: AlbumInspectorAlbum): Track {
@@ -370,7 +371,7 @@ export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy,
       <div><dt>Original Year</dt><dd className="year-original">{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd className="year-release">{album.releaseYear ?? "—"}</dd></div>
       <div className="publisher-metadata"><dt>Publisher</dt><dd>{album.publisher ?? "Unknown"}</dd></div>
-      <div><dt>Format</dt><dd>Album · local edition</dd></div>
+      <div><dt>Format</dt><dd>{album.formats?.length ? album.formats.join(" · ") : "Unknown"}</dd></div>
       <div><dt>Tracks</dt><dd>{formatCount(album.totalTracks)}</dd></div>
       <div><dt>Duration</dt><dd>{formatDuration(album.durationSeconds)}</dd></div>
       {chartRanks?.length ? <div><dt>Charts</dt><dd><CatalogChartRanks kind="album" ranks={chartRanks} /></dd></div> : null}

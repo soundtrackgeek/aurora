@@ -1,10 +1,14 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.10 reads MusicBee user-text values correctly when their ID3 encoding includes a trailing null terminator.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.11 replaces Music Doctor for new music: Inbox scans staged MP3 quality, and intake saves it to Music Library's existing quality tables.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.10 slice
+## Current 0.23.11 slice
+
+- Inbox scans staged MP3 format, size, bitrate, and duration, caches unchanged probes, and blocks intake when audio properties cannot be read. The selected-album inspector shows the resulting aggregate before the move.
+- Successful reviewed intake writes the final published files' quality into Music Library's existing Music Doctor tables. The completed historical Music Doctor scan remains the baseline; Aurora owns new additions from this release onward.
+- The album sidebar inspector now displays the database-backed format aggregate, including mixed-format albums, without adding density beneath Album Detail covers.
 
 - The tag editor now accepts MusicBee `LOVE RATING`, Release Time, and display-artist user-text values that end with an ID3 null terminator. Valid loved tracks no longer make the containing album fail to open.
 

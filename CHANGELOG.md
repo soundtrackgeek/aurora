@@ -4,6 +4,17 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.11] - 2026-08-29
+
+### Added
+
+- Inbox scans each staged MP3 for format, size, bitrate, and duration, caches unchanged results between refreshes, reports unreadable audio as a readiness issue, and shows the album aggregate in the inspector.
+- Album inspectors now show the real format aggregate already stored in Music Library's shared quality tables.
+
+### Changed
+
+- Aurora Inbox intake now completes the Music Doctor workflow for new releases by validating published MP3 audio and persisting its quality data during the reviewed Music Library catalog transaction.
+
 ## [0.23.10] - 2026-08-29
 
 ### Fixed

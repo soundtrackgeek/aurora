@@ -175,6 +175,7 @@ export interface AlbumSummary {
   durationSeconds: number | null;
   rating: number | null;
   albumScore: number | null;
+  formats?: string[];
 }
 
 type ConsistentAlbumValue<T> = { consistent: true; value: T } | { consistent: false };
@@ -432,6 +433,7 @@ function browserAlbumSummaries(): AlbumSummary[] {
       durationSeconds: duration,
       rating,
       albumScore,
+      formats: ["MP3"],
     };
   });
 }

@@ -15,6 +15,11 @@ export interface InboxSettingsStatus {
 export interface InboxTrack {
   path: string;
   fileName: string;
+  format?: string;
+  sizeBytes?: number;
+  bitrateKbps?: number | null;
+  durationMs?: number | null;
+  scanError?: string | null;
   albumArtist: string | null;
   title: string | null;
   artist: string | null;
@@ -40,6 +45,11 @@ export interface InboxAlbum {
   publisher: string | null;
   year: number | null;
   trackCount: number;
+  formats?: string[];
+  totalSizeBytes?: number;
+  avgBitrateKbps?: number | null;
+  durationMs?: number;
+  audioScanErrorCount?: number;
   artworkPresent: boolean;
   artworkSourcePath: string | null;
   artworkTrackCount: number;
@@ -142,6 +152,11 @@ const previewTracks = [
 ].map((title, index): InboxTrack => ({
   path: `C:\\Music\\Inbox\\Baltimoore - Freak\\${String(index + 1).padStart(2, "0")} - ${title}.mp3`,
   fileName: `${String(index + 1).padStart(2, "0")} - ${title}.mp3`,
+  format: "MP3",
+  sizeBytes: 8_900_000 + index * 120_000,
+  bitrateKbps: 320,
+  durationMs: 215_000 + index * 3_000,
+  scanError: null,
   albumArtist: "Baltimoore",
   title,
   artist: "Baltimoore",
@@ -177,6 +192,11 @@ const previewAlbum: InboxAlbum = {
   publisher: "SPV Records",
   year: 1990,
   trackCount: 10,
+  formats: ["MP3"],
+  totalSizeBytes: previewTracks.reduce((total, track) => total + (track.sizeBytes ?? 0), 0),
+  avgBitrateKbps: 320,
+  durationMs: previewTracks.reduce((total, track) => total + (track.durationMs ?? 0), 0),
+  audioScanErrorCount: 0,
   artworkPresent: true,
   artworkSourcePath: previewTracks[0].path,
   artworkTrackCount: 10,
