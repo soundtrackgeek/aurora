@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.2 completes each album's Last.fm popularity ranking on demand.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.3 gives Genre more editing space in Album Auto-Tagger while keeping disc numbering compact.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.2 slice
+## Current 0.23.3 slice
+
+- Album Auto-Tagger gives Genre the same wide field length as Album. Disc total and Disc # override now use compact neighboring inputs on the top metadata row.
 
 - Opening an album immediately uses cached Last.fm evidence, then fills missing album tracks through `track.getInfo` in the background. Aurora ranks positive listener counts, breaks ties by global play count, and marks the top three with 🔥 without writing to Music Library's catalog.
 
@@ -62,7 +64,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Album Auto-Tagger replaces Discogs track positions outside the release's track total with their sequential release-order number, so hidden-track positions such as `41` on a 13-track CD become track 13.
 - Album Auto-Tagger preserves MusicBrainz artist-credit join phrases such as `featuring`, `&`, and commas when applying Artist metadata and building renamed track filenames.
 - The Tags editor cannot horizontally scroll or grow beyond the right sidebar; long values retain native scrolling inside their fixed-width inputs.
-- Album Auto-Tagger places Genre in the wide lower-left metadata slot and Disc total in the compact lower-right numeric slot, with matching visual and keyboard order plus a two-column responsive arrangement.
+- Album Auto-Tagger places Genre in a wide metadata slot matching Album, while Disc total and Disc # override use compact neighboring inputs on the top row with matching visual and keyboard order.
 - The **Finish what you love** Refresh button now reacts immediately, spins while its overview and active shelf reload, and prevents duplicate refresh requests until the cycle finishes.
 - The Album Auto-Tagger grows up to 1100 px tall when the window allows it, giving release matches and track comparisons more visible room without sacrificing the viewport margin or fixed action footer.
 - All-folders Inbox intake re-previews each monitored root immediately before its apply, preventing an earlier folder's catalog update from making the next Music Library plan stale. Aurora compares that fresh plan with the reviewed album and destination list and stops for a new review if the source contents actually changed.

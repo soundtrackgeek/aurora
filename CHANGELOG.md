@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.3] - 2026-08-29
+
+### Fixed
+
+- Reworked Album Auto-Tagger metadata layout so Genre uses the same wide editor width as Album, while the compact Disc total and Disc # override inputs sit together on the top row. Named grid areas now keep the layout stable when hidden suggestion elements are present.
+
 ## [0.23.2] - 2026-08-29
 
 ### Fixed
