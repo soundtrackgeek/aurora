@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.23.9] - 2026-08-29
+
+### Added
+
+- Made embedded front-cover consistency part of Inbox readiness. Every MP3 must contain exactly one valid, identical front cover before album- or folder-level intake can proceed.
+- Added an Inbox artwork repair action that reuses the first usable embedded album image or a user-selected JPG, PNG, GIF, BMP, or WebP, stages same-folder MP3 copies, preserves non-cover frames and audio bytes, verifies every installed cover, and rolls the complete album back if any replacement fails.
+- Added per-album embedded-artwork coverage to the Inbox inspector and made Inbox thumbnails prefer the standard front-cover frame.
+
 ## [0.23.8] - 2026-08-29
 
 ### Fixed

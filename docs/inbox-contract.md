@@ -1,14 +1,14 @@
 # Inbox contract
 
-Aurora 0.18.2 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
+Aurora 0.23.9 provides Inbox as a device-local preparation area. Its files are ordinary MP3 folders outside Aurora's catalog until an explicit Music Library intake succeeds.
 
 ## Monitoring and identity
 
 - Inbox stores at most ten canonical folder paths in `%APPDATA%\com.soundtrackgeek.aurora\aurora-inbox.json`. The setting is device-local and is not copied into Aurora's shared state or OneDrive snapshots.
 - Aurora performs a bounded recursive scan on entry, every 15 seconds while visible, and whenever the window regains focus. Directory symlinks and reparse-style links are not followed; one directory containing MP3 files is one staged album.
 - Scanning never opens the Music Library database for writes and never moves, renames, or catalogs a file. A SHA-256 of the canonical album path provides React's stable selection identity without exposing it as catalog identity.
-- Album artwork comes only from the first track after disc/track/filename sorting. Aurora checks that track's first embedded ID3 picture, produces bounded cached WebP thumbnails through the local cover protocol, and verifies that every requested source remains an MP3 beneath a currently monitored root. It does not scan later tracks for artwork.
-- Readiness reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, Genre, and Publisher. Disc numbering is optional, but a partially numbered multidisc album is reported as incomplete. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
+- Aurora scans every track's embedded ID3 pictures and uses the first usable front cover in disc/track/filename order as the album display and repair source, falling back to another valid embedded picture only as a repair source. Bounded cached WebP thumbnails still pass through the contained local cover protocol.
+- Readiness requires exactly one valid embedded front cover in every MP3 and identical image bytes across the album. It also reports missing or inconsistent Album Artist/Artist, Album, Track Title, track number/total, Genre, and Publisher. Disc numbering is optional, but a partially numbered multidisc album is reported as incomplete. Genre and Publisher are preparation requirements rather than Music Library identity fields, and can be overridden before promotion.
 
 ## Metadata providers
 
@@ -31,6 +31,13 @@ Before replacing originals, Aurora:
 6. Removes working files and backups only after the complete album succeeds.
 
 Inbox files are not cataloged, so this transaction does not queue an existing-folder Music Library sync. The files remain staged for further edits or promotion.
+
+## Artwork transaction
+
+- When some tracks already contain artwork, **Embed cover in all tracks** uses the displayed first valid embedded image. When the album has no usable embedded source, **Choose album cover** accepts a user-selected JPG, PNG, GIF, BMP, or WebP within the 32 MiB and 100-megapixel safety bounds.
+- Aurora removes only front-cover frames, writes one normalized front-cover frame to every MP3, and preserves other pictures and all non-cover frames.
+- Each changed MP3 is copied to a uniquely named same-folder working file. Aurora reopens it, verifies one exact front-cover image digest, compares every preserved non-front-cover frame, and verifies the SHA-256 of all bytes after ID3v2.
+- The complete changed set receives same-folder safety backups and atomic replacement. A later install failure restores every earlier track in reverse order. Intake remains blocked until a fresh album scan confirms matching artwork on every track.
 
 ## Rename transaction
 
@@ -58,4 +65,4 @@ Music Library archives embedded front art in AlbumCovers
 catalog revision refresh + Inbox rescan
 ```
 
-The readiness gate prevents promotion while required identity or numbering issues remain. Music Library remains the only component that moves folders and writes the shared catalog.
+The readiness gate prevents promotion while required identity, numbering, organization, or embedded-artwork issues remain. Music Library remains the only component that moves folders and writes the shared catalog.

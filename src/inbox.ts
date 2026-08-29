@@ -41,6 +41,9 @@ export interface InboxAlbum {
   year: number | null;
   trackCount: number;
   artworkPresent: boolean;
+  artworkSourcePath: string | null;
+  artworkTrackCount: number;
+  artworkReady: boolean;
   modifiedAtMs: number;
   readiness: { ready: boolean; issues: string[] };
   tracks: InboxTrack[];
@@ -115,17 +118,22 @@ export interface InboxBatchRenameResult {
   failures: Array<{ albumPath: string; message: string }>;
 }
 
+export interface InboxCoverEmbedResult {
+  changedTracks: number;
+  trackCount: number;
+}
+
 export function inboxCoverUrl(
-  album: Pick<InboxAlbum, "id" | "artworkPresent" | "modifiedAtMs" | "tracks">,
+  album: Pick<InboxAlbum, "id" | "artworkPresent" | "artworkSourcePath" | "modifiedAtMs">,
   size: 64 | 128 | 256,
 ): string | null {
-  if (!album.artworkPresent || !album.tracks[0]) return null;
+  if (!album.artworkPresent || !album.artworkSourcePath) return null;
   if (!isTauriRuntime()) {
     return album.id === "preview-freak"
       ? `/__aurora-preview-cover/preview-freak?size=${size}`
       : null;
   }
-  return `http://aurora-cover.localhost/inbox/${encodeURIComponent(album.tracks[0].path)}?size=${size}&revision=${album.modifiedAtMs}`;
+  return `http://aurora-cover.localhost/inbox/${encodeURIComponent(album.artworkSourcePath)}?size=${size}&revision=${album.modifiedAtMs}`;
 }
 
 const previewTracks = [
@@ -170,6 +178,9 @@ const previewAlbum: InboxAlbum = {
   year: 1990,
   trackCount: 10,
   artworkPresent: true,
+  artworkSourcePath: previewTracks[0].path,
+  artworkTrackCount: 10,
+  artworkReady: true,
   modifiedAtMs: Date.now() - 5 * 60_000,
   readiness: {
     ready: false,
@@ -287,6 +298,21 @@ export async function loadInboxReleaseDetail(candidate: ReleaseCandidate): Promi
 export async function applyInboxTags(request: InboxTagApplyRequest): Promise<{ changedTracks: number; renamedTracks: number; albumPath: string }> {
   if (!isTauriRuntime()) return { changedTracks: request.tracks.length, renamedTracks: request.renameAfterApply ? request.tracks.length : 0, albumPath: request.albumPath };
   return invoke<{ changedTracks: number; renamedTracks: number; albumPath: string }>("apply_inbox_tags", { request });
+}
+
+export async function selectInboxCoverImage(): Promise<string | null> {
+  if (!isTauriRuntime()) return "C:\\Pictures\\album-cover.jpg";
+  return invoke<string | null>("select_inbox_cover_image");
+}
+
+export async function embedInboxAlbumCover(
+  albumPath: string,
+  imagePath: string | null,
+): Promise<InboxCoverEmbedResult> {
+  if (!isTauriRuntime()) return { changedTracks: previewTracks.length, trackCount: previewTracks.length };
+  return invoke<InboxCoverEmbedResult>("embed_inbox_album_cover", {
+    request: { albumPath, imagePath },
+  });
 }
 
 export async function renameInboxAlbum(albumPath: string): Promise<InboxRenameResult> {

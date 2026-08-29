@@ -8,6 +8,7 @@ import {
   Folder,
   FolderInput,
   FolderPlus,
+  ImagePlus,
   Inbox as InboxIcon,
   LoaderCircle,
   RefreshCw,
@@ -21,12 +22,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   addInboxMonitorFolder,
   applyInboxTags,
+  embedInboxAlbumCover,
   inboxCoverUrl,
   loadInboxReleaseDetail,
   loadInboxSnapshot,
   removeInboxMonitorFolder,
   renameInboxAlbums,
   searchInboxReleases,
+  selectInboxCoverImage,
   selectInboxMonitorFolder,
   type InboxAlbum,
   type InboxSnapshot,
@@ -113,6 +116,8 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameMessage, setRenameMessage] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverMessage, setCoverMessage] = useState<string | null>(null);
   const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
   const [inspectorView, setInspectorView] = useState<"album" | "tags">("album");
   const [intakeScope, setIntakeScope] = useState<{ label: string; targets: InboxLibraryIntakeTarget[] } | null>(null);
@@ -267,6 +272,25 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     }
   }
 
+  async function repairAlbumCover() {
+    if (!selectedAlbum || coverBusy) return;
+    setCoverBusy(true);
+    setCoverMessage(null);
+    setError(null);
+    try {
+      const imagePath = selectedAlbum.artworkPresent ? null : await selectInboxCoverImage();
+      if (!selectedAlbum.artworkPresent && !imagePath) return;
+      const result = await embedInboxAlbumCover(selectedAlbum.path, imagePath);
+      setCoverMessage(`Embedded the album cover in ${result.trackCount} ${result.trackCount === 1 ? "track" : "tracks"}${result.changedTracks < result.trackCount ? `; ${result.changedTracks} needed updating` : ""}.`);
+      setMovePreview(null);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setCoverBusy(false);
+    }
+  }
+
   function intakeTargetForFolder(folder: string): InboxLibraryIntakeTarget | null {
     if (!snapshot) return null;
     const folderAlbums = snapshot.albums.filter((album) => albumInFolder(album, folder));
@@ -338,6 +362,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
 
       {error ? <p className="inbox-banner" role="alert"><AlertTriangle />{error}</p> : null}
       {renameMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{renameMessage}</p> : null}
+      {coverMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{coverMessage}</p> : null}
       {intakeMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{intakeMessage}</p> : null}
       {snapshot.settings.warning ? <p className="inbox-banner" role="status"><AlertTriangle />{snapshot.settings.warning}</p> : null}
 
@@ -401,8 +426,9 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             /> : <p className="inbox-manual-tags__empty">Select one or more tracks to edit their tags.</p>}
           </div> : selectedAlbum ? <>
             <header><InboxArtwork album={selectedAlbum} size={128} decorative={false} /><div><h2>{selectedAlbum.album ?? selectedAlbum.folderName}</h2><p>{selectedAlbum.artist ?? "Unknown artist"}</p></div></header>
-            <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
-            <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
+            <dl><div><dt>Status</dt><dd className={selectedAlbum.readiness.ready ? "is-ready" : "has-issues"}>{selectedAlbum.readiness.ready ? "Ready" : "Needs attention"}</dd></div><div><dt>Folder</dt><dd title={selectedAlbum.path}>{selectedAlbum.path}</dd></div><div><dt>Tracks</dt><dd>{selectedAlbum.trackCount}</dd></div><div><dt>Artwork</dt><dd className={selectedAlbum.artworkReady ? "is-ready" : "has-issues"}>{selectedAlbum.artworkTrackCount} / {selectedAlbum.trackCount} embedded</dd></div><div><dt>Genre</dt><dd>{selectedAlbum.genre ?? "Missing"}</dd></div><div><dt>Publisher</dt><dd>{selectedAlbum.publisher ?? "Missing"}</dd></div></dl>
+            <section><h3>Readiness</h3>{selectedAlbum.readiness.ready ? <p className="inbox-check"><CheckCircle2 /> Tags and embedded artwork are ready for intake.</p> : <ul>{selectedAlbum.readiness.issues.map((issue) => <li key={issue}><AlertTriangle />{issue}</li>)}</ul>}</section>
+            {!selectedAlbum.artworkReady ? <button type="button" className="inbox-autotag inbox-artwork" disabled={coverBusy} onClick={() => void repairAlbumCover()}>{coverBusy ? <LoaderCircle className="is-spinning" /> : <ImagePlus />}<span><strong>{selectedAlbum.artworkPresent ? "Embed cover in all tracks" : "Choose album cover"}</strong><small>{selectedAlbum.artworkPresent ? `Use the displayed cover for all ${selectedAlbum.trackCount} MP3s` : "Select a JPG, PNG, GIF, BMP, or WebP image"}</small></span></button> : null}
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
             <button type="button" className="inbox-autotag" disabled={!selectedTracks.length} onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl Shift T</kbd></button>
             <button type="button" className="inbox-autotag inbox-rename" disabled={!selectedAlbums.length || renameBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}><FilePenLine /><span><strong>Rename from tags</strong><small>{selectedAlbums.length > 1 ? `Standardize ${selectedAlbums.length} selected album folders and track filenames` : "Standardize the album folder and track filenames"}</small></span><kbd>Ctrl R</kbd></button>

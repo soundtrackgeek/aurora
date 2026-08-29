@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.8 stabilizes the Inbox keyboard-rename verification across local and CI runner speeds.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.9 makes identical embedded front covers mandatory across every Inbox album track and adds a verified one-step repair.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.8 slice
+## Current 0.23.9 slice
 
 - Inbox `Ctrl+R` verification now waits for the asynchronously loaded album selection to make Rename available before exercising the shortcut, eliminating a runner-speed-dependent false failure.
 
@@ -88,11 +88,12 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Whole-album Tags saves immediately project the verified Album, Album Artist, Year, Release Year, Genre, and Publisher values into both the Album card and Album Detail. Partial or mixed track results never overwrite an album summary by guesswork.
 - Album covers use five compact text lines: title, artist, `Year — Genre — Publisher`, `track count — album length`, and Album Rating/Score. Album Detail presents Genre and Publisher together with explicit unknown-value fallbacks.
 - A dedicated **Inbox** between Universe and Observatory. Up to ten device-local folders are scanned every 15 seconds and whenever Aurora regains focus; folders containing MP3s become staged albums without entering the Music Library catalog.
-- Inbox album rows and the selected-album inspector show the embedded image from the first sorted track. Aurora reads no other track for artwork, serves bounded WebP thumbnails through its local cover protocol, and falls back to the existing disc mark when track 1 has no usable image.
-- Inbox readiness reports missing or inconsistent album identity, track titles, track/disc numbering, genre, and publisher context before promotion. `Ctrl+Shift+T` opens a dense Album Auto-Tagger that searches concrete MusicBrainz and Discogs releases, compares their track lists, allows per-field inclusion and manual Genre/title correction, and applies one verified album batch. Background Inbox rescans preserve the open tagger's selected release and comparison state.
+- Inbox album rows and the selected-album inspector show the first usable embedded front cover found in track order, serve bounded WebP thumbnails through the local cover protocol, and fall back to the existing disc mark when the album has no usable embedded image.
+- Inbox readiness reports missing or inconsistent album identity, track titles, track/disc numbering, genre, publisher context, and embedded front art before promotion. Every MP3 must contain exactly one valid front cover with image bytes matching the rest of the album. The inspector reports embedded coverage and can propagate the displayed cover across every track or let the user choose a JPG, PNG, GIF, BMP, or WebP when no embedded source exists.
+- `Ctrl+Shift+T` opens a dense Album Auto-Tagger that searches concrete MusicBrainz and Discogs releases, compares their track lists, allows per-field inclusion and manual Genre/title correction, and applies one verified album batch. Background Inbox rescans preserve the open tagger's selected release and comparison state.
 - Auto-Tagger renaming is enabled by default for a full album, and `Ctrl+R` applies the same rename rules to manually tagged Inbox albums. Album folders become `Album Artist - Album (Year)`; tracks become `Disc-01 - Artist - Title.mp3` when a disc tag exists or `01 - Artist - Title.mp3` when it does not. Inbox track checkboxes can scope Auto-Tagger to one CD at a time, with Disc # and total overrides for separate CD1/CD2 releases. Windows-invalid characters and collisions are handled safely, and Discogs vinyl positions such as A1/A2/B1 are normalized to continuous 01/02/03 numbering.
 - MusicBrainz requests use Aurora's identifying User-Agent and a process-wide one-request-per-second gate. Discogs accepts either a personal access token or a consumer key plus secret stored only in the operating-system credential vault; saved values are never returned to React or written to Aurora JSON/SQLite state. Debug builds may read `DISCOGS` and `DISCOGS_SECRET` (or `DISCOGS_TOKEN`) from the ignored `.env.local` for local endpoint testing.
-- Inbox tag writes stay outside the catalog workflow: Rust canonicalizes every selected album path, stages same-folder MP3 copies, verifies parsed tags and the post-ID3 audio SHA-256, creates safety backups, installs atomically, and restores earlier tracks if a later write fails.
+- Inbox tag and artwork writes stay outside the catalog workflow: Rust canonicalizes every selected album path, stages same-folder MP3 copies, verifies parsed tags or the exact front-cover digest plus preserved non-cover frames and post-ID3 audio SHA-256, creates safety backups, installs atomically, and restores earlier tracks if a later write fails.
 - Album-level **Move to library** and folder-level **Add to Library** reuse Add Music's exact preview/apply bridge and its General, Scores, and Synthwave roots. Music Library remains the sole filesystem mover, cover archiver, and catalog writer; Inbox albums disappear from staging only after that reviewed bridge operation completes.
 - Ratings **Play unrated tracks** scopes pending-deletion reconciliation to the selected album instead of rescanning the million-track catalog for every pending Music Library target before playback.
 - Rust's strict warning-as-error CI lint passes for the optimized album snapshot path without changing its deletion projection or runtime behavior.

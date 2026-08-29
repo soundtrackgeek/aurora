@@ -46,10 +46,10 @@ use history::{
     TrackHistoryInsight,
 };
 use inbox::{
-    DiscogsCredentialsRequest, InboxBatchRenameRequest, InboxBatchRenameResult, InboxRenameRequest,
-    InboxRenameResult, InboxRuntime, InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest,
-    InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest,
-    ReleaseSearchResult,
+    DiscogsCredentialsRequest, InboxBatchRenameRequest, InboxBatchRenameResult,
+    InboxCoverEmbedRequest, InboxCoverEmbedResult, InboxRenameRequest, InboxRenameResult,
+    InboxRuntime, InboxSettingsStatus, InboxSnapshot, InboxTagApplyRequest, InboxTagApplyResult,
+    ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest, ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use lastfm::{AlbumPopularity, LastFmCredentialsRequest};
@@ -73,6 +73,7 @@ use tag_model::{
 };
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
 use waveform::{FileSignature, WaveformSnapshot, WaveformStore, WaveformWorkCoordinator};
 use years::{YearDetail, YearOverview, YearQueueRequest, YearSelection};
 
@@ -194,6 +195,42 @@ async fn apply_inbox_tags(request: InboxTagApplyRequest) -> Result<InboxTagApply
     tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request))
         .await
         .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn select_inbox_cover_image(app: AppHandle) -> Result<Option<String>, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Choose an album cover")
+        .add_filter("Images", &["jpg", "jpeg", "png", "gif", "bmp", "webp"])
+        .blocking_pick_file();
+    selected
+        .map(|path| {
+            path.into_path()
+                .map_err(|error| format!("Aurora could not read the selected image: {error}"))?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| "The selected image path is not valid Unicode.".to_owned())
+        })
+        .transpose()
+}
+
+#[tauri::command]
+async fn embed_inbox_album_cover(
+    app: AppHandle,
+    request: InboxCoverEmbedRequest,
+) -> Result<InboxCoverEmbedResult, String> {
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
+    tauri::async_runtime::spawn_blocking(move || {
+        inbox::embed_album_cover(request, &monitored_roots)
+    })
+    .await
+    .map_err(|error| format!("Aurora's embedded-cover worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1355,6 +1392,8 @@ pub fn run() {
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,
+            select_inbox_cover_image,
+            embed_inbox_album_cover,
             rename_inbox_album,
             rename_inbox_albums,
         ])

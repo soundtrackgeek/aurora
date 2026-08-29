@@ -1,4 +1,5 @@
 use crate::{InboxState, catalog, tagging::read_tag_for_write};
+use id3::frame::PictureType;
 use image::{ImageFormat, ImageReader, imageops::FilterType};
 use percent_encoding::percent_decode_str;
 use std::{
@@ -122,15 +123,25 @@ fn encode_thumbnail(source: &Path, size: u32) -> Result<Vec<u8>, String> {
 
 fn encode_embedded_thumbnail(source: &Path, size: u32) -> Result<Vec<u8>, String> {
     let (tag, _) = read_tag_for_write(source)?;
-    let picture = tag
-        .pictures()
-        .next()
-        .ok_or_else(|| "No embedded Inbox cover is available.".to_owned())?;
-    if picture.data.is_empty() || picture.data.len() as u64 > MAX_COVER_BYTES {
-        return Err("The embedded Inbox cover is outside Aurora's safe size range.".to_owned());
+    let mut decoded = None;
+    for prefer_front in [true, false] {
+        for picture in tag
+            .pictures()
+            .filter(|picture| (picture.picture_type == PictureType::CoverFront) == prefer_front)
+        {
+            if picture.data.is_empty() || picture.data.len() as u64 > MAX_COVER_BYTES {
+                continue;
+            }
+            if let Ok(image) = image::load_from_memory(&picture.data) {
+                decoded = Some(image);
+                break;
+            }
+        }
+        if decoded.is_some() {
+            break;
+        }
     }
-    let image = image::load_from_memory(&picture.data)
-        .map_err(|_| "Aurora could not decode this embedded Inbox cover.".to_owned())?;
+    let image = decoded.ok_or_else(|| "No usable embedded Inbox cover is available.".to_owned())?;
     let thumbnail = image.resize(size, size, FilterType::Lanczos3);
     let mut output = Cursor::new(Vec::new());
     thumbnail

@@ -133,6 +133,56 @@ describe("Inbox", () => {
     expect(screen.getByRole("button", { name: "Apply & rename" })).toBeEnabled();
   });
 
+  it("repairs partial embedded artwork before intake", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const album = {
+      ...snapshot.albums[0],
+      artworkTrackCount: 1,
+      artworkReady: false,
+      readiness: {
+        ready: false,
+        issues: ["Embedded front cover is missing or invalid on 9 tracks"],
+      },
+    };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [album] });
+    const choose = vi.spyOn(inboxAdapter, "selectInboxCoverImage");
+    const embed = vi.spyOn(inboxAdapter, "embedInboxAlbumCover").mockResolvedValue({
+      changedTracks: 9,
+      trackCount: 10,
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    expect(await screen.findByText("1 / 10 embedded")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Embed cover in all tracks/ }));
+
+    await waitFor(() => expect(embed).toHaveBeenCalledWith(album.path, null));
+    expect(choose).not.toHaveBeenCalled();
+    expect(await screen.findByText("Embedded the album cover in 10 tracks; 9 needed updating.")).toBeInTheDocument();
+  });
+
+  it("asks for an image when an album has no usable embedded cover", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const album = {
+      ...snapshot.albums[0],
+      artworkPresent: false,
+      artworkSourcePath: null,
+      artworkTrackCount: 0,
+      artworkReady: false,
+      readiness: { ready: false, issues: ["Embedded front cover is missing"] },
+    };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [album] });
+    vi.spyOn(inboxAdapter, "selectInboxCoverImage").mockResolvedValue("C:\\Pictures\\cover.png");
+    const embed = vi.spyOn(inboxAdapter, "embedInboxAlbumCover").mockResolvedValue({
+      changedTracks: 10,
+      trackCount: 10,
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Choose album cover/ }));
+
+    await waitFor(() => expect(embed).toHaveBeenCalledWith(album.path, "C:\\Pictures\\cover.png"));
+  });
+
   it("renames a manually tagged album from Ctrl+R", async () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
