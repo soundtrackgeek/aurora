@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Mutex, OnceLock},
@@ -203,6 +203,7 @@ pub(crate) struct ReleaseCandidate {
     title: String,
     artist: String,
     year: Option<i32>,
+    original_year: Option<i32>,
     country: Option<String>,
     format: Option<String>,
     publisher: Option<String>,
@@ -216,6 +217,8 @@ pub(crate) struct ReleaseSearchRequest {
     artist: String,
     album: String,
     track_count: Option<u32>,
+    #[serde(default)]
+    prefer_original_edition: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -274,6 +277,8 @@ pub(crate) struct InboxTagApplyRequest {
     #[serde(default)]
     rename_after_apply: bool,
     #[serde(default)]
+    remove_track_paths: Vec<String>,
+    #[serde(default)]
     pub(crate) artwork_token: Option<String>,
 }
 
@@ -282,6 +287,8 @@ pub(crate) struct InboxTagApplyRequest {
 pub(crate) struct InboxTagApplyResult {
     changed_tracks: usize,
     renamed_tracks: usize,
+    removed_tracks: usize,
+    recovery_path: Option<String>,
     album_path: String,
 }
 
@@ -366,6 +373,11 @@ struct PreparedRename {
     source: PathBuf,
     temporary: PathBuf,
     destination: PathBuf,
+}
+
+struct PreparedRemoval {
+    source: PathBuf,
+    recovery: PathBuf,
 }
 
 struct AlbumRenameCandidate {
@@ -620,10 +632,18 @@ pub(crate) fn search_releases(
         }
     }
     candidates.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
-            .then_with(|| left.year.cmp(&right.year))
+        let left_original = left.year.is_some() && left.year == left.original_year;
+        let right_original = right.year.is_some() && right.year == right.original_year;
+        let left_track_difference = track_count_difference(left.track_count, request.track_count);
+        let right_track_difference = track_count_difference(right.track_count, request.track_count);
+        (if request.prefer_original_edition {
+            right_original.cmp(&left_original)
+        } else {
+            std::cmp::Ordering::Equal
+        })
+        .then_with(|| left_track_difference.cmp(&right_track_difference))
+        .then_with(|| right.score.cmp(&left.score))
+        .then_with(|| left.year.cmp(&right.year))
     });
     candidates.truncate(20);
     Ok(ReleaseSearchResult {
@@ -646,6 +666,7 @@ pub(crate) fn release_detail(
 pub(crate) fn apply_tags(
     request: InboxTagApplyRequest,
     cover: Option<&CanonicalCover>,
+    recovery_root: &Path,
 ) -> Result<InboxTagApplyResult, String> {
     if (request.fields.is_empty() && cover.is_none())
         || (request.tracks.is_empty() && cover.is_none())
@@ -660,12 +681,35 @@ pub(crate) fn apply_tags(
         return Err("The Inbox tag edit contains duplicate fields.".to_owned());
     }
     let album = canonical_directory(&request.album_path)?;
+    if request.remove_track_paths.len() > 100 {
+        return Err("Choose at most 100 unmatched Inbox tracks to remove.".to_owned());
+    }
+    let mut removal_targets = Vec::with_capacity(request.remove_track_paths.len());
+    let mut removal_set = HashSet::with_capacity(request.remove_track_paths.len());
+    for path in &request.remove_track_paths {
+        let target = fs::canonicalize(path)
+            .map_err(|error| format!("Could not open an unmatched Inbox track: {error}"))?;
+        if target.parent() != Some(album.as_path()) || !is_mp3(&target) {
+            return Err(
+                "An unmatched Inbox track is outside the selected album folder.".to_owned(),
+            );
+        }
+        if !removal_set.insert(target.clone()) {
+            return Err("The Inbox removal selection contains a duplicate track.".to_owned());
+        }
+        removal_targets.push(target);
+    }
     let mut patches = HashMap::with_capacity(request.tracks.len());
     for patch in &request.tracks {
         let target = fs::canonicalize(&patch.path)
             .map_err(|error| format!("Could not open an Inbox track: {error}"))?;
         if target.parent() != Some(album.as_path()) || !is_mp3(&target) {
             return Err("An Inbox track is outside the selected album folder.".to_owned());
+        }
+        if removal_set.contains(&target) {
+            return Err(
+                "An Inbox track cannot be tagged and removed in the same batch.".to_owned(),
+            );
         }
         if patches.insert(target, patch).is_some() {
             return Err("The Inbox tag selection contains a duplicate track.".to_owned());
@@ -682,7 +726,7 @@ pub(crate) fn apply_tags(
                     .filter(|kind| kind.is_file() && !kind.is_symlink())
                     .map(|_| entry.path())
             })
-            .filter(|path| is_mp3(path))
+            .filter(|path| is_mp3(path) && !removal_set.contains(path))
             .collect::<Vec<_>>()
     } else {
         patches.keys().cloned().collect::<Vec<_>>()
@@ -756,9 +800,12 @@ pub(crate) fn apply_tags(
             backup,
         });
     }
+    let (prepared_removals, recovery_directory) =
+        prepare_inbox_recovery(&album, &removal_targets, recovery_root, sequence)?;
     for item in &prepared {
         if let Err(error) = fs::copy(&item.target, &item.backup) {
             cleanup_prepared(&prepared);
+            cleanup_recovery(&recovery_directory);
             return Err(format!("Could not create an Inbox safety backup: {error}"));
         }
     }
@@ -769,11 +816,37 @@ pub(crate) fn apply_tags(
                 let _ = state_sync::replace_file_atomic(&previous.target, &previous.backup);
             }
             cleanup_prepared(&prepared);
+            cleanup_recovery(&recovery_directory);
             return Err(format!(
                 "Aurora could not finish the Inbox tag batch and restored earlier tracks: {error}"
             ));
         }
         installed += 1;
+    }
+    let mut removed = 0usize;
+    for item in &prepared_removals {
+        if let Err(error) = crate::track_deletion::remove_verified_mp3(&item.source) {
+            for previous in prepared.iter().rev() {
+                let _ = state_sync::replace_file_atomic(&previous.target, &previous.backup);
+            }
+            let restore_errors = restore_removed_tracks(&prepared_removals, removed);
+            cleanup_prepared(&prepared);
+            if restore_errors.is_empty() {
+                cleanup_recovery(&recovery_directory);
+                return Err(format!(
+                    "Aurora could not remove an unmatched Inbox track and restored the album: {error}"
+                ));
+            }
+            return Err(format!(
+                "Aurora could not remove an unmatched Inbox track. Recovery copies were retained at {} because rollback also failed: {}",
+                recovery_directory.as_ref().map_or_else(
+                    || "the Inbox recovery folder".to_owned(),
+                    |path| path.display().to_string()
+                ),
+                restore_errors.join("; ")
+            ));
+        }
+        removed += 1;
     }
     let rename_result = if request.rename_after_apply {
         match rename_album_path(&album) {
@@ -782,9 +855,18 @@ pub(crate) fn apply_tags(
                 for item in prepared.iter().rev() {
                     let _ = state_sync::replace_file_atomic(&item.target, &item.backup);
                 }
+                let restore_errors = restore_removed_tracks(&prepared_removals, removed);
                 cleanup_prepared(&prepared);
+                if restore_errors.is_empty() {
+                    cleanup_recovery(&recovery_directory);
+                }
                 return Err(format!(
-                    "Aurora could not rename the tagged album and restored its original tags: {error}"
+                    "Aurora could not rename the tagged album and restored its original tags{}: {error}",
+                    if restore_errors.is_empty() {
+                        " and unmatched tracks"
+                    } else {
+                        "; unmatched-track recovery requires manual attention"
+                    }
                 ));
             }
         }
@@ -805,6 +887,8 @@ pub(crate) fn apply_tags(
         renamed_tracks: rename_result
             .as_ref()
             .map_or(0, |result| result.renamed_tracks),
+        removed_tracks: removed,
+        recovery_path: recovery_directory.as_deref().map(path_text).transpose()?,
         album_path: path_text(&final_album)?,
     })
 }
@@ -1634,6 +1718,104 @@ fn rollback_renames(items: &[PreparedRename], placed: usize) {
     }
 }
 
+fn prepare_inbox_recovery(
+    album: &Path,
+    tracks: &[PathBuf],
+    recovery_root: &Path,
+    sequence: u64,
+) -> Result<(Vec<PreparedRemoval>, Option<PathBuf>), String> {
+    if tracks.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+    let album_key = hex_hash(album.to_string_lossy().as_bytes());
+    let directory = recovery_root.join(format!("{sequence}-{}", &album_key[..12]));
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create Aurora's Inbox recovery folder: {error}"))?;
+    let mut prepared = Vec::with_capacity(tracks.len());
+    for source in tracks {
+        let result = (|| -> Result<PreparedRemoval, String> {
+            let file_name = source
+                .file_name()
+                .ok_or_else(|| "An unmatched Inbox track has no filename.".to_owned())?;
+            let recovery = directory.join(file_name);
+            if recovery.exists() {
+                return Err("Aurora's Inbox recovery destination already exists.".to_owned());
+            }
+            fs::copy(source, &recovery).map_err(|error| {
+                format!("Could not copy an unmatched track into Inbox recovery: {error}")
+            })?;
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&recovery)
+                .and_then(|file| file.sync_all())
+                .map_err(|error| format!("Could not flush an Inbox recovery copy: {error}"))?;
+            if file_sha256(source)? != file_sha256(&recovery)? {
+                return Err("Aurora could not verify an Inbox recovery copy.".to_owned());
+            }
+            Ok(PreparedRemoval {
+                source: source.clone(),
+                recovery,
+            })
+        })();
+        match result {
+            Ok(item) => prepared.push(item),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&directory);
+                return Err(error);
+            }
+        }
+    }
+    Ok((prepared, Some(directory)))
+}
+
+fn restore_removed_tracks(items: &[PreparedRemoval], removed: usize) -> Vec<String> {
+    let mut errors = Vec::new();
+    for item in items[..removed].iter().rev() {
+        if item.source.exists() {
+            continue;
+        }
+        if let Err(error) = fs::copy(&item.recovery, &item.source) {
+            errors.push(format!(
+                "Could not restore {}: {error}",
+                item.source.display()
+            ));
+            continue;
+        }
+        match (file_sha256(&item.recovery), file_sha256(&item.source)) {
+            (Ok(expected), Ok(actual)) if expected == actual => {}
+            _ => errors.push(format!(
+                "Could not verify restored track {}",
+                item.source.display()
+            )),
+        }
+    }
+    errors
+}
+
+fn cleanup_recovery(directory: &Option<PathBuf>) {
+    if let Some(directory) = directory {
+        let _ = fs::remove_dir_all(directory);
+    }
+}
+
+fn file_sha256(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = File::open(path)
+        .map_err(|error| format!("Could not open a file for recovery verification: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Could not read a file for recovery verification: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().into())
+}
+
 fn cleanup_prepared(items: &[PreparedWrite]) {
     for item in items {
         let _ = fs::remove_file(&item.temporary);
@@ -2149,12 +2331,9 @@ fn inspect_audio_quality(
 fn search_musicbrainz(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandidate>, String> {
     wait_for_musicbrainz();
     let query = format!(
-        "artist:\"{}\" AND release:\"{}\"{}",
+        "artist:\"{}\" AND release:\"{}\"",
         escape_lucene(&request.artist),
         escape_lucene(&request.album),
-        request
-            .track_count
-            .map_or_else(String::new, |count| format!(" AND tracks:{count}"))
     );
     let value: Value = http_client()?
         .get("https://musicbrainz.org/ws/2/release/")
@@ -2181,6 +2360,10 @@ fn search_musicbrainz(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandi
                 title,
                 artist,
                 year: text(row, "date").and_then(|value| parse_year(&value)),
+                original_year: row
+                    .get("release-group")
+                    .and_then(|group| text(group, "first-release-date"))
+                    .and_then(|value| parse_year(&value)),
                 country: text(row, "country"),
                 format: media
                     .and_then(|rows| rows.first())
@@ -2232,14 +2415,14 @@ fn search_discogs(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandidate
             );
             let formats = strings(row, "format");
             let labels = strings(row, "label");
-            let track_match = request.track_count.map_or(0, |_| 5);
             Some(ReleaseCandidate {
                 source: MetadataSource::Discogs,
                 id,
-                score: (85 + track_match) as u32,
+                score: 85,
                 title,
                 artist,
                 year: number(row, "year").map(|value| value as i32),
+                original_year: None,
                 country: text(row, "country"),
                 format: formats.first().cloned(),
                 publisher: labels.first().cloned(),
@@ -2311,6 +2494,10 @@ fn musicbrainz_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         title: text(&value, "title").unwrap_or_default(),
         artist: artist_credit(&value).unwrap_or_default(),
         year: text(&value, "date").and_then(|value| parse_year(&value)),
+        original_year: value
+            .get("release-group")
+            .and_then(|group| text(group, "first-release-date"))
+            .and_then(|value| parse_year(&value)),
         country: text(&value, "country"),
         format: media.first().and_then(|value| text(value, "format")),
         publisher: first_label(&value),
@@ -2410,6 +2597,7 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         .flatten()
         .filter_map(|row| text(row, "name"))
         .collect::<Vec<_>>();
+    let original_year = discogs_master_year(&value, &auth).ok().flatten();
     let candidate = ReleaseCandidate {
         source: MetadataSource::Discogs,
         id: id.to_owned(),
@@ -2417,6 +2605,7 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         title: text(&value, "title").unwrap_or_default(),
         artist,
         year: number(&value, "year").map(|value| value as i32),
+        original_year,
         country: text(&value, "country"),
         format: formats.first().cloned(),
         publisher: labels.first().cloned(),
@@ -2433,6 +2622,25 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         tracks,
         candidate,
     })
+}
+
+fn discogs_master_year(value: &Value, auth: &DiscogsAuth) -> Result<Option<i32>, String> {
+    let Some(master_id) = number(value, "master_id").filter(|value| *value > 0) else {
+        return Ok(None);
+    };
+    let url = format!("https://api.discogs.com/masters/{master_id}");
+    let response = http_client()?
+        .get(url)
+        .header(reqwest::header::AUTHORIZATION, discogs_authorization(auth))
+        .send()
+        .map_err(|_| "Aurora could not connect to the Discogs master release.".to_owned())?;
+    let status = response.status();
+    let master: Value = response
+        .error_for_status()
+        .map_err(|_| format!("Discogs master lookup failed with HTTP {status}."))?
+        .json()
+        .map_err(|error| format!("Discogs returned invalid master data: {error}"))?;
+    Ok(number(&master, "year").map(|year| year as i32))
 }
 
 fn http_client() -> Result<Client, String> {
@@ -2672,6 +2880,12 @@ fn escape_lucene(value: &str) -> String {
 }
 fn parse_year(value: &str) -> Option<i32> {
     value.get(..4)?.parse().ok()
+}
+fn track_count_difference(candidate: Option<u32>, requested: Option<u32>) -> u32 {
+    match (candidate, requested) {
+        (Some(candidate), Some(requested)) => candidate.abs_diff(requested),
+        _ => u32::MAX,
+    }
 }
 fn text(value: &Value, key: &str) -> Option<String> {
     value
@@ -3186,9 +3400,11 @@ mod tests {
                     values: EditableTagValues::default(),
                 }],
                 rename_after_apply: false,
+                remove_track_paths: Vec::new(),
                 artwork_token: Some("fixture-cover".to_owned()),
             },
             Some(&cover),
+            &parent.join("recovery"),
         )
         .expect("save album cover");
 
@@ -3210,6 +3426,59 @@ mod tests {
             second_audio
         );
         fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    #[test]
+    fn tag_apply_moves_reviewed_extra_tracks_to_verified_recovery() {
+        let root = std::env::temp_dir().join(format!(
+            "aurora-inbox-extra-recovery-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let album = root.join("Animal Man");
+        let recovery = root.join("recovery");
+        fs::create_dir_all(&album).expect("create album");
+        let retained = album.join("01 Progress.mp3");
+        let extra = album.join("02 Bonus.mp3");
+        write_artwork_fixture(&retained, 1, Some(1));
+        write_artwork_fixture(&extra, 2, Some(1));
+        let extra_hash = file_sha256(&extra).expect("extra hash");
+
+        let result = apply_tags(
+            InboxTagApplyRequest {
+                album_path: path_text(&album).expect("album path"),
+                fields: vec![EditableTagField::Genre],
+                tracks: vec![InboxTrackPatch {
+                    path: path_text(&retained).expect("track path"),
+                    values: EditableTagValues {
+                        genre: Some("Heavy Metal".to_owned()),
+                        ..EditableTagValues::default()
+                    },
+                }],
+                rename_after_apply: false,
+                remove_track_paths: vec![path_text(&extra).expect("extra path")],
+                artwork_token: None,
+            },
+            None,
+            &recovery,
+        )
+        .expect("apply tags and recover extra");
+
+        assert_eq!(result.changed_tracks, 1);
+        assert_eq!(result.removed_tracks, 1);
+        assert!(!extra.exists());
+        let recovery_path = PathBuf::from(result.recovery_path.expect("recovery path"));
+        let recovered = recovery_path.join("02 Bonus.mp3");
+        assert!(recovered.is_file());
+        assert_eq!(file_sha256(&recovered).expect("recovered hash"), extra_hash);
+        assert_eq!(
+            Tag::read_from_path(&retained)
+                .expect("retained tag")
+                .genre()
+                .map(str::to_owned),
+            Some("Heavy Metal".to_owned())
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
     }
 
     #[test]

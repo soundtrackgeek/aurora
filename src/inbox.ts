@@ -75,6 +75,7 @@ export interface ReleaseCandidate {
   title: string;
   artist: string;
   year: number | null;
+  originalYear: number | null;
   country: string | null;
   format: string | null;
   publisher: string | null;
@@ -114,7 +115,16 @@ export interface InboxTagApplyRequest {
   fields: EditableTagField[];
   tracks: Array<{ path: string; values: EditableTagValues }>;
   renameAfterApply: boolean;
+  removeTrackPaths?: string[];
   artworkToken?: string | null;
+}
+
+export interface InboxTagApplyResult {
+  changedTracks: number;
+  renamedTracks: number;
+  removedTracks?: number;
+  recoveryPath?: string | null;
+  albumPath: string;
 }
 
 export interface InboxRenameResult {
@@ -223,12 +233,13 @@ const previewAlbum: InboxAlbum = {
 };
 
 const previewCandidates: ReleaseCandidate[] = [
-  { source: "musicbrainz", id: "mb-freak-de", score: 100, title: "Freak", artist: "Baltimoore", year: 1990, country: "DE", format: "CD", publisher: "SPV Records", trackCount: 10, coverUrl: null },
-  { source: "discogs", id: "discogs-freak-de", score: 94, title: "Freak", artist: "Baltimoore", year: 1990, country: "DE", format: "CD", publisher: "SPV Records", trackCount: 10, coverUrl: null },
-  { source: "discogs", id: "discogs-freak-se", score: 82, title: "Freak", artist: "Baltimoore", year: 1990, country: "SE", format: "CD", publisher: "V.I.P. Records", trackCount: 10, coverUrl: null },
+  { source: "musicbrainz", id: "mb-freak-de", score: 100, title: "Freak", artist: "Baltimoore", year: 1990, originalYear: 1990, country: "DE", format: "CD", publisher: "SPV Records", trackCount: 10, coverUrl: null },
+  { source: "discogs", id: "discogs-freak-de", score: 94, title: "Freak", artist: "Baltimoore", year: 1990, originalYear: 1990, country: "DE", format: "CD", publisher: "SPV Records", trackCount: 10, coverUrl: null },
+  { source: "discogs", id: "discogs-freak-se", score: 82, title: "Freak", artist: "Baltimoore", year: 2008, originalYear: 1990, country: "SE", format: "CD", publisher: "V.I.P. Records", trackCount: 9, coverUrl: null },
 ];
 
 function previewDetail(candidate: ReleaseCandidate): ReleaseCandidateDetail {
+  const tracks = candidate.id === "discogs-freak-se" ? previewTracks.slice(0, 9) : previewTracks;
   return {
     candidate,
     albumArtist: candidate.artist,
@@ -237,7 +248,7 @@ function previewDetail(candidate: ReleaseCandidate): ReleaseCandidateDetail {
     publisher: candidate.publisher,
     year: candidate.year,
     discTotal: 1,
-    tracks: previewTracks.map((track) => ({
+    tracks: tracks.map((track) => ({
       title: track.title ?? track.fileName,
       artist: "Baltimoore",
       trackNumber: track.trackNumber,
@@ -314,9 +325,9 @@ export async function updateLastFmCredentials(request: LastFmCredentialsRequest)
   return invoke<InboxSettingsStatus>("update_last_fm_credentials", { request });
 }
 
-export async function searchInboxReleases(artist: string, album: string, trackCount: number): Promise<ReleaseSearchResult> {
+export async function searchInboxReleases(artist: string, album: string, trackCount: number, preferOriginalEdition = false): Promise<ReleaseSearchResult> {
   if (!isTauriRuntime()) return { candidates: previewCandidates, discogsConfigured: previewSettings.discogsConfigured, warnings: [] };
-  return invoke<ReleaseSearchResult>("search_inbox_releases", { request: { artist, album, trackCount } });
+  return invoke<ReleaseSearchResult>("search_inbox_releases", { request: { artist, album, trackCount, preferOriginalEdition } });
 }
 
 export async function loadInboxReleaseDetail(candidate: ReleaseCandidate): Promise<ReleaseCandidateDetail> {
@@ -324,9 +335,15 @@ export async function loadInboxReleaseDetail(candidate: ReleaseCandidate): Promi
   return invoke<ReleaseCandidateDetail>("inbox_release_detail", { request: { source: candidate.source, id: candidate.id } });
 }
 
-export async function applyInboxTags(request: InboxTagApplyRequest): Promise<{ changedTracks: number; renamedTracks: number; albumPath: string }> {
-  if (!isTauriRuntime()) return { changedTracks: request.tracks.length, renamedTracks: request.renameAfterApply ? request.tracks.length : 0, albumPath: request.albumPath };
-  return invoke<{ changedTracks: number; renamedTracks: number; albumPath: string }>("apply_inbox_tags", { request });
+export async function applyInboxTags(request: InboxTagApplyRequest): Promise<InboxTagApplyResult> {
+  if (!isTauriRuntime()) return {
+    changedTracks: request.tracks.length,
+    renamedTracks: request.renameAfterApply ? request.tracks.length : 0,
+    removedTracks: request.removeTrackPaths?.length ?? 0,
+    recoveryPath: request.removeTrackPaths?.length ? "C:\\Users\\Jorn\\AppData\\Roaming\\Aurora\\inbox-recovery\\preview" : null,
+    albumPath: request.albumPath,
+  };
+  return invoke<InboxTagApplyResult>("apply_inbox_tags", { request });
 }
 
 export async function selectInboxCoverImage(): Promise<string | null> {

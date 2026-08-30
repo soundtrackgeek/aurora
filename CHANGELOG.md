@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-08-30
+
+### Added
+
+- Added a default-on **Prefer the original edition** Auto-Tagger search mode with separate Original and Edition years, visible release track counts, and original-release prioritization that no longer hides a canonical release merely because the Inbox folder contains bonus tracks.
+- Added one-to-one track reconciliation for exact, likely, extra, missing, and ambiguous tracks. Automatic extra-track removal is available only after every release track has a confident match and a dedicated confirmation names the affected MP3s.
+- Added verified Inbox recovery for removed bonus tracks. Aurora copies each selected extra outside monitored folders, verifies the complete file hash, applies tags, removes extras, and renames as one rollback-aware workflow while retaining successful recovery copies.
+
+### Fixed
+
+- Auto-Tagger now writes the release group's earliest date to Aurora's Original Year and the selected concrete edition date to Release Year instead of collapsing the edition date into Year.
+
 ## [0.24.2] - 2026-08-30
 
 ### Changed

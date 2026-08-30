@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.2 keeps Library cover replacements aligned between every album MP3 and the indexed `AlbumCovers` archive.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.3 lets Inbox prefer an album's original edition, reconcile its canonical track list, and safely remove bonus tracks that do not belong.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.2 slice
+## Current 0.24.3 slice
+
+- Album Auto-Tagger now defaults to **Prefer the original edition**. MusicBrainz results use the release group's earliest date, concrete editions show separate Original and Edition years plus track-count fit, and the selected values write Aurora's distinct Year and Release Year tags correctly.
+- Auto-Tagger reconciles files to release tracks by normalized title, duration, and numbering instead of array position. Confidently unmatched local bonus tracks can be selected for removal; Aurora copies and SHA-256 verifies them in app-managed Inbox recovery before changing the album, then rolls tags and files back together if removal or renaming fails.
 
 - A complete album selection in the Albums or Inbox **Tags** editor shows its cover above Album Artist. Clicking the cover opens an image picker in that album's folder; the chosen JPG, PNG, GIF, BMP, or WebP remains a draft until **Save**, which embeds one normalized front cover in every album MP3.
 - Cover-only and combined tag/cover saves use the existing verified batch pipelines. Library saves also replace the exact `C:\_code\music_backup_v5\AlbumCovers` file indexed for the album, transcoding only when needed to preserve its indexed image format. Aurora preserves non-front pictures, other unselected frames, and audio bytes; if the archive swap fails, it restores the old archive image and every changed MP3. In Inbox, the cover always applies to the complete album even when tag fields are scoped to selected tracks.

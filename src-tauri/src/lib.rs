@@ -210,9 +210,16 @@ async fn apply_inbox_tags(
     request: InboxTagApplyRequest,
 ) -> Result<InboxTagApplyResult, String> {
     let cover = artwork::selected_cover(&app, request.artwork_token.as_deref())?;
-    tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request, cover.as_ref()))
-        .await
-        .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
+    let recovery_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Aurora could not locate its Inbox recovery folder: {error}"))?
+        .join("inbox-recovery");
+    tauri::async_runtime::spawn_blocking(move || {
+        inbox::apply_tags(request, cover.as_ref(), &recovery_root)
+    })
+    .await
+    .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]

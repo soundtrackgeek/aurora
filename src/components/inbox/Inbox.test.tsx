@@ -360,6 +360,61 @@ describe("Inbox", () => {
     expect(screen.getByRole("button", { name: "Apply to 2 tracks" })).toBeEnabled();
   });
 
+  it("prefers an original edition and moves a confidently unmatched bonus track only after review", async () => {
+    const searchResult = await inboxAdapter.searchInboxReleases("Baltimoore", "Freak", 10, true);
+    const candidate = { ...searchResult.candidates[0], year: 2008, originalYear: 1990, trackCount: 9 };
+    const fullDetail = await inboxAdapter.loadInboxReleaseDetail(candidate);
+    vi.spyOn(inboxAdapter, "searchInboxReleases").mockResolvedValue({
+      ...searchResult,
+      candidates: [candidate],
+    });
+    vi.spyOn(inboxAdapter, "loadInboxReleaseDetail").mockResolvedValue({
+      ...fullDetail,
+      candidate,
+      year: 2008,
+      tracks: fullDetail.tracks.slice(0, 9).map((track) => ({ ...track, trackTotal: 9 })),
+    });
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockResolvedValue({
+      changedTracks: 9,
+      renamedTracks: 9,
+      removedTracks: 1,
+      recoveryPath: "C:\\Aurora\\inbox-recovery\\reviewed",
+      albumPath: "C:\\Music\\Inbox\\Baltimoore - Freak (1990)",
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    const autoTag = await waitFor(() => {
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      expect(button).toBeEnabled();
+      return button;
+    });
+    fireEvent.click(autoTag);
+
+    expect(await screen.findByRole("checkbox", { name: /Prefer the original edition/u })).toBeChecked();
+    expect(await screen.findByText("9 of 9 release tracks matched")).toBeInTheDocument();
+    expect(screen.getByText("1 extra local track")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Original year" })).toHaveValue("1990");
+    expect(screen.getByRole("textbox", { name: "Release year" })).toHaveValue("2008");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Remove unmatched.*Shadows/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply, rename & move 1 extra" }));
+    const confirmation = screen.getByRole("alertdialog", { name: "Move 1 unmatched track out of this album?" });
+    expect(confirmation).toHaveTextContent("Shadows");
+    fireEvent.click(screen.getByRole("button", { name: "Move to recovery" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({
+      renameAfterApply: true,
+      removeTrackPaths: [expect.stringContaining("Shadows")],
+      tracks: expect.arrayContaining([expect.objectContaining({
+        values: expect.objectContaining({ year: 1990, releaseYear: 2008, trackTotal: 9 }),
+      })]),
+    }));
+    expect(apply.mock.calls[0]?.[0].tracks).toHaveLength(9);
+    expect(await screen.findByText(/moved 1 unmatched track to Aurora recovery/u)).toBeInTheDocument();
+  });
+
   it("keeps the selected release stable while the Inbox refreshes", async () => {
     const search = vi.spyOn(inboxAdapter, "searchInboxReleases");
     const loadSnapshot = vi.spyOn(inboxAdapter, "loadInboxSnapshot");
