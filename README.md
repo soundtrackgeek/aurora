@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.0 adds verified album-cover replacement to the Albums and Inbox Tags editors.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.1 makes an open album's rolling Album Rating and Album Score react immediately to track rating and Love changes.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.0 slice
+## Current 0.24.1 slice
 
 - A complete album selection in the Albums or Inbox **Tags** editor shows its cover above Album Artist. Clicking the cover opens an image picker in that album's folder; the chosen JPG, PNG, GIF, BMP, or WebP remains a draft until **Save**, which embeds one normalized front cover in every album MP3.
 - Cover-only and combined tag/cover saves use the existing verified batch pipelines. Aurora preserves non-front pictures, other unselected frames, and audio bytes; it rolls back earlier files when a later install fails. In Inbox, the cover always applies to the complete album even when tag fields are scoped to selected tracks.
@@ -100,6 +100,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - The Album Auto-Tagger keeps its Rename after tagging, Cancel, and Apply & rename footer visible while release and track results scroll within the available dialog height.
 - Whole-album Tags saves immediately project the verified Album, Album Artist, Year, Release Year, Genre, and Publisher values into both the Album card and Album Detail. Partial or mixed track results never overwrite an album summary by guesswork.
 - Album covers use five compact text lines: title, artist, `Year — Genre — Publisher`, `track count — album length`, and Album Rating/Score. Album Detail presents Genre and Publisher together with explicit unknown-value fallbacks.
+- While an album is open, its card and Album Detail derive a rolling Album Rating and Album Score immediately from the complete track list already on screen. Partial results remain view-local and provisional; global album-rating filters and charts continue to use Music Library-compatible effective ratings.
 - A dedicated **Inbox** between Universe and Observatory. Up to ten device-local folders are scanned every 15 seconds and whenever Aurora regains focus; folders containing MP3s become staged albums without entering the Music Library catalog.
 - Inbox album rows and the selected-album inspector show the first usable embedded front cover found in track order, serve bounded WebP thumbnails through the local cover protocol, and fall back to the existing disc mark when the album has no usable embedded image.
 - Inbox readiness reports missing or inconsistent album identity, track titles, track/disc numbering, genre, publisher context, and embedded front art before promotion. Every MP3 must contain exactly one valid front cover with image bytes matching the rest of the album. The inspector reports embedded coverage and can propagate the displayed cover across every track or let the user choose a JPG, PNG, GIF, BMP, or WebP when no embedded source exists.

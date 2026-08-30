@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-08-30
+
+### Changed
+
+- Open album cards and Album Detail now project rolling Album Rating and Album Score values immediately from the visible complete track list when a track rating or Love changes, without waiting for tag import, cover work, or catalog refresh. Partial values stay provisional and do not enter global album-rating filters or charts.
+
 ## [0.24.0] - 2026-08-30
 
 ### Added

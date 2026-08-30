@@ -88,6 +88,7 @@ import {
   loadArtistDetail,
   loadCatalogRevision,
   loadLibrarySnapshot,
+  applyAlbumTrackMetricsProjection,
   applyAlbumTrackTagProjection,
   applyAlbumPopularity,
   applyEditableTrackTagProjection,
@@ -1152,9 +1153,10 @@ function App() {
             void loadAlbumDetail(restoredAlbumId)
               .then((detail) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
+                const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
                 setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
-                  ? current.map((album) => album.id === detail.album.id ? detail.album : album)
-                  : [detail.album, ...current]);
+                  ? current.map((album) => album.id === detail.album.id ? projectedAlbum : album)
+                  : [projectedAlbum, ...current]);
                 setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
                 setAlbumTracksTruncated(detail.tracksTruncated);
                 setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
@@ -2171,7 +2173,8 @@ function App() {
     try {
       const detail = await loadAlbumDetail(albumId);
       if (requestId !== albumRequestRef.current) return;
-      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
+      const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
+      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
       setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
       setAlbumTracksTruncated(detail.tracksTruncated);
       setSelectedTrack((current) => {
@@ -2193,6 +2196,14 @@ function App() {
       setSelectedTrack((current) => current ? refreshMatchingTrack(current) : current);
     }
     setExplorerTracks((current) => current.map(refreshMatchingTrack));
+    if (updated.albumId && updated.albumId === selectedAlbumId) {
+      const projectedTracks = albumTracks.map(refreshMatchingTrack);
+      setExplorerAlbums((current) => current.map((album) => (
+        album.id === updated.albumId
+          ? applyAlbumTrackMetricsProjection(album, projectedTracks)
+          : album
+      )));
+    }
     setAlbumTracks((current) => current.map(refreshMatchingTrack));
     setYearAlbumTracks((current) => current.map(refreshMatchingTrack));
     setRatingAlbumTracks((current) => current.map(refreshMatchingTrack));
@@ -2303,7 +2314,8 @@ function App() {
         try {
           const detail = await loadAlbumDetail(albumId);
           if (requestId === albumRequestRef.current) {
-            setExplorerAlbums((current) => current.map((album) => album.id === albumId ? detail.album : album));
+            const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
+            setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
             setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
             setAlbumTracksTruncated(detail.tracksTruncated);
             setSelectedTrack((current) => {
@@ -2555,7 +2567,8 @@ function App() {
     void loadAlbumDetail(album.id)
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
-        setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? detail.album : candidate));
+        const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
+        setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
         setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
         setAlbumTracksTruncated(detail.tracksTruncated);
         setSelectedTrack(detail.tracks[0] ?? null);
@@ -2945,7 +2958,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

@@ -220,6 +220,50 @@ export function applyAlbumTrackTagProjection(
   };
 }
 
+export function applyAlbumTrackMetricsProjection(
+  current: AlbumSummary,
+  tracks: readonly Track[],
+): AlbumSummary {
+  if (
+    tracks.length !== current.totalTracks
+    || tracks.some((track) => track.albumId !== current.id)
+  ) {
+    return current;
+  }
+
+  let ratedTracks = 0;
+  let ratingTotal = 0;
+  let lovedTracks = 0;
+  let fiveStarSeconds = 0;
+  let measuredDurationSeconds = 0;
+  for (const track of tracks) {
+    const durationSeconds = Math.max(0, track.durationSeconds ?? 0);
+    measuredDurationSeconds += durationSeconds;
+    if (track.rating !== null) {
+      ratedTracks += 1;
+      ratingTotal += track.rating;
+      if (track.rating === 5) fiveStarSeconds += durationSeconds;
+    }
+    if (track.loved) lovedTracks += 1;
+  }
+
+  const rating = ratedTracks > 0 ? ratingTotal / ratedTracks : null;
+  const durationSeconds = Math.max(0, current.durationSeconds ?? measuredDurationSeconds);
+  const fiveStarRatio = durationSeconds > 0 ? fiveStarSeconds / durationSeconds : 0;
+  const albumScore = rating === null
+    ? null
+    : (((rating * 20 * 0.5) + (fiveStarRatio * 100) + (fiveStarSeconds / 60 * 0.3)) / 10)
+      + lovedTracks * 100;
+
+  return {
+    ...current,
+    ratedTracks,
+    lovedTracks,
+    rating,
+    albumScore,
+  };
+}
+
 export type AlbumSort =
   | "newest"
   | "oldest"

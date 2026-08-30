@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyAlbumTrackMetricsProjection,
   applyAlbumTrackTagProjection,
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
@@ -153,6 +154,58 @@ describe("library presentation", () => {
       originCountryCode: null,
       originCountryName: null,
     });
+  });
+
+  it("projects rolling Album Rating and Album Score from the complete open track list", () => {
+    const album: AlbumSummary = {
+      id: "album-1",
+      title: "Berserker",
+      artist: "Gary Numan",
+      originalYear: 1984,
+      releaseYear: 1984,
+      genre: "Synthpop",
+      totalTracks: 9,
+      ratedTracks: 0,
+      lovedTracks: 0,
+      durationSeconds: 2_700,
+      rating: null,
+      albumScore: null,
+    };
+    const ratedAlbumTracks = [
+      { ...tracks[0], id: "b1", trackKey: "b1", albumId: "album-1", album: "Berserker", rating: 4, loved: false, durationSeconds: 300 },
+      { ...tracks[0], id: "b2", trackKey: "b2", albumId: "album-1", album: "Berserker", rating: 4, loved: false, durationSeconds: 300 },
+      { ...tracks[0], id: "b3", trackKey: "b3", albumId: "album-1", album: "Berserker", rating: 5, loved: true, durationSeconds: 300 },
+    ];
+    const albumTracks = [
+      ...ratedAlbumTracks,
+      ...Array.from({ length: 6 }, (_, index) => ({
+        ...tracks[0],
+        id: `b${index + 4}`,
+        trackKey: `b${index + 4}`,
+        albumId: "album-1",
+        album: "Berserker",
+        rating: null,
+        loved: false,
+        durationSeconds: 300,
+      })),
+    ];
+
+    const projected = applyAlbumTrackMetricsProjection(album, albumTracks);
+
+    expect(projected.ratedTracks).toBe(3);
+    expect(projected.lovedTracks).toBe(1);
+    expect(projected.rating).toBeCloseTo(13 / 3);
+    expect(projected.albumScore).toBeCloseTo(105.5944, 4);
+  });
+
+  it("leaves album metrics unchanged when the open track list is incomplete", () => {
+    const album: AlbumSummary = {
+      id: "album-1", title: "Berserker", artist: "Gary Numan", releaseYear: 1984,
+      genre: "Synthpop", totalTracks: 9, ratedTracks: 3, lovedTracks: 0,
+      durationSeconds: 2_836, rating: null, albumScore: null,
+    };
+
+    expect(applyAlbumTrackMetricsProjection(album, tracks.slice(0, 1))).toBe(album);
   });
 
   it("does not guess album metadata from a partial or mixed track result", () => {
