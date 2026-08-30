@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.6] - 2026-08-30
+
+### Fixed
+
+- Kept the unmatched-track recovery confirmation centered and fully visible above sticky Auto-Tagger table headers on short screens. The confirmation now has a bounded scrolling overlay, and Escape returns to release review without closing the Auto-Tagger.
+
 ## [0.24.5] - 2026-08-30
 
 ### Added

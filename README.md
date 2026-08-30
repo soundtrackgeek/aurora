@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.5 recognizes punctuated track-title initialisms such as `L.U.S.T` as their ordinary-word equivalents during Inbox release matching.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.6 keeps the Inbox extra-track confirmation fully visible above the Auto-Tagger on short screens.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.5 slice
+## Current 0.24.6 slice
+
+- The unmatched-track recovery confirmation now occupies a dedicated overlay above the complete Auto-Tagger panel. Sticky reconciliation and track headers cannot obscure it, its content scrolls when vertical space is limited, and Escape dismisses only the confirmation instead of closing the Auto-Tagger.
 
 - Album Auto-Tagger canonicalizes dotted and spaced initialisms before reconciling release tracks, so `Lust`, `L.U.S.T`, `L. U. S. T.`, and `L U S T` resolve to the same exact match without weakening unrelated title comparisons.
 - When titles really differ because of a typo or provider error, an unresolved release row offers the unmatched local files and a reversible **Confirm match** action. Confirmed pairs receive the release title and track number during tagging and count toward safe extra-track cleanup.

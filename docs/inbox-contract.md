@@ -1,6 +1,6 @@
 # Inbox contract
 
-Aurora 0.24.5 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
+Aurora 0.24.6 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
 
 ## Monitoring and identity
 
@@ -25,6 +25,7 @@ Aurora 0.24.5 provides Inbox as a device-local preparation area. Its files are o
 - Search results identify concrete releases while retaining the containing release group's earliest known year as Original Year. **Prefer the original edition** removes the old exact-track-count search restriction, prioritizes a concrete edition whose date equals that earliest year, then uses track-count distance and provider score to break ties.
 - Original Year and Release Year remain distinct. MusicBrainz supplies the release-group first-release date and concrete release date; a selected Discogs release resolves its master year when one exists. Provider values are proposals: the user chooses a release, chooses fields, and may correct either year, Genre, or any matched track title before applying.
 - React reconciles the chosen release to local files by normalized title first, including canonicalization of dotted or spaced initialisms such as `L.U.S.T` and `L U S T` to `lust`. It uses numbering and duration to disambiguate duplicates and a conservative same-position similarity fallback. The comparison exposes exact, likely, user-confirmed, extra local, missing local, and ambiguous states. For a real typo or provider error, the user may assign one unmatched local file to an unresolved release row; this reversible confirmation writes the selected release title and numbering. An extra can be removed automatically only when every release track has one confident or explicitly confirmed local match.
+- The final unmatched-track recovery confirmation is rendered in a bounded overlay above the Auto-Tagger's sticky reconciliation and track headers. It remains centered and independently scrollable on short screens; Escape closes this confirmation while retaining the selected release review.
 
 ## Tag transaction
 

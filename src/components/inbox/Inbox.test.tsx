@@ -401,6 +401,11 @@ describe("Inbox", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply, rename & move 1 extra" }));
     const confirmation = screen.getByRole("alertdialog", { name: "Move 1 unmatched track out of this album?" });
     expect(confirmation).toHaveTextContent("Shadows");
+    expect(confirmation.parentElement).toHaveClass("inbox-extra-confirmation-backdrop");
+    fireEvent.keyDown(confirmation, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Album Auto-Tagger" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply, rename & move 1 extra" }));
     fireEvent.click(screen.getByRole("button", { name: "Move to recovery" }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
