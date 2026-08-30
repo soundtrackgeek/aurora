@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-08-30
+
+### Changed
+
+- Library cover replacements now also replace the exact `C:\_code\music_backup_v5\AlbumCovers` file mapped by `album_covers.album_id`. Aurora stages and validates a format-compatible archive image, installs it only after every MP3 verifies, and restores both the old archive image and the MP3 batch if the archive replacement fails.
+
 ## [0.24.1] - 2026-08-30
 
 ### Changed

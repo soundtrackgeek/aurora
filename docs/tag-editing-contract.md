@@ -1,6 +1,6 @@
 # Tag editing contract
 
-Aurora 0.24.0 edits MusicBee-compatible metadata and album artwork in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
+Aurora 0.24.2 edits MusicBee-compatible metadata and album artwork in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
 
 ## Selection and write intent
 
@@ -31,6 +31,8 @@ For each file, Aurora:
 6. Atomically replaces the MP3 with `ReplaceFileW`, retaining the original as the operation backup.
 7. Checkpoints `replaced`, verifies the installed MP3 again, and atomically commits `verified` with Aurora's rating/Love/Release Year overlay.
 8. Deletes the original backup and clears its journal path after the complete single-file or album operation succeeds.
+
+For a Library artwork change, Aurora also resolves the existing archive file through the exact `album_covers.album_id` mapping. Before changing an MP3 it stages and validates the selected image in the archive entry's indexed image format. Only after every MP3 verifies does Aurora atomically replace that file under `C:\_code\music_backup_v5\AlbumCovers`. An archive failure restores the old archive image and rolls the MP3 batch back; Aurora never writes the shared catalog row.
 
 The batch preflights all files before step 1 begins. If a later file fails, Aurora attempts to undo every earlier completed file in reverse order. Atomicity is therefore per MP3 rather than filesystem-wide: a failure reported after Windows replacement can require the retained backup and startup recovery, and Aurora states that uncertainty explicitly.
 

@@ -130,7 +130,9 @@ describe("TagEditor", () => {
       expect.any(Object),
       "preview-selected-cover",
     );
-    expect(await screen.findByText("Embedded the replacement cover in 2 MP3s.")).toBeInTheDocument();
+    expect(await screen.findByText(
+      "Embedded the replacement cover in 2 MP3s and replaced its archived cover.",
+    )).toBeInTheDocument();
   });
 
   it("treats a checked blank value as an explicit clear", async () => {

@@ -567,8 +567,8 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     }
     const savedFiles = artworkToken
       ? fields.length
-        ? `Saved ${countLabel(fields.length, "field")} and embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
-        : `Embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
+        ? `Saved ${countLabel(fields.length, "field")}, embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}, and replaced its archived cover.`
+        : `Embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")} and replaced its archived cover.`
       : `Saved ${countLabel(fields.length, "field")} directly to ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`;
     let message = savedFiles;
     if (result.catalogSync?.status === "synced") {

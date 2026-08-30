@@ -1,9 +1,9 @@
 use crate::{
     artwork::{
         CanonicalCover, canonical_front_cover_fingerprint, front_cover_fingerprint,
-        front_cover_matches,
+        front_cover_matches, validate_cover_bytes,
     },
-    catalog::{self, ResolvedTrack, TrackSummary},
+    catalog::{self, CoverArchiveEntry, ResolvedTrack, TrackSummary},
     library_sync::CatalogSync,
     state_store::{StateStore, TagOperation, TagOverlay},
     tag_model::{
@@ -17,13 +17,14 @@ use id3::{
     frame::{Content, ExtendedText, Frame, Unknown},
     no_tag_ok,
 };
+use image::ImageFormat;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     ffi::c_void,
     fs::{self, File, OpenOptions},
-    io::{Read, Seek},
+    io::{Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -170,6 +171,224 @@ struct PreparedEditorWriteFailure {
     installed: bool,
 }
 
+struct PreparedCoverArchiveWrite {
+    target: PathBuf,
+    temporary: PathBuf,
+    backup: PathBuf,
+    mime_type: String,
+    before_digest: [u8; 32],
+    after_digest: [u8; 32],
+}
+
+impl PreparedCoverArchiveWrite {
+    fn prepare(entry: CoverArchiveEntry, cover: &CanonicalCover) -> Result<Self, String> {
+        let before_digest = archive_image_digest(&entry.path, &entry.mime_type)?;
+        let bytes = cover_bytes_for_archive(cover, &entry.mime_type)?;
+        let (after_digest, after_mime) = validate_cover_bytes(&bytes)?;
+        if !same_cover_mime(after_mime, &entry.mime_type) {
+            return Err(
+                "Aurora could not preserve the archive cover's indexed image format.".to_owned(),
+            );
+        }
+        let parent = entry
+            .path
+            .parent()
+            .ok_or_else(|| "The album-cover archive entry has no parent folder.".to_owned())?;
+        let filename = entry
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "The album-cover archive filename is invalid.".to_owned())?;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary = parent.join(format!(
+            ".{filename}.aurora-{}-{unique}.cover-working.tmp",
+            std::process::id()
+        ));
+        let backup = parent.join(format!(
+            ".{filename}.aurora-{}-{unique}.cover-original.backup",
+            std::process::id()
+        ));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("Could not stage the archived album cover: {error}"))?;
+        if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+            cleanup_owned_working_file(&temporary);
+            return Err(format!(
+                "Could not flush the staged archived album cover: {error}"
+            ));
+        }
+        drop(file);
+        match archive_image_digest(&temporary, &entry.mime_type) {
+            Ok(digest) if digest == after_digest => {}
+            Ok(_) => {
+                cleanup_owned_working_file(&temporary);
+                return Err(
+                    "The staged archived album cover did not verify before the MP3 batch."
+                        .to_owned(),
+                );
+            }
+            Err(error) => {
+                cleanup_owned_working_file(&temporary);
+                return Err(format!(
+                    "Aurora could not verify the staged archived album cover: {error}"
+                ));
+            }
+        }
+        Ok(Self {
+            target: entry.path,
+            temporary,
+            backup,
+            mime_type: entry.mime_type,
+            before_digest,
+            after_digest,
+        })
+    }
+
+    fn cleanup_staged(&self) {
+        cleanup_owned_working_file(&self.temporary);
+    }
+
+    fn install(self) -> Result<(), String> {
+        let install_result = (|| -> Result<(), String> {
+            let _write_exclusion = open_archive_write_exclusion(&self.target)?;
+            if archive_image_digest(&self.target, &self.mime_type)? != self.before_digest {
+                return Err(
+                    "The archived album cover changed while Aurora prepared the MP3 batch."
+                        .to_owned(),
+                );
+            }
+            replace_file_atomic(&self.target, &self.temporary, Some(&self.backup))
+                .map_err(|error| format!("Could not replace the archived album cover: {error}"))?;
+            if archive_image_digest(&self.target, &self.mime_type)? != self.after_digest {
+                return Err("The replaced archived album cover did not verify.".to_owned());
+            }
+            fs::remove_file(&self.backup).map_err(|error| {
+                format!("Could not remove the archived cover's completed safety backup: {error}")
+            })?;
+            Ok(())
+        })();
+        if let Err(error) = install_result {
+            self.cleanup_staged();
+            return match restore_cover_archive_backup(&self) {
+                Ok(()) => Err(format!(
+                    "Aurora could not finish the archived cover replacement and restored the old archive image: {error}"
+                )),
+                Err(restore_error) => Err(format!(
+                    "Aurora could not finish the archived cover replacement. Every available archive file was retained for manual recovery: {error}. Restore error: {restore_error}"
+                )),
+            };
+        }
+        Ok(())
+    }
+}
+
+fn canonical_cover_mime(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => Some("image/jpeg"),
+        "image/png" => Some("image/png"),
+        "image/gif" => Some("image/gif"),
+        "image/bmp" | "image/x-ms-bmp" => Some("image/bmp"),
+        "image/webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn same_cover_mime(left: &str, right: &str) -> bool {
+    canonical_cover_mime(left).is_some_and(|left| Some(left) == canonical_cover_mime(right))
+}
+
+fn cover_bytes_for_archive(cover: &CanonicalCover, archive_mime: &str) -> Result<Vec<u8>, String> {
+    let (_, selected_mime) = validate_cover_bytes(&cover.picture.data)?;
+    if same_cover_mime(selected_mime, archive_mime) {
+        return Ok(cover.picture.data.clone());
+    }
+    let format = match canonical_cover_mime(archive_mime) {
+        Some("image/jpeg") => ImageFormat::Jpeg,
+        Some("image/png") => ImageFormat::Png,
+        Some("image/gif") => ImageFormat::Gif,
+        Some("image/bmp") => ImageFormat::Bmp,
+        Some("image/webp") => ImageFormat::WebP,
+        _ => {
+            return Err(
+                "The indexed album-cover archive format is not supported for replacement."
+                    .to_owned(),
+            );
+        }
+    };
+    let image = image::load_from_memory(&cover.picture.data)
+        .map_err(|_| "Aurora could not decode the selected cover for the archive.".to_owned())?;
+    let mut output = Cursor::new(Vec::new());
+    image
+        .write_to(&mut output, format)
+        .map_err(|_| "Aurora could not encode the selected cover for the archive.".to_owned())?;
+    Ok(output.into_inner())
+}
+
+fn archive_image_digest(path: &Path, expected_mime: &str) -> Result<[u8; 32], String> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Could not read the archived album cover: {error}"))?;
+    let (digest, actual_mime) = validate_cover_bytes(&bytes)?;
+    if !same_cover_mime(actual_mime, expected_mime) {
+        return Err("The archived album cover does not match its indexed image format.".to_owned());
+    }
+    Ok(digest)
+}
+
+fn restore_cover_archive_backup(item: &PreparedCoverArchiveWrite) -> Result<(), String> {
+    if item.target.is_file()
+        && archive_image_digest(&item.target, &item.mime_type).ok() == Some(item.before_digest)
+    {
+        cleanup_owned_working_file(&item.backup);
+        return Ok(());
+    }
+    if !item.backup.is_file()
+        || archive_image_digest(&item.backup, &item.mime_type).ok() != Some(item.before_digest)
+    {
+        return Err(
+            "The original archived cover safety copy is unavailable or invalid.".to_owned(),
+        );
+    }
+    if item.target.is_file() {
+        replace_file_atomic(&item.target, &item.backup, None)
+            .map_err(|error| format!("Could not restore the old archived cover: {error}"))?;
+    } else {
+        move_file_without_replacing(&item.backup, &item.target)
+            .map_err(|error| format!("Could not restore the missing archived cover: {error}"))?;
+    }
+    if archive_image_digest(&item.target, &item.mime_type)? != item.before_digest {
+        return Err("The restored archived cover did not verify.".to_owned());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn open_archive_write_exclusion(path: &Path) -> Result<File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+        .open(path)
+        .map_err(|error| {
+            format!("The archived album cover is open for writing in another application: {error}")
+        })
+}
+
+#[cfg(not(windows))]
+fn open_archive_write_exclusion(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| format!("Could not lock the archived album cover: {error}"))
+}
+
 impl From<String> for PreparedEditorWriteFailure {
     fn from(message: String) -> Self {
         Self {
@@ -268,6 +487,12 @@ impl TagService {
                 "Album artwork can only be replaced for one complete album selection.".to_owned(),
             );
         }
+        let archive_entry = match (&request.target, artwork.as_ref()) {
+            (TagEditorTarget::Album { album_id, .. }, Some(_)) => {
+                Some(catalog::resolve_cover_archive_entry(album_id)?)
+            }
+            _ => None,
+        };
         let desired_patch = request.values.clone().normalize();
         desired_patch.validate()?;
         let resolved = self.resolve_editor_update_target(&request.target, &request.expected)?;
@@ -345,6 +570,10 @@ impl TagService {
                     .to_owned(),
             );
         }
+        let archive_write = match (archive_entry, artwork.as_ref()) {
+            (Some(entry), Some(cover)) => Some(PreparedCoverArchiveWrite::prepare(entry, cover)?),
+            _ => None,
+        };
 
         let mut completed = Vec::new();
         for item in prepared {
@@ -356,6 +585,9 @@ impl TagService {
             match self.write_prepared_editor(item, &request.fields, artwork.as_ref()) {
                 Ok(()) => completed.push((track_id, track_key)),
                 Err(write_error) => {
+                    if let Some(archive_write) = &archive_write {
+                        archive_write.cleanup_staged();
+                    }
                     let mut rollback_errors = Vec::new();
                     if write_error.installed {
                         let recovered = self.recover_interrupted_operations();
@@ -384,6 +616,26 @@ impl TagService {
                     ));
                 }
             }
+        }
+        if let Some(archive_write) = archive_write
+            && let Err(archive_error) = archive_write.install()
+        {
+            let mut rollback_errors = Vec::new();
+            for (track_id, track_key) in completed.iter().rev() {
+                if let Err(error) = self.undo(track_id, track_key) {
+                    rollback_errors.push(format!("{track_key}: {error}"));
+                }
+            }
+            if rollback_errors.is_empty() {
+                let _ = self.store.cleanup_completed_tag_backups();
+                return Err(format!(
+                    "Aurora could not finish the cover replacement and restored every MP3 it had changed. {archive_error}"
+                ));
+            }
+            return Err(format!(
+                "Aurora could not finish the cover replacement. Some MP3s may still contain the edit; retained backups require recovery. Archive error: {archive_error}. Rollback errors: {}",
+                rollback_errors.join("; ")
+            ));
         }
         let changed_keys = completed
             .iter()
@@ -2685,7 +2937,7 @@ fn replace_file_atomic(
     };
     if result == 0 {
         Err(format!(
-            "Windows could not atomically replace the MP3: {}",
+            "Windows could not atomically replace the file: {}",
             std::io::Error::last_os_error()
         ))
     } else {
@@ -2745,7 +2997,7 @@ fn replace_file_atomic(
         if let Some(backup) = backup {
             let _ = fs::rename(backup, target);
         }
-        return Err(format!("Could not replace the MP3: {error}"));
+        return Err(format!("Could not replace the file: {error}"));
     }
     Ok(())
 }
@@ -2794,13 +3046,17 @@ mod tests {
         audio
     }
 
-    fn valid_cover_bytes(red: u8) -> Vec<u8> {
+    fn valid_cover_bytes_with_format(red: u8, format: image::ImageFormat) -> Vec<u8> {
         let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([red, 0, 0, 255]));
         let mut bytes = Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut bytes, image::ImageFormat::Png)
+            .write_to(&mut bytes, format)
             .expect("encode cover");
         bytes.into_inner()
+    }
+
+    fn valid_cover_bytes(red: u8) -> Vec<u8> {
+        valid_cover_bytes_with_format(red, image::ImageFormat::Png)
     }
 
     fn replace_musicbee_values(path: &Path, values: &TagValues) {
@@ -3282,6 +3538,96 @@ mod tests {
                 .any(|picture| picture.picture_type == PictureType::Other)
         );
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn library_cover_save_replaces_the_indexed_archive_image_atomically() {
+        let root = fixture_path("cover-archive-root").with_extension("dir");
+        fs::create_dir_all(&root).expect("create archive fixture folder");
+        let target = root.join("album-cover.bmp");
+        let before = valid_cover_bytes_with_format(3, image::ImageFormat::Bmp);
+        fs::write(&target, &before).expect("write original archive cover");
+        let target = fs::canonicalize(&target).expect("canonical archive cover");
+        let replacement = valid_cover_bytes(9);
+        let cover = crate::artwork::canonical_cover_from_picture(&Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: replacement,
+        })
+        .expect("replacement cover");
+
+        let prepared = PreparedCoverArchiveWrite::prepare(
+            CoverArchiveEntry {
+                path: target.clone(),
+                mime_type: "image/bmp".to_owned(),
+            },
+            &cover,
+        )
+        .expect("stage archive cover");
+        assert_eq!(fs::read(&target).expect("original archive cover"), before);
+        prepared.install().expect("install archive cover");
+
+        let written = fs::read(&target).expect("read replaced archive cover");
+        assert_eq!(
+            validate_cover_bytes(&written)
+                .expect("validate replaced archive cover")
+                .1,
+            "image/bmp"
+        );
+        assert_eq!(
+            image::load_from_memory(&written)
+                .expect("decode replaced archive cover")
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0[0],
+            9
+        );
+        assert_eq!(
+            fs::read_dir(&root)
+                .expect("list archive fixture folder")
+                .filter_map(Result::ok)
+                .count(),
+            1
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_library_cover_save_can_restore_the_original_archive_image() {
+        let root = fixture_path("cover-archive-rollback").with_extension("dir");
+        fs::create_dir_all(&root).expect("create archive rollback folder");
+        let target = root.join("album-cover.png");
+        let before = valid_cover_bytes(3);
+        fs::write(&target, &before).expect("write original archive cover");
+        let target = fs::canonicalize(&target).expect("canonical archive cover");
+        let cover = crate::artwork::canonical_cover_from_picture(&Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: valid_cover_bytes(9),
+        })
+        .expect("replacement cover");
+        let prepared = PreparedCoverArchiveWrite::prepare(
+            CoverArchiveEntry {
+                path: target.clone(),
+                mime_type: "image/png".to_owned(),
+            },
+            &cover,
+        )
+        .expect("stage archive cover");
+
+        replace_file_atomic(
+            &prepared.target,
+            &prepared.temporary,
+            Some(&prepared.backup),
+        )
+        .expect("simulate archive replacement");
+        assert_ne!(fs::read(&target).expect("new archive cover"), before);
+        restore_cover_archive_backup(&prepared).expect("restore original archive cover");
+        assert_eq!(fs::read(&target).expect("restored archive cover"), before);
+        assert!(!prepared.backup.exists());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

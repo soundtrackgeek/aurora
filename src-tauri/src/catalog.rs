@@ -18,6 +18,12 @@ use std::{
 const CATALOG_RELATIVE_PATH: &str = "com.local.musiclibrary\\music-library.sqlite3";
 pub(crate) const COVER_ROOT: &str = r"C:\_code\music_backup_v5\AlbumCovers";
 
+#[derive(Clone, Debug)]
+pub(crate) struct CoverArchiveEntry {
+    pub(crate) path: PathBuf,
+    pub(crate) mime_type: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LibrarySummary {
@@ -1913,16 +1919,20 @@ fn catalog_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String
 }
 
 pub(crate) fn resolve_cover_path(album_id: &str) -> Result<PathBuf, String> {
+    resolve_cover_archive_entry(album_id).map(|entry| entry.path)
+}
+
+pub(crate) fn resolve_cover_archive_entry(album_id: &str) -> Result<CoverArchiveEntry, String> {
     if album_id.trim().is_empty() || album_id.chars().count() > 512 {
         return Err("Album identity is invalid.".to_owned());
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    let cover_path: String = connection
+    let (cover_path, mime_type): (String, String) = connection
         .query_row(
-            "SELECT cache_path FROM album_covers WHERE album_id = :album_id AND file_size_bytes > 0",
+            "SELECT cache_path, mime_type FROM album_covers WHERE album_id = :album_id AND file_size_bytes > 0",
             named_params! { ":album_id": album_id },
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| "No album cover is available.".to_owned())?;
 
@@ -1933,7 +1943,10 @@ pub(crate) fn resolve_cover_path(album_id: &str) -> Result<PathBuf, String> {
     if !candidate.starts_with(&root) || !candidate.is_file() {
         return Err("The album cover resolved outside the configured archive.".to_owned());
     }
-    Ok(candidate)
+    Ok(CoverArchiveEntry {
+        path: candidate,
+        mime_type,
+    })
 }
 
 #[cfg(test)]

@@ -1,13 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.1 makes an open album's rolling Album Rating and Album Score react immediately to track rating and Love changes.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.2 keeps Library cover replacements aligned between every album MP3 and the indexed `AlbumCovers` archive.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.1 slice
+## Current 0.24.2 slice
 
 - A complete album selection in the Albums or Inbox **Tags** editor shows its cover above Album Artist. Clicking the cover opens an image picker in that album's folder; the chosen JPG, PNG, GIF, BMP, or WebP remains a draft until **Save**, which embeds one normalized front cover in every album MP3.
-- Cover-only and combined tag/cover saves use the existing verified batch pipelines. Aurora preserves non-front pictures, other unselected frames, and audio bytes; it rolls back earlier files when a later install fails. In Inbox, the cover always applies to the complete album even when tag fields are scoped to selected tracks.
+- Cover-only and combined tag/cover saves use the existing verified batch pipelines. Library saves also replace the exact `C:\_code\music_backup_v5\AlbumCovers` file indexed for the album, transcoding only when needed to preserve its indexed image format. Aurora preserves non-front pictures, other unselected frames, and audio bytes; if the archive swap fails, it restores the old archive image and every changed MP3. In Inbox, the cover always applies to the complete album even when tag fields are scoped to selected tracks.
 
 - Opened albums show each track's duration in a compact **Time** column between **Track** and **Rating**.
 
