@@ -1,6 +1,6 @@
 # Tag editing contract
 
-Aurora 0.17.28 edits MusicBee-compatible metadata in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
+Aurora 0.24.0 edits MusicBee-compatible metadata and album artwork in MP3 files while keeping `%APPDATA%\com.local.musiclibrary\music-library.sqlite3` strictly read-only.
 
 ## Selection and write intent
 
@@ -8,6 +8,7 @@ Aurora 0.17.28 edits MusicBee-compatible metadata in MP3 files while keeping `%A
 - Aurora reads all editable values from the MP3 files. A field is **Mixed** when at least two selected files differ.
 - Only fields whose checkbox is selected are part of the save. Typing into a field selects it automatically. An untouched Mixed field is omitted, and a selected blank field explicitly removes that tag. Album Artist, Album, and Track Title cannot be cleared because Music Library requires them for a safe existing-folder sync.
 - Editable fields are Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- One complete album selection also exposes its cover above Album Artist. Clicking it opens the native image picker in the album directory. The selected JPG, PNG, GIF, BMP, or WebP is validated within a 32 MiB and 100-megapixel bound, represented in React by an opaque token, and remains a draft until Save. Track and mixed-album selections do not expose album artwork.
 - Artist is MusicBee's display override (`TXXX/DISPLAY ARTIST`). If it is absent, Aurora displays the underlying `TPE1` performer credits joined with `; `; saving Artist never rewrites those credits. Album Artist maps to the actual multi-value `TPE2` credits.
 - Track and disc numbers share one ID3 frame with their totals. Changing only a total preserves each file's existing number; removing a number also removes a total that cannot exist independently.
 
@@ -22,10 +23,10 @@ Aurora 0.17.28 edits MusicBee-compatible metadata in MP3 files while keeping `%A
 
 For each file, Aurora:
 
-1. Merges only the selected fields with that file's current values and validates text, half-star rating, year, and track/disc constraints.
+1. Merges only the selected fields with that file's current values and validates text, half-star rating, year, track/disc constraints, and any selected album artwork.
 2. Records a durable `prepared` journal operation containing legacy overlay values plus complete before/after editable values and the exact selected-field list.
-3. Copies the MP3 to a uniquely owned same-folder working path and changes only the selected ID3 frame families.
-4. Flushes and re-reads the working copy, verifying the complete editable value set, every unselected parsed frame, and the SHA-256 of all bytes after ID3v2.
+3. Copies the MP3 to a uniquely owned same-folder working path and changes only the selected ID3 frame families. A cover change removes front-cover pictures and writes one normalized front-cover picture to every album MP3; non-front pictures remain untouched.
+4. Flushes and re-reads the working copy, verifying the complete editable value set, the exact front-cover fingerprint when changed, every unselected parsed frame, and the SHA-256 of all bytes after ID3v2.
 5. Opens a Windows handle that permits reads and replacement but denies concurrent writers, then rechecks canonical path, volume/file ID, size, modified time, and creation time.
 6. Atomically replaces the MP3 with `ReplaceFileW`, retaining the original as the operation backup.
 7. Checkpoints `replaced`, verifies the installed MP3 again, and atomically commits `verified` with Aurora's rating/Love/Release Year overlay.
@@ -35,8 +36,8 @@ The batch preflights all files before step 1 begins. If a later file fails, Auro
 
 ## Recovery and preservation
 
-- Recovery metadata is operation-specific. Startup knows which frames Aurora intended to change and verifies the full before/after editable value set before completing or rejecting a recovery path.
-- Artwork, lyrics, ReplayGain, MusicBrainz identifiers, unknown frames, other POPM owners, ID3v1/trailing bytes, and audio bytes are outside the operation and must remain unchanged.
+- Recovery metadata is operation-specific. Startup knows which frames Aurora intended to change and verifies the full before/after editable value set plus optional artwork fingerprints before completing or rejecting a recovery path.
+- Except for an explicitly selected front-cover replacement, artwork, lyrics, ReplayGain, MusicBrainz identifiers, unknown frames, other POPM owners, ID3v1/trailing bytes, and audio bytes are outside the operation and must remain unchanged. Non-front pictures are always preserved.
 - Successful operations do not retain an undo copy. Album writes keep their per-file originals only until every track has verified so a later failure can restore earlier tracks.
 - Ambiguous, interrupted, or externally changed files are never auto-overwritten or prematurely cleaned up. Aurora retains the available files and records a candid recovery error.
 

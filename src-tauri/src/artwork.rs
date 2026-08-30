@@ -1,9 +1,14 @@
-use crate::{InboxState, catalog, tagging::read_tag_for_write};
-use id3::frame::PictureType;
+use crate::{ArtworkSelectionState, InboxState, catalog, tagging::read_tag_for_write};
+use id3::{
+    TagLike,
+    frame::{Picture, PictureType},
+};
 use image::{ImageFormat, ImageReader, imageops::FilterType};
 use percent_encoding::percent_decode_str;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{VecDeque, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
     io::Cursor,
@@ -14,7 +19,199 @@ use std::{
 use tauri::{AppHandle, Manager, Runtime, http};
 
 const MAX_COVER_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_COVER_PIXELS: u64 = 100_000_000;
+const MAX_ARTWORK_SELECTIONS: usize = 16;
 static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone)]
+pub(crate) struct CanonicalCover {
+    pub(crate) picture: Picture,
+    pub(crate) digest: [u8; 32],
+}
+
+#[derive(Clone)]
+struct ArtworkSelection {
+    token: String,
+    path: PathBuf,
+    digest: [u8; 32],
+}
+
+#[derive(Default)]
+pub(crate) struct ArtworkSelectionRegistry {
+    selections: VecDeque<ArtworkSelection>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SelectedArtwork {
+    token: String,
+    preview_url: String,
+    file_name: String,
+}
+
+impl ArtworkSelectionRegistry {
+    fn register(&mut self, path: PathBuf, digest: [u8; 32]) -> SelectedArtwork {
+        let sequence = TEMPORARY_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let token = format!("{}-{sequence}", now_ns());
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Selected cover")
+            .to_owned();
+        self.selections.push_back(ArtworkSelection {
+            token: token.clone(),
+            path,
+            digest,
+        });
+        while self.selections.len() > MAX_ARTWORK_SELECTIONS {
+            self.selections.pop_front();
+        }
+        SelectedArtwork {
+            preview_url: format!("http://aurora-cover.localhost/selected/{token}?size=256"),
+            token,
+            file_name,
+        }
+    }
+
+    fn resolve(&self, token: &str) -> Result<PathBuf, String> {
+        let selection = self
+            .selections
+            .iter()
+            .find(|selection| selection.token == token)
+            .ok_or_else(|| {
+                "The selected album cover expired. Choose it again before saving.".to_owned()
+            })?;
+        let cover = canonical_cover_from_image(&selection.path)?;
+        if cover.digest != selection.digest {
+            return Err(
+                "The selected album-cover file changed. Choose it again before saving.".to_owned(),
+            );
+        }
+        Ok(selection.path.clone())
+    }
+}
+
+fn now_ns() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+pub(crate) fn register_selected_artwork<R: Runtime>(
+    app: &AppHandle<R>,
+    path: PathBuf,
+) -> Result<SelectedArtwork, String> {
+    let cover = canonical_cover_from_image(&path)?;
+    let selected = app
+        .state::<ArtworkSelectionState>()
+        .lock()
+        .map_err(|_| "Aurora's album-cover picker stopped unexpectedly.".to_owned())?
+        .register(path, cover.digest);
+    Ok(selected)
+}
+
+pub(crate) fn selected_cover<R: Runtime>(
+    app: &AppHandle<R>,
+    token: Option<&str>,
+) -> Result<Option<CanonicalCover>, String> {
+    token
+        .map(|token| {
+            let path = app
+                .state::<ArtworkSelectionState>()
+                .lock()
+                .map_err(|_| "Aurora's album-cover picker stopped unexpectedly.".to_owned())?
+                .resolve(token)?;
+            canonical_cover_from_image(&path)
+        })
+        .transpose()
+}
+
+pub(crate) fn validate_cover_bytes(data: &[u8]) -> Result<([u8; 32], &'static str), String> {
+    if data.is_empty() || data.len() as u64 > MAX_COVER_BYTES {
+        return Err("The album cover is outside Aurora's safe size range.".to_owned());
+    }
+    let format = image::guess_format(data)
+        .map_err(|_| "Aurora could not identify the album-cover image.".to_owned())?;
+    let (width, height) = ImageReader::with_format(Cursor::new(data), format)
+        .into_dimensions()
+        .map_err(|_| "Aurora could not decode the album-cover image.".to_owned())?;
+    if width == 0
+        || height == 0
+        || u64::from(width).saturating_mul(u64::from(height)) > MAX_COVER_PIXELS
+    {
+        return Err("The album-cover dimensions are outside Aurora's safe range.".to_owned());
+    }
+    ImageReader::with_format(Cursor::new(data), format)
+        .decode()
+        .map_err(|_| "Aurora could not fully decode the album-cover image.".to_owned())?;
+    Ok((Sha256::digest(data).into(), format.to_mime_type()))
+}
+
+pub(crate) fn canonical_cover_from_image(path: &Path) -> Result<CanonicalCover, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|error| format!("Could not open the selected album cover: {error}"))?;
+    if !canonical.is_file() {
+        return Err("The selected album cover is not a file.".to_owned());
+    }
+    let data = fs::read(&canonical)
+        .map_err(|error| format!("Could not read the selected album cover: {error}"))?;
+    canonical_cover_from_picture(&Picture {
+        mime_type: String::new(),
+        picture_type: PictureType::CoverFront,
+        description: String::new(),
+        data,
+    })
+}
+
+pub(crate) fn canonical_cover_from_picture(picture: &Picture) -> Result<CanonicalCover, String> {
+    let (digest, mime_type) = validate_cover_bytes(&picture.data)?;
+    Ok(CanonicalCover {
+        picture: Picture {
+            mime_type: mime_type.to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: picture.data.clone(),
+        },
+        digest,
+    })
+}
+
+pub(crate) fn cover_digest(picture: &Picture) -> Result<[u8; 32], String> {
+    validate_cover_bytes(&picture.data).map(|(digest, _)| digest)
+}
+
+pub(crate) fn front_cover_matches(tag: &id3::Tag, expected_digest: &[u8; 32]) -> bool {
+    let pictures = tag
+        .pictures()
+        .filter(|picture| picture.picture_type == PictureType::CoverFront)
+        .collect::<Vec<_>>();
+    pictures.len() == 1 && cover_digest(pictures[0]).is_ok_and(|digest| &digest == expected_digest)
+}
+
+pub(crate) fn front_cover_fingerprint(tag: &id3::Tag) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    let pictures = tag
+        .pictures()
+        .filter(|picture| picture.picture_type == PictureType::CoverFront)
+        .collect::<Vec<_>>();
+    hasher.update((pictures.len() as u64).to_le_bytes());
+    for picture in pictures {
+        hasher.update((picture.mime_type.len() as u64).to_le_bytes());
+        hasher.update(picture.mime_type.as_bytes());
+        hasher.update((picture.description.len() as u64).to_le_bytes());
+        hasher.update(picture.description.as_bytes());
+        hasher.update((picture.data.len() as u64).to_le_bytes());
+        hasher.update(&picture.data);
+    }
+    hasher.finalize().into()
+}
+
+pub(crate) fn canonical_front_cover_fingerprint(cover: &CanonicalCover) -> [u8; 32] {
+    let mut tag = id3::Tag::new();
+    tag.add_frame(cover.picture.clone());
+    front_cover_fingerprint(&tag)
+}
 
 fn response(
     status: http::StatusCode,
@@ -39,6 +236,7 @@ fn response(
 enum CoverSource {
     Album(String),
     InboxTrack(String),
+    Selected(String),
 }
 
 fn parse_request(request: &http::Request<Vec<u8>>) -> Result<(CoverSource, u32), ()> {
@@ -53,6 +251,13 @@ fn parse_request(request: &http::Request<Vec<u8>>) -> Result<(CoverSource, u32),
                 .path()
                 .strip_prefix("/inbox/")
                 .map(|value| ("inbox", value, 32_768))
+        })
+        .or_else(|| {
+            request
+                .uri()
+                .path()
+                .strip_prefix("/selected/")
+                .map(|value| ("selected", value, 128))
         })
         .ok_or(())?;
     let identity = percent_decode_str(encoded)
@@ -77,7 +282,8 @@ fn parse_request(request: &http::Request<Vec<u8>>) -> Result<(CoverSource, u32),
     }
     let source = match kind {
         "album" => CoverSource::Album(identity),
-        _ => CoverSource::InboxTrack(identity),
+        "inbox" => CoverSource::InboxTrack(identity),
+        _ => CoverSource::Selected(identity),
     };
     Ok((source, size))
 }
@@ -220,6 +426,31 @@ fn load_inbox_thumbnail<R: Runtime>(
     Ok(bytes)
 }
 
+fn load_selected_thumbnail<R: Runtime>(
+    app: &AppHandle<R>,
+    token: &str,
+    size: u32,
+) -> Result<Vec<u8>, String> {
+    let source = app
+        .state::<ArtworkSelectionState>()
+        .lock()
+        .map_err(|_| "Aurora's album-cover picker stopped unexpectedly.".to_owned())?
+        .resolve(token)?;
+    let filename = source_fingerprint(token, &source, size, Some(MAX_COVER_BYTES))?;
+    let cache_path = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
+        .join("selected-covers")
+        .join(filename);
+    if let Ok(bytes) = fs::read(&cache_path) {
+        return Ok(bytes);
+    }
+    let bytes = encode_thumbnail(&source, size)?;
+    cache_thumbnail(&cache_path, &bytes)?;
+    Ok(bytes)
+}
+
 pub(crate) fn handle_cover_request<R: Runtime>(
     app: &AppHandle<R>,
     request: &http::Request<Vec<u8>>,
@@ -230,6 +461,7 @@ pub(crate) fn handle_cover_request<R: Runtime>(
     let result = match source {
         CoverSource::Album(album_id) => load_thumbnail(app, &album_id, size),
         CoverSource::InboxTrack(track_path) => load_inbox_thumbnail(app, &track_path, size),
+        CoverSource::Selected(token) => load_selected_thumbnail(app, &token, size),
     };
     match result {
         Ok(bytes) => response(http::StatusCode::OK, "image/webp", bytes),

@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-30
+
+### Added
+
+- Added album-cover replacement to the Albums and Inbox **Tags** editors. Clicking the cover opens the native image picker in the album folder and stages a preview until the shared **Save** action embeds it in every album MP3.
+- Added cover-only and combined tag/cover transactions with bounded image validation, exact post-write artwork checks, preserved non-front pictures and audio bytes, complete-album rollback, and artwork-aware startup recovery.
+- Added a contained selected-artwork preview route backed by short-lived opaque tokens rather than frontend filesystem paths.
+
+### Changed
+
+- Inbox cover changes now apply to every MP3 in the selected album even when ordinary tag edits are scoped to only some tracks.
+
 ## [0.23.13] - 2026-08-30
 
 ### Added

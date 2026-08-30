@@ -84,6 +84,19 @@ type LaptopState = Mutex<LaptopModeRuntime>;
 type WaveformState = Mutex<WaveformStore>;
 type GlobalShortcutState = Mutex<shortcuts::GlobalShortcutRuntime>;
 type InboxState = Mutex<InboxRuntime>;
+type ArtworkSelectionState = Mutex<artwork::ArtworkSelectionRegistry>;
+
+#[derive(serde::Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum AlbumCoverPickerRequest {
+    Library { target: TagEditorTarget },
+    Inbox { album_path: String },
+}
 
 async fn with_playback<T: Send + 'static>(
     app: AppHandle,
@@ -192,10 +205,50 @@ async fn inbox_release_detail(
 }
 
 #[tauri::command]
-async fn apply_inbox_tags(request: InboxTagApplyRequest) -> Result<InboxTagApplyResult, String> {
-    tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request))
+async fn apply_inbox_tags(
+    app: AppHandle,
+    request: InboxTagApplyRequest,
+) -> Result<InboxTagApplyResult, String> {
+    let cover = artwork::selected_cover(&app, request.artwork_token.as_deref())?;
+    tauri::async_runtime::spawn_blocking(move || inbox::apply_tags(request, cover.as_ref()))
         .await
         .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn select_album_cover_image(
+    app: AppHandle,
+    request: AlbumCoverPickerRequest,
+) -> Result<Option<artwork::SelectedArtwork>, String> {
+    let directory = match request {
+        AlbumCoverPickerRequest::Library { target } => {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
+            service.editor_album_directory(&target)?
+        }
+        AlbumCoverPickerRequest::Inbox { album_path } => app
+            .state::<InboxState>()
+            .lock()
+            .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+            .resolve_album_directory(&album_path)?,
+    };
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Choose an album cover")
+        .set_directory(&directory)
+        .add_filter("Images", &["jpg", "jpeg", "png", "gif", "bmp", "webp"])
+        .blocking_pick_file();
+    selected
+        .map(|path| {
+            let path = path
+                .into_path()
+                .map_err(|error| format!("Aurora could not read the selected image: {error}"))?;
+            artwork::register_selected_artwork(&app, path)
+        })
+        .transpose()
 }
 
 #[tauri::command]
@@ -977,6 +1030,7 @@ async fn update_tag_editor(
     app: AppHandle,
     request: TagEditorUpdateRequest,
 ) -> Result<TagEditorUpdateResult, String> {
+    let selected_cover = artwork::selected_cover(&app, request.artwork_token.as_deref())?;
     tauri::async_runtime::spawn_blocking(move || {
         let coordinator = app.state::<LibrarySyncCoordinator>();
         let (result, projection_token) = coordinator.serialize_tag_edit(|| {
@@ -985,7 +1039,7 @@ async fn update_tag_editor(
                 let service = state
                     .lock()
                     .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-                service.update_editor(request)?
+                service.update_editor(request, selected_cover)?
             };
 
             for track in &result.tracks {
@@ -1297,6 +1351,7 @@ pub fn run() {
             app.manage(Mutex::new(InboxRuntime::load(
                 state_directory.join("aurora-inbox.json"),
             )));
+            app.manage(Mutex::new(artwork::ArtworkSelectionRegistry::default()));
             app.manage(WaveformWorkCoordinator::default());
             app.manage(LibrarySyncCoordinator::default());
             app.manage(shortcuts::ShortcutTagQueue::default());
@@ -1410,6 +1465,7 @@ pub fn run() {
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,
+            select_album_cover_image,
             select_inbox_cover_image,
             embed_inbox_album_cover,
             rename_inbox_album,

@@ -1,6 +1,6 @@
 # Inbox contract
 
-Aurora 0.23.12 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
+Aurora 0.24.0 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
 
 ## Monitoring and identity
 
@@ -42,6 +42,7 @@ Inbox files are not cataloged, so this transaction does not queue an existing-fo
 ## Artwork transaction
 
 - When some tracks already contain artwork, **Embed cover in all tracks** uses the displayed first valid embedded image. When the album has no usable embedded source, **Choose album cover** accepts a user-selected JPG, PNG, GIF, BMP, or WebP within the 32 MiB and 100-megapixel safety bounds.
+- The Tags editor exposes the selected album cover above Album Artist. Clicking it opens the same bounded native picker in the album folder and stages the image until Save. Artwork always targets every MP3 in that album, even when ordinary tag-field edits are scoped to selected tracks.
 - Aurora removes only front-cover frames, writes one normalized front-cover frame to every MP3, and preserves other pictures and all non-cover frames.
 - Each changed MP3 is copied to a uniquely named same-folder working file. Aurora reopens it, verifies one exact front-cover image digest, compares every preserved non-front-cover frame, and verifies the SHA-256 of all bytes after ID3v2.
 - The complete changed set receives same-folder safety backups and atomic replacement. A later install failure restores every earlier track in reverse order. Intake remains blocked until a fresh album scan confirms matching artwork on every track.

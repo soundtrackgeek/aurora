@@ -1,16 +1,19 @@
 use crate::{
+    artwork::{
+        CanonicalCover, canonical_cover_from_image, canonical_cover_from_picture,
+        canonical_front_cover_fingerprint, cover_digest, front_cover_matches, validate_cover_bytes,
+    },
     lastfm, state_sync,
     tag_model::{EditableTagField, EditableTagValues},
     tagging::{
-        apply_editor_tag_changes, audio_payload_hash, merge_editor_patch, read_editable_tag_values,
-        read_tag_for_write,
+        apply_editor_tag_changes, audio_payload_hash, editor_non_target_frames, merge_editor_patch,
+        read_editable_tag_values, read_tag_for_write, verify_editor_written_file,
     },
 };
 use id3::{
     Frame, TagLike,
     frame::{Picture, PictureType},
 };
-use image::ImageReader;
 use keyring::Entry;
 use lofty::{config::ParseOptions, file::AudioFile, probe::Probe};
 use reqwest::blocking::Client;
@@ -20,7 +23,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{Cursor, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Mutex, OnceLock},
@@ -34,8 +37,6 @@ use std::os::windows::process::CommandExt;
 const SETTINGS_VERSION: u8 = 1;
 const MAX_MONITORED_FOLDERS: usize = 10;
 const MAX_SCANNED_DIRECTORIES: usize = 50_000;
-const MAX_INBOX_COVER_BYTES: usize = 32 * 1024 * 1024;
-const MAX_INBOX_COVER_PIXELS: u64 = 100_000_000;
 const DISCOGS_SERVICE: &str = "Aurora";
 const DISCOGS_TOKEN_USER: &str = "Discogs personal access token";
 const DISCOGS_KEY_USER: &str = "Discogs consumer key";
@@ -272,6 +273,8 @@ pub(crate) struct InboxTagApplyRequest {
     tracks: Vec<InboxTrackPatch>,
     #[serde(default)]
     rename_after_apply: bool,
+    #[serde(default)]
+    pub(crate) artwork_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -359,12 +362,6 @@ struct PreparedWrite {
     backup: PathBuf,
 }
 
-#[derive(Clone)]
-struct CanonicalCover {
-    picture: Picture,
-    digest: [u8; 32],
-}
-
 struct PreparedRename {
     source: PathBuf,
     temporary: PathBuf,
@@ -450,6 +447,19 @@ impl InboxRuntime {
         allowed
             .then_some(track)
             .ok_or_else(|| "The Inbox cover source is outside the monitored folders.".to_owned())
+    }
+
+    pub(crate) fn resolve_album_directory(&self, value: &str) -> Result<PathBuf, String> {
+        if value.trim().is_empty() || value.chars().count() > 32_768 {
+            return Err("The Inbox album path is invalid.".to_owned());
+        }
+        let album = canonical_directory(value)?;
+        let allowed = self.settings.monitored_folders.iter().any(|root| {
+            fs::canonicalize(root).is_ok_and(|canonical_root| album.starts_with(canonical_root))
+        });
+        allowed
+            .then_some(album)
+            .ok_or_else(|| "The Inbox album is outside the monitored folders.".to_owned())
     }
 
     pub(crate) fn add_folder(&mut self, folder: String) -> Result<InboxSettingsStatus, String> {
@@ -633,45 +643,105 @@ pub(crate) fn release_detail(
     }
 }
 
-pub(crate) fn apply_tags(request: InboxTagApplyRequest) -> Result<InboxTagApplyResult, String> {
-    if request.fields.is_empty() || request.tracks.is_empty() {
-        return Err("Choose at least one field and one track before applying tags.".to_owned());
+pub(crate) fn apply_tags(
+    request: InboxTagApplyRequest,
+    cover: Option<&CanonicalCover>,
+) -> Result<InboxTagApplyResult, String> {
+    if (request.fields.is_empty() && cover.is_none())
+        || (request.tracks.is_empty() && cover.is_none())
+    {
+        return Err(
+            "Choose at least one field, track, or replacement album cover before applying tags."
+                .to_owned(),
+        );
     }
     let unique_fields = request.fields.iter().copied().collect::<HashSet<_>>();
     if unique_fields.len() != request.fields.len() {
         return Err("The Inbox tag edit contains duplicate fields.".to_owned());
     }
     let album = canonical_directory(&request.album_path)?;
-    let mut prepared = Vec::new();
-    let sequence = now_ms();
-    for (index, patch) in request.tracks.iter().enumerate() {
+    let mut patches = HashMap::with_capacity(request.tracks.len());
+    for patch in &request.tracks {
         let target = fs::canonicalize(&patch.path)
             .map_err(|error| format!("Could not open an Inbox track: {error}"))?;
         if target.parent() != Some(album.as_path()) || !is_mp3(&target) {
-            cleanup_prepared(&prepared);
             return Err("An Inbox track is outside the selected album folder.".to_owned());
         }
+        if patches.insert(target, patch).is_some() {
+            return Err("The Inbox tag selection contains a duplicate track.".to_owned());
+        }
+    }
+    let mut targets = if cover.is_some() {
+        fs::read_dir(&album)
+            .map_err(|error| format!("Could not read the Inbox album: {error}"))?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                entry
+                    .file_type()
+                    .ok()
+                    .filter(|kind| kind.is_file() && !kind.is_symlink())
+                    .map(|_| entry.path())
+            })
+            .filter(|path| is_mp3(path))
+            .collect::<Vec<_>>()
+    } else {
+        patches.keys().cloned().collect::<Vec<_>>()
+    };
+    targets.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+    if targets.is_empty() {
+        return Err("The Inbox album contains no MP3 files.".to_owned());
+    }
+    let expected_artwork_fingerprint = cover.map(canonical_front_cover_fingerprint);
+    let mut prepared = Vec::new();
+    let sequence = now_ms();
+    for (index, target) in targets.into_iter().enumerate() {
+        let patch = patches.get(&target).copied();
         let (mut tag, version) = read_tag_for_write(&target)?;
         let before = read_editable_tag_values(&tag)?;
-        let after =
-            merge_editor_patch(&before, &request.fields, &patch.values.clone().normalize())?;
-        if before == after {
+        let after = patch.map_or_else(
+            || Ok(before.clone()),
+            |patch| merge_editor_patch(&before, &request.fields, &patch.values.clone().normalize()),
+        )?;
+        let artwork_changed = cover.is_some_and(|cover| !front_cover_matches(&tag, &cover.digest));
+        if before == after && !artwork_changed {
             continue;
         }
+        let track_fields = if patch.is_some() {
+            request.fields.as_slice()
+        } else {
+            &[]
+        };
+        let preserved_frames = editor_non_target_frames(&tag, track_fields, artwork_changed);
         let original_hash = audio_payload_hash(&target)?;
         let temporary = album.join(format!(".aurora-inbox-{sequence}-{index}.tmp.mp3"));
         let backup = album.join(format!(".aurora-inbox-{sequence}-{index}.backup.mp3"));
         fs::copy(&target, &temporary)
             .map_err(|error| format!("Could not prepare an Inbox tag edit: {error}"))?;
-        apply_editor_tag_changes(&mut tag, version, &request.fields, &after)?;
+        apply_editor_tag_changes(&mut tag, version, track_fields, &after)?;
+        if artwork_changed {
+            tag.remove_picture_by_type(PictureType::CoverFront);
+            tag.add_frame(
+                cover
+                    .expect("an Inbox artwork change was prepared with a cover")
+                    .picture
+                    .clone(),
+            );
+        }
         if let Err(error) = tag.write_to_path(&temporary, version) {
             let _ = fs::remove_file(&temporary);
             cleanup_prepared(&prepared);
             return Err(format!("Could not write staged Inbox tags: {error}"));
         }
-        let (written, _) = read_tag_for_write(&temporary)?;
-        if read_editable_tag_values(&written)? != after
-            || audio_payload_hash(&temporary)? != original_hash
+        if verify_editor_written_file(
+            &temporary,
+            &after,
+            track_fields,
+            artwork_changed,
+            expected_artwork_fingerprint.as_ref(),
+            &preserved_frames,
+            &original_hash,
+        )
+        .is_err()
         {
             let _ = fs::remove_file(&temporary);
             cleanup_prepared(&prepared);
@@ -1571,31 +1641,6 @@ fn cleanup_prepared(items: &[PreparedWrite]) {
     }
 }
 
-fn validate_cover_bytes(data: &[u8]) -> Result<([u8; 32], &'static str), String> {
-    if data.is_empty() || data.len() > MAX_INBOX_COVER_BYTES {
-        return Err("The album cover is outside Aurora's safe size range.".to_owned());
-    }
-    let format = image::guess_format(data)
-        .map_err(|_| "Aurora could not identify the album-cover image.".to_owned())?;
-    let (width, height) = ImageReader::with_format(Cursor::new(data), format)
-        .into_dimensions()
-        .map_err(|_| "Aurora could not decode the album-cover image.".to_owned())?;
-    if width == 0
-        || height == 0
-        || u64::from(width).saturating_mul(u64::from(height)) > MAX_INBOX_COVER_PIXELS
-    {
-        return Err("The album-cover dimensions are outside Aurora's safe range.".to_owned());
-    }
-    ImageReader::with_format(Cursor::new(data), format)
-        .decode()
-        .map_err(|_| "Aurora could not fully decode the album-cover image.".to_owned())?;
-    Ok((Sha256::digest(data).into(), format.to_mime_type()))
-}
-
-fn cover_digest(picture: &Picture) -> Result<[u8; 32], String> {
-    validate_cover_bytes(&picture.data).map(|(digest, _)| digest)
-}
-
 fn cached_cover_digest(
     picture: &Picture,
     validation_cache: &mut HashMap<[u8; 32], bool>,
@@ -1605,35 +1650,6 @@ fn cached_cover_digest(
         .entry(digest)
         .or_insert_with(|| validate_cover_bytes(&picture.data).is_ok());
     valid.then_some(digest)
-}
-
-fn canonical_cover_from_picture(picture: &Picture) -> Result<CanonicalCover, String> {
-    let (digest, mime_type) = validate_cover_bytes(&picture.data)?;
-    Ok(CanonicalCover {
-        picture: Picture {
-            mime_type: mime_type.to_owned(),
-            picture_type: PictureType::CoverFront,
-            description: String::new(),
-            data: picture.data.clone(),
-        },
-        digest,
-    })
-}
-
-fn canonical_cover_from_image(path: &Path) -> Result<CanonicalCover, String> {
-    let canonical = fs::canonicalize(path)
-        .map_err(|error| format!("Could not open the selected album cover: {error}"))?;
-    if !canonical.is_file() {
-        return Err("The selected album cover is not a file.".to_owned());
-    }
-    let data = fs::read(&canonical)
-        .map_err(|error| format!("Could not read the selected album cover: {error}"))?;
-    canonical_cover_from_picture(&Picture {
-        mime_type: String::new(),
-        picture_type: PictureType::CoverFront,
-        description: String::new(),
-        data,
-    })
 }
 
 fn canonical_cover_from_tracks(tracks: &[InboxTrack]) -> Result<CanonicalCover, String> {
@@ -2745,6 +2761,7 @@ mod tests {
     use super::*;
     use id3::frame::{Picture, PictureType};
     use id3::{Tag, TagLike, Version};
+    use std::io::Cursor;
 
     #[test]
     fn discogs_positions_support_multidisc_and_plain_tracks() {
@@ -3131,6 +3148,59 @@ mod tests {
             .find(|picture| picture.picture_type == PictureType::CoverFront)
             .expect("second cover");
         assert_eq!(first_cover.data, second_cover.data);
+        assert_eq!(
+            audio_payload_hash(&first).expect("first audio after"),
+            first_audio
+        );
+        assert_eq!(
+            audio_payload_hash(&second).expect("second audio after"),
+            second_audio
+        );
+        fs::remove_dir_all(parent).expect("remove fixture");
+    }
+
+    #[test]
+    fn manual_tag_cover_save_updates_the_complete_album_from_one_selected_track() {
+        let parent = std::env::temp_dir().join(format!(
+            "aurora-inbox-manual-cover-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir_all(&parent).expect("create album");
+        let first = parent.join("first.mp3");
+        let second = parent.join("second.mp3");
+        let image = parent.join("replacement.png");
+        write_artwork_fixture(&first, 1, Some(1));
+        write_artwork_fixture(&second, 2, Some(2));
+        fs::write(&image, cover_fixture_bytes(9)).expect("write replacement cover");
+        let first_audio = audio_payload_hash(&first).expect("first audio before");
+        let second_audio = audio_payload_hash(&second).expect("second audio before");
+        let cover = canonical_cover_from_image(&image).expect("selected cover");
+
+        let result = apply_tags(
+            InboxTagApplyRequest {
+                album_path: path_text(&parent).expect("album path"),
+                fields: Vec::new(),
+                tracks: vec![InboxTrackPatch {
+                    path: path_text(&first).expect("track path"),
+                    values: EditableTagValues::default(),
+                }],
+                rename_after_apply: false,
+                artwork_token: Some("fixture-cover".to_owned()),
+            },
+            Some(&cover),
+        )
+        .expect("save album cover");
+
+        assert_eq!(result.changed_tracks, 2);
+        for track in [&first, &second] {
+            let tag = Tag::read_from_path(track).expect("read updated tag");
+            let picture = tag
+                .pictures()
+                .find(|picture| picture.picture_type == PictureType::CoverFront)
+                .expect("front cover");
+            assert_eq!(cover_digest(picture).expect("cover digest"), cover.digest);
+        }
         assert_eq!(
             audio_payload_hash(&first).expect("first audio after"),
             first_audio

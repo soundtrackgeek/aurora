@@ -113,6 +113,26 @@ describe("TagEditor", () => {
     expect(onTracksChange).toHaveBeenCalledWith(updatedTracks());
   });
 
+  it("stages a replacement cover as an album-wide save change", async () => {
+    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Choose replacement album cover" }));
+
+    expect(await screen.findByText("selected-cover.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Pending · saves to all 2 album MP3s")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 change to 2 MP3s" }));
+
+    await waitFor(() => expect(tagMocks.update).toHaveBeenCalledTimes(1));
+    expect(tagMocks.update).toHaveBeenCalledWith(
+      target,
+      snapshot(),
+      [],
+      expect.any(Object),
+      "preview-selected-cover",
+    );
+    expect(await screen.findByText("Embedded the replacement cover in 2 MP3s.")).toBeInTheDocument();
+  });
+
   it("treats a checked blank value as an explicit clear", async () => {
     render(<TagEditor target={target} onTracksChange={vi.fn()} />);
     const genre = await screen.findByLabelText("Genre");

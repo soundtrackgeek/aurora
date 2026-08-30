@@ -261,12 +261,24 @@ pub(crate) struct TagEditorUpdateRequest {
     pub(crate) expected: TagEditorSnapshot,
     pub(crate) fields: Vec<EditableTagField>,
     pub(crate) values: EditableTagValues,
+    #[serde(default)]
+    pub(crate) artwork_token: Option<String>,
 }
 
 impl TagEditorUpdateRequest {
     pub(crate) fn validate(&self) -> Result<(), String> {
-        if self.fields.is_empty() {
-            return Err("Choose at least one tag field before saving.".to_owned());
+        if self.fields.is_empty() && self.artwork_token.is_none() {
+            return Err(
+                "Choose at least one tag field or a replacement album cover before saving."
+                    .to_owned(),
+            );
+        }
+        if self.artwork_token.as_deref().is_some_and(|token| {
+            token.trim().is_empty()
+                || token.chars().count() > 128
+                || token.chars().any(char::is_whitespace)
+        }) {
+            return Err("The selected album-cover reference is invalid.".to_owned());
         }
         let unique = self.fields.iter().copied().collect::<HashSet<_>>();
         if unique.len() != self.fields.len() {

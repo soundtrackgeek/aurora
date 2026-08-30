@@ -1,7 +1,8 @@
-import { RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
+import { ImagePlus, Music2, RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { Track } from "../library";
+import { albumCoverUrl, type Track } from "../library";
+import { selectAlbumCoverImage, type SelectedArtwork } from "../artworkSelection";
 import { loadGenreNames } from "../genres";
 import {
   aggregateEditableTagValues,
@@ -27,6 +28,12 @@ export interface ManualTagEditorSaveResult {
   message: string;
 }
 
+export interface AlbumArtworkEditor {
+  currentUrl: string | null;
+  trackCount?: number;
+  choose: () => Promise<SelectedArtwork | null>;
+}
+
 interface ManualTagEditorProps {
   kind: "track" | "album";
   label: string;
@@ -35,7 +42,9 @@ interface ManualTagEditorProps {
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
     values: EditableTagValues,
+    artworkToken: string | null,
   ) => Promise<ManualTagEditorSaveResult>;
+  artwork?: AlbumArtworkEditor;
 }
 
 type EditorPhase = "loading" | "ready" | "saving" | "saved" | "error";
@@ -203,13 +212,52 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: ManualTagEditorProps) {
+function ArtworkField({
+  source,
+  fileName,
+  trackCount,
+  disabled,
+  pending,
+  onChoose,
+}: {
+  source: string | null;
+  fileName: string | null;
+  trackCount: number;
+  disabled: boolean;
+  pending: boolean;
+  onChoose: () => void;
+}) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const showImage = source && source !== failedSource;
+  return (
+    <button
+      type="button"
+      className={`tag-editor__artwork${pending ? " is-pending" : ""}`}
+      aria-label={pending ? "Choose a different replacement album cover" : "Choose replacement album cover"}
+      disabled={disabled}
+      onClick={onChoose}
+    >
+      <span className="tag-editor__artwork-image">
+        {showImage
+          ? <img src={source} alt="" onError={() => setFailedSource(source)} />
+          : <Music2 aria-hidden="true" />}
+        <span><ImagePlus aria-hidden="true" />{pending ? "Change selection" : "Replace cover"}</span>
+      </span>
+      <strong>{pending ? fileName : "Album artwork"}</strong>
+      <small>{pending ? `Pending · saves to all ${trackCount} album ${trackCount === 1 ? "MP3" : "MP3s"}` : "Click to choose an image from the album folder"}</small>
+    </button>
+  );
+}
+
+export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot, artwork }: ManualTagEditorProps) {
   const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
   const [draft, setDraft] = useState<DraftText>(emptyDraft);
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
   const [phase, setPhase] = useState<EditorPhase>("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
+  const [artworkDraft, setArtworkDraft] = useState<SelectedArtwork | null>(null);
+  const [savedArtworkUrl, setSavedArtworkUrl] = useState<string | null>(null);
   const requestRef = useRef(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef(true);
@@ -262,7 +310,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
   }, [acceptSnapshot, loadSnapshot]);
 
   const isWorking = phase === "loading" || phase === "saving";
-  const isDirty = selectedFields.size > 0;
+  const isDirty = selectedFields.size > 0 || artworkDraft !== null;
 
   useEffect(() => {
     dirtyRef.current = isDirty;
@@ -292,6 +340,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
   ])) as Record<EditableTagField, string | null>, [draft, selectedFields]);
   const validationMessage = selectedInOrder.map((field) => validation[field]).find(Boolean) ?? null;
   const trackCount = snapshot?.tracks.length ?? 0;
+  const artworkTrackCount = artwork?.trackCount ?? trackCount;
 
   function checkField(field: EditableTagField, checked: boolean) {
     setSelectedFields((current) => {
@@ -315,20 +364,46 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
     if (!snapshot) return;
     setDraft(draftForSnapshot(snapshot));
     setSelectedFields(new Set());
+    setArtworkDraft(null);
     setPhase("ready");
     setMessage(null);
   }
 
+  async function chooseArtwork() {
+    if (!artwork || isWorking) return;
+    setMessage(null);
+    try {
+      const selected = await artwork.choose();
+      if (!selected) return;
+      setArtworkDraft(selected);
+      setPhase("ready");
+    } catch (error) {
+      setPhase("error");
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function save() {
-    if (!snapshot || !selectedInOrder.length || validationMessage) return;
+    if (!snapshot || (!selectedInOrder.length && !artworkDraft) || validationMessage) return;
     const savingCount = snapshot.tracks.length;
     const fieldCount = selectedInOrder.length;
+    const savingArtwork = artworkDraft;
     setPhase("saving");
     setMessage(null);
     try {
-      const result = await saveSnapshot(snapshot, selectedInOrder, valuesForDraft(draft));
+      const result = await saveSnapshot(
+        snapshot,
+        selectedInOrder,
+        valuesForDraft(draft),
+        savingArtwork?.token ?? null,
+      );
       acceptSnapshot(result.state, "saved");
-      setMessage(result.message || `Saved ${countLabel(fieldCount, "field")} directly to ${countLabel(savingCount, "MP3", "MP3s")}.`);
+      if (savingArtwork) {
+        setSavedArtworkUrl(savingArtwork.previewUrl);
+        setArtworkDraft(null);
+      }
+      const changeCount = fieldCount + (savingArtwork ? 1 : 0);
+      setMessage(result.message || `Saved ${countLabel(changeCount, "change")} directly to ${countLabel(Math.max(savingCount, artworkTrackCount), "MP3", "MP3s")}.`);
     } catch (error) {
       setPhase("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -379,6 +454,14 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
       </div>
 
       <div className="tag-editor__fields">
+        {artwork ? <ArtworkField
+          source={artworkDraft?.previewUrl ?? savedArtworkUrl ?? artwork.currentUrl}
+          fileName={artworkDraft?.fileName ?? null}
+          trackCount={artworkTrackCount}
+          disabled={isWorking}
+          pending={artworkDraft !== null}
+          onChoose={() => void chooseArtwork()}
+        /> : null}
         <datalist id="tag-editor-genre-suggestions">
           {genreSuggestions.map((genre) => <option value={genre} key={genre} />)}
         </datalist>
@@ -428,8 +511,10 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot }: Man
         >
           {phase === "saving" ? <RefreshCw className="is-spinning" aria-hidden="true" /> : phase === "saved" ? <ShieldCheck aria-hidden="true" /> : <Save aria-hidden="true" />}
           {phase === "saving"
-            ? `Saving ${countLabel(trackCount, "MP3", "MP3s")}…`
-            : `Save ${countLabel(selectedFields.size, "field")} to ${countLabel(trackCount, "MP3", "MP3s")}`}
+            ? `Saving ${countLabel(Math.max(trackCount, artworkDraft ? artworkTrackCount : 0), "MP3", "MP3s")}…`
+            : artworkDraft
+              ? `Save ${countLabel(selectedFields.size + 1, "change")} to ${countLabel(Math.max(trackCount, artworkTrackCount), "MP3", "MP3s")}`
+              : `Save ${countLabel(selectedFields.size, "field")} to ${countLabel(trackCount, "MP3", "MP3s")}`}
         </button>
       </div>
     </section>
@@ -459,12 +544,17 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     targetTrackSelectionJson,
   ]);
   const loadSnapshot = useCallback(() => readTagEditorState(requestTarget), [requestTarget]);
+  const artwork = useMemo<AlbumArtworkEditor | undefined>(() => targetKind === "album" ? {
+    currentUrl: albumCoverUrl(targetAlbumId!, 256),
+    choose: () => selectAlbumCoverImage({ source: "library", target: requestTarget }),
+  } : undefined, [requestTarget, targetAlbumId, targetKind]);
   const saveSnapshot = useCallback(async (
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
     values: EditableTagValues,
+    artworkToken: string | null,
   ): Promise<ManualTagEditorSaveResult> => {
-    const result = await updateTagEditor(requestTarget, expected, fields, values);
+    const result = await updateTagEditor(requestTarget, expected, fields, values, artworkToken);
     const projectionAccepted = result.catalogSync
       ? onTracksChange(result.tracks, result.catalogSync)
       : onTracksChange(result.tracks);
@@ -475,7 +565,11 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
         message: result.catalogSync?.message ?? "Tags were saved; the latest Music Library state is shown.",
       };
     }
-    const savedFiles = `Saved ${countLabel(fields.length, "field")} directly to ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`;
+    const savedFiles = artworkToken
+      ? fields.length
+        ? `Saved ${countLabel(fields.length, "field")} and embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
+        : `Embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
+      : `Saved ${countLabel(fields.length, "field")} directly to ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`;
     let message = savedFiles;
     if (result.catalogSync?.status === "synced") {
       const remaining = result.catalogSync.pendingFolderCount > 0
@@ -498,9 +592,11 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
   }, [onCatalogSync, onTracksChange, requestTarget]);
 
   return <ManualTagEditor
+    key={JSON.stringify(requestTarget)}
     kind={target.kind === "album" || target.kind === "albums" ? "album" : "track"}
     label={target.label}
     loadSnapshot={loadSnapshot}
     saveSnapshot={saveSnapshot}
+    artwork={artwork}
   />;
 }

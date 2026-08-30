@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { applyInboxTags, type InboxAlbum, type InboxTrack } from "../../inbox";
+import { selectAlbumCoverImage } from "../../artworkSelection";
+import { applyInboxTags, inboxCoverUrl, type InboxAlbum, type InboxTrack } from "../../inbox";
 import type {
   EditableTagField,
   EditableTagValues,
@@ -7,6 +8,7 @@ import type {
 } from "../../tags";
 import {
   ManualTagEditor,
+  type AlbumArtworkEditor,
   type ManualTagEditorSaveResult,
 } from "../TagEditor";
 
@@ -73,6 +75,7 @@ export function InboxTagEditor({ albums, tracks, onApplied }: InboxTagEditorProp
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
     values: EditableTagValues,
+    artworkToken: string | null,
   ): Promise<ManualTagEditorSaveResult> => {
     const current = currentRef.current;
     const selectedPaths = new Set(current.tracks.map((track) => track.path));
@@ -85,6 +88,7 @@ export function InboxTagEditor({ albums, tracks, onApplied }: InboxTagEditorProp
       fields,
       tracks: albumTracks.map((track) => ({ path: track.path, values })),
       renameAfterApply: false,
+      artworkToken,
     })));
     await current.onApplied();
     const fieldLabel = `${fields.length} ${fields.length === 1 ? "field" : "fields"}`;
@@ -93,9 +97,15 @@ export function InboxTagEditor({ albums, tracks, onApplied }: InboxTagEditorProp
     const changed = changedTrackCount === current.tracks.length
       ? ""
       : ` ${changedTrackCount} contained changes.`;
+    const albumTrackCount = current.albums[0]?.trackCount ?? current.tracks.length;
+    const message = artworkToken
+      ? fields.length
+        ? `Saved ${fieldLabel} to ${fileLabel} and embedded the replacement cover in all ${albumTrackCount} album ${albumTrackCount === 1 ? "MP3" : "MP3s"}.`
+        : `Embedded the replacement cover in all ${albumTrackCount} album ${albumTrackCount === 1 ? "MP3" : "MP3s"}.`
+      : `Saved ${fieldLabel} directly to ${fileLabel}.${changed}`;
     return {
       state: updatedSnapshot(expected, fields, values),
-      message: `Saved ${fieldLabel} directly to ${fileLabel}.${changed}`,
+      message,
     };
   }, []);
 
@@ -103,10 +113,18 @@ export function InboxTagEditor({ albums, tracks, onApplied }: InboxTagEditorProp
   const label = singleTrack?.title ?? singleTrack?.fileName
     ?? (albums.length === 1 ? albums[0]?.album ?? albums[0]?.folderName : `${albums.length} albums`)
     ?? "Inbox selection";
+  const album = albums.length === 1 ? albums[0] : null;
+  const artwork: AlbumArtworkEditor | undefined = album ? {
+    currentUrl: inboxCoverUrl(album, 256),
+    trackCount: album.trackCount,
+    choose: () => selectAlbumCoverImage({ source: "inbox", albumPath: album.path }),
+  } : undefined;
   return <ManualTagEditor
+    key={`${albums.map((item) => item.path).join("\u0000")}|${tracks.map((item) => item.path).join("\u0000")}`}
     kind={singleTrack ? "track" : "album"}
     label={label}
     loadSnapshot={loadSnapshot}
     saveSnapshot={saveSnapshot}
+    artwork={artwork}
   />;
 }

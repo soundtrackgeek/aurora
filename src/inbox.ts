@@ -114,6 +114,7 @@ export interface InboxTagApplyRequest {
   fields: EditableTagField[];
   tracks: Array<{ path: string; values: EditableTagValues }>;
   renameAfterApply: boolean;
+  artworkToken?: string | null;
 }
 
 export interface InboxRenameResult {

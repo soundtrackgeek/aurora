@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as artworkSelection from "../../artworkSelection";
 import * as inboxAdapter from "../../inbox";
 import { libraryIntakeAdapter, type LibraryIntakeCategoryId, type LibraryIntakePreview } from "../../ingest";
 import { Inbox } from "./Inbox";
@@ -308,6 +309,37 @@ describe("Inbox", () => {
       renameAfterApply: false,
       tracks: [{ path: expect.stringContaining("Memories Calling") }],
     });
+  });
+
+  it("saves a chosen Inbox cover album-wide even when one tag track is selected", async () => {
+    vi.spyOn(artworkSelection, "selectAlbumCoverImage").mockResolvedValue({
+      token: "selected-inbox-cover",
+      previewUrl: "/__aurora-preview-cover/preview-freak?size=256",
+      fileName: "better-cover.jpg",
+    });
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockResolvedValue({
+      changedTracks: 10,
+      renamedTracks: 0,
+      albumPath: "C:\\Music\\Inbox\\Baltimoore - Freak",
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
+    fireEvent.click(screen.getByRole("button", { name: "None" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /01.*Memories Calling/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose replacement album cover" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save 1 change to 10 MP3s" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({
+      fields: [],
+      artworkToken: "selected-inbox-cover",
+      tracks: [expect.objectContaining({ path: expect.stringContaining("Memories Calling") })],
+    }));
+    expect(await screen.findByText(
+      "Embedded the replacement cover in all 10 album MP3s.",
+    )).toBeInTheDocument();
   });
 
   it("auto-tags only selected disc tracks and exposes disc overrides", async () => {

@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.23.13 adds per-track durations to opened albums while retaining the verified Inbox conversion workflow.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.0 adds verified album-cover replacement to the Albums and Inbox Tags editors.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.23.13 slice
+## Current 0.24.0 slice
+
+- A complete album selection in the Albums or Inbox **Tags** editor shows its cover above Album Artist. Clicking the cover opens an image picker in that album's folder; the chosen JPG, PNG, GIF, BMP, or WebP remains a draft until **Save**, which embeds one normalized front cover in every album MP3.
+- Cover-only and combined tag/cover saves use the existing verified batch pipelines. Aurora preserves non-front pictures, other unselected frames, and audio bytes; it rolls back earlier files when a later install fails. In Inbox, the cover always applies to the complete album even when tag fields are scoped to selected tracks.
 
 - Opened albums show each track's duration in a compact **Time** column between **Track** and **Rating**.
 
@@ -116,7 +119,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Album and Ratings album-detail track lists show the exact per-track Artist credit as a muted, MusicBee-style suffix beside the title. `DISPLAY ARTIST` overrides remain preferred, so Various Artists compilations identify every performer without sacrificing the compact album layout.
 - Album detail supports standard click, Ctrl+click, and Shift+click track selection, a bulk **Delete selected** action, and an explicit permanent-deletion confirmation. Aurora re-resolves every bounded catalog identity before deleting only regular MP3 files, durably queues the exact affected files, and asks Music Library to rescan immediately so its catalog and Updates deletion count reflect the removed tracks. While a failed or locked bridge update remains queued, stale catalog reads cannot restore a verified-missing deleted row, and whole-album Tags safely excludes only that queued missing file.
 - A top-bar **Add music** workflow for one already-tagged album folder or a parent containing many album folders. Choose General music, Movie / TV / game music, or Synthwave; preview every unchanged folder name and exact destination in a bounded, keyboard-scrollable plan before one explicit batch apply. Apply closes the modal and continues under a persistent top-bar status so browsing and playback remain available; the intake action stays disabled until completion, and a synchronous guard prevents duplicate requests. Music Library `0.144.5` then runs its cover-archive/embedded-art workflow only for the added albums, writing embedded front art to the configured `AlbumCovers` folder without a manual full-library Cover add.
-- A dedicated **Tags** tab in the right inspector for Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total.
+- A dedicated **Tags** tab in the right inspector for album artwork, Album Artist, Artist, Album, Track Title, Genre, Publisher, Track Rating, Year, Release Year, track number/total, and disc number/total. Album artwork appears only for one complete album selection.
 - Player stars, global rating/Love shortcuts, inline edits, inspector saves, and undo no longer queue behind slow Music Library bridge work. Background reconciliation reserves an older projection token before it starts and conditionally updates only the exact pending-overlay revision it inspected, so foreground changes appear promptly and always win stale-result races.
 - The playbar and Track inspector prefer the selected track's Artist credit, and the Artist tab follows that credit instead of the album-level Album Artist. Track Publisher and Artist metadata remain available through library snapshots, restored queues, and specialized Genres, Publishers, Years, Ratings, and Charts playback routes.
 - Track and album selection semantics model MusicBee's vertical editor: common values are shown once, differing values are labelled **Mixed**, and only checked or edited fields are written. A checked blank value is an explicit clear except for Album Artist, Album, and Track Title, which Music Library requires for safe catalog identity.

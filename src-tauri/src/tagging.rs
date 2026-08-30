@@ -1,4 +1,8 @@
 use crate::{
+    artwork::{
+        CanonicalCover, canonical_front_cover_fingerprint, front_cover_fingerprint,
+        front_cover_matches,
+    },
     catalog::{self, ResolvedTrack, TrackSummary},
     library_sync::CatalogSync,
     state_store::{StateStore, TagOperation, TagOverlay},
@@ -157,6 +161,8 @@ struct PreparedEditorWrite {
     before_legacy: TagValues,
     after_legacy: TagValues,
     preserved_frames: Vec<Frame>,
+    before_artwork_fingerprint: Option<[u8; 32]>,
+    artwork_changed: bool,
 }
 
 struct PreparedEditorWriteFailure {
@@ -178,6 +184,19 @@ struct OperationEditorMetadata {
     before: EditableTagValues,
     after: EditableTagValues,
     fields: Vec<EditableTagField>,
+    before_artwork_fingerprint: Option<[u8; 32]>,
+    after_artwork_fingerprint: Option<[u8; 32]>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum OperationEditorFieldsJournal {
+    Legacy(Vec<EditableTagField>),
+    Current {
+        fields: Vec<EditableTagField>,
+        before_artwork_fingerprint: Option<[u8; 32]>,
+        after_artwork_fingerprint: Option<[u8; 32]>,
+    },
 }
 
 impl TagService {
@@ -211,11 +230,44 @@ impl TagService {
         Ok(TagEditorSnapshot { tracks })
     }
 
+    pub(crate) fn editor_album_directory(
+        &self,
+        target: &TagEditorTarget,
+    ) -> Result<PathBuf, String> {
+        if !matches!(target, TagEditorTarget::Album { .. }) {
+            return Err("Choose one complete album before replacing its cover.".to_owned());
+        }
+        let resolved = self.resolve_editor_target(target)?;
+        let directory = resolved
+            .first()
+            .and_then(|track| track.audio_path.parent())
+            .ok_or_else(|| "The selected album folder is unavailable.".to_owned())?
+            .to_path_buf();
+        if resolved
+            .iter()
+            .any(|track| track.audio_path.parent() != Some(directory.as_path()))
+        {
+            return Err("The selected album spans more than one folder, so Aurora cannot root the cover picker safely.".to_owned());
+        }
+        Ok(directory)
+    }
+
     pub(crate) fn update_editor(
         &self,
         request: TagEditorUpdateRequest,
+        artwork: Option<CanonicalCover>,
     ) -> Result<TagEditorUpdateResult, String> {
         request.validate()?;
+        if request.artwork_token.is_some() != artwork.is_some() {
+            return Err(
+                "The selected album cover expired. Choose it again before saving.".to_owned(),
+            );
+        }
+        if artwork.is_some() && !matches!(&request.target, TagEditorTarget::Album { .. }) {
+            return Err(
+                "Album artwork can only be replaced for one complete album selection.".to_owned(),
+            );
+        }
         let desired_patch = request.values.clone().normalize();
         desired_patch.validate()?;
         let resolved = self.resolve_editor_update_target(&request.target, &request.expected)?;
@@ -267,7 +319,11 @@ impl TagService {
             after_legacy.rating = after.rating;
             after_legacy.release_year = after.release_year;
             after_legacy.validate()?;
-            let preserved_frames = editor_non_target_frames(&tag, &request.fields);
+            let artwork_changed = artwork
+                .as_ref()
+                .is_some_and(|cover| !front_cover_matches(&tag, &cover.digest));
+            let before_artwork_fingerprint = artwork_changed.then(|| front_cover_fingerprint(&tag));
+            let preserved_frames = editor_non_target_frames(&tag, &request.fields, artwork_changed);
             prepared.push(PreparedEditorWrite {
                 resolved,
                 fingerprint,
@@ -279,6 +335,8 @@ impl TagService {
                 before_legacy,
                 after_legacy,
                 preserved_frames,
+                before_artwork_fingerprint,
+                artwork_changed,
             });
         }
         if !expected_by_key.is_empty() {
@@ -290,12 +348,12 @@ impl TagService {
 
         let mut completed = Vec::new();
         for item in prepared {
-            if item.before == item.after {
+            if item.before == item.after && !item.artwork_changed {
                 continue;
             }
             let track_id = item.resolved.summary.id.clone();
             let track_key = item.resolved.summary.track_key.clone();
-            match self.write_prepared_editor(item, &request.fields) {
+            match self.write_prepared_editor(item, &request.fields, artwork.as_ref()) {
                 Ok(()) => completed.push((track_id, track_key)),
                 Err(write_error) => {
                     let mut rollback_errors = Vec::new();
@@ -557,14 +615,24 @@ impl TagService {
         &self,
         mut item: PreparedEditorWrite,
         fields: &[EditableTagField],
+        artwork: Option<&CanonicalCover>,
     ) -> Result<(), PreparedEditorWriteFailure> {
         let target_path_text = item.resolved.audio_path.to_string_lossy().into_owned();
         let before_json = serde_json::to_string(&item.before)
             .map_err(|error| format!("Could not journal the original MP3 tags: {error}"))?;
         let after_json = serde_json::to_string(&item.after)
             .map_err(|error| format!("Could not journal the edited MP3 tags: {error}"))?;
-        let fields_json = serde_json::to_string(fields)
-            .map_err(|error| format!("Could not journal the selected tag fields: {error}"))?;
+        let after_artwork_fingerprint = item.artwork_changed.then(|| {
+            canonical_front_cover_fingerprint(
+                artwork.expect("an artwork change was prepared with a selected cover"),
+            )
+        });
+        let fields_json = serde_json::to_string(&OperationEditorFieldsJournal::Current {
+            fields: fields.to_vec(),
+            before_artwork_fingerprint: item.before_artwork_fingerprint,
+            after_artwork_fingerprint,
+        })
+        .map_err(|error| format!("Could not journal the selected tag fields: {error}"))?;
         let operation_id = self.store.begin_tag_operation_with_metadata(
             &item.resolved.summary.track_key,
             &target_path_text,
@@ -593,6 +661,16 @@ impl TagService {
                 format!("Could not create the same-folder MP3 working copy: {error}")
             })?;
             apply_editor_tag_changes(&mut item.tag, item.version, fields, &item.after)?;
+            if item.artwork_changed {
+                item.tag
+                    .remove_picture_by_type(id3::frame::PictureType::CoverFront);
+                item.tag.add_frame(
+                    artwork
+                        .expect("an artwork change was prepared with a selected cover")
+                        .picture
+                        .clone(),
+                );
+            }
             item.tag
                 .write_to_path(&temp_path, item.version)
                 .map_err(|error| format!("Could not write the MP3 working copy: {error}"))?;
@@ -606,6 +684,8 @@ impl TagService {
                 &temp_path,
                 &item.after,
                 fields,
+                item.artwork_changed,
+                after_artwork_fingerprint.as_ref(),
                 &item.preserved_frames,
                 &item.payload_hash,
             )?;
@@ -650,6 +730,8 @@ impl TagService {
                 &item.resolved.audio_path,
                 &item.after,
                 fields,
+                item.artwork_changed,
+                after_artwork_fingerprint.as_ref(),
                 &item.preserved_frames,
                 &item.payload_hash,
             )
@@ -1023,6 +1105,9 @@ impl TagService {
         let editor_metadata = operation_editor_metadata(&operation)?;
         let current_matches = if let Some(metadata) = &editor_metadata {
             read_editable_tag_values(&current_tag)? == metadata.after
+                && metadata
+                    .after_artwork_fingerprint
+                    .is_none_or(|expected| front_cover_fingerprint(&current_tag) == expected)
         } else {
             current == operation.after
         };
@@ -1038,9 +1123,10 @@ impl TagService {
             .ok_or_else(|| "Aurora's rollback copy is no longer available.".to_owned())?;
         let (backup_tag, _) = read_tag_for_write(backup_path)?;
         let non_target_frames_match = if let Some(metadata) = &editor_metadata {
+            let artwork_changed = metadata.after_artwork_fingerprint.is_some();
             same_frames(
-                &editor_non_target_frames(&current_tag, &metadata.fields),
-                &editor_non_target_frames(&backup_tag, &metadata.fields),
+                &editor_non_target_frames(&current_tag, &metadata.fields, artwork_changed),
+                &editor_non_target_frames(&backup_tag, &metadata.fields, artwork_changed),
             )
         } else {
             same_frames(
@@ -1102,13 +1188,17 @@ impl TagService {
             .transpose()?;
         let restored_values_match = if let Some(metadata) = &editor_metadata {
             restored_editor_values.as_ref() == Some(&metadata.before)
+                && metadata
+                    .before_artwork_fingerprint
+                    .is_none_or(|expected| front_cover_fingerprint(&restored_tag) == expected)
         } else {
             restored == operation.before
         };
         let restored_frames_match = if let Some(metadata) = &editor_metadata {
+            let artwork_changed = metadata.after_artwork_fingerprint.is_some();
             same_frames(
-                &editor_non_target_frames(&restored_tag, &metadata.fields),
-                &editor_non_target_frames(&backup_tag, &metadata.fields),
+                &editor_non_target_frames(&restored_tag, &metadata.fields, artwork_changed),
+                &editor_non_target_frames(&backup_tag, &metadata.fields, artwork_changed),
             )
         } else {
             same_frames(
@@ -1868,7 +1958,19 @@ fn apply_full_editor_undo_projection(snapshot: &mut TrackTagSnapshot, values: &E
     snapshot.tag_state.sync_state = Some(TagSyncState::PendingImport);
 }
 
-fn is_editor_target_frame(frame: &Frame, fields: &[EditableTagField]) -> bool {
+fn is_editor_target_frame(
+    frame: &Frame,
+    fields: &[EditableTagField],
+    artwork_changed: bool,
+) -> bool {
+    if artwork_changed
+        && frame
+            .content()
+            .picture()
+            .is_some_and(|picture| picture.picture_type == id3::frame::PictureType::CoverFront)
+    {
+        return true;
+    }
     match frame.id() {
         "TPE2" => fields.contains(&EditableTagField::AlbumArtist),
         "TALB" => fields.contains(&EditableTagField::Album),
@@ -1906,17 +2008,23 @@ fn is_editor_target_frame(frame: &Frame, fields: &[EditableTagField]) -> bool {
     }
 }
 
-fn editor_non_target_frames(tag: &Tag, fields: &[EditableTagField]) -> Vec<Frame> {
+pub(crate) fn editor_non_target_frames(
+    tag: &Tag,
+    fields: &[EditableTagField],
+    artwork_changed: bool,
+) -> Vec<Frame> {
     tag.frames()
-        .filter(|frame| !is_editor_target_frame(frame, fields))
+        .filter(|frame| !is_editor_target_frame(frame, fields, artwork_changed))
         .cloned()
         .collect()
 }
 
-fn verify_editor_written_file(
+pub(crate) fn verify_editor_written_file(
     path: &Path,
     expected: &EditableTagValues,
     fields: &[EditableTagField],
+    artwork_changed: bool,
+    expected_artwork_fingerprint: Option<&[u8; 32]>,
     preserved_frames: &[Frame],
     expected_payload_hash: &[u8; 32],
 ) -> Result<(), String> {
@@ -1924,7 +2032,16 @@ fn verify_editor_written_file(
     if read_editable_tag_values(&tag)? != *expected {
         return Err("the edited ID3 values did not round-trip".to_owned());
     }
-    if !same_frames(&editor_non_target_frames(&tag, fields), preserved_frames) {
+    if artwork_changed
+        && expected_artwork_fingerprint
+            .is_none_or(|expected| &front_cover_fingerprint(&tag) != expected)
+    {
+        return Err("the embedded front cover did not round-trip".to_owned());
+    }
+    if !same_frames(
+        &editor_non_target_frames(&tag, fields, artwork_changed),
+        preserved_frames,
+    ) {
         return Err("an unselected ID3 frame changed".to_owned());
     }
     if &audio_payload_hash(path)? != expected_payload_hash {
@@ -2206,15 +2323,33 @@ fn operation_editor_metadata(
         operation.edited_fields_json.as_deref(),
     ) {
         (None, None, None) => Ok(None),
-        (Some(before), Some(after), Some(fields)) => Ok(Some(OperationEditorMetadata {
-            before: serde_json::from_str(before).map_err(|error| {
-                format!("Aurora's original full-tag journal is invalid: {error}")
-            })?,
-            after: serde_json::from_str(after)
-                .map_err(|error| format!("Aurora's edited full-tag journal is invalid: {error}"))?,
-            fields: serde_json::from_str(fields)
-                .map_err(|error| format!("Aurora's edited-field journal is invalid: {error}"))?,
-        })),
+        (Some(before), Some(after), Some(fields)) => {
+            let fields = serde_json::from_str::<OperationEditorFieldsJournal>(fields)
+                .map_err(|error| format!("Aurora's edited-field journal is invalid: {error}"))?;
+            let (fields, before_artwork_fingerprint, after_artwork_fingerprint) = match fields {
+                OperationEditorFieldsJournal::Legacy(fields) => (fields, None, None),
+                OperationEditorFieldsJournal::Current {
+                    fields,
+                    before_artwork_fingerprint,
+                    after_artwork_fingerprint,
+                } => (
+                    fields,
+                    before_artwork_fingerprint,
+                    after_artwork_fingerprint,
+                ),
+            };
+            Ok(Some(OperationEditorMetadata {
+                before: serde_json::from_str(before).map_err(|error| {
+                    format!("Aurora's original full-tag journal is invalid: {error}")
+                })?,
+                after: serde_json::from_str(after).map_err(|error| {
+                    format!("Aurora's edited full-tag journal is invalid: {error}")
+                })?,
+                fields,
+                before_artwork_fingerprint,
+                after_artwork_fingerprint,
+            }))
+        }
         _ => Err("Aurora's full-tag journal is incomplete; no file was overwritten.".to_owned()),
     }
 }
@@ -2236,10 +2371,40 @@ fn operation_file_matches(
         };
         let tags_match = match (read_tag_for_write(candidate), read_tag_for_write(reference)) {
             (Ok((candidate_tag, _)), Ok((reference_tag, _))) => {
+                let artwork_changed = metadata.after_artwork_fingerprint.is_some();
+                let candidate_artwork_matches = if expected_after {
+                    metadata
+                        .after_artwork_fingerprint
+                        .is_none_or(|fingerprint| {
+                            front_cover_fingerprint(&candidate_tag) == fingerprint
+                        })
+                } else {
+                    metadata
+                        .before_artwork_fingerprint
+                        .is_none_or(|fingerprint| {
+                            front_cover_fingerprint(&candidate_tag) == fingerprint
+                        })
+                };
+                let reference_artwork_matches =
+                    metadata
+                        .before_artwork_fingerprint
+                        .is_none_or(|fingerprint| {
+                            front_cover_fingerprint(&reference_tag) == fingerprint
+                        });
                 read_editable_tag_values(&candidate_tag).is_ok_and(|values| values == *expected)
+                    && candidate_artwork_matches
+                    && reference_artwork_matches
                     && same_frames(
-                        &editor_non_target_frames(&candidate_tag, &metadata.fields),
-                        &editor_non_target_frames(&reference_tag, &metadata.fields),
+                        &editor_non_target_frames(
+                            &candidate_tag,
+                            &metadata.fields,
+                            artwork_changed,
+                        ),
+                        &editor_non_target_frames(
+                            &reference_tag,
+                            &metadata.fields,
+                            artwork_changed,
+                        ),
                     )
             }
             _ => false,
@@ -2589,7 +2754,7 @@ fn replace_file_atomic(
 mod tests {
     use super::*;
     use id3::frame::{Picture, PictureType, Popularimeter};
-    use std::io::Write;
+    use std::io::{Cursor, Write};
 
     fn fixture_path(label: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -2627,6 +2792,15 @@ mod tests {
         });
         tag.write_to_path(path, version).expect("write fixture tag");
         audio
+    }
+
+    fn valid_cover_bytes(red: u8) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([red, 0, 0, 255]));
+        let mut bytes = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .expect("encode cover");
+        bytes.into_inner()
     }
 
     fn replace_musicbee_values(path: &Path, values: &TagValues) {
@@ -3020,12 +3194,20 @@ mod tests {
             ..Default::default()
         };
         let after = merge_editor_patch(&before, &fields, &patch).expect("merge edit");
-        let preserved = editor_non_target_frames(&tag, &fields);
+        let preserved = editor_non_target_frames(&tag, &fields, false);
         apply_editor_tag_changes(&mut tag, version, &fields, &after).expect("apply edit");
         tag.write_to_path(&path, version).expect("write edit");
 
-        verify_editor_written_file(&path, &after, &fields, &preserved, &payload_hash)
-            .expect("verify full edit");
+        verify_editor_written_file(
+            &path,
+            &after,
+            &fields,
+            false,
+            None,
+            &preserved,
+            &payload_hash,
+        )
+        .expect("verify full edit");
         let written = Tag::read_from_path(&path).expect("read written tag");
         assert!(written.extended_texts().any(|text| {
             text.description == DISPLAY_ARTIST_DESCRIPTION && text.value == "New Artist"
@@ -3041,6 +3223,63 @@ mod tests {
         assert_eq!(
             audio_payload_hash(&path).expect("payload after"),
             payload_hash
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn full_editor_replaces_only_front_artwork_and_verifies_the_selected_image() {
+        let path = fixture_path("full-editor-artwork-roundtrip");
+        write_fixture(&path, Version::Id3v24);
+        let payload_hash = audio_payload_hash(&path).expect("payload before");
+        let (mut tag, version) = read_tag_for_write(&path).expect("read fixture");
+        tag.add_frame(Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::Other,
+            description: "booklet".to_owned(),
+            data: valid_cover_bytes(3),
+        });
+        tag.write_to_path(&path, version)
+            .expect("seed secondary artwork");
+
+        let (mut tag, version) = read_tag_for_write(&path).expect("read seeded fixture");
+        let values = read_editable_tag_values(&tag).expect("editable values");
+        let preserved = editor_non_target_frames(&tag, &[], true);
+        let cover = crate::artwork::canonical_cover_from_picture(&Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: valid_cover_bytes(9),
+        })
+        .expect("replacement cover");
+        let fingerprint = canonical_front_cover_fingerprint(&cover);
+        tag.remove_picture_by_type(PictureType::CoverFront);
+        tag.add_frame(cover.picture);
+        tag.write_to_path(&path, version)
+            .expect("write replacement cover");
+
+        verify_editor_written_file(
+            &path,
+            &values,
+            &[],
+            true,
+            Some(&fingerprint),
+            &preserved,
+            &payload_hash,
+        )
+        .expect("verify artwork edit");
+        let written = Tag::read_from_path(&path).expect("read written artwork");
+        assert_eq!(
+            written
+                .pictures()
+                .filter(|picture| picture.picture_type == PictureType::CoverFront)
+                .count(),
+            1
+        );
+        assert!(
+            written
+                .pictures()
+                .any(|picture| picture.picture_type == PictureType::Other)
         );
         let _ = fs::remove_file(path);
     }

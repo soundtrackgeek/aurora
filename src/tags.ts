@@ -324,6 +324,7 @@ export async function updateTagEditor(
   expected: TagEditorSnapshot,
   fields: EditableTagField[],
   values: EditableTagValues,
+  artworkToken: string | null = null,
 ): Promise<TagEditorUpdateResult> {
   if (!isTauriRuntime()) {
     const current = browserTagEditorSnapshot(target);
@@ -354,7 +355,7 @@ export async function updateTagEditor(
     };
   }
   return invoke<TagEditorUpdateResult>("update_tag_editor", {
-    request: { target, expected, fields, values },
+    request: { target, expected, fields, values, artworkToken },
   });
 }
 
