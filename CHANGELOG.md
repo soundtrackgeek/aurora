@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.4] - 2026-08-30
+
+### Changed
+
+- Made the Album Auto-Tagger's complete working content vertically scrollable behind its fixed action footer, enlarged release matches to show at least five rows, and constrained responsive search, metadata, field-selection, track, and footer layouts so Maximum text and lower-resolution windows no longer clip the right edge.
+
 ## [0.24.3] - 2026-08-30
 
 ### Added

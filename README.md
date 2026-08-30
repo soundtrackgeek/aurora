@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.3 lets Inbox prefer an album's original edition, reconcile its canonical track list, and safely remove bonus tracks that do not belong.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.4 makes the Album Auto-Tagger usable at lower resolutions and Aurora's largest text sizes without clipping its controls.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.3 slice
+## Current 0.24.4 slice
+
+- Album Auto-Tagger uses one vertically scrollable content area for search, release matches, editable metadata, and track reconciliation while keeping its action footer visible. The release table reserves room for at least five results, and responsive grids keep search, field-selection, metadata, and footer text inside the dialog at lower resolutions and Maximum text size.
 
 - Album Auto-Tagger now defaults to **Prefer the original edition**. MusicBrainz results use the release group's earliest date, concrete editions show separate Original and Edition years plus track-count fit, and the selected values write Aurora's distinct Year and Release Year tags correctly.
 - Auto-Tagger reconciles files to release tracks by normalized title, duration, and numbering instead of array position. Confidently unmatched local bonus tracks can be selected for removal; Aurora copies and SHA-256 verifies them in app-managed Inbox recovery before changing the album, then rolls tags and files back together if removal or renaming fails.
