@@ -248,8 +248,8 @@ function previewDetail(candidate: ReleaseCandidate): ReleaseCandidateDetail {
     publisher: candidate.publisher,
     year: candidate.year,
     discTotal: 1,
-    tracks: tracks.map((track) => ({
-      title: track.title ?? track.fileName,
+    tracks: tracks.map((track, index) => ({
+      title: candidate.id === "discogs-freak-de" && index === 1 ? "Kahlua Conflusion" : track.title ?? track.fileName,
       artist: "Baltimoore",
       trackNumber: track.trackNumber,
       trackTotal: track.trackTotal,

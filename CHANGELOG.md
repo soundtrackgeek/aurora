@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.5] - 2026-08-30
+
+### Added
+
+- Added a reversible **Confirm match** override for misspellings and provider errors. Each unresolved release track can be assigned to one unmatched local file; Aurora then uses the release title and track position for tagging and treats the user-confirmed pair as safe reconciliation evidence.
+
+### Fixed
+
+- Album Auto-Tagger now treats dotted and spaced initialisms such as `L.U.S.T`, `L. U. S. T.`, and `L U S T` as the same title as `Lust`, preventing an obvious match from appearing as one missing and one extra track.
+
 ## [0.24.4] - 2026-08-30
 
 ### Changed

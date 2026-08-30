@@ -509,6 +509,8 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const [values, setValues] = useState({ albumArtist: album.artist ?? "", album: album.album ?? "", genre: album.genre ?? "", publisher: album.publisher ?? "", year: album.year?.toString() ?? "", releaseYear: "" });
   const [trackTitles, setTrackTitles] = useState<string[]>(tracks.map((track) => track.title ?? ""));
   const [removeExtraPaths, setRemoveExtraPaths] = useState<Set<string>>(new Set());
+  const [manualMatches, setManualMatches] = useState<Map<number, number>>(() => new Map());
+  const [manualDrafts, setManualDrafts] = useState<Map<number, number>>(() => new Map());
   const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [renameAfterApply, setRenameAfterApply] = useState(tracks.length === album.tracks.length);
   const [discNumber, setDiscNumber] = useState("");
@@ -518,8 +520,12 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const [warnings, setWarnings] = useState<string[]>([]);
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
   const reconciliation = useMemo(
-    () => reconcileInboxTracks(tracks, detail?.tracks ?? []),
-    [detail?.tracks, tracks],
+    () => reconcileInboxTracks(
+      tracks,
+      detail?.tracks ?? [],
+      [...manualMatches].map(([releaseIndex, localIndex]) => ({ localIndex, releaseIndex })),
+    ),
+    [detail?.tracks, manualMatches, tracks],
   );
 
   useEffect(() => {
@@ -547,6 +553,8 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
       const releaseIndex = releaseByLocalIndex.get(index);
       return releaseIndex === undefined ? track.title ?? "" : next.tracks[releaseIndex]?.title ?? track.title ?? "";
     }));
+    setManualMatches(new Map());
+    setManualDrafts(new Map());
     setRemoveExtraPaths(new Set());
     setConfirmRemoval(false);
     const releaseDiscs = new Set(next.tracks.map((track) => track.discNumber).filter((value): value is number => value !== null));
@@ -584,6 +592,56 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
 
   function toggleField(field: EditableTagField) { setFields((current) => { const next = new Set(current); if (next.has(field)) next.delete(field); else next.add(field); return next; }); }
 
+  const unmatchedLocalIndices = reconciliation.rows.flatMap((row) => (
+    row.status === "extra" && row.localIndex !== null ? [row.localIndex] : []
+  ));
+
+  function proposedLocalIndex(releaseIndex: number): number | null {
+    const draft = manualDrafts.get(releaseIndex);
+    if (draft !== undefined && unmatchedLocalIndices.includes(draft)) return draft;
+    const releaseTrack = detail?.tracks[releaseIndex];
+    const sameNumber = unmatchedLocalIndices.filter((localIndex) => (
+      releaseTrack?.trackNumber !== null && tracks[localIndex]?.trackNumber === releaseTrack?.trackNumber
+    ));
+    if (sameNumber.length === 1) return sameNumber[0];
+    return unmatchedLocalIndices.length === 1 ? unmatchedLocalIndices[0] : null;
+  }
+
+  function setManualDraft(releaseIndex: number, value: string) {
+    setManualDrafts((current) => {
+      const next = new Map(current);
+      if (value === "") next.delete(releaseIndex);
+      else next.set(releaseIndex, Number(value));
+      return next;
+    });
+  }
+
+  function confirmManualMatch(releaseIndex: number, localIndex: number) {
+    const releaseTrack = detail?.tracks[releaseIndex];
+    const localTrack = tracks[localIndex];
+    if (!releaseTrack || !localTrack || !unmatchedLocalIndices.includes(localIndex)) return;
+    setManualMatches((current) => {
+      const next = new Map(current);
+      for (const [currentReleaseIndex, currentLocalIndex] of next) {
+        if (currentLocalIndex === localIndex) next.delete(currentReleaseIndex);
+      }
+      next.set(releaseIndex, localIndex);
+      return next;
+    });
+    setManualDrafts((current) => { const next = new Map(current); next.delete(releaseIndex); return next; });
+    setTrackTitles((current) => current.map((title, index) => index === localIndex ? releaseTrack.title : title));
+    setRemoveExtraPaths((current) => { const next = new Set(current); next.delete(localTrack.path); return next; });
+    setConfirmRemoval(false);
+  }
+
+  function undoManualMatch(releaseIndex: number) {
+    const localIndex = manualMatches.get(releaseIndex);
+    if (localIndex === undefined) return;
+    setManualMatches((current) => { const next = new Map(current); next.delete(releaseIndex); return next; });
+    setManualDrafts((current) => new Map(current).set(releaseIndex, localIndex));
+    setTrackTitles((current) => current.map((title, index) => index === localIndex ? tracks[localIndex]?.title ?? "" : title));
+  }
+
   const selectedRemovalCount = removeExtraPaths.size;
   const allExtrasSelected = reconciliation.extraCount > 0 && selectedRemovalCount === reconciliation.extraCount;
   const willRename = renameAfterApply
@@ -602,7 +660,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
         albumPath: album.path,
         fields: [...fields],
         tracks: reconciliation.rows.flatMap((match) => {
-          if (match.localIndex === null || match.releaseIndex === null || (match.status !== "exact" && match.status !== "likely")) return [];
+          if (match.localIndex === null || match.releaseIndex === null || (match.status !== "exact" && match.status !== "likely" && match.status !== "confirmed")) return [];
           const track = tracks[match.localIndex];
           const releaseTrack = detail.tracks[match.releaseIndex];
           const next: EditableTagValues = {
@@ -650,12 +708,15 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
       <section className="inbox-track-compare">
-        {detail ? <div className="inbox-reconciliation-summary" role="status"><strong>{reconciliation.matchedCount} of {detail.tracks.length} release tracks matched</strong><span>{reconciliation.extraCount ? `${reconciliation.extraCount} extra local ${reconciliation.extraCount === 1 ? "track" : "tracks"}` : "No extra local tracks"}{reconciliation.missingCount || reconciliation.ambiguousCount ? ` · ${reconciliation.missingCount + reconciliation.ambiguousCount} unresolved` : ""}</span>{reconciliation.extraCount && !reconciliation.cleanupSafe ? <small>Automatic removal is disabled until every release track has one confident match.</small> : null}</div> : null}
-        <table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Status</th><th>Remove</th></tr></thead><tbody>{detail ? reconciliation.rows.map((match, rowIndex) => {
+        {detail ? <div className="inbox-reconciliation-summary" role="status"><strong>{reconciliation.matchedCount} of {detail.tracks.length} release tracks matched</strong><span>{reconciliation.extraCount ? `${reconciliation.extraCount} extra local ${reconciliation.extraCount === 1 ? "track" : "tracks"}` : "No extra local tracks"}{reconciliation.missingCount || reconciliation.ambiguousCount ? ` · ${reconciliation.missingCount + reconciliation.ambiguousCount} unresolved` : ""}</span>{reconciliation.extraCount && !reconciliation.cleanupSafe ? <small>Choose an unmatched file and confirm any true match before removing extras.</small> : null}</div> : null}
+        <table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Status</th><th>Action</th></tr></thead><tbody>{detail ? reconciliation.rows.map((match, rowIndex) => {
           const track = match.localIndex === null ? null : tracks[match.localIndex];
           const releaseTrack = match.releaseIndex === null ? null : detail.tracks[match.releaseIndex];
           const removable = match.status === "extra" && track && reconciliation.cleanupSafe;
-          return <tr key={`${match.localIndex ?? "none"}:${match.releaseIndex ?? "none"}:${rowIndex}`} className={`inbox-track-match inbox-track-match--${match.status}`}><td>{releaseTrack?.trackNumber ?? track?.trackNumber ?? "—"}</td><td title={track?.fileName}>{track?.fileName ?? "—"}</td><td>{track?.title ?? "—"}</td><td>{match.localIndex !== null && releaseTrack ? <input aria-label={`Release title ${match.localIndex + 1}`} value={trackTitles[match.localIndex] ?? ""} onChange={(event) => setTrackTitles((current) => current.map((value, itemIndex) => itemIndex === match.localIndex ? event.target.value : value))} /> : releaseTrack?.title ?? "—"}</td><td><span className={`inbox-track-status inbox-track-status--${match.status}`}>{trackMatchIcon(match.status)}{trackMatchLabel(match.status)}</span></td><td>{removable ? <input type="checkbox" aria-label={`Remove unmatched ${track.fileName}`} checked={removeExtraPaths.has(track.path)} onChange={() => setRemoveExtraPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); setConfirmRemoval(false); return next; })} /> : "—"}</td></tr>;
+          const unresolved = (match.status === "missing" || match.status === "ambiguous") && match.releaseIndex !== null;
+          const proposedIndex = unresolved ? proposedLocalIndex(match.releaseIndex as number) : null;
+          const proposedTrack = proposedIndex === null ? null : tracks[proposedIndex];
+          return <tr key={`${match.localIndex ?? "none"}:${match.releaseIndex ?? "none"}:${rowIndex}`} className={`inbox-track-match inbox-track-match--${match.status}`}><td>{releaseTrack?.trackNumber ?? track?.trackNumber ?? "—"}</td><td title={track?.fileName}>{unresolved ? <select aria-label={`Local file for ${releaseTrack?.title ?? "unresolved release track"}`} value={proposedIndex ?? ""} onChange={(event) => setManualDraft(match.releaseIndex as number, event.target.value)}><option value="">Choose unmatched file</option>{unmatchedLocalIndices.map((localIndex) => <option key={tracks[localIndex]?.path} value={localIndex}>{tracks[localIndex]?.fileName}</option>)}</select> : track?.fileName ?? "—"}</td><td>{track?.title ?? proposedTrack?.title ?? "—"}</td><td>{match.localIndex !== null && releaseTrack ? <input aria-label={`Release title ${match.localIndex + 1}`} value={trackTitles[match.localIndex] ?? ""} onChange={(event) => setTrackTitles((current) => current.map((value, itemIndex) => itemIndex === match.localIndex ? event.target.value : value))} /> : releaseTrack?.title ?? "—"}</td><td><span className={`inbox-track-status inbox-track-status--${match.status}`}>{trackMatchIcon(match.status)}{trackMatchLabel(match.status)}</span></td><td className="inbox-track-action">{removable ? <input type="checkbox" aria-label={`Remove unmatched ${track.fileName}`} checked={removeExtraPaths.has(track.path)} onChange={() => setRemoveExtraPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); setConfirmRemoval(false); return next; })} /> : unresolved ? <button type="button" disabled={proposedIndex === null} onClick={() => { if (proposedIndex !== null) confirmManualMatch(match.releaseIndex as number, proposedIndex); }}><Check aria-hidden="true" />Confirm match</button> : match.status === "confirmed" && match.releaseIndex !== null ? <button type="button" onClick={() => undoManualMatch(match.releaseIndex as number)}>Undo</button> : "—"}</td></tr>;
         }) : null}</tbody></table>
       </section>
     </div>
@@ -668,12 +729,13 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
 function trackMatchLabel(status: InboxTrackMatchStatus): string {
   if (status === "exact") return "Matched";
   if (status === "likely") return "Likely match";
+  if (status === "confirmed") return "Confirmed";
   if (status === "extra") return "Extra local";
   if (status === "missing") return "Missing local";
   return "Ambiguous";
 }
 
 function trackMatchIcon(status: InboxTrackMatchStatus) {
-  if (status === "exact") return <Check aria-hidden="true" />;
+  if (status === "exact" || status === "confirmed") return <Check aria-hidden="true" />;
   return <AlertTriangle aria-hidden="true" />;
 }

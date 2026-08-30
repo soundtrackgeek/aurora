@@ -51,4 +51,28 @@ describe("Inbox release reconciliation", () => {
   it("normalizes edition notes and leading articles without erasing the title", () => {
     expect(normalizeInboxTrackTitle("The Job Centre (Remastered Version)")).toBe("job centre");
   });
+
+  it("treats dotted and spaced initialisms as ordinary title words", () => {
+    expect(normalizeInboxTrackTitle("L.U.S.T")).toBe("lust");
+    expect(normalizeInboxTrackTitle("L. U. S. T.")).toBe("lust");
+    expect(normalizeInboxTrackTitle("L U S T")).toBe("lust");
+
+    const result = reconcileInboxTracks(
+      [local("Progress", 1), local("Lust", 2)],
+      [release("Progress", 1), release("L.U.S.T", 2)],
+    );
+    expect(result).toMatchObject({ matchedCount: 2, exactCount: 2, extraCount: 0, missingCount: 0, cleanupSafe: true });
+  });
+
+  it("accepts an explicit local-to-release assignment for a misspelled title", () => {
+    const localTracks = [local("Progress", 1), local("Lost", 2)];
+    const releaseTracks = [release("Progress", 1), release("L.U.S.T", 2)];
+    expect(reconcileInboxTracks(localTracks, releaseTracks)).toMatchObject({
+      matchedCount: 1, extraCount: 1, missingCount: 1, cleanupSafe: false,
+    });
+
+    expect(reconcileInboxTracks(localTracks, releaseTracks, [{ localIndex: 1, releaseIndex: 1 }])).toMatchObject({
+      matchedCount: 2, confirmedCount: 1, extraCount: 0, missingCount: 0, cleanupSafe: true,
+    });
+  });
 });

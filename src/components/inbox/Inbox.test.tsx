@@ -393,7 +393,7 @@ describe("Inbox", () => {
 
     expect(await screen.findByRole("checkbox", { name: /Prefer the original edition/u })).toBeChecked();
     expect(await screen.findByText("9 of 9 release tracks matched")).toBeInTheDocument();
-    expect(screen.getByText("1 extra local track")).toBeInTheDocument();
+    expect(screen.getByText(/1 extra local track/u)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Original year" })).toHaveValue("1990");
     expect(screen.getByRole("textbox", { name: "Release year" })).toHaveValue("2008");
 
@@ -413,6 +413,52 @@ describe("Inbox", () => {
     }));
     expect(apply.mock.calls[0]?.[0].tracks).toHaveLength(9);
     expect(await screen.findByText(/moved 1 unmatched track to Aurora recovery/u)).toBeInTheDocument();
+  });
+
+  it("lets the user confirm that a misspelled release title belongs to an unmatched local file", async () => {
+    const searchResult = await inboxAdapter.searchInboxReleases("Baltimoore", "Freak", 10, true);
+    const candidate = searchResult.candidates[0];
+    const fullDetail = await inboxAdapter.loadInboxReleaseDetail(candidate);
+    vi.spyOn(inboxAdapter, "searchInboxReleases").mockResolvedValue({ ...searchResult, candidates: [candidate] });
+    vi.spyOn(inboxAdapter, "loadInboxReleaseDetail").mockResolvedValue({
+      ...fullDetail,
+      tracks: fullDetail.tracks.map((track, index) => index === 1 ? { ...track, title: "Kahlua Conflusion" } : track),
+    });
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockResolvedValue({
+      changedTracks: 10,
+      renamedTracks: 10,
+      removedTracks: 0,
+      recoveryPath: null,
+      albumPath: "C:\\Music\\Inbox\\Baltimoore - Freak (1990)",
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    const autoTag = await waitFor(() => {
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      expect(button).toBeEnabled();
+      return button;
+    });
+    fireEvent.click(autoTag);
+
+    expect(await screen.findByText("9 of 10 release tracks matched")).toBeInTheDocument();
+    expect(screen.getByText(/1 extra local track/u)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Local file for Kahlua Conflusion" })).toHaveValue("1");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+
+    expect(screen.getByText("10 of 10 release tracks matched")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(screen.getByLabelText("Release title 2")).toHaveValue("Kahlua Conflusion");
+    fireEvent.click(screen.getByRole("button", { name: "Apply & rename" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply.mock.calls[0]?.[0].tracks).toHaveLength(10);
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({
+      tracks: expect.arrayContaining([expect.objectContaining({
+        path: expect.stringContaining("Kahlua Confusion"),
+        values: expect.objectContaining({ title: "Kahlua Conflusion", trackNumber: 2 }),
+      })]),
+    }));
   });
 
   it("keeps the selected release stable while the Inbox refreshes", async () => {

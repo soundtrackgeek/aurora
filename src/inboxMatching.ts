@@ -1,6 +1,11 @@
 import type { InboxTrack, ReleaseTrack } from "./inbox";
 
-export type InboxTrackMatchStatus = "exact" | "likely" | "ambiguous" | "extra" | "missing";
+export type InboxTrackMatchStatus = "exact" | "likely" | "confirmed" | "ambiguous" | "extra" | "missing";
+
+export interface InboxManualTrackMatch {
+  localIndex: number;
+  releaseIndex: number;
+}
 
 export interface InboxTrackMatch {
   localIndex: number | null;
@@ -13,6 +18,7 @@ export interface InboxTrackReconciliation {
   matchedCount: number;
   exactCount: number;
   likelyCount: number;
+  confirmedCount: number;
   extraCount: number;
   missingCount: number;
   ambiguousCount: number;
@@ -20,14 +26,34 @@ export interface InboxTrackReconciliation {
 }
 
 const LEADING_ARTICLE = /^(?:a|an|the)\s+/u;
+const DOTTED_INITIALISM = /(?<![\p{L}\p{N}])(?:[\p{L}\p{N}]\s*\.\s*)+[\p{L}\p{N}](?![\p{L}\p{N}])/gu;
+const SINGLE_CHARACTER_TOKEN = /^[\p{L}\p{N}]$/u;
+
+function collapseInitialismRuns(value: string): string {
+  const tokens = value.split(" ").filter(Boolean);
+  const collapsed: string[] = [];
+  for (let index = 0; index < tokens.length;) {
+    let end = index;
+    while (end < tokens.length && SINGLE_CHARACTER_TOKEN.test(tokens[end])) end += 1;
+    if (end - index >= 3) {
+      collapsed.push(tokens.slice(index, end).join(""));
+      index = end;
+    } else {
+      collapsed.push(tokens[index]);
+      index += 1;
+    }
+  }
+  return collapsed.join(" ");
+}
 
 export function normalizeInboxTrackTitle(value: string | null | undefined): string {
-  return (value ?? "")
+  const normalized = (value ?? "")
     .toLocaleLowerCase()
     .replace(/\([^)]*(?:bonus|remaster(?:ed)?|version)[^)]*\)/gu, " ")
+    .replace(DOTTED_INITIALISM, (initialism) => initialism.replace(/[.\s]+/gu, ""))
     .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .replace(LEADING_ARTICLE, "");
+    .trim();
+  return collapseInitialismRuns(normalized).replace(LEADING_ARTICLE, "");
 }
 
 function titleTokens(value: string): Set<string> {
@@ -85,11 +111,21 @@ function exactCandidate(
 export function reconcileInboxTracks(
   localTracks: readonly InboxTrack[],
   releaseTracks: readonly ReleaseTrack[],
+  manualMatches: readonly InboxManualTrackMatch[] = [],
 ): InboxTrackReconciliation {
   const matchedLocal = new Set<number>();
   const matchedRelease = new Set<number>();
   const matches: InboxTrackMatch[] = [];
   const ambiguousReleaseIndices = new Set<number>();
+
+  for (const manual of manualMatches) {
+    if (manual.localIndex < 0 || manual.localIndex >= localTracks.length
+      || manual.releaseIndex < 0 || manual.releaseIndex >= releaseTracks.length
+      || matchedLocal.has(manual.localIndex) || matchedRelease.has(manual.releaseIndex)) continue;
+    matchedLocal.add(manual.localIndex);
+    matchedRelease.add(manual.releaseIndex);
+    matches.push({ localIndex: manual.localIndex, releaseIndex: manual.releaseIndex, status: "confirmed" });
+  }
 
   for (let releaseIndex = 0; releaseIndex < releaseTracks.length; releaseIndex += 1) {
     const available = localTracks.map((_, index) => index).filter((index) => !matchedLocal.has(index));
@@ -132,7 +168,8 @@ export function reconcileInboxTracks(
       .map((localIndex): InboxTrackMatch => ({ localIndex, releaseIndex: null, status: "extra" })),
   ];
   const exactCount = matches.filter((match) => match.status === "exact").length;
-  const likelyCount = matches.length - exactCount;
+  const likelyCount = matches.filter((match) => match.status === "likely").length;
+  const confirmedCount = matches.filter((match) => match.status === "confirmed").length;
   const extraCount = localTracks.length - matchedLocal.size;
   const missingCount = releaseTracks.length - matchedRelease.size - ambiguousReleaseIndices.size;
   const ambiguousCount = ambiguousReleaseIndices.size;
@@ -141,6 +178,7 @@ export function reconcileInboxTracks(
     matchedCount: matches.length,
     exactCount,
     likelyCount,
+    confirmedCount,
     extraCount,
     missingCount,
     ambiguousCount,
