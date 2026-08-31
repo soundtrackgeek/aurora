@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.7] - 2026-08-31
+
+### Fixed
+
+- Prevented Windows WebView2 from locking Aurora when a populated top-bar search first receives focus. Pointer clicks and `Ctrl+K` now focus an empty native control before restoring the controlled query and caret on the next frame.
+
 ## [0.24.6] - 2026-08-30
 
 ### Fixed

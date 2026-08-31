@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.6 keeps the Inbox extra-track confirmation fully visible above the Auto-Tagger on short screens.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.7 prevents Windows WebView2 from locking Aurora when a populated search first receives focus.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.6 slice
+## Current 0.24.7 slice
+
+- Populated top-bar searches now use a Windows WebView2-safe focus handoff for both pointer clicks and `Ctrl+K`. The saved query is restored on the next frame with its caret at the end, avoiding the upstream text-services deadlock while preserving normal typing and filtering.
 
 - The unmatched-track recovery confirmation now occupies a dedicated overlay above the complete Auto-Tagger panel. Sticky reconciliation and track headers cannot obscure it, its content scrolls when vertical space is limited, and Escape dismisses only the confirmation instead of closing the Auto-Tagger.
 

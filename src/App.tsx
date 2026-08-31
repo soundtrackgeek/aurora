@@ -114,6 +114,7 @@ import {
   type ReleaseDecisionRequest,
 } from "./musicbrainz";
 import { shouldFollowPlaybackTransition, usePlayback } from "./playback";
+import { preparePopulatedInputForFocus } from "./searchFocusGuard";
 import {
   loadHistoryPage,
   loadTrackHistoryInsight,
@@ -840,7 +841,10 @@ function App() {
     function focusSearch(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
-        searchRef.current?.focus();
+        const input = searchRef.current;
+        if (!input) return;
+        preparePopulatedInputForFocus(input);
+        input.focus();
       }
     }
     window.addEventListener("keydown", focusSearch);
@@ -2958,7 +2962,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2983,6 +2987,11 @@ function App() {
             <input
               ref={searchRef}
               value={topbarSearchValue}
+              onPointerDownCapture={(event) => {
+                if (!preparePopulatedInputForFocus(event.currentTarget)) return;
+                event.preventDefault();
+                event.currentTarget.focus();
+              }}
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
