@@ -43,6 +43,7 @@ pub(crate) struct ArtistSummary {
     pub(crate) track_count: i64,
     pub(crate) album_count: i64,
     pub(crate) play_count: Option<i64>,
+    pub(crate) last_played_at_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -453,6 +454,7 @@ pub(crate) fn query_snapshot(
                 track_count: row.get(1)?,
                 album_count: row.get(2)?,
                 play_count: None,
+                last_played_at_ms: None,
             })
         })
         .map_err(|error| format!("Could not read the artist universe: {error}"))?

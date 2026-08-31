@@ -1043,6 +1043,7 @@ fn artist_page_from_connection(
                     .get(2)
                     .map_err(|error| format!("Could not decode the artist explorer: {error}"))?,
                 play_count: None,
+                last_played_at_ms: None,
             },
             row.get(3)
                 .map_err(|error| format!("Could not decode the artist cursor: {error}"))?,
@@ -1179,6 +1180,7 @@ fn artist_detail_from_connection(
                     track_count: row.get(1)?,
                     album_count: row.get(2)?,
                     play_count: None,
+                    last_played_at_ms: None,
                 })
             },
         )

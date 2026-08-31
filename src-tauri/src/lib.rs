@@ -391,10 +391,21 @@ async fn explore_albums(app: AppHandle, request: AlbumPageRequest) -> Result<Alb
 }
 
 #[tauri::command]
-async fn explore_artists(request: ArtistPageRequest) -> Result<ArtistPage, String> {
-    tauri::async_runtime::spawn_blocking(move || explorer::load_artist_page(request))
-        .await
-        .map_err(|error| format!("The artist explorer stopped unexpectedly: {error}"))?
+async fn explore_artists(app: AppHandle, request: ArtistPageRequest) -> Result<ArtistPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut page = explorer::load_artist_page(request)?;
+        let history = app.state::<HistoryStore>();
+        let insights = history.artist_insights()?;
+        for artist in &mut page.items {
+            if let Some(insight) = insights.get(&history::artist_identity(&artist.name)) {
+                artist.play_count = Some(insight.plays);
+                artist.last_played_at_ms = insight.last_played_at_ms;
+            }
+        }
+        Ok(page)
+    })
+    .await
+    .map_err(|error| format!("The artist explorer stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]

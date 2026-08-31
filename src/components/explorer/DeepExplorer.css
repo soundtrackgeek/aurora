@@ -244,7 +244,9 @@
 .deep-explorer-artist__copy small { margin-top: 3px; color: var(--explorer-muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
 .deep-explorer-artist__copy > span { display: block; width: min(240px, 70%); height: 2px; margin-top: 6px; overflow: hidden; background: #202b37; }
 .deep-explorer-artist__copy i { display: block; height: 100%; background: linear-gradient(90deg, var(--explorer-violet), var(--explorer-cyan)); }
-.deep-explorer-artist__plays { color: #8794a3; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-align: right; }
+.deep-explorer-artist__plays { display: grid; gap: 3px; color: #8794a3; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); text-align: right; white-space: nowrap; }
+.deep-explorer-artist__plays strong { color: #cfd7df; font-weight: 500; }
+.deep-explorer-artist__plays small { color: #8794a3; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
 .deep-explorer-artists button > svg { width: 13px; height: 13px; color: #667484; }
 
 .deep-explorer-feedback { display: grid; place-items: center; align-content: center; min-height: 250px; padding: 32px; color: var(--explorer-muted); text-align: center; }

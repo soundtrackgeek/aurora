@@ -18,6 +18,7 @@ export interface Artist {
   trackCount: number;
   albumCount: number;
   playCount: number | null;
+  lastPlayedAtMs: number | null;
 }
 
 export interface Track {
@@ -359,14 +360,14 @@ export const browserPreview: LibrarySnapshot = {
     rated: 4_812,
   },
   artists: [
-    { id: "preview-m83", name: "M83", trackCount: 94, albumCount: 9, playCount: 4_218 },
-    { id: "preview-beethoven", name: "Ludwig van Beethoven", trackCount: 312, albumCount: 28, playCount: 3_804 },
-    { id: "preview-daft-punk", name: "Daft Punk", trackCount: 126, albumCount: 12, playCount: 3_116 },
-    { id: "preview-gorillaz", name: "Gorillaz", trackCount: 84, albumCount: 8, playCount: 2_730 },
-    { id: "preview-coldplay", name: "Coldplay", trackCount: 178, albumCount: 14, playCount: 2_414 },
-    { id: "preview-college", name: "College", trackCount: 62, albumCount: 6, playCount: 2_108 },
-    { id: "preview-kavinsky", name: "Kavinsky", trackCount: 47, albumCount: 5, playCount: 1_982 },
-    { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755 },
+    { id: "preview-m83", name: "M83", trackCount: 94, albumCount: 9, playCount: 4_218, lastPlayedAtMs: Date.now() - 18 * 60_000 },
+    { id: "preview-beethoven", name: "Ludwig van Beethoven", trackCount: 312, albumCount: 28, playCount: 3_804, lastPlayedAtMs: Date.now() - 25 * 60 * 60_000 },
+    { id: "preview-daft-punk", name: "Daft Punk", trackCount: 126, albumCount: 12, playCount: 3_116, lastPlayedAtMs: Date.now() - 4 * 24 * 60 * 60_000 },
+    { id: "preview-gorillaz", name: "Gorillaz", trackCount: 84, albumCount: 8, playCount: 2_730, lastPlayedAtMs: Date.now() - 8 * 24 * 60 * 60_000 },
+    { id: "preview-coldplay", name: "Coldplay", trackCount: 178, albumCount: 14, playCount: 2_414, lastPlayedAtMs: Date.now() - 15 * 24 * 60 * 60_000 },
+    { id: "preview-college", name: "College", trackCount: 62, albumCount: 6, playCount: 2_108, lastPlayedAtMs: Date.now() - 31 * 24 * 60 * 60_000 },
+    { id: "preview-kavinsky", name: "Kavinsky", trackCount: 47, albumCount: 5, playCount: 1_982, lastPlayedAtMs: Date.now() - 62 * 24 * 60 * 60_000 },
+    { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755, lastPlayedAtMs: Date.now() - 120 * 24 * 60 * 60_000 },
   ],
   tracks: [
     previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", originCountryCode: "FR", originCountryName: "France", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186, trackNumber: 2, trackTotal: 11, discNumber: 1, discTotal: 2 }),

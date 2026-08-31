@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.8] - 2026-08-31
+
+### Fixed
+
+- Replaced the Artists page's hard-coded empty history state with registered-play totals and latest-play timestamps aggregated across Aurora's available device histories.
+
 ## [0.24.7] - 2026-08-31
 
 ### Fixed

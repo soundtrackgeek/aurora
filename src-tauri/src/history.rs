@@ -254,6 +254,12 @@ pub(crate) struct GenreHistoryInsight {
     pub(crate) last_listened_at_ms: Option<i64>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ArtistHistoryInsight {
+    pub(crate) plays: i64,
+    pub(crate) last_played_at_ms: Option<i64>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveHistorySession {
     session_id: String,
@@ -1331,6 +1337,57 @@ impl HistoryStore {
         Ok(insights)
     }
 
+    pub(crate) fn artist_insights(&self) -> Result<HashMap<String, ArtistHistoryInsight>, String> {
+        let mut insights: HashMap<String, ArtistHistoryInsight> = HashMap::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection
+                .prepare(
+                    r#"
+                    SELECT TRIM(artist), COUNT(*), MAX(started_at_ms)
+                    FROM listening_sessions
+                    WHERE registered_play = 1
+                      AND NULLIF(TRIM(artist), '') IS NOT NULL
+                    GROUP BY TRIM(artist) COLLATE NOCASE
+                    "#,
+                )
+                .map_err(|error| format!("Could not prepare Aurora's artist history: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        ArtistHistoryInsight {
+                            plays: row.get(1)?,
+                            last_played_at_ms: row.get(2)?,
+                        },
+                    ))
+                })
+                .map_err(|error| format!("Could not read Aurora's artist history: {error}"))?;
+            for row in rows {
+                let (artist, candidate) = row.map_err(|error| {
+                    format!("Could not decode Aurora's artist history: {error}")
+                })?;
+                let combined = insights.entry(artist_identity(&artist)).or_default();
+                combined.plays = combined.plays.saturating_add(candidate.plays);
+                combined.last_played_at_ms =
+                    match (combined.last_played_at_ms, candidate.last_played_at_ms) {
+                        (Some(current), Some(next)) => Some(current.max(next)),
+                        (None, next) => next,
+                        (current, None) => current,
+                    };
+            }
+        }
+        Ok(insights)
+    }
+
     pub(crate) fn played_track_keys_for_genre(
         &self,
         genre: &str,
@@ -1606,6 +1663,10 @@ fn mirror_tonehavn_snapshots(local: &Path, remote: &Path) -> Result<(), String> 
 
 pub(crate) fn genre_identity(genre: &str) -> String {
     genre.trim().to_lowercase()
+}
+
+pub(crate) fn artist_identity(artist: &str) -> String {
+    artist.trim().to_lowercase()
 }
 
 fn query_top_rows(connection: &Connection, limit: usize) -> Result<Vec<HistoryTopRow>, String> {
@@ -2275,6 +2336,51 @@ mod tests {
         assert_eq!(insight.skips, 1);
         assert_eq!(insight.listened_seconds, 12.0);
         assert!(insight.last_listened_at_ms.is_some());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn artist_insights_count_registered_plays_and_keep_the_latest_timestamp() {
+        let root = temporary_root("artist-insights");
+        let remote = root.join("remote");
+        fs::create_dir_all(&remote).expect("remote directory");
+        let store = HistoryStore::new(
+            root.join("history.sqlite3"),
+            remote,
+            "device-test-artist".to_owned(),
+            "Test computer".to_owned(),
+        )
+        .expect("history store");
+        store
+            .set_play_threshold_seconds(1)
+            .expect("short threshold");
+
+        let mut first = store
+            .begin_session(&track(240), 0.0)
+            .expect("first session");
+        store
+            .observe_position(&mut first, 1.0)
+            .expect("register first play");
+        store
+            .finish_session(&first, "skipped")
+            .expect("finish first play");
+
+        let mut alternate_case = track(240);
+        alternate_case.artist = " artist ".to_owned();
+        let mut second = store
+            .begin_session(&alternate_case, 0.0)
+            .expect("second session");
+        store
+            .observe_position(&mut second, 1.0)
+            .expect("register second play");
+        store
+            .finish_session(&second, "skipped")
+            .expect("finish second play");
+
+        let insights = store.artist_insights().expect("artist history");
+        let artist = insights.get("artist").expect("normalized artist");
+        assert_eq!(artist.plays, 2);
+        assert!(artist.last_played_at_ms.is_some());
         let _ = fs::remove_dir_all(root);
     }
 

@@ -985,6 +985,13 @@ function ArtistList({
   selectedArtistId: string | null;
   onSelectArtist: (artist: Artist | null) => void;
 }) {
+  const formatLastPlayed = (timestamp: number) => new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
   let largestTrackCount = 1;
   for (const artist of artists) largestTrackCount = Math.max(largestTrackCount, artist.trackCount);
 
@@ -1006,7 +1013,14 @@ function ArtistList({
               <span aria-hidden="true"><i style={{ width: `${Math.max(4, (artist.trackCount / largestTrackCount) * 100)}%` }} /></span>
             </span>
             <span className="deep-explorer-artist__plays">
-              {artist.playCount === null ? "No play history" : `${formatCount(artist.playCount)} plays`}
+              {artist.playCount === null || artist.lastPlayedAtMs === null ? (
+                "No play history"
+              ) : (
+                <>
+                  <strong>{formatCount(artist.playCount)} {artist.playCount === 1 ? "play" : "plays"}</strong>
+                  <small>Last played {formatLastPlayed(artist.lastPlayedAtMs)}</small>
+                </>
+              )}
             </span>
             <ChevronRight aria-hidden="true" />
           </button>

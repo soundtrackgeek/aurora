@@ -51,7 +51,7 @@ const tracks: Track[] = [
 ];
 
 const artists: Artist[] = [
-  { id: "artist-1", name: "Aurora Lines", trackCount: 28, albumCount: 3, playCount: 512 },
+  { id: "artist-1", name: "Aurora Lines", trackCount: 28, albumCount: 3, playCount: 512, lastPlayedAtMs: 1_777_680_540_000 },
 ];
 
 const albums: ExplorerAlbum[] = [
@@ -112,6 +112,24 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it("shows total plays and the latest play timestamp for artists with history", () => {
+    const noHistoryArtist: Artist = {
+      id: "artist-2",
+      name: "Silent Orbit",
+      trackCount: 4,
+      albumCount: 1,
+      playCount: null,
+      lastPlayedAtMs: null,
+    };
+    render(<DeepExplorer {...explorerProps({ view: "artists", artists: [...artists, noHistoryArtist] })} />);
+
+    const artistRow = screen.getByRole("button", { name: /Aurora Lines/ });
+    expect(artistRow).toHaveTextContent("512 plays");
+    expect(artistRow).toHaveTextContent("Last played");
+    expect(artistRow).not.toHaveTextContent("No play history");
+    expect(screen.getByRole("button", { name: /Silent Orbit/ })).toHaveTextContent("No play history");
+  });
+
   it("keeps album, track, and artist inspector context on the selected album", () => {
     const staleTrack: Track = {
       ...tracks[0],
