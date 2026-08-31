@@ -25,7 +25,9 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
+import { albumArtistSearchQuery } from "./artistSearch";
 import { Artwork } from "./components/Artwork";
+import { ArtistSmartLink } from "./components/ArtistSmartLink";
 import {
   ChartInspector,
   ChartStudio,
@@ -2391,6 +2393,22 @@ function App() {
     setExplorerFilters((current) => ({ ...current, artist: artistName, sort: "newest" }));
   }
 
+  function openArtistAlbums(artistName: string) {
+    const artist = artistName.trim();
+    if (!artist) return;
+    setActiveNav("Albums");
+    expandLibraryNavigation();
+    setExplorerSelection(null);
+    setSelectedAlbumId(null);
+    setSelectedArtistId(null);
+    setExplorerView("albums");
+    setExplorerFilters({
+      ...defaultExplorerFilters,
+      query: albumArtistSearchQuery(artist),
+      sort: defaultExplorerSort.albums,
+    });
+  }
+
   function exploreGenreInLibrary(genre: string) {
     setActiveNav("Songs");
     expandLibraryNavigation();
@@ -2962,7 +2980,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.9</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.10</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3094,6 +3112,7 @@ function App() {
             ) : activeNav === "Charts" ? (
               <ChartStudio
                 catalogRevision={chartReloadToken}
+                onOpenArtistAlbums={openArtistAlbums}
                 onSelectionChange={(selection, options) => {
                   setChartSelection(selection);
                   if (selection && !options?.preserveInspector) {
@@ -3129,6 +3148,7 @@ function App() {
                 onSaveThreshold={(value) => void savePlayedThreshold(value)}
                 onSelectTrack={selectTrack}
                 onPlayTrack={playHistoryTrack}
+                onOpenArtistAlbums={openArtistAlbums}
                 onLoadMore={() => void loadMoreHistory()}
                 onRefresh={() => setHistoryReloadToken((value) => value + 1)}
               />
@@ -3281,6 +3301,7 @@ function App() {
                 onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                 onSelectAlbum={selectAlbum}
                 onSelectArtist={(artist) => { if (artist) focusArtist(artist, "albums"); else setSelectedArtistId(null); }}
+                onOpenArtistAlbums={openArtistAlbums}
                 onLoadMore={() => void loadMoreExplorerResults()}
                 onRetry={() => {
                   if (selectedAlbumId && albumDetailState === "error") {
@@ -3354,6 +3375,7 @@ function App() {
               busy={chartPlaybackBusy || Boolean(selectedTrack && inlineSavingKeys.has(selectedTrack.trackKey))}
               onPlay={() => void playChartSelection()}
               onOpenLibrary={openChartSelectionInLibrary}
+              onOpenArtistAlbums={openArtistAlbums}
               onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
               onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
             />
@@ -3364,20 +3386,21 @@ function App() {
               album={explorerAlbumInspectorContext.album}
               busy={albumDetailState === "loading"}
               onPlay={(album) => void playExplorerAlbum(album)}
+              onOpenArtistAlbums={openArtistAlbums}
               chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
             />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
           <div className="inspector-scroll">
-            <PublisherAlbumInspector album={selectedPublisherAlbum} busy={publisherAlbumBusy} onPlay={(album) => void playPublisherAlbum(album)} />
+            <PublisherAlbumInspector album={selectedPublisherAlbum} busy={publisherAlbumBusy} onPlay={(album) => void playPublisherAlbum(album)} onOpenArtistAlbums={openArtistAlbums} />
           </div>
         ) : inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
           <div className="inspector-scroll">
-            <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} />
+            <RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} onOpenArtistAlbums={openArtistAlbums} />
           </div>
         ) : inspectorView === "album" && activeNav === "Years" && selectedYearAlbum ? (
           <div className="inspector-scroll">
-            <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} chartRanks={catalogChartRanks.albums[selectedYearAlbum.id]} />
+            <YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} onOpenArtistAlbums={openArtistAlbums} chartRanks={catalogChartRanks.albums[selectedYearAlbum.id]} />
           </div>
         ) : inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">
@@ -3400,7 +3423,7 @@ function App() {
           <div className="inspector-scroll">
             <Artwork track={inspectorTrack} size="large" />
             <div className="track-hero-copy">
-              <div><h2>{inspectorTrack.title}</h2><p>{displayTrackArtist(inspectorTrack)}</p><span>{inspectorTrack.album}</span></div>
+              <div><h2>{inspectorTrack.title}</h2><p><ArtistSmartLink artist={displayTrackArtist(inspectorTrack)} onOpen={openArtistAlbums} /></p><span>{inspectorTrack.album}</span></div>
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
@@ -3456,6 +3479,7 @@ function App() {
           ...tagValuesForTrack(track),
           loveState,
         })}
+        onOpenArtistAlbums={openArtistAlbums}
         onOpenAudioSettings={() => openSettings("audio")}
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />

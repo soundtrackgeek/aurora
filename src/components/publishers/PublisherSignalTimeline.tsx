@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { memo, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Artwork } from "../Artwork";
+import { ArtistSmartLink } from "../ArtistSmartLink";
 import { formatCount, formatDuration, type Track } from "../../library";
 import {
   clearPublisherLogoOverride,
@@ -410,11 +411,11 @@ export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
   );
 }
 
-export function PublisherAlbumInspector({ album, busy, onPlay }: { album: PublisherAlbum; busy: boolean; onPlay: (album: PublisherAlbum) => void }) {
+export function PublisherAlbumInspector({ album, busy, onPlay, onOpenArtistAlbums }: { album: PublisherAlbum; busy: boolean; onPlay: (album: PublisherAlbum) => void; onOpenArtistAlbums: (artist: string) => void }) {
   return (
     <div className="publisher-album-inspector">
       <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
-      <div className="publisher-album-inspector__heading"><div><h2>{album.title}</h2><p>{album.artist}</p></div>{album.lovedTracks > 0 ? <span><Star aria-hidden="true" /> {album.rating?.toFixed(1) ?? "—"}</span> : null}</div>
+      <div className="publisher-album-inspector__heading"><div><h2>{album.title}</h2><p><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} /></p></div>{album.lovedTracks > 0 ? <span><Star aria-hidden="true" /> {album.rating?.toFixed(1) ?? "—"}</span> : null}</div>
       <dl className="metadata-list">
         <div><dt>Original Year</dt><dd>{album.originalYear ?? "—"}</dd></div>
         <div><dt>Release Year</dt><dd>{album.releaseYear ?? "—"}</dd></div>

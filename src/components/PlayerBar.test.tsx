@@ -74,6 +74,7 @@ function props(positionSeconds = 60) {
     onRepeat: vi.fn(),
     onRatingChange: vi.fn(),
     onLoveChange: vi.fn(),
+    onOpenArtistAlbums: vi.fn(),
     onOpenAudioSettings: vi.fn(),
     onToggleQueue: vi.fn(),
   };
@@ -90,8 +91,8 @@ describe("PlayerBar", () => {
     };
     render(<PlayerBar {...props()} playback={snapshot(60, soundtrackTrack)} />);
 
-    expect(screen.getByText("Coldplay · Unbroken")).toBeInTheDocument();
-    expect(screen.queryByText("Alexandre Desplat · Unbroken")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show albums by Coldplay" }).parentElement).toHaveTextContent("Coldplay · Unbroken");
+    expect(screen.queryByRole("button", { name: "Show albums by Alexandre Desplat" })).not.toBeInTheDocument();
   });
 
   it("toggles total time to a live remaining-time readout", () => {

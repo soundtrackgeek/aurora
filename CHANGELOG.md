@@ -4,6 +4,16 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.10] - 2026-08-31
+
+### Added
+
+- Artist names across Albums, album and track inspectors, the player, Listening Report, History, and Charts are now smart links. Activating one opens Albums with an exact `aartist:"Artist Name"` search while preserving row and playback actions.
+
+### Fixed
+
+- Exact catalog searches now support artist names containing quotation marks by accepting doubled quotes inside quoted values.
+
 ## [0.24.9] - 2026-08-31
 
 ### Fixed

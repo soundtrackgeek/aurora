@@ -16,6 +16,7 @@ import type { PlaybackSnapshot, RepeatMode } from "../playback";
 import type { LoveState } from "../tags";
 import { loadTrackWaveform, type TrackWaveform } from "../waveform";
 import { Artwork } from "./Artwork";
+import { ArtistSmartLink } from "./ArtistSmartLink";
 import { InlineLoveControl, InlineRatingControl } from "./InlineTagControls";
 import { WaveformTimeline } from "./WaveformTimeline";
 
@@ -51,6 +52,7 @@ export function PlayerBar({
   onRepeat,
   onRatingChange,
   onLoveChange,
+  onOpenArtistAlbums,
   onOpenAudioSettings,
   onToggleQueue,
 }: {
@@ -69,6 +71,7 @@ export function PlayerBar({
   onRepeat: (mode: RepeatMode) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, loveState: LoveState) => void;
+  onOpenArtistAlbums: (artist: string) => void;
   onOpenAudioSettings: () => void;
   onToggleQueue: () => void;
 }) {
@@ -193,7 +196,7 @@ export function PlayerBar({
                   onLoveChange={(loveState) => onLoveChange(track, loveState)}
                 />
               </div>
-              <span>{displayTrackArtist(track)} · {track.album}</span>
+              <span><ArtistSmartLink artist={displayTrackArtist(track)} onOpen={onOpenArtistAlbums} /> · {track.album}</span>
               <div className="now-playing__details">
                 <div className="now-playing__technical">
                   <small>{technicalSummary(waveform, waveformFailed)}</small>

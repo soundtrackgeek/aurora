@@ -107,6 +107,7 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
     onSelectTrack: vi.fn(),
     onSelectAlbum: vi.fn(),
     onSelectArtist: vi.fn(),
+    onOpenArtistAlbums: vi.fn(),
     ...overrides,
   };
 }

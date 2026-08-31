@@ -1308,12 +1308,15 @@ pub fn run() {
         .register_uri_scheme_protocol("aurora-cover", |context, request| {
             artwork::handle_cover_request(context.app_handle(), &request)
         })
-        .register_asynchronous_uri_scheme_protocol("aurora-artist", |context, request, responder| {
-            let app = context.app_handle().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                responder.respond(lastfm::handle_artist_image_request(&app, &request));
-            });
-        })
+        .register_asynchronous_uri_scheme_protocol(
+            "aurora-artist",
+            |context, request, responder| {
+                let app = context.app_handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(lastfm::handle_artist_image_request(&app, &request));
+                });
+            },
+        )
         .setup(|app| {
             #[cfg(debug_assertions)]
             {

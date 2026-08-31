@@ -12,6 +12,7 @@ describe("ListeningReport", () => {
         deviceId={null}
         onDeviceChange={vi.fn()}
         onPlayTrack={vi.fn()}
+        onOpenArtistAlbums={vi.fn()}
       />,
     );
 

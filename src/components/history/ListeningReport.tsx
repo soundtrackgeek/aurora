@@ -23,6 +23,7 @@ import {
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistPortrait } from "../ArtistPortrait";
+import { ArtistSmartLink } from "../ArtistSmartLink";
 import "./ListeningReport.css";
 
 type ReportPeriod = "7" | "30" | "90" | "all";
@@ -39,6 +40,7 @@ interface ListeningReportProps {
   deviceId: string | null;
   onDeviceChange: (value: string | null) => void;
   onPlayTrack: (track: Track) => void;
+  onOpenArtistAlbums: (artist: string) => void;
 }
 
 const DAY_MS = 86_400_000;
@@ -246,20 +248,20 @@ function RadarChart({ report }: { report: HistoryReport }) {
   );
 }
 
-function TopMusic({ report, onPlayTrack }: { report: HistoryReport; onPlayTrack: (track: Track) => void }) {
+function TopMusic({ report, onPlayTrack, onOpenArtistAlbums }: { report: HistoryReport; onPlayTrack: (track: Track) => void; onOpenArtistAlbums: (artist: string) => void }) {
   return (
     <section className="report-section report-top" aria-labelledby="report-top-title">
       <div className="report-heading"><div><h2 id="report-top-title">Top music</h2><p>The artists, albums, and tracks that shaped this period.</p></div></div>
       <div className="report-top__columns">
-        <article><h3><UserRound aria-hidden="true" /> Artists</h3>{report.topArtists.map((item, index) => <div className="report-rank" key={item.artist}><strong>{index + 1}</strong><ArtistPortrait artist={item.artist} className="report-artist-mark" eager /><span><b>{item.artist}</b><small>{durationLabel(item.listenedSeconds)}</small></span><em>{item.plays} plays</em></div>)}</article>
-        <article><h3><Disc3 aria-hidden="true" /> Albums</h3>{report.topAlbums.map((item, index) => <div className="report-rank" key={`${item.artist}-${item.album}`}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback"><Album aria-hidden="true" /></span>}<span><b>{item.album}</b><small>{item.artist}</small></span><em>{item.plays} plays</em></div>)}</article>
-        <article><h3><Music2 aria-hidden="true" /> Tracks</h3>{report.topTracks.map((item, index) => <div className="report-rank" key={item.trackKey}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback report-artwork-fallback--track"><Music2 aria-hidden="true" /></span>}<span><b>{item.title}</b><small>{item.artist}</small></span><em>{item.plays} plays</em><button type="button" disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)} aria-label={`Play ${item.title}`}><Play aria-hidden="true" /></button></div>)}</article>
+        <article><h3><UserRound aria-hidden="true" /> Artists</h3>{report.topArtists.map((item, index) => <div className="report-rank" key={item.artist}><strong>{index + 1}</strong><ArtistPortrait artist={item.artist} className="report-artist-mark" eager /><span><b><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} /></b><small>{durationLabel(item.listenedSeconds)}</small></span><em>{item.plays} plays</em></div>)}</article>
+        <article><h3><Disc3 aria-hidden="true" /> Albums</h3>{report.topAlbums.map((item, index) => <div className="report-rank" key={`${item.artist}-${item.album}`}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback"><Album aria-hidden="true" /></span>}<span><b>{item.album}</b><small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} /></small></span><em>{item.plays} plays</em></div>)}</article>
+        <article><h3><Music2 aria-hidden="true" /> Tracks</h3>{report.topTracks.map((item, index) => <div className="report-rank" key={item.trackKey}><strong>{index + 1}</strong>{item.track ? <Artwork track={item.track} size="small" /> : <span className="report-artwork-fallback report-artwork-fallback--track"><Music2 aria-hidden="true" /></span>}<span><b>{item.title}</b><small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} /></small></span><em>{item.plays} plays</em><button type="button" disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)} aria-label={`Play ${item.title}`}><Play aria-hidden="true" /></button></div>)}</article>
       </div>
     </section>
   );
 }
 
-export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack }: ListeningReportProps) {
+export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack, onOpenArtistAlbums }: ListeningReportProps) {
   const [period, setPeriod] = useState<ReportPeriod>("7");
   const [offset, setOffset] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
@@ -307,7 +309,7 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
         </section>
 
         {report.summary.sessions === 0 ? <section className="report-empty"><Headphones aria-hidden="true" /><h2>No listening in this period</h2><p>Move to another period or start listening to build your next report.</p></section> : <>
-          <TopMusic report={report} onPlayTrack={onPlayTrack} />
+          <TopMusic report={report} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
           <section className="report-analysis">
             <article><div className="report-heading"><div><h2>Listening rhythm</h2><p>When your registered plays happen across 24 hours.</p></div></div><ListeningClock hourly={report.hourly} /></article>
             <article><div className="report-heading"><div><h2>Listening fingerprint</h2><p>Five signals derived from this period—no global score.</p></div></div><RadarChart report={report} /></article>

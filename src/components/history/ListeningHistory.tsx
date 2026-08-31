@@ -23,6 +23,7 @@ import type {
 } from "../../history";
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
+import { ArtistSmartLink } from "../ArtistSmartLink";
 import "./ListeningHistory.css";
 
 const ListeningReport = lazy(() => import("./ListeningReport").then((module) => ({ default: module.ListeningReport })));
@@ -48,6 +49,7 @@ interface ListeningHistoryProps {
   onSaveThreshold: (value: number) => void;
   onSelectTrack: (track: Track) => void;
   onPlayTrack: (track: Track) => void;
+  onOpenArtistAlbums: (artist: string) => void;
   onLoadMore: () => void;
   onRefresh: () => void;
 }
@@ -99,10 +101,11 @@ function outcomeIcon(item: HistoryItem) {
   return <TimerReset aria-hidden="true" />;
 }
 
-function HistoryRow({ item, onSelectTrack, onPlayTrack }: {
+function HistoryRow({ item, onSelectTrack, onPlayTrack, onOpenArtistAlbums }: {
   item: HistoryItem;
   onSelectTrack: (track: Track) => void;
   onPlayTrack: (track: Track) => void;
+  onOpenArtistAlbums: (artist: string) => void;
 }) {
   return (
     <article className={`history-row history-row--${item.outcome}${item.registeredPlay ? " is-play" : ""}`}>
@@ -116,7 +119,7 @@ function HistoryRow({ item, onSelectTrack, onPlayTrack }: {
         {item.track ? <Artwork track={item.track} size="small" /> : <span className="history-row__missing"><ListMusic aria-hidden="true" /></span>}
         <span className="history-row__copy">
           <strong>{item.title}</strong>
-          <small>{item.artist} <span>·</span> {item.album}</small>
+          <small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} nested /> <span>·</span> {item.album}</small>
         </span>
       </button>
       <span className="history-row__time"><strong>{timeLabel(item.startedAtMs)}</strong><small>{listenedLabel(item.listenedSeconds)}</small></span>
@@ -177,6 +180,7 @@ export function ListeningHistory({
   onSaveThreshold,
   onSelectTrack,
   onPlayTrack,
+  onOpenArtistAlbums,
   onLoadMore,
   onRefresh,
 }: ListeningHistoryProps) {
@@ -200,7 +204,7 @@ export function ListeningHistory({
       </nav>
       {activePage === "report" ? (
         <Suspense fallback={<section className="history-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Opening listening report…</p></section>}>
-          <ListeningReport devices={page?.devices ?? []} deviceId={deviceId} onDeviceChange={onDeviceChange} onPlayTrack={onPlayTrack} />
+          <ListeningReport devices={page?.devices ?? []} deviceId={deviceId} onDeviceChange={onDeviceChange} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
         </Suspense>
       ) : (
     <section className="history-view" aria-labelledby="history-title">
@@ -239,7 +243,7 @@ export function ListeningHistory({
               <button type="button" key={item.trackKey} disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)}>
                 <span className="history-top__rank">{String(index + 1).padStart(2, "0")}</span>
                 {item.track ? <Artwork track={item.track} size="small" /> : <span className="history-row__missing"><ListMusic aria-hidden="true" /></span>}
-                <span><strong>{item.title}</strong><small>{item.artist} · {item.plays} {item.plays === 1 ? "play" : "plays"}</small></span>
+                <span><strong>{item.title}</strong><small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} nested /> · {item.plays} {item.plays === 1 ? "play" : "plays"}</small></span>
                 <Play aria-hidden="true" />
               </button>
             ))}
@@ -263,7 +267,7 @@ export function ListeningHistory({
         {loadState === "loading" && !page ? <div className="history-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Combining listening history…</p></div>
           : loadState === "error" ? <div className="history-state history-state--error" role="alert"><CloudOff aria-hidden="true" /><h3>Listening history is unavailable.</h3><p>{errorMessage}</p><button type="button" onClick={onRefresh}><RefreshCw aria-hidden="true" /> Try again</button></div>
             : grouped.length === 0 ? <div className="history-state"><CalendarDays aria-hidden="true" /><h3>No sessions match these filters.</h3><p>Play a track for {page?.playThresholdSeconds ?? 30} seconds to register your first play.</p></div>
-              : <div className="history-days">{grouped.map((group) => <section key={group.key} className="history-day" aria-labelledby={`history-day-${group.key}`}><div className="history-day__label"><span /><h3 id={`history-day-${group.key}`}>{group.label}</h3><small>{group.items.length} {group.items.length === 1 ? "session" : "sessions"}</small></div><div>{group.items.map((item) => <HistoryRow key={item.sessionId} item={item} onSelectTrack={onSelectTrack} onPlayTrack={onPlayTrack} />)}</div></section>)}</div>}
+              : <div className="history-days">{grouped.map((group) => <section key={group.key} className="history-day" aria-labelledby={`history-day-${group.key}`}><div className="history-day__label"><span /><h3 id={`history-day-${group.key}`}>{group.label}</h3><small>{group.items.length} {group.items.length === 1 ? "session" : "sessions"}</small></div><div>{group.items.map((item) => <HistoryRow key={item.sessionId} item={item} onSelectTrack={onSelectTrack} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />)}</div></section>)}</div>}
         {page?.nextCursor && <div className="history-load-more"><button type="button" disabled={isLoadingMore} onClick={onLoadMore}>{isLoadingMore ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Clock3 aria-hidden="true" />}{isLoadingMore ? "Loading…" : "Load earlier sessions"}</button></div>}
       </section>
     </section>

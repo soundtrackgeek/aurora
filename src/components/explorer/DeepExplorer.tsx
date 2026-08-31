@@ -31,6 +31,7 @@ import {
 } from "react";
 import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
+import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
 import { libraryIntakeAdapter, type LibraryIntakePreview } from "../../ingest";
 import { loadInboxSettings } from "../../inbox";
@@ -130,6 +131,7 @@ export interface DeepExplorerProps {
   onActivateTrack?: (track: Track) => void;
   onSelectAlbum: (album: ExplorerAlbum | null) => void;
   onSelectArtist: (artist: Artist | null) => void;
+  onOpenArtistAlbums: (artist: string) => void;
   onLoadMore?: () => void;
   onRetry?: () => void;
   onClearFilters?: () => void;
@@ -618,6 +620,7 @@ function AlbumGrid({
   detailAlbumId,
   detail,
   chartRanks,
+  onOpenArtistAlbums,
 }: {
   albums: readonly ExplorerAlbum[];
   selectedAlbumId: string | null;
@@ -627,6 +630,7 @@ function AlbumGrid({
   detailAlbumId: string | null;
   detail: ReactNode;
   chartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  onOpenArtistAlbums: (artist: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [columnCount, setColumnCount] = useState(1);
@@ -691,7 +695,7 @@ function AlbumGrid({
                   <strong>{album.title}</strong>
                   <span className="deep-explorer-album__artist">
                     <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
-                    <span>{album.artist}</span>
+                    <ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested />
                   </span>
                   <small className="deep-explorer-album__metadata">
                     {album.originalYear ?? "Year unknown"} <span aria-hidden="true">—</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
@@ -739,6 +743,7 @@ function AlbumDetail({
   onAlbumMovedToInbox,
   onSelectionChange,
   trackChartRanks,
+  onOpenArtistAlbums,
   albumChartRanks,
 }: {
   album: ExplorerAlbum;
@@ -760,6 +765,7 @@ function AlbumDetail({
   onAlbumMovedToInbox?: () => boolean | void | Promise<boolean | void>;
   onSelectionChange?: (selection: ExplorerSelection) => void;
   trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  onOpenArtistAlbums: (artist: string) => void;
   albumChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
 }) {
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
@@ -872,7 +878,7 @@ function AlbumDetail({
           <h3>{album.title}</h3>
           <p className="deep-explorer-album-detail__artist">
             <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
-            <span>{album.artist}</span>
+            <ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} />
           </p>
           <span className="deep-explorer-album-publisher">
             {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
@@ -1063,6 +1069,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onActivateTrack,
     onSelectAlbum,
     onSelectArtist,
+    onOpenArtistAlbums,
     onLoadMore,
     onRetry,
     onClearFilters,
@@ -1291,6 +1298,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
             onSelectionGesture={selectAlbums}
             detailAlbumId={detailAlbum?.id ?? null}
             chartRanks={albumChartRanks}
+            onOpenArtistAlbums={onOpenArtistAlbums}
             detail={detailAlbum ? (
               <AlbumDetail
                 key={detailAlbum.id}
@@ -1313,6 +1321,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                 onAlbumMovedToInbox={onAlbumMovedToInbox}
                 onSelectionChange={onSelectionChange}
                 trackChartRanks={trackChartRanks}
+                onOpenArtistAlbums={onOpenArtistAlbums}
                 albumChartRanks={albumChartRanks}
               />
             ) : null}

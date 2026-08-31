@@ -8,8 +8,9 @@ function renderStudio() {
   const onSelectionChange = vi.fn();
   const onSelectTrack = vi.fn();
   const onPlayQueue = vi.fn(async () => true);
-  render(<ChartStudio onSelectionChange={onSelectionChange} onSelectTrack={onSelectTrack} onPlayQueue={onPlayQueue} />);
-  return { onSelectionChange, onSelectTrack, onPlayQueue };
+  const onOpenArtistAlbums = vi.fn();
+  render(<ChartStudio onSelectionChange={onSelectionChange} onSelectTrack={onSelectTrack} onPlayQueue={onPlayQueue} onOpenArtistAlbums={onOpenArtistAlbums} />);
+  return { onSelectionChange, onSelectTrack, onPlayQueue, onOpenArtistAlbums };
 }
 
 describe("ChartStudio", () => {
@@ -94,6 +95,7 @@ describe("ChartStudio", () => {
         onSelectionChange={onSelectionChange}
         onSelectTrack={onSelectTrack}
         onPlayQueue={onPlayQueue}
+        onOpenArtistAlbums={vi.fn()}
       />,
     );
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });
@@ -114,6 +116,7 @@ describe("ChartStudio", () => {
         onSelectionChange={onSelectionChange}
         onSelectTrack={onSelectTrack}
         onPlayQueue={onPlayQueue}
+        onOpenArtistAlbums={vi.fn()}
       />,
     );
 

@@ -57,6 +57,7 @@ function renderHistory(items: HistoryItem[] = [historyItem()]) {
   const onPlayTrack = vi.fn<(track: Track) => void>();
   const onSelectTrack = vi.fn<(track: Track) => void>();
   const onOutcomeChange = vi.fn();
+  const onOpenArtistAlbums = vi.fn();
   render(
     <ListeningHistory
       page={historyPage(items)}
@@ -76,12 +77,13 @@ function renderHistory(items: HistoryItem[] = [historyItem()]) {
       onSaveThreshold={onSaveThreshold}
       onSelectTrack={onSelectTrack}
       onPlayTrack={onPlayTrack}
+      onOpenArtistAlbums={onOpenArtistAlbums}
       onLoadMore={() => undefined}
       onRefresh={() => undefined}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "History" }));
-  return { onSaveThreshold, onPlayTrack, onSelectTrack, onOutcomeChange };
+  return { onSaveThreshold, onPlayTrack, onSelectTrack, onOutcomeChange, onOpenArtistAlbums };
 }
 
 describe("ListeningHistory", () => {
@@ -105,5 +107,12 @@ describe("ListeningHistory", () => {
     fireEvent.click(screen.getByRole("button", { name: `Inspect ${track.title}` }));
     expect(onSelectTrack).toHaveBeenCalledWith(track);
     expect(screen.getByRole("button", { name: "Play Missing track again" })).toBeDisabled();
+  });
+
+  it("opens an artist's albums from the listening timeline", () => {
+    const { onOpenArtistAlbums } = renderHistory();
+    const artistLinks = screen.getAllByRole("link", { name: `Show albums by ${track.artist}` });
+    fireEvent.click(artistLinks[artistLinks.length - 1]);
+    expect(onOpenArtistAlbums).toHaveBeenCalledWith(track.artist);
   });
 });

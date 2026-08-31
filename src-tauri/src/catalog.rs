@@ -877,7 +877,7 @@ fn exact_search_value(value: &str) -> Result<Option<String>, String> {
     if exact.is_empty() {
         return Err("Exact search quotes cannot be empty.".to_owned());
     }
-    Ok(Some(exact.to_owned()))
+    Ok(Some(exact.replace("\"\"", "\"")))
 }
 
 pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String> {
@@ -2526,6 +2526,13 @@ mod tests {
         assert_eq!(
             exact.groups[0].alternatives[0].matcher,
             CatalogSearchMatch::Exact("scores".to_owned())
+        );
+
+        let quoted_artist = parse_catalog_search("aartist:\"\"\"Weird Al\"\" Yankovic\"")
+            .expect("quoted exact artist search");
+        assert_eq!(
+            quoted_artist.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::Exact("\"Weird Al\" Yankovic".to_owned())
         );
     }
 

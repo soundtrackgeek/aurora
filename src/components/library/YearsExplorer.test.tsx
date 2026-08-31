@@ -109,7 +109,7 @@ describe("YearsExplorer", () => {
 describe("YearAlbumInspector", () => {
   it("shows both dates and plays the selected edition", () => {
     const onPlay = vi.fn();
-    render(<YearAlbumInspector album={album} busy={false} onPlay={onPlay} />);
+    render(<YearAlbumInspector album={album} busy={false} onPlay={onPlay} onOpenArtistAlbums={vi.fn()} />);
     expect(screen.getByText("Original Year").nextSibling).toHaveTextContent("1982");
     expect(screen.getByText("Release Year").nextSibling).toHaveTextContent("2025");
     expect(screen.getByText("Format").nextSibling).toHaveTextContent("MP3");

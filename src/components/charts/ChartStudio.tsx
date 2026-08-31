@@ -39,6 +39,7 @@ import {
 import type { Track } from "../../library";
 import type { LoveState } from "../../tags";
 import { Artwork } from "../Artwork";
+import { ArtistSmartLink } from "../ArtistSmartLink";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import "./ChartStudio.css";
 
@@ -61,6 +62,7 @@ interface ChartStudioProps {
   onSelectionChange: (selection: ChartSelectionContext | null, options?: ChartSelectionOptions) => void;
   onSelectTrack: (track: Track, options?: ChartSelectionOptions) => void;
   onPlayQueue: (tracks: Track[]) => Promise<boolean>;
+  onOpenArtistAlbums: (artist: string) => void;
 }
 
 const sourceOptions: Record<ChartKind, ReadonlyArray<{ source: ChartSource; label: string; annual?: boolean }>> = {
@@ -179,7 +181,7 @@ function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: str
   </div>;
 }
 
-export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue }: ChartStudioProps) {
+export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue, onOpenArtistAlbums }: ChartStudioProps) {
   const [request, setRequest] = useState(initialRequest);
   const [page, setPage] = useState<ChartPage | null>(null);
   const [loadState, setLoadState] = useState<ChartLoadState>("loading");
@@ -390,7 +392,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             const selected = selectedEntry?.artistKey === entry.artistKey && selectedEntry.titleKey === entry.titleKey;
             return <div className={`chart-row${entry.position <= 3 ? " is-podium" : ""}${selected ? " is-selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} onClick={() => selectEntry(entry, page)} onDoubleClick={() => entry.matchedTrackId && void loadChartEntryTrack(entry.matchedTrackId).then((track) => callbacksRef.current.onPlayQueue([track]))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectEntry(entry, page); } }} key={`${entry.artistKey}:${entry.titleKey}`}>
               <strong className="chart-row__rank">{entry.position}</strong>
-              <div className="chart-row__identity"><Artwork track={entryAsTrack(entry)} decorative={false} /><span><strong>{entry.title}</strong><small>{entry.artist}</small></span></div>
+              <div className="chart-row__identity"><Artwork track={entryAsTrack(entry)} decorative={false} /><span><strong>{entry.title}</strong><small><ArtistSmartLink artist={entry.artist} onOpen={onOpenArtistAlbums} /></small></span></div>
               {movementLabel(entry)}
               <span>{page.request.scope === "week" ? entry.previousPosition ?? "—" : entry.weeksAtNumberOne}</span>
               <span>{entry.peakPosition ?? "—"}</span>
@@ -403,7 +405,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </section>
 
       {selectedEntry ? <section className="chart-comparison" aria-label={`Across the sources for ${selectedEntry.title}`}>
-        <div><h3>Across the sources</h3><p>{selectedEntry.title} by {selectedEntry.artist}</p></div>
+        <div><h3>Across the sources</h3><p>{selectedEntry.title} by <ArtistSmartLink artist={selectedEntry.artist} onOpen={onOpenArtistAlbums} /></p></div>
         <div className="chart-comparison__sources">
           {(detail?.sourceRanks ?? []).map((rank) => <div key={rank.source}><span>{rank.label}{rank.annualOnly ? <small> annual</small> : null}</span><strong>{rank.bestRank === null ? "—" : `#${rank.bestRank}`}</strong><i style={{ width: `${rank.bestRank === null ? 0 : Math.max(8, 100 - rank.bestRank)}%` }} /></div>)}
           {!detail ? <span className="chart-comparison__loading"><LoaderCircle className="is-spinning" aria-hidden="true" /> Comparing source archives…</span> : null}
@@ -421,7 +423,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             <button type="button" className="chart-score-shelf__open" onClick={() => { changeKind("albums"); changeSource("auroraScore"); }}>View full chart <ChevronRight aria-hidden="true" /></button>
           </div>
         </header>
-        <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small>{album.artist}</small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
+        <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
       </section>
     </>}
     {customOpen ? <CustomPeriodDialog initial={request.period} onClose={() => setCustomOpen(false)} onApply={applyPeriod} /> : null}
@@ -457,6 +459,7 @@ export function ChartInspector({
   busy,
   onPlay,
   onOpenLibrary,
+  onOpenArtistAlbums,
   onRatingChange,
   onLoveChange,
 }: {
@@ -465,13 +468,14 @@ export function ChartInspector({
   busy: boolean;
   onPlay: () => void;
   onOpenLibrary: () => void;
+  onOpenArtistAlbums: (artist: string) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, state: LoveState) => void;
 }) {
   const { entry, detail, pageRequest } = selection;
   return <div className="chart-inspector">
     <Artwork track={track ?? entryAsTrack(entry)} size="large" decorative={false} />
-    <div className="chart-inspector__heading"><span>#{entry.position}</span><div><h2>{entry.title}</h2><p>{entry.artist}</p></div>{track?.loved || entry.loved ? <Heart aria-label="Loved" /> : null}</div>
+    <div className="chart-inspector__heading"><span>#{entry.position}</span><div><h2>{entry.title}</h2><p><ArtistSmartLink artist={entry.artist} onOpen={onOpenArtistAlbums} /></p></div>{track?.loved || entry.loved ? <Heart aria-label="Loved" /> : null}</div>
     <dl className="metadata-list">
       <div><dt>Chart</dt><dd>{selection.chartTitle}</dd></div>
       <div><dt>{pageRequest.scope === "week" ? "Week" : "Period"}</dt><dd>{pageRequest.scope === "week" ? `${pageRequest.selectedWeek} · ${pageRequest.selectedYear}` : pageRequest.period.label}</dd></div>
