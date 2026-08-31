@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.9] - 2026-08-31
+
+### Fixed
+
+- Kept the Artists page responsive while uncached Last.fm portraits are fetched, decoded, and cached. Artist-image protocol requests now resolve asynchronously instead of blocking WebView resource handling during searches and artist selection.
+
 ## [0.24.8] - 2026-08-31
 
 ### Fixed

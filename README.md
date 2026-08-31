@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.8 shows each artist's personal play total and latest play timestamp from Aurora's listening history.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.9 keeps Artists responsive while uncached Last.fm portraits load in the background.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.8 slice
+## Current 0.24.9 slice
+
+- Artists-page portrait cache misses now use Tauri's asynchronous protocol responder. Last.fm requests, image decoding, and WebP caching no longer block WebView resource handling while a search updates or an artist is opened.
 
 - Artist rows now combine registered plays from Aurora's available device histories and show both the personal play total and latest play timestamp. Artists without a registered play retain the explicit **No play history** state.
 
