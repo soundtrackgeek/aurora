@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.11] - 2026-08-31
+
+### Fixed
+
+- Restored full-width artist names in Listening Report rows by limiting circular play-button sizing to the actual track play controls.
+
 ## [0.24.10] - 2026-08-31
 
 ### Added

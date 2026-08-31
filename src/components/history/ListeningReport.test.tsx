@@ -20,5 +20,7 @@ describe("ListeningReport", () => {
     const columns = container.querySelectorAll(".report-top__columns > article");
     expect(columns[0].querySelectorAll(".artist-portrait").length).toBeGreaterThan(0);
     expect(columns[2].querySelectorAll(".artwork").length).toBeGreaterThan(0);
+    expect(columns[0].querySelector(".artist-smart-link")?.classList.contains("report-rank__play")).toBe(false);
+    expect(columns[2].querySelector(".report-rank > .report-rank__play")).not.toBeNull();
   });
 });

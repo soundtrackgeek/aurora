@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.10 turns artist names into direct paths back to their albums.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.11 keeps Listening Report artist links readable at their natural width.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.10 slice
+## Current 0.24.11 slice
+
+- Listening Report artist links keep their full available width; circular sizing is scoped only to track play controls.
 
 - Artist names in Albums, album and track inspectors, the player, Listening Report, History, and Charts now open the Albums view with an exact `aartist:"Artist Name"` search. Smart links stop their click before the surrounding album, history, or chart row can activate, and quoted artist names remain searchable through doubled-quote escaping.
 
