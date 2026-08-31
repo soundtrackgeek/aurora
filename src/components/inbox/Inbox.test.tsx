@@ -472,7 +472,12 @@ describe("Inbox", () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
     await screen.findByRole("heading", { name: "Inbox" });
-    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    const autoTag = await waitFor(() => {
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      expect(button).toBeEnabled();
+      return button;
+    });
+    fireEvent.click(autoTag);
     await waitFor(() => expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling"));
     expect(search).toHaveBeenCalledTimes(1);
 

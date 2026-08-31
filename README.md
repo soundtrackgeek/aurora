@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.11 keeps Listening Report artist links readable at their natural width.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.12 strengthens Inbox Auto-Tagger refresh verification.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.11 slice
+## Current 0.24.12 slice
+
+- Inbox Auto-Tagger refresh coverage now opens the tagger only after the selected album action is ready, removing a runner-speed race without changing product behavior.
 
 - Listening Report artist links keep their full available width; circular sizing is scoped only to track play controls.
 

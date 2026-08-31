@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.12] - 2026-08-31
+
+### Fixed
+
+- Stabilized Inbox Auto-Tagger refresh coverage by waiting for the selected album action to become ready before opening the tagger.
+
 ## [0.24.11] - 2026-08-31
 
 ### Fixed
