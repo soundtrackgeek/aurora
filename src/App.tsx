@@ -1190,7 +1190,9 @@ function App() {
           if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
-            setAlbumDetailState("loading");
+            if (!preservingCurrentView) {
+              setAlbumDetailState("loading");
+            }
             void loadAlbumDetail(restoredAlbumId)
               .then((detail) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
@@ -3023,7 +3025,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.15</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.16</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

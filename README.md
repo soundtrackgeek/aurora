@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.15 restores each page to the exact working position you left behind.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.16 keeps an expanded album at the exact scroll position while ratings refresh its catalog data.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.15 slice
+## Current 0.24.16 slice
+
+- Rating a track inside an expanded album now keeps the existing track table rendered while Aurora refreshes catalog data, preventing the album from collapsing and preserving the exact scroll position.
 
 - Switching between Albums, History, and other destinations now preserves an independent scroll position for each page. The Albums workspace remains mounted while it is hidden, so lazy-loaded batches, expanded album details, selections, filters, and sort state return immediately instead of reloading the first 50 results.
 

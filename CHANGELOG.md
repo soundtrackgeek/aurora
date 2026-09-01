@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.16] - 2026-09-01
+
+### Fixed
+
+- Kept expanded album details rendered during background catalog refreshes after rating changes, preserving the exact album scroll position instead of collapsing the track table and jumping upward.
+
 ## [0.24.15] - 2026-09-01
 
 ### Fixed
