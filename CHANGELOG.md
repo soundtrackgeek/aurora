@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.14] - 2026-09-01
+
+### Fixed
+
+- Cleared the strict Rust Clippy check for the genre trends report test fixture so CI can complete the release workflow.
+
 ## [0.24.13] - 2026-09-01
 
 ### Added

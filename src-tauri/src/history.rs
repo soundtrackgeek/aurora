@@ -2657,7 +2657,7 @@ mod tests {
             report_row(9, Some("Classical"), day),
             report_row(10, None, day),
         ];
-        let previous = vec![
+        let previous = [
             report_row(11, Some("ELECTRONIC"), day - 86_400_000),
             report_row(12, Some("Ambient"), day - 86_400_000),
             report_row(13, Some("Ambient"), day - 82_800_000),
