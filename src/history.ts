@@ -124,6 +124,13 @@ export interface HistoryReportDecade {
   plays: number;
 }
 
+export interface HistoryReportGenre {
+  genre: string;
+  plays: number;
+  previousPlays: number;
+  daily: HistoryReportBucket[];
+}
+
 export interface HistoryReport {
   summary: HistoryReportSummary;
   previousSummary: HistoryReportSummary | null;
@@ -135,6 +142,8 @@ export interface HistoryReport {
   topTracks: HistoryTopTrack[];
   discovery: HistoryReportDiscovery;
   decades: HistoryReportDecade[];
+  genreTaggedPlays: number;
+  genres: HistoryReportGenre[];
 }
 
 export interface TrackHistoryInsight {
@@ -284,6 +293,47 @@ function reportSummary(items: HistoryItem[], timezoneOffsetMinutes: number): His
   };
 }
 
+function previewReportGenres(
+  currentPlays: HistoryItem[],
+  previousPlays: HistoryItem[],
+  timezoneOffsetMinutes: number,
+): { genreTaggedPlays: number; genres: HistoryReportGenre[] } {
+  const aggregates = new Map<string, { genre: string; plays: number; listenedSeconds: number; daily: Map<number, number> }>();
+  for (const item of currentPlays) {
+    const genre = item.genre?.trim();
+    if (!genre) continue;
+    const key = genre.toLocaleLowerCase();
+    const aggregate = aggregates.get(key) ?? { genre, plays: 0, listenedSeconds: 0, daily: new Map<number, number>() };
+    aggregate.plays += 1;
+    aggregate.listenedSeconds += item.listenedSeconds;
+    const day = localDayStart(item.startedAtMs, timezoneOffsetMinutes);
+    aggregate.daily.set(day, (aggregate.daily.get(day) ?? 0) + 1);
+    aggregates.set(key, aggregate);
+  }
+  const previousCounts = new Map<string, number>();
+  for (const item of previousPlays) {
+    const genre = item.genre?.trim();
+    if (!genre) continue;
+    const key = genre.toLocaleLowerCase();
+    previousCounts.set(key, (previousCounts.get(key) ?? 0) + 1);
+  }
+  const genres = [...aggregates.values()]
+    .sort((left, right) => right.plays - left.plays || right.listenedSeconds - left.listenedSeconds || left.genre.localeCompare(right.genre))
+    .slice(0, 5)
+    .map((aggregate) => ({
+      genre: aggregate.genre,
+      plays: aggregate.plays,
+      previousPlays: previousCounts.get(aggregate.genre.toLocaleLowerCase()) ?? 0,
+      daily: [...aggregate.daily]
+        .map(([startMs, plays]) => ({ startMs, plays }))
+        .sort((left, right) => left.startMs - right.startMs),
+    }));
+  return {
+    genreTaggedPlays: [...aggregates.values()].reduce((total, aggregate) => total + aggregate.plays, 0),
+    genres,
+  };
+}
+
 function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): HistoryReport {
   const all = previewItems(tracks).filter((item) => !request.deviceId || item.deviceId === request.deviceId);
   const current = all.filter((item) => inReportRange(item, request.startedAfterMs, request.startedBeforeMs));
@@ -291,6 +341,7 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
     ? []
     : all.filter((item) => inReportRange(item, request.previousStartedAfterMs, request.previousStartedBeforeMs));
   const plays = current.filter((item) => item.registeredPlay);
+  const previousPlays = previous.filter((item) => item.registeredPlay);
   const dailyMap = new Map<number, number>();
   const previousDailyMap = new Map<number, number>();
   const hourly = Array.from({ length: 24 }, () => 0);
@@ -335,6 +386,7 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
     const label = year ? `${Math.floor(year / 10) * 10}s` : "Unknown";
     decades.set(label, (decades.get(label) ?? 0) + 1);
   }
+  const genreReport = previewReportGenres(plays, previousPlays, request.timezoneOffsetMinutes);
   return {
     summary: reportSummary(current, request.timezoneOffsetMinutes),
     previousSummary: request.previousStartedAfterMs === undefined ? null : reportSummary(previous, request.timezoneOffsetMinutes),
@@ -353,6 +405,7 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
       totalTracks: new Set(plays.map((item) => item.trackKey)).size,
     },
     decades: [...decades].map(([decade, count]) => ({ decade, plays: count })).sort((a, b) => a.decade.localeCompare(b.decade)),
+    ...genreReport,
   };
 }
 

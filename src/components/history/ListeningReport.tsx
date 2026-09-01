@@ -6,11 +6,13 @@ import {
   Clock3,
   Disc3,
   Headphones,
+  Info,
   Monitor,
   Music2,
   Play,
   RefreshCw,
   Sparkles,
+  TrendingUp,
   UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -112,10 +114,12 @@ function aggregateBuckets(
   values: HistoryReportBucket[],
   period: ReportPeriod,
   range: ReturnType<typeof reportRange>,
+  allTimeStartMs?: number,
 ): Array<{ label: string; plays: number }> {
-  if (values.length === 0) return [];
+  const firstStartMs = allTimeStartMs ?? values[0]?.startMs;
+  if (period === "all" && firstStartMs === undefined) return [];
   const start = period === "all" || range.startedAfterMs === undefined
-    ? startOfLocalDay(values[0].startMs)
+    ? startOfLocalDay(firstStartMs ?? range.startedBeforeMs)
     : range.startedAfterMs;
   const end = (range.startedBeforeMs ?? Date.now()) + 1;
   const totalDays = Math.max(1, Math.ceil((end - start) / DAY_MS));
@@ -261,6 +265,104 @@ function TopMusic({ report, onPlayTrack, onOpenArtistAlbums }: { report: History
   );
 }
 
+function sparklinePaths(values: number[], width = 520, height = 74): { line: string; area: string } {
+  const padding = 7;
+  const max = Math.max(1, ...values);
+  const points = values.map((value, index) => ({
+    x: values.length === 1 ? width / 2 : (index / (values.length - 1)) * width,
+    y: height - padding - (value / max) * (height - padding * 2),
+  }));
+  if (points.length === 0) return { line: "", area: "" };
+  let line = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const midpoint = (previous.x + current.x) / 2;
+    line += ` C ${midpoint.toFixed(2)} ${previous.y.toFixed(2)}, ${midpoint.toFixed(2)} ${current.y.toFixed(2)}, ${current.x.toFixed(2)} ${current.y.toFixed(2)}`;
+  }
+  return {
+    line,
+    area: `${line} L ${width} ${height} L 0 ${height} Z`,
+  };
+}
+
+function GenreSparkline({ genre, values }: { genre: string; values: number[] }) {
+  const paths = sparklinePaths(values);
+  return (
+    <svg className="report-genres__sparkline" viewBox="0 0 520 74" preserveAspectRatio="none" role="img" aria-label={`${genre} registered plays over this period: ${values.join(", ")}`}>
+      <title>{genre} registered plays over this period</title>
+      <path className="report-genres__area" d={paths.area} />
+      <path className="report-genres__line" d={paths.line} />
+    </svg>
+  );
+}
+
+function GenreTrends({ report, period, range }: {
+  report: HistoryReport;
+  period: ReportPeriod;
+  range: ReturnType<typeof reportRange>;
+}) {
+  const allTimeStartMs = report.daily[0]?.startMs;
+  const timeline = aggregateBuckets(report.daily, period, range, allTimeStartMs);
+  const previousTotal = report.previousSummary?.plays;
+  const rows = report.genres.map((genre, index) => {
+    const share = (genre.plays / Math.max(1, report.summary.plays)) * 100;
+    const previousShare = previousTotal && previousTotal > 0
+      ? (genre.previousPlays / previousTotal) * 100
+      : null;
+    const change = previousShare === null ? null : Math.round(share - previousShare);
+    return {
+      ...genre,
+      index,
+      share: Math.round(share),
+      change,
+      isNew: report.previousSummary !== null && previousTotal === 0,
+      buckets: aggregateBuckets(genre.daily, period, range, allTimeStartMs),
+    };
+  });
+  const fastestGrowing = rows.reduce<(typeof rows)[number] | null>((fastest, row) => {
+    if (row.change === null || row.change <= 0) return fastest;
+    return !fastest || row.change > (fastest.change ?? 0) ? row : fastest;
+  }, null);
+  const missingGenres = Math.max(0, report.summary.plays - report.genreTaggedPlays);
+
+  return (
+    <section className="report-section report-genres" aria-labelledby="report-genres-title">
+      <div className="report-heading report-genres__heading">
+        <div><h2 id="report-genres-title">Genre trends</h2><p>Top 5 genres from registered plays in this period.</p></div>
+        <span className="report-genres__measure"><TrendingUp aria-hidden="true" /> Share of plays</span>
+      </div>
+      {rows.length > 0 ? <>
+        <div className="report-genres__column-head" aria-hidden="true">
+          <span />
+          <div className="report-genres__timeline">{timeline.map((bucket, index) => <span key={`${bucket.label}-${index}`}>{bucket.label}</span>)}</div>
+          <span>Share <Info /></span>
+          <span>Change <Info /></span>
+        </div>
+        <div className="report-genres__rows">
+          {rows.map((row) => {
+            const isFastest = fastestGrowing?.genre === row.genre;
+            const changeLabel = row.isNew
+              ? "New"
+              : row.change === null
+                ? "—"
+                : `${row.change > 0 ? "+" : ""}${row.change} pp`;
+            return (
+              <article className={`report-genres__row report-genres__row--${row.index + 1}${isFastest ? " is-fastest" : ""}`} key={row.genre}>
+                <div className="report-genres__identity"><i aria-hidden="true" /><strong>{row.genre}</strong>{isFastest && <em>fastest growing</em>}</div>
+                <GenreSparkline genre={row.genre} values={row.buckets.map((bucket) => bucket.plays)} />
+                <strong className="report-genres__share" aria-label={`${row.genre} share ${row.share} percent`}>{row.share}%</strong>
+                <strong className={`report-genres__change${row.change === null ? " is-neutral" : row.change < 0 ? " is-down" : ""}`} aria-label={`${row.genre} change ${changeLabel}`}>{changeLabel}</strong>
+              </article>
+            );
+          })}
+        </div>
+        <div className="report-genres__footnote"><Info aria-hidden="true" /><span>Share is each genre&apos;s percentage of all registered plays. Change compares with the previous equal period.{missingGenres > 0 ? ` ${missingGenres} ${missingGenres === 1 ? "play has" : "plays have"} no genre tag.` : ""}</span></div>
+      </> : <div className="report-genres__empty"><Info aria-hidden="true" /><p>No registered plays in this period have genre tags.</p></div>}
+    </section>
+  );
+}
+
 export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack, onOpenArtistAlbums }: ListeningReportProps) {
   const [period, setPeriod] = useState<ReportPeriod>("7");
   const [offset, setOffset] = useState(0);
@@ -310,6 +412,7 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
 
         {report.summary.sessions === 0 ? <section className="report-empty"><Headphones aria-hidden="true" /><h2>No listening in this period</h2><p>Move to another period or start listening to build your next report.</p></section> : <>
           <TopMusic report={report} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
+          <GenreTrends report={report} period={period} range={range} />
           <section className="report-analysis">
             <article><div className="report-heading"><div><h2>Listening rhythm</h2><p>When your registered plays happen across 24 hours.</p></div></div><ListeningClock hourly={report.hourly} /></article>
             <article><div className="report-heading"><div><h2>Listening fingerprint</h2><p>Five signals derived from this period—no global score.</p></div></div><RadarChart report={report} /></article>

@@ -223,6 +223,15 @@ pub(crate) struct HistoryReportDecade {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryReportGenre {
+    genre: String,
+    plays: i64,
+    previous_plays: i64,
+    daily: Vec<HistoryReportBucket>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryReport {
     summary: HistoryReportSummary,
     previous_summary: Option<HistoryReportSummary>,
@@ -234,6 +243,8 @@ pub(crate) struct HistoryReport {
     top_tracks: Vec<HistoryTopTrack>,
     discovery: HistoryReportDiscovery,
     decades: Vec<HistoryReportDecade>,
+    genre_tagged_plays: i64,
+    genres: Vec<HistoryReportGenre>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -1049,6 +1060,15 @@ impl HistoryStore {
             .copied()
             .filter(|row| row.registered_play)
             .collect::<Vec<_>>();
+        let previous_plays = previous
+            .as_ref()
+            .map(|rows| {
+                rows.iter()
+                    .copied()
+                    .filter(|row| row.registered_play)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         let resolved = resolve_report_tracks(&current_plays, state_store);
         let resolved_by_key = resolved
@@ -1199,6 +1219,11 @@ impl HistoryStore {
             request.started_after_ms,
             request.started_before_ms,
         );
+        let (genre_tagged_plays, genres) = report_genres(
+            &current_plays,
+            &previous_plays,
+            request.timezone_offset_minutes,
+        );
         Ok(HistoryReport {
             summary: report_summary(&current, request.timezone_offset_minutes),
             previous_summary: previous
@@ -1221,6 +1246,8 @@ impl HistoryStore {
                 .into_iter()
                 .map(|(decade, plays)| HistoryReportDecade { decade, plays })
                 .collect(),
+            genre_tagged_plays,
+            genres,
         })
     }
 
@@ -1839,6 +1866,88 @@ fn report_decade(track: Option<&TrackSummary>) -> String {
         .unwrap_or_else(|| "Unknown".to_owned())
 }
 
+#[derive(Default)]
+struct HistoryReportGenreAggregate {
+    genre: String,
+    plays: i64,
+    listened_seconds: f64,
+    daily: BTreeMap<i64, i64>,
+}
+
+fn report_genres(
+    current_plays: &[&HistoryRow],
+    previous_plays: &[&HistoryRow],
+    timezone_offset_minutes: i32,
+) -> (i64, Vec<HistoryReportGenre>) {
+    let mut aggregates: HashMap<String, HistoryReportGenreAggregate> = HashMap::new();
+    let mut tagged_plays = 0_i64;
+    for row in current_plays {
+        let Some(genre) = row
+            .genre
+            .as_deref()
+            .map(str::trim)
+            .filter(|genre| !genre.is_empty())
+        else {
+            continue;
+        };
+        tagged_plays = tagged_plays.saturating_add(1);
+        let aggregate = aggregates.entry(genre_identity(genre)).or_insert_with(|| {
+            HistoryReportGenreAggregate {
+                genre: genre.to_owned(),
+                ..HistoryReportGenreAggregate::default()
+            }
+        });
+        aggregate.plays = aggregate.plays.saturating_add(1);
+        aggregate.listened_seconds += row.listened_seconds;
+        let day = report_local_day_start(row.started_at_ms, timezone_offset_minutes);
+        *aggregate.daily.entry(day).or_insert(0) += 1;
+    }
+
+    let mut previous_counts: HashMap<String, i64> = HashMap::new();
+    for row in previous_plays {
+        let Some(genre) = row
+            .genre
+            .as_deref()
+            .map(str::trim)
+            .filter(|genre| !genre.is_empty())
+        else {
+            continue;
+        };
+        let count = previous_counts.entry(genre_identity(genre)).or_insert(0);
+        *count = count.saturating_add(1);
+    }
+
+    let mut ranked = aggregates.into_values().collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .plays
+            .cmp(&left.plays)
+            .then_with(|| right.listened_seconds.total_cmp(&left.listened_seconds))
+            .then_with(|| left.genre.to_lowercase().cmp(&right.genre.to_lowercase()))
+    });
+    ranked.truncate(5);
+    let genres = ranked
+        .into_iter()
+        .map(|aggregate| {
+            let previous_plays = previous_counts
+                .get(&genre_identity(&aggregate.genre))
+                .copied()
+                .unwrap_or(0);
+            HistoryReportGenre {
+                genre: aggregate.genre,
+                plays: aggregate.plays,
+                previous_plays,
+                daily: aggregate
+                    .daily
+                    .into_iter()
+                    .map(|(start_ms, plays)| HistoryReportBucket { start_ms, plays })
+                    .collect(),
+            }
+        })
+        .collect();
+    (tagged_plays, genres)
+}
+
 fn report_track_references(rows: &[&HistoryRow]) -> Vec<StoredQueueEntry> {
     let mut seen = HashSet::new();
     rows.iter()
@@ -2280,6 +2389,28 @@ mod tests {
         }
     }
 
+    fn report_row(index: i64, genre: Option<&str>, started_at_ms: i64) -> HistoryRow {
+        HistoryRow {
+            session_id: format!("report-session-{index}"),
+            track_key: format!("report-track-{index}"),
+            title: format!("Track {index}"),
+            artist: "Artist".to_owned(),
+            album: "Album".to_owned(),
+            genre: genre.map(str::to_owned),
+            directory: r"D:\Music".to_owned(),
+            filename: format!("report-track-{index}.mp3"),
+            duration_seconds: Some(240),
+            device_id: "device-test-report".to_owned(),
+            device_name: "Test computer".to_owned(),
+            started_at_ms,
+            ended_at_ms: Some(started_at_ms + 30_000),
+            listened_seconds: 30.0,
+            registered_play: true,
+            registered_at_ms: Some(started_at_ms + 30_000),
+            outcome: "completed".to_owned(),
+        }
+    }
+
     #[test]
     fn configurable_threshold_counts_forward_listening_and_not_seeks() {
         let root = temporary_root("threshold");
@@ -2509,6 +2640,50 @@ mod tests {
         assert_eq!(summary.unique_tracks, 12);
         assert_eq!(summary.unique_artists, 4);
         assert!(summary.active_days > 1);
+    }
+
+    #[test]
+    fn report_genres_rank_registered_plays_and_keep_aligned_daily_history() {
+        let day = 1_700_000_000_000;
+        let current = vec![
+            report_row(1, Some("Electronic"), day),
+            report_row(2, Some(" electronic "), day + 3_600_000),
+            report_row(3, Some("Electronic"), day + 86_400_000),
+            report_row(4, Some("Ambient"), day),
+            report_row(5, Some("Ambient"), day + 86_400_000),
+            report_row(6, Some("Indie Rock"), day),
+            report_row(7, Some("Jazz"), day),
+            report_row(8, Some("Synthwave"), day),
+            report_row(9, Some("Classical"), day),
+            report_row(10, None, day),
+        ];
+        let previous = vec![
+            report_row(11, Some("ELECTRONIC"), day - 86_400_000),
+            report_row(12, Some("Ambient"), day - 86_400_000),
+            report_row(13, Some("Ambient"), day - 82_800_000),
+        ];
+        let current_refs = current.iter().collect::<Vec<_>>();
+        let previous_refs = previous.iter().collect::<Vec<_>>();
+
+        let (tagged_plays, genres) = report_genres(&current_refs, &previous_refs, 0);
+
+        assert_eq!(tagged_plays, 9);
+        assert_eq!(genres.len(), 5);
+        assert_eq!(genres[0].genre, "Electronic");
+        assert_eq!(genres[0].plays, 3);
+        assert_eq!(genres[0].previous_plays, 1);
+        assert_eq!(genres[0].daily.len(), 2);
+        assert_eq!(
+            genres[0]
+                .daily
+                .iter()
+                .map(|bucket| bucket.plays)
+                .sum::<i64>(),
+            3
+        );
+        assert_eq!(genres[1].genre, "Ambient");
+        assert_eq!(genres[1].previous_plays, 2);
+        assert!(!genres.iter().any(|genre| genre.genre == "Synthwave"));
     }
 
     #[test]

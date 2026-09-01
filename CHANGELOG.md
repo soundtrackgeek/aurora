@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.13] - 2026-09-01
+
+### Added
+
+- Added a responsive **Genre trends** section to Listening Report. Aurora ranks the top five genre-tagged registered plays for the active date and device filters, keeps those rows stable across the chart buckets, shows each genre's share of all registered plays, compares that share with the previous equal period, and discloses plays without genre metadata.
+
 ## [0.24.12] - 2026-08-31
 
 ### Fixed
