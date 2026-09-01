@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.15] - 2026-09-01
+
+### Fixed
+
+- Preserved destination-specific scroll positions when moving around Aurora, including delayed restoration for pages whose content finishes loading asynchronously.
+- Kept the Albums explorer workspace mounted and reused its loaded request state across navigation, preserving lazy-loaded batches, album details, selections, filters, and sort order instead of replacing the view with the first 50 results.
+
 ## [0.24.14] - 2026-09-01
 
 ### Fixed

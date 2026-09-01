@@ -18,3 +18,11 @@ export function refreshedExplorerCursor<T>(
 ): T | null {
   return currentLoaded > refreshedLoaded ? currentCursor : refreshedCursor;
 }
+
+export function shouldReuseExplorerPage(
+  loadedRequestKey: string | null,
+  currentRequestKey: string,
+  preservingCurrentView: boolean,
+): boolean {
+  return !preservingCurrentView && loadedRequestKey === currentRequestKey;
+}

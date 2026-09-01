@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.14 keeps the new Listening Report genre trends release-ready across Aurora's strict Rust lint checks.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.15 restores each page to the exact working position you left behind.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.14 slice
+## Current 0.24.15 slice
+
+- Switching between Albums, History, and other destinations now preserves an independent scroll position for each page. The Albums workspace remains mounted while it is hidden, so lazy-loaded batches, expanded album details, selections, filters, and sort state return immediately instead of reloading the first 50 results.
 
 - Listening Report now charts the top five genres actually played in the selected date and device scope. Stable per-genre sparklines show activity over time, Share uses all registered plays as its denominator, Change compares percentage-point share with the previous equal period, and missing genre metadata remains explicit instead of inflating known genres.
 

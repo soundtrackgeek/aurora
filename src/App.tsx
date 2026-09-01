@@ -23,7 +23,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { lazy, Suspense, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Activity as ReactActivity, lazy, Suspense, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./App.css";
 import { albumArtistSearchQuery } from "./artistSearch";
 import { Artwork } from "./components/Artwork";
@@ -154,7 +154,7 @@ import {
   shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
 } from "./viewPreferences";
-import { mergeRefreshedExplorerPage, refreshedExplorerCursor } from "./explorerRefresh";
+import { mergeRefreshedExplorerPage, refreshedExplorerCursor, shouldReuseExplorerPage } from "./explorerRefresh";
 import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
@@ -382,6 +382,10 @@ function explorerCountKey(view: ExplorerView, filters: ExplorerFilters): string 
   ]);
 }
 
+function explorerRequestKey(view: ExplorerView, filters: ExplorerFilters, reloadToken: number): string {
+  return JSON.stringify([view, filters, reloadToken]);
+}
+
 function historyDateLabel(timestamp: number | null): string {
   if (timestamp === null) return "Never";
   return new Intl.DateTimeFormat(undefined, {
@@ -497,7 +501,7 @@ function App() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
-  const [activeNav, setActiveNav] = useState<SidebarDestination>(initialViewPreferences.activeNav);
+  const [activeNav, setActiveNavState] = useState<SidebarDestination>(initialViewPreferences.activeNav);
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const [reloadToken, setReloadToken] = useState(0);
@@ -609,7 +613,10 @@ function App() {
   const [audioSaving, setAudioSaving] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+  const scrollPositionByDestinationRef = useRef<Partial<Record<SidebarDestination, number>>>({});
   const exploreRequestRef = useRef(0);
+  const loadedExplorerRequestKeyRef = useRef<string | null>(null);
   const explorerCursorRef = useRef<ExplorerCursor | null>(null);
   const explorerLoadedRef = useRef(0);
   const explorerLoadingMoreRef = useRef(false);
@@ -722,6 +729,31 @@ function App() {
       selectedAlbumId,
     });
   }, [activeNav, explorerFilters, explorerView, inspectorView, selectedAlbumId, tagSelectionKind]);
+
+  useLayoutEffect(() => {
+    const scrollContainer = mainScrollRef.current;
+    if (!scrollContainer) return undefined;
+    const target = scrollPositionByDestinationRef.current[activeNav] ?? 0;
+    let attempts = 0;
+    let lastApplied: number | null = null;
+    let retryTimer: number | null = null;
+    const restore = () => {
+      const maximum = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+      if (
+        lastApplied !== null
+        && scrollContainer.scrollTop !== lastApplied
+        && scrollContainer.scrollTop < maximum
+      ) return;
+      scrollContainer.scrollTop = target;
+      lastApplied = scrollContainer.scrollTop;
+      attempts += 1;
+      if (attempts < 10) retryTimer = window.setTimeout(restore, 50);
+    };
+    restore();
+    return () => {
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [activeNav]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1117,6 +1149,8 @@ function App() {
       || activeNav === "Years"
       || activeNav === "Ratings"
     ) return;
+    const requestKey = explorerRequestKey(explorerView, explorerFilters, explorerReloadToken);
+    if (shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current, requestKey, preservingCurrentView)) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
     const handoffAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
     const restoredAlbumId = handoffAlbumId
@@ -1152,6 +1186,7 @@ function App() {
             : page.nextCursor);
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
+          loadedExplorerRequestKeyRef.current = requestKey;
           if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
@@ -2350,13 +2385,21 @@ function App() {
   }
 
   function changeExplorerView(view: ExplorerView) {
+    if (view === explorerView) return;
     setExplorerSelection(null);
     setExplorerView(view);
-    setExplorerFilters((current) => ({
-      ...current,
-      sort: explorerSorts[view].includes(current.sort) ? current.sort : defaultExplorerSort[view],
-    }));
+    setExplorerFilters((current) => explorerSorts[view].includes(current.sort)
+      ? current
+      : { ...current, sort: defaultExplorerSort[view] });
     if (view !== "albums") setSelectedAlbumId(null);
+  }
+
+  function setActiveNav(destination: SidebarDestination) {
+    if (destination === activeNav) return;
+    if (mainScrollRef.current) {
+      scrollPositionByDestinationRef.current[activeNav] = mainScrollRef.current.scrollTop;
+    }
+    setActiveNavState(destination);
   }
 
   function expandLibraryNavigation() {
@@ -2980,7 +3023,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.14</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.15</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3080,11 +3123,13 @@ function App() {
       <main className="main-content">
         <div
           className="main-scroll"
+          ref={mainScrollRef}
           data-text-size={activeDisplayPreferences.textSize}
           data-cover-size={activeDisplayPreferences.coverSize}
         >
           {snapshot ? (
-            activeNav === "Inbox" ? (
+            <>
+            {activeNav === "Inbox" ? (
               <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
                 <Inbox
                   onOpenMetadataSettings={() => openSettings("metadata")}
@@ -3252,7 +3297,8 @@ function App() {
                 onRetry={() => setRatingsReloadToken((value) => value + 1)}
                 onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
               />
-            ) : <>
+            ) : null}
+            <ReactActivity mode={showExplorerCount ? "visible" : "hidden"}>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
               <section className="stats" aria-label="Library overview">
@@ -3324,6 +3370,7 @@ function App() {
                   setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
                 }}
               />
+            </ReactActivity>
             </>
           ) : loadError ? (
             <section className="load-state load-state--error" role="alert">
