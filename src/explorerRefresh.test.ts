@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeRefreshedExplorerPage,
   refreshedExplorerCursor,
+  resolveExplorerRefreshPreservation,
   shouldReuseExplorerPage,
 } from "./explorerRefresh";
 
@@ -40,5 +41,18 @@ describe("mergeRefreshedExplorerPage", () => {
     expect(shouldReuseExplorerPage(requestKey, requestKey, false)).toBe(true);
     expect(shouldReuseExplorerPage(requestKey, requestKey, true)).toBe(false);
     expect(shouldReuseExplorerPage(requestKey, '["albums",{"sort":"yearDesc"},1]', false)).toBe(false);
+  });
+
+  it("keeps refresh preservation pending until the Explorer is visible again", () => {
+    const whileRatingsIsVisible = resolveExplorerRefreshPreservation(true, false);
+
+    expect(whileRatingsIsVisible).toEqual({
+      preservingCurrentView: false,
+      pending: true,
+    });
+    expect(resolveExplorerRefreshPreservation(whileRatingsIsVisible.pending, true)).toEqual({
+      preservingCurrentView: true,
+      pending: false,
+    });
   });
 });

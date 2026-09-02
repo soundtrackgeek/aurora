@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.19] - 2026-09-02
+
+### Fixed
+
+- Kept catalog-refresh preservation pending while Inbox, Ratings, or another dedicated page is visible, so returning to Albums retains the expanded album, lazy-loaded results, selection, and scroll position after work elsewhere changes the catalog.
+
 ## [0.24.18] - 2026-09-02
 
 ### Fixed

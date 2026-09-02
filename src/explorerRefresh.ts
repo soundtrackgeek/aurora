@@ -26,3 +26,14 @@ export function shouldReuseExplorerPage(
 ): boolean {
   return !preservingCurrentView && loadedRequestKey === currentRequestKey;
 }
+
+export function resolveExplorerRefreshPreservation(
+  pending: boolean,
+  explorerActive: boolean,
+): { preservingCurrentView: boolean; pending: boolean } {
+  if (!explorerActive) {
+    return { preservingCurrentView: false, pending };
+  }
+
+  return { preservingCurrentView: pending, pending: false };
+}

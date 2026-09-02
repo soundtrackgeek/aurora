@@ -155,7 +155,12 @@ import {
   shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
 } from "./viewPreferences";
-import { mergeRefreshedExplorerPage, refreshedExplorerCursor, shouldReuseExplorerPage } from "./explorerRefresh";
+import {
+  mergeRefreshedExplorerPage,
+  refreshedExplorerCursor,
+  resolveExplorerRefreshPreservation,
+  shouldReuseExplorerPage,
+} from "./explorerRefresh";
 import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
@@ -1137,19 +1142,14 @@ function App() {
   ]);
 
   useEffect(() => {
-    const preservingCurrentView = preserveExplorerOnReloadRef.current;
-    preserveExplorerOnReloadRef.current = false;
-    if (
-      !libraryReady
-      || activeNav === "Inbox"
-      || activeNav === "Observatory"
-      || activeNav === "Charts"
-      || activeNav === "History"
-      || activeNav === "Genres"
-      || activeNav === "Publishers"
-      || activeNav === "Years"
-      || activeNav === "Ratings"
-    ) return;
+    const explorerActive = libraryReady && explorerViewForDestination(activeNav) !== null;
+    const preservation = resolveExplorerRefreshPreservation(
+      preserveExplorerOnReloadRef.current,
+      explorerActive,
+    );
+    preserveExplorerOnReloadRef.current = preservation.pending;
+    if (!explorerActive) return;
+    const preservingCurrentView = preservation.preservingCurrentView;
     const requestKey = explorerRequestKey(explorerView, explorerFilters, explorerReloadToken);
     if (shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current, requestKey, preservingCurrentView)) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
@@ -3024,7 +3024,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.18</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.19</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
