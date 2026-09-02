@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultViewPreferences,
+  explorerViewForDestination,
   loadViewPreferences,
   saveViewPreferences,
   shouldRetargetTagsForAlbumSelection,
   shouldUseExplorerTagSelection,
   type ViewPreferences,
 } from "./viewPreferences";
+
+describe("destination explorer routing", () => {
+  it("changes explorer views only for destinations that actually use the explorer", () => {
+    expect(explorerViewForDestination("Universe")).toBe("tracks");
+    expect(explorerViewForDestination("Songs")).toBe("tracks");
+    expect(explorerViewForDestination("Tags")).toBe("tracks");
+    expect(explorerViewForDestination("Albums")).toBe("albums");
+    expect(explorerViewForDestination("Artists")).toBe("artists");
+    expect(explorerViewForDestination("Inbox")).toBeNull();
+    expect(explorerViewForDestination("Charts")).toBeNull();
+    expect(explorerViewForDestination("History")).toBeNull();
+  });
+});
 
 describe("tag selection scope", () => {
   it("does not let a hidden Albums selection override the Ratings inspector", () => {

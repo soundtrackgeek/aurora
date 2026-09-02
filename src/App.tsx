@@ -148,6 +148,7 @@ import {
 import {
   defaultExplorerFilters,
   defaultExplorerSort,
+  explorerViewForDestination,
   explorerSorts,
   loadViewPreferences,
   saveViewPreferences,
@@ -2415,10 +2416,8 @@ function App() {
     if (label !== "Universe" && label !== "Observatory" && label !== "History") {
       expandLibraryNavigation();
     }
-    if (label === "Observatory" || label === "History" || label === "Genres" || label === "Publishers" || label === "Years" || label === "Ratings") return;
-    if (label === "Albums") changeExplorerView("albums");
-    else if (label === "Artists") changeExplorerView("artists");
-    else changeExplorerView("tracks");
+    const destinationExplorerView = explorerViewForDestination(label);
+    if (destinationExplorerView) changeExplorerView(destinationExplorerView);
   }
 
   function focusArtist(artist: Artist, destination: "tracks" | "albums" = "tracks") {
@@ -3025,7 +3024,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.17</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.18</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

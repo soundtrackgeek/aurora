@@ -25,6 +25,13 @@ export function shouldRetargetTagsForAlbumSelection(inspectorView: InspectorView
   return inspectorView !== "tags";
 }
 
+export function explorerViewForDestination(destination: SidebarDestination): ExplorerView | null {
+  if (destination === "Albums") return "albums";
+  if (destination === "Artists") return "artists";
+  if (destination === "Universe" || destination === "Songs" || destination === "Tags") return "tracks";
+  return null;
+}
+
 export type ViewPreferences = {
   activeNav: SidebarDestination;
   explorerView: ExplorerView;

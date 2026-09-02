@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.18] - 2026-09-02
+
+### Fixed
+
+- Prevented Inbox, Charts, and other dedicated destinations from switching the hidden Library explorer to Tracks, so returning to Albums keeps the previously expanded album open with its existing detail state.
+
 ## [0.24.17] - 2026-09-02
 
 ### Changed

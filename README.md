@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.17 adds Music Library's album-average bitrate beside the audio type in the album sidebar.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.18 keeps expanded Albums state intact while visiting Inbox, Charts, and other dedicated pages.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.17 slice
+## Current 0.24.18 slice
+
+- Visiting Inbox, Charts, History, or another dedicated page no longer switches the hidden Library explorer to Tracks. Returning to Albums keeps the same album expanded, including its loaded detail and selection state.
 
 - The album sidebar Format row now shows the database-backed audio type and rounded album-average bitrate together, such as **MP3 · 320 kbps**. Albums without quality data retain the existing format-only or **Unknown** fallback.
 
