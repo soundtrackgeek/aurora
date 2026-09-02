@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.17] - 2026-09-02
+
+### Changed
+
+- The album sidebar Format row now combines Music Library's database-backed audio type with the rounded album-average bitrate, such as `MP3 · 320 kbps`, while preserving the existing fallback when quality data is unavailable.
+
 ## [0.24.16] - 2026-09-01
 
 ### Fixed

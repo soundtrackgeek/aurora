@@ -72,6 +72,15 @@ interface AlbumInspectorAlbum {
   genre: string | null;
   rating: number | null;
   formats?: string[];
+  avgBitrateKbps?: number | null;
+}
+
+function formatAlbumAudio(album: AlbumInspectorAlbum): string {
+  const formats = album.formats?.length ? album.formats.join(" · ") : "Unknown";
+  const bitrate = album.avgBitrateKbps;
+  return bitrate !== null && bitrate !== undefined && Number.isFinite(bitrate) && bitrate > 0
+    ? `${formats} · ${Math.round(bitrate)} kbps`
+    : formats;
 }
 
 function albumAsTrack(album: AlbumInspectorAlbum): Track {
@@ -372,7 +381,7 @@ export function YearAlbumInspector<T extends AlbumInspectorAlbum>({ album, busy,
       <div><dt>Original Year</dt><dd className="year-original">{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd className="year-release">{album.releaseYear ?? "—"}</dd></div>
       <div className="publisher-metadata"><dt>Publisher</dt><dd>{album.publisher ?? "Unknown"}</dd></div>
-      <div><dt>Format</dt><dd>{album.formats?.length ? album.formats.join(" · ") : "Unknown"}</dd></div>
+      <div><dt>Format</dt><dd>{formatAlbumAudio(album)}</dd></div>
       <div><dt>Tracks</dt><dd>{formatCount(album.totalTracks)}</dd></div>
       <div><dt>Duration</dt><dd>{formatDuration(album.durationSeconds)}</dd></div>
       {chartRanks?.length ? <div><dt>Charts</dt><dd><CatalogChartRanks kind="album" ranks={chartRanks} /></dd></div> : null}

@@ -20,6 +20,7 @@ const album = {
   genre: "Stage & Screen",
   rating: 5,
   formats: ["MP3"],
+  avgBitrateKbps: 320,
 };
 
 const detail: YearDetail = {
@@ -112,7 +113,7 @@ describe("YearAlbumInspector", () => {
     render(<YearAlbumInspector album={album} busy={false} onPlay={onPlay} onOpenArtistAlbums={vi.fn()} />);
     expect(screen.getByText("Original Year").nextSibling).toHaveTextContent("1982");
     expect(screen.getByText("Release Year").nextSibling).toHaveTextContent("2025");
-    expect(screen.getByText("Format").nextSibling).toHaveTextContent("MP3");
+    expect(screen.getByText("Format").nextSibling).toHaveTextContent("MP3 · 320 kbps");
     expect(screen.getByRole("img", { name: "Greece origin country" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Play album" }));
     expect(onPlay).toHaveBeenCalledWith(album);

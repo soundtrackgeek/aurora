@@ -150,6 +150,7 @@ pub(crate) struct AlbumSummary {
     pub(crate) rating: Option<f64>,
     pub(crate) album_score: Option<f64>,
     pub(crate) formats: Vec<String>,
+    pub(crate) avg_bitrate_kbps: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -749,6 +750,10 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
                 .unwrap_or_default(),
             Err(_) => Vec::new(),
         },
+        avg_bitrate_kbps: match row.as_ref().column_index("avg_bitrate_kbps") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
     })
 }
 
@@ -857,7 +862,7 @@ fn album_page_from_connection(
     let mut params = Vec::<Value>::new();
     let origin_key = artist_key_sql("a.album_artist_display");
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -1116,7 +1121,7 @@ fn album_detail_from_connection(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", artist_key_sql("a.album_artist_display")),
+            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", artist_key_sql("a.album_artist_display")),
             [album_id],
             map_album_row,
         )
@@ -1233,7 +1238,7 @@ mod tests {
                   country_code TEXT, country_name TEXT
                 );
                 CREATE TABLE music_doctor_album_quality (
-                  album_id TEXT PRIMARY KEY, formats TEXT NOT NULL
+                  album_id TEXT PRIMARY KEY, formats TEXT NOT NULL, avg_bitrate_kbps REAL
                 );
                 CREATE VIRTUAL TABLE track_search_fts USING fts5(
                   track_id UNINDEXED, album_id UNINDEXED, title, display_artist, album,
@@ -1254,7 +1259,7 @@ mod tests {
                   ('sigur rós', 'Sigur Rós', 'f2fdb8a7-eec6-447d-bb70-10c2e93eec17', 'IS', 'Iceland'),
                   ('daft punk', 'Daft Punk', '056e4f3e-d505-4dad-8ec1-d04f521cbb56', 'FR', 'France');
                 INSERT INTO music_doctor_album_quality VALUES
-                  ('a1', 'MP3'), ('a2', 'FLAC,MP3');
+                  ('a1', 'MP3', 320.0), ('a2', 'FLAC,MP3', 768.4);
                 INSERT INTO tracks VALUES
                   (7, 1, 'a1', 'Sæglópur', 'Jónsi', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', 'L', '5', 100, 2005, 473, 'H:\Music\Sigur Rós', '01.mp3', 1, 1, 1999),
                   (8, 1, 'a1', 'Hoppípolla', 'Sigur Rós', 'Sigur Rós', 'Takk...', 'Post-rock', 'EMI Records', NULL, '', NULL, 2005, 268, 'H:\Music\Sigur Rós', '02.mp3', 1, 2, 1999),
@@ -1860,6 +1865,7 @@ mod tests {
 
         let detail = album_detail_from_connection(&connection, "a1", None).expect("album detail");
         assert_eq!(detail.album.formats, vec!["MP3"]);
+        assert_eq!(detail.album.avg_bitrate_kbps, Some(320.0));
         assert_eq!(detail.tracks.len(), 2);
         assert_eq!(detail.tracks[0].title, "Sæglópur");
         assert_eq!(detail.tracks[0].display_artist.as_deref(), Some("Jónsi"));

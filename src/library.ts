@@ -177,6 +177,7 @@ export interface AlbumSummary {
   rating: number | null;
   albumScore: number | null;
   formats?: string[];
+  avgBitrateKbps?: number | null;
 }
 
 type ConsistentAlbumValue<T> = { consistent: true; value: T } | { consistent: false };
@@ -479,6 +480,7 @@ function browserAlbumSummaries(): AlbumSummary[] {
       rating,
       albumScore,
       formats: ["MP3"],
+      avgBitrateKbps: 320,
     };
   });
 }
