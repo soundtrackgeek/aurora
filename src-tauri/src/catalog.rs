@@ -607,12 +607,19 @@ enum CatalogSearchField {
     Publisher,
     Country,
     Title,
+    Completeness,
+    Love,
 }
 
 impl CatalogSearchField {
     fn fts_column(self) -> Option<&'static str> {
         match self {
-            Self::Any | Self::Year | Self::ReleaseYear | Self::Country => None,
+            Self::Any
+            | Self::Year
+            | Self::ReleaseYear
+            | Self::Country
+            | Self::Completeness
+            | Self::Love => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -624,7 +631,12 @@ impl CatalogSearchField {
 
     fn sql_column(self) -> Option<&'static str> {
         match self {
-            Self::Any | Self::Year | Self::ReleaseYear | Self::Country => None,
+            Self::Any
+            | Self::Year
+            | Self::ReleaseYear
+            | Self::Country
+            | Self::Completeness
+            | Self::Love => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -642,6 +654,8 @@ enum CatalogSearchMatch {
     Country { value: String, exact: bool },
     ScoreGenreGroup,
     YearRange { from: Option<i32>, to: Option<i32> },
+    CompletenessMax(u8),
+    AlbumLove(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -680,7 +694,9 @@ impl CatalogSearch {
             CatalogSearchMatch::Exact(_)
             | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
-            | CatalogSearchMatch::YearRange { .. } => None,
+            | CatalogSearchMatch::YearRange { .. }
+            | CatalogSearchMatch::CompletenessMax(_)
+            | CatalogSearchMatch::AlbumLove(_) => None,
         }
     }
 
@@ -791,6 +807,30 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "country" => Some(CatalogSearchField::Country),
         "title" => Some(CatalogSearchField::Title),
         _ => None,
+    }
+}
+
+fn parse_equals_search_field(value: &str) -> Option<CatalogSearchField> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cr" => Some(CatalogSearchField::Completeness),
+        "love" => Some(CatalogSearchField::Love),
+        _ => None,
+    }
+}
+
+fn parse_search_integer(value: &str, field: CatalogSearchField) -> Result<u8, String> {
+    let invalid = if field == CatalogSearchField::Completeness {
+        "cr must be a whole percentage from 0 through 100."
+    } else {
+        "love must be 0 or 1."
+    };
+    let parsed = value.trim().parse::<u8>().map_err(|_| invalid.to_owned())?;
+    if (field == CatalogSearchField::Completeness && parsed <= 100)
+        || (field == CatalogSearchField::Love && parsed <= 1)
+    {
+        Ok(parsed)
+    } else {
+        Err(invalid.to_owned())
     }
 }
 
@@ -919,6 +959,12 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                     .and_then(|(field, value)| {
                         parse_search_field(field).map(|field| (field, value.trim(), true))
                     })
+                    .or_else(|| {
+                        raw.split_once('=').and_then(|(field, value)| {
+                            parse_equals_search_field(field)
+                                .map(|field| (field, value.trim(), true))
+                        })
+                    })
                     .unwrap_or((
                         inherited_field.unwrap_or(CatalogSearchField::Any),
                         raw,
@@ -975,6 +1021,12 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                             }
                         }
                     },
+                    CatalogSearchField::Completeness => CatalogSearchMatch::CompletenessMax(
+                        parse_search_integer(exact.as_deref().unwrap_or(value), field)?,
+                    ),
+                    CatalogSearchField::Love => CatalogSearchMatch::AlbumLove(
+                        parse_search_integer(exact.as_deref().unwrap_or(value), field)? == 1,
+                    ),
                     _ => match exact {
                         Some(value) => CatalogSearchMatch::Exact(value),
                         None => CatalogSearchMatch::Prefix(build_fts_prefix_query(
@@ -1165,7 +1217,37 @@ fn non_prefix_predicate(
             }
             Some(format!("({})", predicates.join(" AND ")))
         }
+        CatalogSearchMatch::CompletenessMax(_) | CatalogSearchMatch::AlbumLove(_) => None,
     }
+}
+
+fn album_level_predicate(
+    alias: &str,
+    matcher: &CatalogSearchMatch,
+    params: &mut Vec<Value>,
+) -> Option<String> {
+    match matcher {
+        CatalogSearchMatch::CompletenessMax(maximum) => {
+            params.push(Value::Real(f64::from(*maximum) / 100.0));
+            Some(format!("{alias}.rating_completeness BETWEEN 0.0 AND ?"))
+        }
+        CatalogSearchMatch::AlbumLove(has_love) => Some(format!(
+            "{alias}.loved_tracks {} 0",
+            if *has_love { ">" } else { "=" }
+        )),
+        _ => None,
+    }
+}
+
+fn track_album_level_predicate(
+    track_alias: &str,
+    matcher: &CatalogSearchMatch,
+    params: &mut Vec<Value>,
+) -> Option<String> {
+    let predicate = album_level_predicate("search_album", matcher, params)?;
+    Some(format!(
+        "EXISTS (SELECT 1 FROM albums AS search_album WHERE search_album.id = {track_alias}.album_id AND {predicate})"
+    ))
 }
 
 fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
@@ -1177,7 +1259,9 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             CatalogSearchMatch::Exact(_)
             | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
-            | CatalogSearchMatch::YearRange { .. } => None,
+            | CatalogSearchMatch::YearRange { .. }
+            | CatalogSearchMatch::CompletenessMax(_)
+            | CatalogSearchMatch::AlbumLove(_) => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -1216,6 +1300,9 @@ pub(crate) fn push_track_search_predicates(
                 .iter()
                 .filter_map(|alternative| non_prefix_predicate("t", alternative, params)),
         );
+        alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
+            track_album_level_predicate("t", &alternative.matcher, params)
+        }));
         sql.push_str(if group.negated {
             " AND NOT ("
         } else {
@@ -1251,6 +1338,12 @@ pub(crate) fn push_album_search_predicates(
                 track_predicates.join(" OR ")
             ));
         }
+        alternatives.extend(
+            group
+                .alternatives
+                .iter()
+                .filter_map(|alternative| album_level_predicate("a", &alternative.matcher, params)),
+        );
         sql.push_str(if group.negated {
             " AND NOT ("
         } else {
@@ -2433,6 +2526,29 @@ mod tests {
         );
         assert!(parse_catalog_search("year:not-a-year").is_err());
         assert!(parse_catalog_search("artist:").is_err());
+    }
+
+    #[test]
+    fn catalog_search_parses_album_completeness_and_love() {
+        let search = parse_catalog_search("cr=80,love=1").expect("album metric search");
+        assert_eq!(search.groups.len(), 2);
+        assert_eq!(
+            search.groups[0].alternatives[0],
+            CatalogSearchAlternative {
+                field: CatalogSearchField::Completeness,
+                matcher: CatalogSearchMatch::CompletenessMax(80),
+            }
+        );
+        assert_eq!(
+            search.groups[1].alternatives[0],
+            CatalogSearchAlternative {
+                field: CatalogSearchField::Love,
+                matcher: CatalogSearchMatch::AlbumLove(true),
+            }
+        );
+        assert!(parse_catalog_search("cr=101").is_err());
+        assert!(parse_catalog_search("cr=80.5").is_err());
+        assert!(parse_catalog_search("love=2").is_err());
     }
 
     #[test]

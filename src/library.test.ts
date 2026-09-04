@@ -37,6 +37,13 @@ const yearRangeTracks: Track[] = [
   { ...tracks[0], id: "9", trackKey: "c:/music/ranges/1988.mp3", albumId: "album-9", title: "Outside", originalYear: 1988, releaseYear: 1987 },
 ];
 
+const albumMetricTracks: Track[] = [
+  { ...tracks[0], id: "10", trackKey: "metric:partial:1", albumId: "metric-partial", album: "Half Rated", rating: 5, loved: true },
+  { ...tracks[0], id: "11", trackKey: "metric:partial:2", albumId: "metric-partial", album: "Half Rated", rating: null, loved: false },
+  { ...tracks[1], id: "12", trackKey: "metric:complete", albumId: "metric-complete", album: "Complete", rating: 4, loved: false },
+  { ...tracks[1], id: "13", trackKey: "metric:unrated", albumId: "metric-unrated", album: "Unrated", rating: null, loved: false },
+];
+
 describe("library presentation", () => {
   it("acknowledges a catalog refresh only when every read used one revision", () => {
     expect(catalogRefreshIsConsistent(
@@ -279,6 +286,19 @@ describe("library presentation", () => {
     expect(filterTracks(yearRangeTracks, "NOT year:1985..1987", null)).toEqual([yearRangeTracks[2]]);
     expect(() => filterTracks(yearRangeTracks, "year:1987..1985", null)).toThrow(/start at or before/u);
     expect(() => filterTracks(yearRangeTracks, "ryear:..", null)).toThrow(/starting or ending/u);
+  });
+
+  it("filters whole albums by Music Library completeness and Love", () => {
+    expect(filterTracks(albumMetricTracks, "cr=80", null).map((track) => track.albumId)).toEqual([
+      "metric-partial", "metric-partial", "metric-unrated",
+    ]);
+    expect(filterTracks(albumMetricTracks, "love=1", null).map((track) => track.albumId)).toEqual([
+      "metric-partial", "metric-partial",
+    ]);
+    expect(filterTracks(albumMetricTracks, "cr=50,love=1", null)).toEqual(albumMetricTracks.slice(0, 2));
+    expect(filterTracks(albumMetricTracks, "love=0", null)).toEqual(albumMetricTracks.slice(2));
+    expect(() => filterTracks(albumMetricTracks, "cr=101", null)).toThrow(/0 through 100/u);
+    expect(() => filterTracks(albumMetricTracks, "love=2", null)).toThrow(/0 or 1/u);
   });
 
   it("supports OR inheritance, NOT, negative fields, and exact quoted values", () => {

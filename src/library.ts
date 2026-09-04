@@ -491,7 +491,7 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
 }
 
 function usesAdvancedLibrarySearch(search?: string): boolean {
-  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title)\s*:|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
+  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title)\s*:|(?:^|,)\s*(?:cr|love)\s*=|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
 function compareText(left: string, right: string, descending = false): number {
@@ -508,8 +508,9 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
   const yearFor = (track: Track) => request.yearBasis === "release"
     ? track.releaseYear
     : (track.originalYear ?? null);
+  const matchingTrackIds = new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.id));
   const items = browserPreview.tracks
-    .filter((track) => filterTracks([track], request.search ?? "", null).length > 0)
+    .filter((track) => matchingTrackIds.has(track.id))
     .filter((track) => request.rating === undefined || track.rating === request.rating)
     .filter((track) => !request.unrated || track.rating === null)
     .filter((track) => request.loveState === undefined || track.loveState === request.loveState)
@@ -678,7 +679,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -686,6 +687,7 @@ interface LibrarySearchAlternative {
   exact: boolean;
   yearFrom: number | null;
   yearTo: number | null;
+  numberValue: number | null;
 }
 
 interface LibrarySearchGroup {
@@ -695,9 +697,11 @@ interface LibrarySearchGroup {
 
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
-const librarySearchFields = new Set<LibrarySearchField>([
+const librarySearchColonFields = new Set<LibrarySearchField>([
   "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title",
 ]);
+
+const librarySearchEqualsFields = new Set<LibrarySearchField>(["cr", "love"]);
 
 const scoreGenreGroup = new Set([
   "action", "animation", "comedy", "documentary", "drama", "fantasy", "horror",
@@ -799,6 +803,18 @@ function parseLibrarySearchYearRange(
   return { yearFrom, yearTo };
 }
 
+function parseLibrarySearchInteger(value: string, field: "cr" | "love"): number {
+  const trimmed = value.trim();
+  const invalid = field === "cr"
+    ? "cr must be a whole percentage from 0 through 100."
+    : "love must be 0 or 1.";
+  if (!/^\d+$/u.test(trimmed)) throw new Error(invalid);
+  const number = Number(trimmed);
+  if (field === "cr" && number <= 100) return number;
+  if (field === "love" && number <= 1) return number;
+  throw new Error(invalid);
+}
+
 function parseLibrarySearch(query: string): LibrarySearchGroup[] {
   const groups: LibrarySearchGroup[] = [];
   let current: LibrarySearchGroup | null = null;
@@ -821,9 +837,15 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         current = { negated: pendingNot || negativePrefix, alternatives: [] };
         pendingNot = false;
       }
-      const separator = raw.indexOf(":");
-      const candidateField = separator >= 0 ? raw.slice(0, separator).trim().toLocaleLowerCase() : "";
-      const explicitField = librarySearchFields.has(candidateField as LibrarySearchField);
+      const colonSeparator = raw.indexOf(":");
+      const equalsSeparator = raw.indexOf("=");
+      const colonField = colonSeparator >= 0 ? raw.slice(0, colonSeparator).trim().toLocaleLowerCase() : "";
+      const equalsField = equalsSeparator >= 0 ? raw.slice(0, equalsSeparator).trim().toLocaleLowerCase() : "";
+      const hasColonField = librarySearchColonFields.has(colonField as LibrarySearchField);
+      const hasEqualsField = librarySearchEqualsFields.has(equalsField as LibrarySearchField);
+      const explicitField = hasColonField || hasEqualsField;
+      const separator = hasColonField ? colonSeparator : equalsSeparator;
+      const candidateField = hasColonField ? colonField : equalsField;
       const field: LibrarySearchField = explicitField
         ? candidateField as LibrarySearchField
         : (inheritedField ?? "any");
@@ -833,8 +855,11 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       const exact = exactLibrarySearchValue(value);
       let yearFrom: number | null = null;
       let yearTo: number | null = null;
+      let numberValue: number | null = null;
       if (field === "year" || field === "ryear") {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
+      } else if (field === "cr" || field === "love") {
+        numberValue = parseLibrarySearchInteger(exact ?? value, field);
       } else if (exact === null) {
         termCount += searchTerms(value).length;
         if (termCount > 32) throw new Error("Search can contain at most 32 words.");
@@ -848,6 +873,7 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         exact: exact !== null,
         yearFrom,
         yearTo,
+        numberValue,
       });
       afterOr = false;
       continue;
@@ -885,6 +911,8 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "publisher": return [track.publisher ?? ""];
     case "country": return [track.originCountryName ?? "", track.originCountryCode ?? ""];
     case "title": return [track.title];
+    case "cr":
+    case "love": return [];
     case "year":
     case "ryear": return [];
     default: return [
@@ -898,12 +926,45 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
   }
 }
 
-function matchesLibrarySearchAlternative(track: Track, alternative: LibrarySearchAlternative): boolean {
+interface AlbumSearchStats {
+  totalTracks: number;
+  ratedTracks: number;
+  lovedTracks: number;
+}
+
+function albumSearchStats(tracks: readonly Track[]): Map<string, AlbumSearchStats> {
+  const stats = new Map<string, AlbumSearchStats>();
+  for (const track of tracks) {
+    if (!track.albumId) continue;
+    const album = stats.get(track.albumId) ?? { totalTracks: 0, ratedTracks: 0, lovedTracks: 0 };
+    album.totalTracks += 1;
+    if (track.rating !== null) album.ratedTracks += 1;
+    if (track.loved) album.lovedTracks += 1;
+    stats.set(track.albumId, album);
+  }
+  return stats;
+}
+
+function matchesLibrarySearchAlternative(
+  track: Track,
+  alternative: LibrarySearchAlternative,
+  albumStats: ReadonlyMap<string, AlbumSearchStats>,
+): boolean {
   if (alternative.field === "year" || alternative.field === "ryear") {
     const year = alternative.field === "year" ? track.originalYear : track.releaseYear;
     if (year === null || year === undefined) return false;
     return (alternative.yearFrom === null || year >= alternative.yearFrom)
       && (alternative.yearTo === null || year <= alternative.yearTo);
+  }
+  if (alternative.field === "cr") {
+    const album = track.albumId ? albumStats.get(track.albumId) : undefined;
+    if (!album || album.totalTracks <= 0 || alternative.numberValue === null) return false;
+    return album.ratedTracks / album.totalTracks * 100 <= alternative.numberValue;
+  }
+  if (alternative.field === "love") {
+    const album = track.albumId ? albumStats.get(track.albumId) : undefined;
+    if (!album || alternative.numberValue === null) return false;
+    return alternative.numberValue === 1 ? album.lovedTracks > 0 : album.lovedTracks === 0;
   }
   const values = librarySearchValues(track, alternative.field);
   if (
@@ -926,12 +987,13 @@ function matchesLibrarySearchAlternative(track: Track, alternative: LibrarySearc
 export function filterTracks(tracks: Track[], query: string, artist: string | null): Track[] {
   const normalized = query.trim();
   const groups = normalized ? parseLibrarySearch(normalized) : [];
+  const albumStats = albumSearchStats(tracks);
 
   return tracks.filter((track) => {
     if (artist && track.artist !== artist) return false;
     return !normalized || groups.every((group) => {
       const matched = group.alternatives.some((alternative) => (
-        matchesLibrarySearchAlternative(track, alternative)
+        matchesLibrarySearchAlternative(track, alternative, albumStats)
       ));
       return group.negated ? !matched : matched;
     });

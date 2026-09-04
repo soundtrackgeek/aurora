@@ -13,7 +13,7 @@ Aurora has one persistent search box at the top of the window, but the search be
 
 ## Catalog search: Songs, Albums, and Artists
 
-An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through the explicit `country:` field.
+An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through `country:`. Album rating completeness and album Love status are available through `cr=` and `love=`.
 
 | Query | What it finds |
 | --- | --- |
@@ -37,12 +37,18 @@ Punctuation in an unquoted value separates words. Use quotes when the entire sto
 | `publisher:` | Publisher or label | `publisher:varèse` |
 | `country:` | Imported Album Artist origin-country name or two-letter code | `country:norway OR sweden` |
 | `title:` | Track title | `title:"Running Up That Hill"` |
+| `cr=` | Album rating completeness from 0% through the supplied maximum | `cr=80` |
+| `love=` | Whether the album contains at least one track marked Love | `love=1` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
 
 `country:` uses Music Library's imported artist-origin record for the Album Artist. It accepts country names or two-letter codes, so `country:norway`, `country:NO`, and exact `country:"Norway"` all target the same origin data. Artists without an imported origin do not match.
 
-There are no `rating:`, `love:`, or `unrated:` search fields. Those are Aurora collection filters and handoffs, not query-language keywords.
+`cr=80` includes albums from 0% through 80% rating completeness, inclusive. Aurora uses Music Library's completeness calculation: rated track count divided by total track count. The value must be a whole number from 0 through 100.
+
+`love=1` includes an album when at least one of its tracks is marked Love. `love=0` includes albums with no loved tracks. Use `=` for `cr` and `love`; they are album-wide filters, not colon-prefixed text fields.
+
+There are no `rating:` or `unrated:` search fields. Those remain Aurora collection filters and handoffs rather than query-language keywords.
 
 ### Prefix and exact matching
 
@@ -157,12 +163,14 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | A song title prefix, excluding live albums | `title:heroes NOT album:live` |
 | Everything from a publisher except one artist | `publisher:decca,-aartist:"Various Artists"` |
 | Artists originating in Norway or Sweden | `country:norway OR sweden` |
+| Albums no more than 80% rated | `cr=80` |
+| Incomplete albums with at least one loved track | `cr=99,love=1` |
 
 ### Differences between Songs, Albums, and Artists
 
-- **Songs** returns matching tracks.
-- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query.
-- **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks.
+- **Songs** returns matching tracks. An album-wide `cr=` or `love=` clause returns every matching track from qualifying albums.
+- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr=` and `love=` evaluate the album itself.
+- **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks, including album-wide `cr=` and `love=` clauses.
 
 The same query can therefore produce different result counts in each view.
 
@@ -206,5 +214,6 @@ The Genre Atlas also repeats its genre-name search inside the atlas for convenie
 - If an exact query returns nothing, remove the quotes to try word-prefix matching and confirm the stored spelling.
 - If an artist result looks too broad, use `aartist:` instead of unscoped text; use `artist:` only when you mean per-track Display Artist.
 - If a year looks wrong, confirm whether you need Original Year (`year:`) or Release Year (`ryear:`).
+- If `cr` or `love` behaves like plain text, use `=` rather than `:` and supply `cr` with 0–100 or `love` with 0 or 1.
 - If `genre:scores` is too broad, search one exact genre such as `genre:"video game"`.
 - Catalog queries are limited to 256 characters, 32 search words, and 32 alternatives. Aurora reports malformed quotes, operators, fields without values, and invalid year ranges instead of silently changing the query.

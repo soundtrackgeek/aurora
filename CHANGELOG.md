@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.24] - 2026-09-04
+
+### Added
+
+- Added album-wide `cr=` catalog search for an inclusive maximum rating-completeness percentage, using Music Library's rated-tracks divided by total-tracks calculation.
+- Added album-wide `love=1` and `love=0` catalog search for albums with or without at least one loved track.
+- Documented rating completeness, Love, and origin-country catalog search in the search guide.
+
 ## [0.24.23] - 2026-09-04
 
 ### Changed

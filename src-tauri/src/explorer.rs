@@ -1226,7 +1226,7 @@ mod tests {
                 CREATE TABLE albums (
                   id TEXT PRIMARY KEY, album TEXT, album_artist_display TEXT, canonical_genre TEXT,
                   release_year INTEGER, total_tracks INTEGER NOT NULL, rated_tracks INTEGER NOT NULL,
-                  loved_tracks INTEGER NOT NULL, total_seconds INTEGER NOT NULL,
+                  rating_completeness REAL NOT NULL, loved_tracks INTEGER NOT NULL, total_seconds INTEGER NOT NULL,
                   album_score REAL, effective_album_rating INTEGER, year INTEGER, publisher TEXT
                 );
                 CREATE TABLE lastfm_track_popularity (
@@ -1252,9 +1252,9 @@ mod tests {
                   album_id TEXT PRIMARY KEY, added_at_ms INTEGER NOT NULL
                 );
                 INSERT INTO albums VALUES
-                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 1, 741, 95, 90, 1999, 'EMI Records'),
-                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0, 426, 80, NULL, 1999, 'FatCat'),
-                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1, 301, 88, 80, 2001, 'Virgin');
+                  ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 0.5, 1, 741, 95, 90, 1999, 'EMI Records'),
+                  ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0.0, 0, 426, 80, NULL, 1999, 'FatCat'),
+                  ('a3', 'Discovery', 'Daft Punk', 'House', 2001, 1, 1, 1.0, 1, 301, 88, 80, 2001, 'Virgin');
                 INSERT INTO musicbrainz_artist_origin_countries VALUES
                   ('sigur rós', 'Sigur Rós', 'f2fdb8a7-eec6-447d-bb70-10c2e93eec17', 'IS', 'Iceland'),
                   ('daft punk', 'Daft Punk', '056e4f3e-d505-4dad-8ec1-d04f521cbb56', 'FR', 'France');
@@ -1701,6 +1701,55 @@ mod tests {
     }
 
     #[test]
+    fn album_metric_search_filters_tracks_albums_and_artists() {
+        let connection = fixture();
+
+        let tracks = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("cr=50".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("track completeness search");
+        assert_eq!(tracks.items.len(), 3);
+        assert!(tracks.items.iter().all(|track| track.artist == "Sigur Rós"));
+
+        let albums = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("cr=80,love=1".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("album completeness and Love search");
+        assert_eq!(albums.items.len(), 1);
+        assert_eq!(albums.items[0].id, "a1");
+
+        let artists = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                search: Some("love=1".to_owned()),
+                ..ArtistPageRequest::default()
+            },
+        )
+        .expect("artist album Love search");
+        assert_eq!(artists.items.len(), 2);
+
+        let without_love = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("love=0".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("album without Love search");
+        assert_eq!(without_love.items.len(), 1);
+        assert_eq!(without_love.items[0].id, "a2");
+    }
+
+    #[test]
     fn track_search_supports_or_not_negative_prefix_and_exact_values() {
         let connection = fixture();
         let boolean = track_page_from_connection(
@@ -1762,10 +1811,10 @@ mod tests {
             .execute_batch(
                 r#"
                 INSERT INTO albums VALUES
-                  ('a4', 'Kiss', 'Kiss', 'Rock', 1974, 1, 0, 0, 180, NULL, NULL, 1974, 'Casablanca'),
-                  ('a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Synth-pop', 1986, 1, 0, 0, 210, NULL, NULL, 1986, 'Magnet'),
-                  ('a6', 'Film Music', 'Composer', 'Drama', 2020, 1, 0, 0, 180, NULL, NULL, 2020, 'Label'),
-                  ('a7', 'Compilation', 'Various Artists', 'Soundtrack', 2020, 1, 0, 0, 180, NULL, NULL, 2020, 'Label');
+                  ('a4', 'Kiss', 'Kiss', 'Rock', 1974, 1, 0, 0.0, 0, 180, NULL, NULL, 1974, 'Casablanca'),
+                  ('a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Synth-pop', 1986, 1, 0, 0.0, 0, 210, NULL, NULL, 1986, 'Magnet'),
+                  ('a6', 'Film Music', 'Composer', 'Drama', 2020, 1, 0, 0.0, 0, 180, NULL, NULL, 2020, 'Label'),
+                  ('a7', 'Compilation', 'Various Artists', 'Soundtrack', 2020, 1, 0, 0.0, 0, 180, NULL, NULL, 2020, 'Label');
                 INSERT INTO tracks VALUES
                   (11, 1, 'a4', 'Strutter', 'Kiss', 'Kiss', 'Kiss', 'Rock', 'Casablanca', NULL, '', NULL, 1974, 180, 'H:\Music\Kiss', '01.mp3', 1, 1, 1974),
                   (12, 1, 'a5', 'Certain Things Are Likely', 'Kissing the Pink', 'Kissing the Pink', 'Certain Things Are Likely', 'Synth-pop', 'Magnet', NULL, '', NULL, 1986, 210, 'H:\Music\Kissing the Pink', '01.mp3', 1, 1, 1986),
