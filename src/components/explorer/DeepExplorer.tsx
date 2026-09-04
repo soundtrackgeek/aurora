@@ -359,7 +359,7 @@ function AlbumRatingStars({ rating }: { rating: number | null }) {
   return (
     <span
       className={`deep-explorer-album-rating${rating === null ? " is-unrated" : ""}`}
-      aria-label={rating === null ? "Album unrated" : `Album rating ${rating.toFixed(1)} out of 5 stars`}
+      aria-label={rating === null ? "Album unrated" : `Album rating ${rating.toFixed(2)} out of 5 stars`}
     >
       <span className="deep-explorer-album-rating__stars" aria-hidden="true">
         {[1, 2, 3, 4, 5].map((star) => {
@@ -372,7 +372,7 @@ function AlbumRatingStars({ rating }: { rating: number | null }) {
           );
         })}
       </span>
-      <span>{rating === null ? "—" : rating.toFixed(1)}</span>
+      <span>{rating === null ? "—" : rating.toFixed(2)}</span>
     </span>
   );
 }
@@ -707,8 +707,8 @@ function AlbumGrid({
                   <span className="deep-explorer-album__metrics">
                     <AlbumRatingStars rating={album.rating} />
                     <span aria-hidden="true">·</span>
-                    <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(1)}`}>
-                      Score {album.albumScore === null ? "—" : album.albumScore.toFixed(1)}
+                    <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(2)}`}>
+                      Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}
                     </span>
                   </span>
                 </span>
@@ -891,7 +891,7 @@ function AlbumDetail({
           <span className="deep-explorer-album-score">
             <AlbumRatingStars rating={album.rating} />
             <span aria-hidden="true">·</span>
-            <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(1)}</span>
+            <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}</span>
           </span>
         </div>
         {onAlbumMovedToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={moveBusy} onClick={() => void requestMoveToInbox()}><FolderOutput aria-hidden="true" />{moveBusy && !movePreview ? "Preparing…" : "Move to Inbox"}</button> : null}

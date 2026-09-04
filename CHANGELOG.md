@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.23] - 2026-09-04
+
+### Changed
+
+- Album cards, expanded Album Detail, and the Albums sidebar inspector now show Album Rating and Album Score with two decimal places where available.
+
 ## [0.24.22] - 2026-09-04
 
 ### Changed

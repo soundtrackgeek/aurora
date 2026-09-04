@@ -64,13 +64,13 @@ const albums: ExplorerAlbum[] = [
     publisher: "EMI Records",
     originCountryCode: "NO",
     originCountryName: "Norway",
-    rating: 4.5,
+    rating: 4.33,
     totalTracks: 12,
     durationSeconds: 2_844,
     genre: "Synthwave",
     lovedTracks: 4,
     ratedTracks: 9,
-    albumScore: 412.4,
+    albumScore: 412.49,
   },
 ];
 
@@ -412,7 +412,7 @@ describe("DeepExplorer", () => {
     expect(albumTracks.getByRole("row", { name: /Third/ })).not.toHaveTextContent("🔥");
   });
 
-  it("shows half-star Album Rating and Album Score together on album cards and detail", () => {
+  it("shows two-decimal Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer
         {...explorerProps({
@@ -424,10 +424,10 @@ describe("DeepExplorer", () => {
       />,
     );
 
-    expect(screen.getAllByLabelText("Album rating 4.5 out of 5 stars")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Album rating 4.33 out of 5 stars")).toHaveLength(2);
     expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
-    expect(screen.getByText("Score 412.4")).toBeInTheDocument();
-    expect(screen.getByText("Album Score 412.4")).toBeInTheDocument();
+    expect(screen.getByText("Score 412.49")).toBeInTheDocument();
+    expect(screen.getByText("Album Score 412.49")).toBeInTheDocument();
     expect(screen.getByText((_, element) => (
       element?.classList.contains("deep-explorer-album__metadata") === true
       && element.textContent?.replace(/\s+/g, " ").trim() === "1985 — Synthwave — EMI Records"

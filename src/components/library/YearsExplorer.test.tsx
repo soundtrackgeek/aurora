@@ -118,4 +118,10 @@ describe("YearAlbumInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Play album" }));
     expect(onPlay).toHaveBeenCalledWith(album);
   });
+
+  it("can show album ratings with two decimal places", () => {
+    render(<YearAlbumInspector album={{ ...album, rating: 4.33 }} busy={false} onPlay={vi.fn()} onOpenArtistAlbums={vi.fn()} ratingDigits={2} />);
+
+    expect(screen.getByText("Rating").nextSibling).toHaveTextContent("4.33");
+  });
 });

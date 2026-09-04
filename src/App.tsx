@@ -3024,7 +3024,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.22</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.23</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3436,6 +3436,7 @@ function App() {
               onPlay={(album) => void playExplorerAlbum(album)}
               onOpenArtistAlbums={openArtistAlbums}
               chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
+              ratingDigits={2}
             />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (

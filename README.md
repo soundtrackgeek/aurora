@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.22 makes Windows CI timing more predictable with a pinned Rust toolchain and safer cache retention.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.23 gives Album Rating and Album Score consistent two-decimal precision throughout Albums.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.22 slice
+## Current 0.24.23 slice
+
+- Album cards, expanded Album Detail, and the Albums sidebar inspector show rating values with two decimal places, such as Album Rating **4.33** and Album Score **5.39**.
 
 - Local development and both Windows CI jobs use Rust 1.98.1 instead of floating `stable`. Trusted master and manual runs may retain dependency caches after a later failure, while pull requests remain restore-only.
 
