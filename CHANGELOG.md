@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.21] - 2026-09-04
+
+### Fixed
+
+- Updated the native Inbox progress reader to satisfy the release workflow's current Rust Clippy warnings-as-errors gate without changing runtime behavior.
+
 ## [0.24.20] - 2026-09-04
 
 ### Added

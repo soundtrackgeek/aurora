@@ -1056,15 +1056,14 @@ fn wait_for_child(
     let started = Instant::now();
     let mut last_progress = Vec::new();
     loop {
-        if let Ok(bytes) = fs::read(progress_path) {
-            if bytes != last_progress {
-                if let Ok(progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes) {
-                    if let Some(app) = app {
-                        let _ = app.emit("library-intake-progress", progress);
-                    }
-                    last_progress = bytes;
-                }
+        if let Ok(bytes) = fs::read(progress_path)
+            && bytes != last_progress
+            && let Ok(progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes)
+        {
+            if let Some(app) = app {
+                let _ = app.emit("library-intake-progress", progress);
             }
+            last_progress = bytes;
         }
         match child.try_wait() {
             Ok(Some(status)) => return Ok(status),

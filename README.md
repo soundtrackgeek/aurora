@@ -1,12 +1,14 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.20 makes reviewed Inbox intake substantially faster and visibly reports each safe import stage.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.21 ships the faster, visible Inbox intake path with clean Rust lint verification.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.20 slice
+## Current 0.24.21 slice
 
 - Inbox preview and move actions now show the live companion stage: scan, analysis, fingerprinting, transfer, verification, catalog update, artwork, and final cleanup. Transfer reports exact completed files, bytes, and percentage while retaining the existing rollback-safe workflow.
+
+- The native bridge progress reader now uses the current Rust conditional-chain form, keeping the intake behavior unchanged while passing the release workflow's warnings-as-errors Clippy gate.
 
 - Reviewed folder intake applies the already-approved plan immediately and only rebuilds the preview after a real stale-plan response. The Music Library companion reuses released SQLite staging pages instead of synchronously rewriting the complete multi-gigabyte database after every small Aurora batch, and immediate duplicate destination hash passes were replaced by exact structure checks while the independent pre-commit and post-commit SHA-256 checks remain.
 
