@@ -52,6 +52,8 @@ import { formatDuration } from "../../library";
 import { reconcileInboxTracks, type InboxTrackMatchStatus } from "../../inboxMatching";
 import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
+import { LibraryIntakeActivity } from "./LibraryIntakeActivity";
+import { useLibraryIntakeProgress } from "./useLibraryIntakeProgress";
 import { applyWindowsSelection } from "../explorer/windowsSelection";
 import "./Inbox.css";
 
@@ -135,6 +137,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [inspectorView, setInspectorView] = useState<"album" | "tags">("album");
   const [intakeScope, setIntakeScope] = useState<{ label: string; targets: InboxLibraryIntakeTarget[] } | null>(null);
   const [intakeMessage, setIntakeMessage] = useState<string | null>(null);
+  const { progress: moveProgress, reset: resetMoveProgress } = useLibraryIntakeProgress();
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoadState("loading");
@@ -358,6 +361,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     if (!selectedAlbum || !moveCategory) return;
     setMoveBusy(true);
     setMoveMessage(null);
+    resetMoveProgress();
     try {
       setMovePreview(await libraryIntakeAdapter.preview({ sourcePath: selectedAlbum.path, category: moveCategory }));
       setReplacementConfirmed(false);
@@ -371,6 +375,8 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   async function applyMove() {
     if (!movePreview || (movePreview.albums.some((album) => album.action === "replace") && !replacementConfirmed)) return;
     setMoveBusy(true);
+    setMoveMessage(null);
+    resetMoveProgress();
     try {
       const result = await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
       await onCatalogChanged();
@@ -478,6 +484,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             </> : null}
             <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); setReplacementConfirmed(false); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
+              {moveBusy ? <LibraryIntakeActivity mode={movePreview ? "apply" : "preview"} progress={moveProgress} /> : null}
               {movePreview?.albums.some((album) => album.action === "replace") ? <label className="inbox-move__replacement"><AlertTriangle /><span><strong>Replace existing release</strong><small>{movePreview.albums[0].existingTrackCount} existing → {movePreview.albums[0].trackCount} new tracks · old release preserved for recovery</small></span><input type="checkbox" aria-label="Confirm replacement" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /></label> : null}
               {moveMessage ? <p className="inbox-move__message" role="status">{moveMessage}</p> : null}
               <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || !selectedAlbum.readiness.ready || Boolean(movePreview?.albums.some((album) => album.action === "replace") && !replacementConfirmed)} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview?.albums.some((album) => album.action === "replace") ? "Replace and catalog" : movePreview ? "Move and catalog" : "Preview move"}</button>

@@ -10,7 +10,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
@@ -197,6 +197,20 @@ pub struct LibraryIntakeApplyResult {
     pub cleanup_warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct LibraryIntakeProgress {
+    operation: String,
+    stage: String,
+    message: String,
+    completed_albums: usize,
+    total_albums: usize,
+    processed_files: usize,
+    total_files: usize,
+    processed_bytes: u64,
+    total_bytes: u64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProtocolRequest<T> {
@@ -285,6 +299,7 @@ pub(crate) struct LibraryExistingFoldersSyncResult {
 struct ExchangeFiles {
     request_path: PathBuf,
     response_path: PathBuf,
+    progress_path: PathBuf,
 }
 
 impl ExchangeFiles {
@@ -302,6 +317,7 @@ impl ExchangeFiles {
             let stem = format!("exchange-{}-{timestamp}-{sequence}", std::process::id());
             let request_path = directory.join(format!("{stem}.request.json"));
             let response_path = directory.join(format!("{stem}.response.json"));
+            let progress_path = request_path.with_extension("progress.json");
             match OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -312,6 +328,7 @@ impl ExchangeFiles {
                         Self {
                             request_path,
                             response_path,
+                            progress_path,
                         },
                         file,
                     ));
@@ -333,6 +350,7 @@ impl Drop for ExchangeFiles {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.request_path);
         let _ = fs::remove_file(&self.response_path);
+        let _ = fs::remove_file(&self.progress_path);
     }
 }
 
@@ -952,15 +970,23 @@ where
         .app_data_dir()
         .map_err(|error| format!("Aurora could not locate its app-data folder: {error}"))?
         .join("music-library-bridge");
-    invoke_bridge_at(&executable, &bridge_directory, operation, payload, timeout)
+    invoke_bridge_at_with_progress(
+        &executable,
+        &bridge_directory,
+        operation,
+        payload,
+        timeout,
+        Some(app),
+    )
 }
 
-fn invoke_bridge_at<TRequest, TResponse>(
+fn invoke_bridge_at_with_progress<TRequest, TResponse>(
     executable: &Path,
     bridge_directory: &Path,
     operation: &'static str,
     payload: TRequest,
     timeout: Duration,
+    app: Option<&AppHandle>,
 ) -> Result<TResponse, String>
 where
     TRequest: Serialize,
@@ -1003,7 +1029,7 @@ where
             "Aurora could not start the Music Library bridge: {error}"
         ))
     })?;
-    let status = wait_for_child(&mut child, timeout, operation)?;
+    let status = wait_for_child(&mut child, timeout, operation, &exchange.progress_path, app)?;
     let response = read_protocol_response::<TResponse>(&exchange.response_path, operation);
 
     if !status.success() {
@@ -1024,9 +1050,22 @@ fn wait_for_child(
     child: &mut Child,
     timeout: Duration,
     operation: &str,
+    progress_path: &Path,
+    app: Option<&AppHandle>,
 ) -> Result<ExitStatus, String> {
     let started = Instant::now();
+    let mut last_progress = Vec::new();
     loop {
+        if let Ok(bytes) = fs::read(progress_path) {
+            if bytes != last_progress {
+                if let Ok(progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes) {
+                    if let Some(app) = app {
+                        let _ = app.emit("library-intake-progress", progress);
+                    }
+                    last_progress = bytes;
+                }
+            }
+        }
         match child.try_wait() {
             Ok(Some(status)) => return Ok(status),
             Ok(None) if started.elapsed() < timeout => thread::sleep(CHILD_POLL_INTERVAL),
@@ -1654,12 +1693,15 @@ mod tests {
         let (exchange, request_file) = ExchangeFiles::create(directory.path()).expect("exchange");
         drop(request_file);
         fs::write(&exchange.response_path, b"{}").expect("response");
+        fs::write(&exchange.progress_path, b"{}").expect("progress");
         let request_path = exchange.request_path.clone();
         let response_path = exchange.response_path.clone();
+        let progress_path = exchange.progress_path.clone();
         drop(exchange);
 
         assert!(!request_path.exists());
         assert!(!response_path.exists());
+        assert!(!progress_path.exists());
     }
 
     #[test]

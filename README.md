@@ -1,10 +1,14 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.19 keeps pending Albums refresh preservation intact while work continues on another page.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.20 makes reviewed Inbox intake substantially faster and visibly reports each safe import stage.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.19 slice
+## Current 0.24.20 slice
+
+- Inbox preview and move actions now show the live companion stage: scan, analysis, fingerprinting, transfer, verification, catalog update, artwork, and final cleanup. Transfer reports exact completed files, bytes, and percentage while retaining the existing rollback-safe workflow.
+
+- Reviewed folder intake applies the already-approved plan immediately and only rebuilds the preview after a real stale-plan response. The Music Library companion reuses released SQLite staging pages instead of synchronously rewriting the complete multi-gigabyte database after every small Aurora batch, and immediate duplicate destination hash passes were replaced by exact structure checks while the independent pre-commit and post-commit SHA-256 checks remain.
 
 - Catalog changes made from Inbox, Ratings, and other dedicated pages no longer consume the hidden Explorer's pending refresh-preservation state. Returning to Albums keeps the same album expanded, its lazy-loaded results, selection, and scroll position even when work elsewhere refreshed the catalog.
 

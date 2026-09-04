@@ -4,6 +4,21 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.20] - 2026-09-04
+
+### Added
+
+- Added live Inbox intake stages for preview and apply, including exact file, byte, and percentage feedback during album transfer and explicit safety context while the catalog is being committed.
+
+### Changed
+
+- Removed the unconditional second preview before applying an already-reviewed folder batch. Aurora now applies that plan directly and rebuilds it only when Music Library reports a stale plan.
+- Streamed Music Library companion progress through Aurora's existing bridge exchange without changing the version-1 request or response contract.
+
+### Fixed
+
+- Eliminated synchronous full-database vacuuming after small Aurora intake batches in the companion and removed immediate duplicate destination hashing while retaining independent SHA-256 verification before and after the catalog commit.
+
 ## [0.24.19] - 2026-09-02
 
 ### Fixed

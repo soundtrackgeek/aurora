@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "./library";
 
 export type LibraryIntakeCategoryId = "general" | "scores" | "synthwave";
@@ -85,6 +86,18 @@ export interface LibraryIntakeApplyResult {
   backupPath: string | null;
   albums: LibraryIntakeApplyAlbum[];
   cleanupWarnings: string[];
+}
+
+export interface LibraryIntakeProgress {
+  operation: "previewBatch" | "applyBatch" | string;
+  stage: string;
+  message: string;
+  completedAlbums: number;
+  totalAlbums: number;
+  processedFiles: number;
+  totalFiles: number;
+  processedBytes: number;
+  totalBytes: number;
 }
 
 export interface LibraryIntakePreviewRequest {
@@ -185,6 +198,15 @@ export async function previewLibraryMoveToInbox(
     throw new Error("Moving an album back to Inbox is available in the native Aurora app.");
   }
   return invoke<LibraryIntakePreview>("preview_library_move_to_inbox", { request });
+}
+
+export async function listenLibraryIntakeProgress(
+  onProgress: (progress: LibraryIntakeProgress) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => {};
+  return listen<LibraryIntakeProgress>("library-intake-progress", (event) => {
+    onProgress(event.payload);
+  });
 }
 
 export const libraryIntakeAdapter: LibraryIntakeAdapter = {

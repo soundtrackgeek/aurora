@@ -528,8 +528,9 @@ describe("Inbox", () => {
     expect(await screen.findByText(/1 album · 10 tracks → D:\\Music/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add 1 album" }));
 
-    await waitFor(() => expect(preview).toHaveBeenCalledTimes(2));
-    expect(apply).toHaveBeenCalledWith({ planId: "folder-plan-2", sessionId: 42 });
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith({ planId: "folder-plan-1", sessionId: 41 });
     expect(catalogChanged).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
   });
@@ -569,9 +570,9 @@ describe("Inbox", () => {
     expect(preview).toHaveBeenNthCalledWith(2, { sourcePath: "D:\\Bandcamp", category: "synthwave" });
     fireEvent.click(await screen.findByRole("button", { name: "Add 2 albums" }));
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
-    expect(preview).toHaveBeenCalledTimes(4);
-    expect(apply).toHaveBeenNthCalledWith(1, { planId: "all-plan-3", sessionId: 53 });
-    expect(apply).toHaveBeenNthCalledWith(2, { planId: "all-plan-4", sessionId: 54 });
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenNthCalledWith(1, { planId: "all-plan-1", sessionId: 51 });
+    expect(apply).toHaveBeenNthCalledWith(2, { planId: "all-plan-2", sessionId: 52 });
     expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
   });
 
@@ -589,7 +590,7 @@ describe("Inbox", () => {
     const apply = vi.spyOn(libraryIntakeAdapter, "apply")
       .mockRejectedValueOnce(new Error("The source albums or active catalog changed after preview. Prepare the batch again (stalePlan)"))
       .mockResolvedValue({
-        planId: "retry-plan-3", sessionId: 73, status: "completed", albumCount: 1, trackCount: 10,
+        planId: "retry-plan-2", sessionId: 72, status: "completed", albumCount: 1, trackCount: 10,
         movedAlbumCount: 1, importRunId: 7, backupPath: null, cleanupWarnings: [],
         albums: [{ sourcePath: "source", destinationPath: "destination", action: "add", recoveryPath: null, cleanupStatus: "removed" }],
       });
@@ -602,9 +603,9 @@ describe("Inbox", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add 1 album" }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
-    expect(preview).toHaveBeenCalledTimes(3);
-    expect(apply).toHaveBeenNthCalledWith(1, { planId: "retry-plan-2", sessionId: 72 });
-    expect(apply).toHaveBeenNthCalledWith(2, { planId: "retry-plan-3", sessionId: 73 });
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenNthCalledWith(1, { planId: "retry-plan-1", sessionId: 71 });
+    expect(apply).toHaveBeenNthCalledWith(2, { planId: "retry-plan-2", sessionId: 72 });
     expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
   });
 
@@ -620,7 +621,8 @@ describe("Inbox", () => {
       const preview = libraryPreview(`changed-plan-${previewSequence}`, 60 + previewSequence, sourcePath, category, 1);
       return previewSequence === 1 ? preview : { ...preview, trackCount: 11 };
     });
-    const apply = vi.spyOn(libraryIntakeAdapter, "apply");
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply")
+      .mockRejectedValueOnce(new Error("The source albums or active catalog changed after preview. Prepare the batch again (stalePlan)"));
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 
     await screen.findByRole("heading", { name: "Inbox" });
@@ -630,7 +632,7 @@ describe("Inbox", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add 1 album" }));
 
     expect(await screen.findByText("Inbox changed after review. Preview destinations again before adding it to the library.")).toBeInTheDocument();
-    expect(apply).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 });
 

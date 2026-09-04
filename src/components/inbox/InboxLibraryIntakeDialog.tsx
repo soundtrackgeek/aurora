@@ -6,6 +6,8 @@ import {
   type LibraryIntakeCategoryId,
   type LibraryIntakePreview,
 } from "../../ingest";
+import { LibraryIntakeActivity } from "./LibraryIntakeActivity";
+import { useLibraryIntakeProgress } from "./useLibraryIntakeProgress";
 
 export interface InboxLibraryIntakeTarget {
   sourcePath: string;
@@ -28,6 +30,8 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [activeTargetIndex, setActiveTargetIndex] = useState(0);
+  const { progress, reset: resetProgress } = useLibraryIntakeProgress();
 
   const albumCount = useMemo(() => targets.reduce((total, target) => total + target.albumCount, 0), [targets]);
   const unreadyAlbumCount = useMemo(() => targets.reduce((total, target) => total + target.unreadyAlbumCount, 0), [targets]);
@@ -39,9 +43,11 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     if (!destinationsSelected || unreadyAlbumCount > 0) return;
     setBusy("preview");
     setError(null);
+    resetProgress();
     try {
       const next: LibraryIntakePreview[] = [];
-      for (const target of targets) {
+      for (const [index, target] of targets.entries()) {
+        setActiveTargetIndex(index);
         next.push(await libraryIntakeAdapter.preview({
           sourcePath: target.sourcePath,
           category: destinations[target.sourcePath] as LibraryIntakeCategoryId,
@@ -61,9 +67,11 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     if (!canApply || !previews) return;
     setBusy("apply");
     setError(null);
+    resetProgress();
     let completedAlbums = 0;
     try {
       for (const [index, reviewedPreview] of previews.entries()) {
+        setActiveTargetIndex(index);
         const target = targets[index];
         const result = await applyReviewedTarget(
           target,
@@ -110,6 +118,11 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
             </section>;
           })}
         </div>
+        {busy ? <LibraryIntakeActivity
+          mode={busy}
+          progress={progress}
+          targetLabel={targets.length > 1 ? `${activeTargetIndex + 1} of ${targets.length} · ${targets[activeTargetIndex]?.label ?? "Folder"}` : targets[0]?.label}
+        /> : null}
         {error ? <p className="inbox-intake-dialog__error" role="alert"><AlertTriangle />{error}</p> : null}
         {replacements.length ? <section className="inbox-intake-dialog__replacements" role="alert">
           <AlertTriangle />
@@ -138,16 +151,10 @@ async function applyReviewedTarget(
   category: LibraryIntakeCategoryId,
   reviewedPreview: LibraryIntakePreview,
 ) {
+  let applicablePreview = reviewedPreview;
   for (let stalePlanRetries = 0; ; stalePlanRetries += 1) {
-    const freshPreview = await libraryIntakeAdapter.preview({
-      sourcePath: target.sourcePath,
-      category,
-    });
-    if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
-      throw new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
-    }
     try {
-      return await libraryIntakeAdapter.apply({ planId: freshPreview.planId, sessionId: freshPreview.sessionId });
+      return await libraryIntakeAdapter.apply({ planId: applicablePreview.planId, sessionId: applicablePreview.sessionId });
     } catch (error) {
       if (!isStalePlanError(error)) throw error;
       if (stalePlanRetries >= MAX_STALE_PLAN_RETRIES) {
@@ -155,6 +162,16 @@ async function applyReviewedTarget(
         (retryError as Error & { cause: unknown }).cause = error;
         throw retryError;
       }
+      const freshPreview = await libraryIntakeAdapter.preview({
+        sourcePath: target.sourcePath,
+        category,
+      });
+      if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
+        const changedError = new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
+        (changedError as Error & { cause: unknown }).cause = error;
+        throw changedError;
+      }
+      applicablePreview = freshPreview;
     }
   }
 }
