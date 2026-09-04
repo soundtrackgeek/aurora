@@ -46,7 +46,7 @@ Punctuation in an unquoted value separates words. Use quotes when the entire sto
 
 `country:` uses Music Library's imported artist-origin record for the Album Artist. It accepts country names or two-letter codes, so `country:norway`, `country:NO`, and exact `country:"Norway"` all target the same origin data. Artists without an imported origin do not match.
 
-`cr:80` includes albums from 0% through 80% rating completeness, preserving the original maximum shorthand. `cr:50..80` includes albums from 50% through 80%, inclusive. Aurora uses Music Library's completeness calculation: rated track count divided by total track count. Bounds must be whole percentages from 0 through 100.
+`cr:80` includes albums from 0% through 80% rating completeness, preserving the original maximum shorthand. `cr:50..80` includes albums from 50% through 80%, inclusive. Aurora calculates rated tracks divided by total tracks from the Music Library catalog plus Aurora's verified pending rating changes and queued missing-track deletions, so search results do not wait for Music Library synchronization. Bounds must be whole percentages from 0 through 100.
 
 `love:1` includes an album when at least one of its tracks is marked Love, preserving the original shorthand. `love:0` includes albums with no loved tracks. Use a range to filter the album's loved-track count: `love:1..3` means one through three loved tracks, inclusive. These are album-wide filters even though they use the same conventional separator as text fields.
 

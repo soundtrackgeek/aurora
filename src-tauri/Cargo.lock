@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.24.25"
+version = "0.24.26"
 dependencies = [
  "cpal",
  "dotenvy",

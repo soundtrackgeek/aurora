@@ -4,6 +4,18 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.26] - 2026-09-04
+
+### Changed
+
+- Rating-completeness searches now use Aurora's live projected album state, including verified rating overlays and queued missing-track deletions that Music Library has not imported yet.
+- Music Library busy, locked, unavailable, timed-out, and companion-upgrade failures now remain durably retryable without consuming the three-attempt budget for permanent folder validation failures. The existing queue is reopened once during migration, every live tag overlay missing from that queue is added, and background work proceeds oldest first so a steady stream of new edits cannot starve older changes.
+- When an unrelated whole-folder validation problem prevents synchronization, Aurora now attempts each verified pending-overlay MP3 through Music Library's guarded exact-file path before retaining the folder-level issue for attention.
+
+### Fixed
+
+- Prevented stale Music Library album aggregates from making fully rated albums match incomplete `cr:` searches after Aurora had already verified the underlying MP3 changes.
+
 ## [0.24.25] - 2026-09-04
 
 ### Changed

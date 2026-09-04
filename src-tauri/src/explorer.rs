@@ -1,6 +1,7 @@
 use crate::{
     catalog::{
-        ArtistSummary, TrackSummary, apply_overlays, artist_key_sql, default_catalog_path,
+        ArtistSummary, TrackSummary, apply_overlays, artist_key_sql, attach_aurora_state,
+        default_catalog_path, live_album_rated_tracks_sql, live_album_total_tracks_sql,
         map_track_row, open_catalog, parse_catalog_search, push_album_search_predicates,
         push_track_search_predicates,
     },
@@ -861,8 +862,10 @@ fn album_page_from_connection(
     let sort = album_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
     let origin_key = artist_key_sql("a.album_artist_display");
+    let live_total_tracks = live_album_total_tracks_sql("a");
+    let live_rated_tracks = live_album_rated_tracks_sql("a");
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, {live_total_tracks}, {live_rated_tracks}, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
     if plain_match_query.is_some() {
@@ -1007,8 +1010,9 @@ fn artist_page_from_connection(
     if let Some(genre) = genre {
         push_exact_filter(&mut rollup_where, &mut params, "a.canonical_genre", genre);
     }
+    let live_total_tracks = live_album_total_tracks_sql("a");
     let mut sql = format!(
-        "WITH r AS (SELECT a.album_artist_display AS name, CAST(SUM(a.total_tracks) AS INTEGER) AS track_count, COUNT(*) AS album_count FROM albums AS a {rollup_where} GROUP BY a.album_artist_display COLLATE NOCASE) SELECT r.name, r.track_count, r.album_count, CAST(({}) AS TEXT) AS cursor_value FROM r WHERE 1 = 1",
+        "WITH r AS (SELECT a.album_artist_display AS name, CAST(SUM({live_total_tracks}) AS INTEGER) AS track_count, COUNT(*) AS album_count FROM albums AS a {rollup_where} GROUP BY a.album_artist_display COLLATE NOCASE) SELECT r.name, r.track_count, r.album_count, CAST(({}) AS TEXT) AS cursor_value FROM r WHERE 1 = 1",
         definition.expression
     );
     let total_count = filtered_row_count(connection, &sql, &params, "artist")?;
@@ -1075,6 +1079,7 @@ pub(crate) fn load_track_page(
     store: &StateStore,
 ) -> Result<TrackPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
+    attach_aurora_state(&connection, store)?;
     track_page_from_connection(&connection, request, Some(store))
 }
 
@@ -1083,17 +1088,16 @@ pub(crate) fn load_album_page(
     store: &StateStore,
 ) -> Result<AlbumPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
-    connection
-        .execute(
-            "ATTACH DATABASE ?1 AS aurora_state",
-            [store.path().to_string_lossy().as_ref()],
-        )
-        .map_err(|error| format!("Could not attach Aurora's album additions: {error}"))?;
+    attach_aurora_state(&connection, store)?;
     album_page_from_connection(&connection, request)
 }
 
-pub(crate) fn load_artist_page(request: ArtistPageRequest) -> Result<ArtistPage, String> {
+pub(crate) fn load_artist_page(
+    request: ArtistPageRequest,
+    store: &StateStore,
+) -> Result<ArtistPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
+    attach_aurora_state(&connection, store)?;
     artist_page_from_connection(&connection, request)
 }
 
@@ -1163,9 +1167,13 @@ fn album_detail_from_connection(
     })
 }
 
-pub(crate) fn load_artist_detail(artist: String) -> Result<ArtistDetail, String> {
+pub(crate) fn load_artist_detail(
+    artist: String,
+    store: &StateStore,
+) -> Result<ArtistDetail, String> {
     let artist = validate_identity(&artist, "Artist identity", MAX_FILTER_CHARS)?;
     let connection = open_catalog(&default_catalog_path()?)?;
+    attach_aurora_state(&connection, store)?;
     artist_detail_from_connection(&connection, &artist)
 }
 
@@ -1209,6 +1217,7 @@ fn artist_detail_from_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::refresh_live_album_rating_projection;
 
     fn fixture() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory explorer database");
@@ -1251,6 +1260,18 @@ mod tests {
                 CREATE TABLE aurora_state.album_additions (
                   album_id TEXT PRIMARY KEY, added_at_ms INTEGER NOT NULL
                 );
+                CREATE TABLE aurora_state.tag_overlays (
+                  track_key TEXT PRIMARY KEY, directory TEXT NOT NULL, filename TEXT NOT NULL,
+                  rating REAL, love_state TEXT NOT NULL, release_year INTEGER,
+                  catalog_rating REAL, catalog_love_state TEXT NOT NULL,
+                  catalog_release_year INTEGER, catalog_import_run_id INTEGER NOT NULL,
+                  last_operation_id INTEGER, updated_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE aurora_state.pending_library_folder_sync (
+                  directory TEXT PRIMARY KEY COLLATE NOCASE, filename TEXT,
+                  updated_at_ms INTEGER NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0,
+                  next_attempt_at_ms INTEGER NOT NULL DEFAULT 0, last_error TEXT
+                );
                 INSERT INTO albums VALUES
                   ('a1', 'Takk...', 'Sigur Rós', 'Post-rock', 2005, 2, 1, 0.5, 1, 741, 95, 90, 1999, 'EMI Records'),
                   ('a2', 'Ágætis byrjun', 'Sigur Rós', 'Post-rock', 1999, 1, 0, 0.0, 0, 426, 80, NULL, 1999, 'FatCat'),
@@ -1273,6 +1294,8 @@ mod tests {
                 "#,
             )
             .expect("explorer fixture schema");
+        refresh_live_album_rating_projection(&connection)
+            .expect("initial live album rating projection");
         connection
     }
 
@@ -1769,6 +1792,164 @@ mod tests {
         )
         .expect("album loved-track count search");
         assert!(multiple_loves.items.is_empty());
+    }
+
+    #[test]
+    fn completeness_search_uses_pending_rating_and_deletion_projections() {
+        let connection = fixture();
+        let directory = tempfile::TempDir::new().expect("temporary live-completeness album");
+        let directory_text = directory.path().to_string_lossy().into_owned();
+        std::fs::write(directory.path().join("01.mp3"), b"present").expect("present fixture track");
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a1'",
+                [&directory_text],
+            )
+            .expect("move fixture album into temporary directory");
+        connection
+            .execute(
+                r#"
+                INSERT INTO aurora_state.tag_overlays(
+                  track_key, directory, filename, rating, love_state, release_year,
+                  catalog_rating, catalog_love_state, catalog_release_year,
+                  catalog_import_run_id, last_operation_id, updated_at_ms
+                ) VALUES ('pending-rating', ?1, '02.mp3', 5.0, 'neutral', 2005,
+                          NULL, 'neutral', 2005, 1, 1, 1)
+                "#,
+                [&directory_text],
+            )
+            .expect("pending rating overlay");
+        refresh_live_album_rating_projection(&connection).expect("refresh rating projection");
+
+        let overlaid = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("cr:100..100".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("live overlaid completeness search");
+        let overlaid_album = overlaid
+            .items
+            .iter()
+            .find(|album| album.id == "a1")
+            .expect("rating overlay completes album");
+        assert_eq!(overlaid_album.rated_tracks, 2);
+        assert_eq!(overlaid_album.total_tracks, 2);
+        let overlaid_tracks = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("cr:100..100".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("live overlaid track search");
+        assert!(
+            overlaid_tracks
+                .items
+                .iter()
+                .any(|track| track.album == "Takk...")
+        );
+        let overlaid_artists = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                search: Some("cr:100..100".to_owned()),
+                ..ArtistPageRequest::default()
+            },
+        )
+        .expect("live overlaid artist search");
+        assert!(
+            overlaid_artists
+                .items
+                .iter()
+                .any(|artist| artist.name == "Sigur Rós")
+        );
+
+        connection
+            .execute("DELETE FROM aurora_state.tag_overlays", [])
+            .expect("remove rating overlay");
+        connection
+            .execute(
+                "INSERT INTO aurora_state.pending_library_folder_sync(directory, filename, updated_at_ms) VALUES (?1, '02.mp3', 1)",
+                [&directory_text],
+            )
+            .expect("pending deleted track");
+        refresh_live_album_rating_projection(&connection).expect("refresh deletion projection");
+
+        let after_deletion = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("cr:100..100".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("live pending-deletion completeness search");
+        let projected_album = after_deletion
+            .items
+            .iter()
+            .find(|album| album.id == "a1")
+            .expect("pending deletion completes album");
+        assert_eq!(projected_album.rated_tracks, 1);
+        assert_eq!(projected_album.total_tracks, 1);
+    }
+
+    #[test]
+    #[ignore = "reads the user's live Aurora state and Music Library catalog"]
+    fn live_completeness_search_excludes_the_reported_fully_rated_albums() {
+        let state_path = std::path::PathBuf::from(
+            std::env::var_os("APPDATA").expect("Windows APPDATA for live Aurora state"),
+        )
+        .join("com.soundtrackgeek.aurora")
+        .join("aurora-state.sqlite3");
+        let store = StateStore::new(state_path).expect("live Aurora state");
+        let connection = open_catalog(&default_catalog_path().expect("live catalog path"))
+            .expect("live Music Library catalog");
+        let projection_started = std::time::Instant::now();
+        attach_aurora_state(&connection, &store).expect("live album projection");
+        eprintln!(
+            "live album projection prepared in {:?}",
+            projection_started.elapsed()
+        );
+        for (artist, album) in [("Chicago", "Chicago 18"), ("Disturbed", "The Sickness")] {
+            let query_started = std::time::Instant::now();
+            let incomplete = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(format!(
+                        "aartist:\"{artist}\" AND album:\"{album}\" AND cr:80..99"
+                    )),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .expect("live incomplete search");
+            eprintln!(
+                "live incomplete query finished in {:?}",
+                query_started.elapsed()
+            );
+            assert_eq!(incomplete.total_count, 0, "{artist} - {album}");
+
+            let query_started = std::time::Instant::now();
+            let complete = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(format!(
+                        "aartist:\"{artist}\" AND album:\"{album}\" AND cr:100..100"
+                    )),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .expect("live complete search");
+            eprintln!(
+                "live complete query finished in {:?}",
+                query_started.elapsed()
+            );
+            assert_eq!(complete.total_count, 1, "{artist} - {album}");
+            assert_eq!(
+                complete.items[0].rated_tracks,
+                complete.items[0].total_tracks
+            );
+        }
     }
 
     #[test]

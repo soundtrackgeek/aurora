@@ -14,6 +14,8 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 const BACKGROUND_RETRY_FOLDERS: usize = 1;
+const MAX_EXACT_OVERLAY_RETRIES: usize = 100;
+const TRANSIENT_RETRY_DELAY_MS: i64 = 30_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,15 +260,35 @@ impl LibrarySyncCoordinator {
         let processed = process_targets(
             targets,
             |target| {
-                sync_existing_library_folders(
-                    app,
-                    vec![target.directory.clone()],
-                    target_changed_file_paths(target),
-                )
-                .map(|_| ())
+                let overlay_filenames = if target.filename.is_none() {
+                    store.pending_overlay_filenames_for_directory(
+                        &target.directory,
+                        MAX_EXACT_OVERLAY_RETRIES,
+                    )?
+                } else {
+                    Vec::new()
+                };
+                sync_target_with_overlay_fallback(target, &overlay_filenames, |changed_files| {
+                    sync_existing_library_folders(
+                        app,
+                        vec![target.directory.clone()],
+                        changed_files,
+                    )
+                    .map(|_| ())
+                })
             },
             |target| store.complete_library_folder_sync(target),
-            |target, error| store.defer_library_folder_sync(target, error),
+            |target, error| {
+                if transient_library_sync_error(error) {
+                    store.defer_transient_library_folder_sync(
+                        target,
+                        error,
+                        TRANSIENT_RETRY_DELAY_MS,
+                    )
+                } else {
+                    store.defer_library_folder_sync(target, error)
+                }
+            },
         );
         completed_directories.extend(processed.completed_directories);
         let mut first_error = processed.first_error;
@@ -296,6 +318,22 @@ impl LibrarySyncCoordinator {
     }
 }
 
+fn transient_library_sync_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    [
+        "another aurora album intake is already running",
+        "being used by another process",
+        "could not start the music library bridge",
+        "music library did not return a response",
+        "music library took too long",
+        "could not monitor the music library bridge",
+        "database is locked",
+        "music library must be updated (or installed if missing)",
+    ]
+    .iter()
+    .any(|fragment| error.contains(fragment))
+}
+
 fn target_changed_file_paths(target: &PendingLibraryFolderSync) -> Vec<String> {
     target
         .filename
@@ -305,6 +343,40 @@ fn target_changed_file_paths(target: &PendingLibraryFolderSync) -> Vec<String> {
         .map(|path| path.to_string_lossy().into_owned())
         .into_iter()
         .collect()
+}
+
+fn sync_target_with_overlay_fallback(
+    target: &PendingLibraryFolderSync,
+    overlay_filenames: &[String],
+    mut synchronize: impl FnMut(Vec<String>) -> Result<(), String>,
+) -> Result<(), String> {
+    let primary = synchronize(target_changed_file_paths(target));
+    let Err(primary_error) = primary else {
+        return Ok(());
+    };
+    if target.filename.is_some() || transient_library_sync_error(&primary_error) {
+        return Err(primary_error);
+    }
+
+    let mut fallback_error = None;
+    for filename in overlay_filenames {
+        let exact_target = PendingLibraryFolderSync {
+            directory: target.directory.clone(),
+            filename: Some(filename.clone()),
+            token: target.token,
+        };
+        let changed_files = target_changed_file_paths(&exact_target);
+        if changed_files.is_empty() {
+            continue;
+        }
+        if let Err(error) = synchronize(changed_files) {
+            if transient_library_sync_error(&error) {
+                return Err(error);
+            }
+            fallback_error.get_or_insert(error);
+        }
+    }
+    Err(fallback_error.unwrap_or(primary_error))
 }
 
 #[derive(Debug, Default)]
@@ -417,6 +489,87 @@ mod tests {
         };
 
         assert!(target_changed_file_paths(&target).is_empty());
+    }
+
+    #[test]
+    fn transient_bridge_failures_never_consume_the_terminal_retry_budget() {
+        assert!(transient_library_sync_error(
+            "Another Aurora album intake is already running"
+        ));
+        assert!(transient_library_sync_error(
+            "Could not configure SQLite pragmas: database is locked"
+        ));
+        assert!(transient_library_sync_error(
+            "Music Library must be updated (or installed if missing)"
+        ));
+        assert!(!transient_library_sync_error(
+            "The selected folder contains more than one album"
+        ));
+    }
+
+    #[test]
+    fn permanent_folder_failure_still_attempts_each_exact_overlay_file() {
+        let directory = TempDir::new().expect("temporary album");
+        std::fs::write(directory.path().join("One.mp3"), b"one").expect("first MP3");
+        std::fs::write(directory.path().join("Two.mp3"), b"two").expect("second MP3");
+        let target = PendingLibraryFolderSync {
+            directory: directory.path().to_string_lossy().into_owned(),
+            filename: None,
+            token: 41,
+        };
+        let attempts = std::cell::RefCell::new(Vec::new());
+
+        let result = sync_target_with_overlay_fallback(
+            &target,
+            &["One.mp3".to_owned(), "Two.mp3".to_owned()],
+            |changed_files| {
+                attempts.borrow_mut().push(changed_files.clone());
+                if changed_files.is_empty() {
+                    Err("The folder contains an unrelated sidecar".to_owned())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+
+        assert_eq!(
+            attempts.into_inner(),
+            vec![
+                Vec::<String>::new(),
+                vec![
+                    directory
+                        .path()
+                        .join("One.mp3")
+                        .to_string_lossy()
+                        .into_owned()
+                ],
+                vec![
+                    directory
+                        .path()
+                        .join("Two.mp3")
+                        .to_string_lossy()
+                        .into_owned()
+                ],
+            ]
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "The folder contains an unrelated sidecar"
+        );
+    }
+
+    #[test]
+    fn transient_folder_failure_does_not_compete_with_exact_fallbacks() {
+        let target = pending(r"D:\Music\Busy Album", 41);
+        let calls = std::cell::Cell::new(0);
+        let error = sync_target_with_overlay_fallback(&target, &["Track.mp3".to_owned()], |_| {
+            calls.set(calls.get() + 1);
+            Err("database is locked".to_owned())
+        })
+        .unwrap_err();
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(error, "database is locked");
     }
 
     #[test]

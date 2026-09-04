@@ -393,7 +393,8 @@ async fn explore_albums(app: AppHandle, request: AlbumPageRequest) -> Result<Alb
 #[tauri::command]
 async fn explore_artists(app: AppHandle, request: ArtistPageRequest) -> Result<ArtistPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut page = explorer::load_artist_page(request)?;
+        let store = app.state::<StateStore>();
+        let mut page = explorer::load_artist_page(request, &store)?;
         let history = app.state::<HistoryStore>();
         let insights = history.artist_insights()?;
         for artist in &mut page.items {
@@ -537,10 +538,13 @@ async fn delete_album_track(
 }
 
 #[tauri::command]
-async fn artist_detail(artist: String) -> Result<ArtistDetail, String> {
-    tauri::async_runtime::spawn_blocking(move || explorer::load_artist_detail(artist))
-        .await
-        .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
+async fn artist_detail(app: AppHandle, artist: String) -> Result<ArtistDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        explorer::load_artist_detail(artist, &store)
+    })
+    .await
+    .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]

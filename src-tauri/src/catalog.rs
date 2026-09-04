@@ -182,7 +182,126 @@ pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), 
             FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
             |context| context.get::<String>(0).map(|value| value.to_lowercase()),
         )
-        .map_err(|error| format!("Could not configure Unicode catalog matching: {error}"))
+        .map_err(|error| format!("Could not configure Unicode catalog matching: {error}"))?;
+    connection
+        .create_scalar_function(
+            "aurora_file_missing",
+            2,
+            FunctionFlags::SQLITE_UTF8,
+            |context| {
+                let directory = context.get::<String>(0)?;
+                let filename = context.get::<String>(1)?;
+                let filename_path = Path::new(&filename);
+                if filename_path.components().count() != 1
+                    || filename_path.extension().is_none_or(|extension| {
+                        !extension.to_string_lossy().eq_ignore_ascii_case("mp3")
+                    })
+                {
+                    return Ok(0_i64);
+                }
+                let path =
+                    device_mode::resolve_device_path(Path::new(&directory)).join(filename_path);
+                Ok(i64::from(!path.is_file()))
+            },
+        )
+        .map_err(|error| format!("Could not configure live catalog file checks: {error}"))
+}
+
+pub(crate) fn attach_aurora_state(
+    connection: &Connection,
+    store: &StateStore,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS aurora_state",
+            [store.path().to_string_lossy().as_ref()],
+        )
+        .map_err(|error| format!("Could not attach Aurora's live catalog state: {error}"))?;
+    refresh_live_album_rating_projection(connection)
+}
+
+pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> Result<(), String> {
+    let query_only = connection
+        .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+        .map_err(|error| format!("Could not inspect the catalog read-only guard: {error}"))?;
+    if query_only {
+        connection
+            .pragma_update(None, "query_only", false)
+            .map_err(|error| {
+                format!("Could not prepare Aurora's temporary album projection: {error}")
+            })?;
+    }
+    let projection = connection.execute_batch(
+        r#"
+            DROP TABLE IF EXISTS temp.aurora_live_album_rating_state;
+            CREATE TEMP TABLE aurora_live_album_rating_state (
+              album_id TEXT PRIMARY KEY,
+              total_tracks INTEGER NOT NULL,
+              rated_tracks INTEGER NOT NULL
+            ) WITHOUT ROWID;
+            INSERT INTO aurora_live_album_rating_state(album_id, total_tracks, rated_tracks)
+            WITH affected(album_id) AS (
+              SELECT DISTINCT track.album_id
+              FROM aurora_state.tag_overlays AS overlay
+              CROSS JOIN tracks AS track
+                ON track.file_path = overlay.directory
+               AND track.filename = overlay.filename
+              UNION
+              SELECT DISTINCT track.album_id
+              FROM tracks AS track
+              JOIN aurora_state.pending_library_folder_sync AS pending
+                ON track.file_path = pending.directory
+               AND (pending.filename IS NULL OR track.filename = pending.filename)
+              WHERE aurora_file_missing(track.file_path, track.filename) = 1
+            ),
+            overlay_delta(album_id, rated_delta) AS (
+              SELECT track.album_id,
+                     SUM(
+                       CASE WHEN overlay.rating IS NOT NULL THEN 1 ELSE 0 END
+                       - CASE WHEN overlay.catalog_rating IS NOT NULL THEN 1 ELSE 0 END
+                     )
+              FROM aurora_state.tag_overlays AS overlay
+              CROSS JOIN tracks AS track
+                ON track.file_path = overlay.directory
+               AND track.filename = overlay.filename
+              GROUP BY track.album_id
+            ),
+            deleted(album_id, total_deleted, rated_deleted) AS (
+              SELECT track.album_id,
+                     COUNT(*),
+                     SUM(CASE
+                       WHEN overlay.track_key IS NOT NULL
+                         THEN CASE WHEN overlay.rating IS NOT NULL THEN 1 ELSE 0 END
+                       ELSE CASE WHEN track.normalized_rating IS NOT NULL THEN 1 ELSE 0 END
+                     END)
+              FROM tracks AS track
+              JOIN aurora_state.pending_library_folder_sync AS pending
+                ON track.file_path = pending.directory
+               AND (pending.filename IS NULL OR track.filename = pending.filename)
+              LEFT JOIN aurora_state.tag_overlays AS overlay
+                ON track.file_path = overlay.directory
+               AND track.filename = overlay.filename
+              WHERE aurora_file_missing(track.file_path, track.filename) = 1
+              GROUP BY track.album_id
+            )
+            SELECT album.id,
+                   MAX(0, album.total_tracks - COALESCE(deleted.total_deleted, 0)),
+                   MAX(0, album.rated_tracks
+                     + COALESCE(overlay_delta.rated_delta, 0)
+                     - COALESCE(deleted.rated_deleted, 0))
+            FROM albums AS album
+            JOIN affected ON affected.album_id = album.id
+            LEFT JOIN overlay_delta ON overlay_delta.album_id = album.id
+            LEFT JOIN deleted ON deleted.album_id = album.id;
+            "#,
+    );
+    let restore = query_only.then(|| connection.pragma_update(None, "query_only", true));
+    if let Some(Err(error)) = restore {
+        return Err(format!(
+            "Could not restore the catalog read-only guard after projecting live album ratings: {error}"
+        ));
+    }
+    projection.map_err(|error| format!("Could not project Aurora's live album ratings: {error}"))
 }
 
 fn completed_import_revision_for_connection(connection: &Connection) -> Result<String, String> {
@@ -1283,16 +1402,7 @@ fn album_level_predicate(
 ) -> Option<String> {
     match matcher {
         CatalogSearchMatch::CompletenessRange { from, to } => {
-            let mut predicates = Vec::new();
-            if let Some(from) = from {
-                params.push(Value::Real(f64::from(*from) / 100.0));
-                predicates.push(format!("{alias}.rating_completeness >= ?"));
-            }
-            if let Some(to) = to {
-                params.push(Value::Real(f64::from(*to) / 100.0));
-                predicates.push(format!("{alias}.rating_completeness <= ?"));
-            }
-            Some(format!("({})", predicates.join(" AND ")))
+            live_album_completeness_range_predicate(alias, *from, *to, params)
         }
         CatalogSearchMatch::LovedTracksRange { from, to } => {
             let mut predicates = Vec::new();
@@ -1308,6 +1418,49 @@ fn album_level_predicate(
         }
         _ => None,
     }
+}
+
+pub(crate) fn live_album_total_tracks_sql(album_alias: &str) -> String {
+    format!(
+        "COALESCE((SELECT live.total_tracks FROM temp.aurora_live_album_rating_state AS live WHERE live.album_id = {album_alias}.id), {album_alias}.total_tracks)"
+    )
+}
+
+pub(crate) fn live_album_rated_tracks_sql(album_alias: &str) -> String {
+    format!(
+        "COALESCE((SELECT live.rated_tracks FROM temp.aurora_live_album_rating_state AS live WHERE live.album_id = {album_alias}.id), {album_alias}.rated_tracks)"
+    )
+}
+
+fn live_album_completeness_range_predicate(
+    album_alias: &str,
+    from: Option<u32>,
+    to: Option<u32>,
+    params: &mut Vec<Value>,
+) -> Option<String> {
+    let (catalog_condition, live_condition, bounds) = match (from, to) {
+        (Some(from), Some(to)) => (
+            format!("{album_alias}.rating_completeness BETWEEN ? AND ?"),
+            "CASE WHEN live.total_tracks > 0 THEN live.rated_tracks * 1.0 / live.total_tracks ELSE 0.0 END BETWEEN ? AND ?".to_owned(),
+            vec![f64::from(from) / 100.0, f64::from(to) / 100.0],
+        ),
+        (Some(from), None) => (
+            format!("{album_alias}.rating_completeness >= ?"),
+            "CASE WHEN live.total_tracks > 0 THEN live.rated_tracks * 1.0 / live.total_tracks ELSE 0.0 END >= ?".to_owned(),
+            vec![f64::from(from) / 100.0],
+        ),
+        (None, Some(to)) => (
+            format!("{album_alias}.rating_completeness <= ?"),
+            "CASE WHEN live.total_tracks > 0 THEN live.rated_tracks * 1.0 / live.total_tracks ELSE 0.0 END <= ?".to_owned(),
+            vec![f64::from(to) / 100.0],
+        ),
+        (None, None) => return None,
+    };
+    params.extend(bounds.iter().copied().map(Value::Real));
+    params.extend(bounds.into_iter().map(Value::Real));
+    Some(format!(
+        "(({catalog_condition} AND {album_alias}.id NOT IN (SELECT album_id FROM temp.aurora_live_album_rating_state)) OR {album_alias}.id IN (SELECT live.album_id FROM temp.aurora_live_album_rating_state AS live WHERE {live_condition}))"
+    ))
 }
 
 fn track_album_level_predicate(
@@ -1438,6 +1591,7 @@ pub(crate) fn load_search_tracks(
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
+    attach_aurora_state(&connection, store)?;
     let ranked_query = search.fts_only_query();
     let mut params = Vec::<Value>::new();
     let mut sql = String::from(

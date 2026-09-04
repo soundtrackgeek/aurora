@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -363,6 +363,7 @@ impl StateStore {
                   filename TEXT,
                   updated_at_ms INTEGER NOT NULL,
                   attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                  next_attempt_at_ms INTEGER NOT NULL DEFAULT 0 CHECK (next_attempt_at_ms >= 0),
                   last_error TEXT
                 );
 
@@ -419,6 +420,61 @@ impl StateStore {
                 )
                 .map_err(|error| {
                     format!("Could not migrate Aurora's exact-file pending sync: {error}")
+                })?;
+        }
+        if !pending_sync_columns
+            .iter()
+            .any(|column| column == "next_attempt_at_ms")
+        {
+            transaction
+                .execute(
+                    "ALTER TABLE pending_library_folder_sync ADD COLUMN next_attempt_at_ms INTEGER NOT NULL DEFAULT 0 CHECK (next_attempt_at_ms >= 0)",
+                    [],
+                )
+                .map_err(|error| {
+                    format!("Could not migrate Aurora's durable library-sync schedule: {error}")
+                })?;
+        }
+        if current < 13 {
+            transaction
+                .execute(
+                    "UPDATE pending_library_folder_sync SET attempt_count = 0, next_attempt_at_ms = 0",
+                    [],
+                )
+                .map_err(|error| {
+                    format!("Could not reopen Aurora's stranded library-sync backlog: {error}")
+                })?;
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO pending_library_folder_sync(
+                      directory, filename, updated_at_ms, attempt_count, next_attempt_at_ms, last_error
+                    )
+                    SELECT directory,
+                           CASE WHEN COUNT(*) = 1 THEN MIN(filename) ELSE NULL END,
+                           MAX(updated_at_ms), 0, 0, NULL
+                    FROM tag_overlays
+                    GROUP BY directory COLLATE NOCASE
+                    ON CONFLICT(directory) DO UPDATE SET
+                      filename = CASE
+                        WHEN pending_library_folder_sync.filename IS NULL
+                          OR excluded.filename IS NULL
+                          OR pending_library_folder_sync.filename <> excluded.filename COLLATE NOCASE
+                          THEN NULL
+                        ELSE pending_library_folder_sync.filename
+                      END,
+                      updated_at_ms = MAX(
+                        excluded.updated_at_ms,
+                        pending_library_folder_sync.updated_at_ms + 1
+                      ),
+                      attempt_count = 0,
+                      next_attempt_at_ms = 0,
+                      last_error = NULL
+                    "#,
+                    [],
+                )
+                .map_err(|error| {
+                    format!("Could not queue Aurora's complete live tag backlog: {error}")
                 })?;
         }
         let synchronized_tables = [
@@ -1276,8 +1332,8 @@ impl StateStore {
                 r#"
                 SELECT directory, filename, updated_at_ms
                 FROM pending_library_folder_sync
-                WHERE attempt_count < ?2
-                ORDER BY updated_at_ms DESC, directory COLLATE NOCASE
+                WHERE attempt_count < ?2 AND next_attempt_at_ms <= ?3
+                ORDER BY updated_at_ms, directory COLLATE NOCASE
                 LIMIT ?1
                 "#,
             )
@@ -1286,7 +1342,7 @@ impl StateStore {
             })?;
         statement
             .query_map(
-                params![limit as i64, MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS],
+                params![limit as i64, MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS, now_ms()],
                 |row| {
                     Ok(PendingLibraryFolderSync {
                         directory: row.get(0)?,
@@ -1410,6 +1466,39 @@ impl StateStore {
         Ok(pending)
     }
 
+    pub(crate) fn pending_overlay_filenames_for_directory(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        if directory.trim().is_empty() || limit == 0 || limit > 100 {
+            return Err("Aurora refused an invalid exact-file overlay retry.".to_owned());
+        }
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT filename
+                FROM tag_overlays
+                WHERE directory = ?1 COLLATE NOCASE
+                ORDER BY updated_at_ms, filename COLLATE NOCASE
+                LIMIT ?2
+                "#,
+            )
+            .map_err(|error| {
+                format!("Could not prepare Aurora's exact-file overlay retries: {error}")
+            })?;
+        statement
+            .query_map(params![directory, limit as i64], |row| row.get(0))
+            .map_err(|error| {
+                format!("Could not read Aurora's exact-file overlay retries: {error}")
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                format!("Could not decode Aurora's exact-file overlay retries: {error}")
+            })
+    }
+
     pub(crate) fn library_folder_sync_counts(&self) -> Result<(usize, usize), String> {
         let connection = self.open()?;
         connection
@@ -1466,6 +1555,7 @@ impl StateStore {
                 UPDATE pending_library_folder_sync
                 SET updated_at_ms = MAX(?1, updated_at_ms + 1),
                     attempt_count = attempt_count + 1,
+                    next_attempt_at_ms = 0,
                     last_error = ?2
                 WHERE directory = ?3 AND updated_at_ms = ?4
                 "#,
@@ -1473,6 +1563,41 @@ impl StateStore {
             )
             .map(|changed| changed == 1)
             .map_err(|error| format!("Could not defer Aurora's library-folder sync: {error}"))
+    }
+
+    pub(crate) fn defer_transient_library_folder_sync(
+        &self,
+        item: &PendingLibraryFolderSync,
+        error_message: &str,
+        retry_after_ms: i64,
+    ) -> Result<bool, String> {
+        if item.directory.trim().is_empty() || retry_after_ms < 0 {
+            return Err("Aurora refused an invalid transient library-folder retry.".to_owned());
+        }
+        let connection = self.open()?;
+        let timestamp = now_ms();
+        connection
+            .execute(
+                r#"
+                UPDATE pending_library_folder_sync
+                SET updated_at_ms = MAX(?1, updated_at_ms + 1),
+                    attempt_count = 0,
+                    next_attempt_at_ms = ?1 + ?2,
+                    last_error = ?3
+                WHERE directory = ?4 AND updated_at_ms = ?5
+                "#,
+                params![
+                    timestamp,
+                    retry_after_ms,
+                    error_message,
+                    &item.directory,
+                    item.token
+                ],
+            )
+            .map(|changed| changed == 1)
+            .map_err(|error| {
+                format!("Could not schedule Aurora's transient library-folder retry: {error}")
+            })
     }
 
     pub(crate) fn interrupted_operations(&self) -> Result<Vec<TagOperation>, String> {
@@ -1618,8 +1743,8 @@ fn enqueue_pending_library_folder_sync(
         .execute(
             r#"
             INSERT INTO pending_library_folder_sync (
-              directory, filename, updated_at_ms, attempt_count, last_error
-            ) VALUES (?1, ?2, ?3, 0, NULL)
+              directory, filename, updated_at_ms, attempt_count, next_attempt_at_ms, last_error
+            ) VALUES (?1, ?2, ?3, 0, 0, NULL)
             ON CONFLICT(directory) DO UPDATE SET
               filename = CASE
                 WHEN pending_library_folder_sync.filename IS NULL
@@ -1633,6 +1758,7 @@ fn enqueue_pending_library_folder_sync(
                 pending_library_folder_sync.updated_at_ms + 1
               ),
               attempt_count = 0,
+              next_attempt_at_ms = 0,
               last_error = NULL
             "#,
             params![directory, filename, now_ms()],
@@ -2204,6 +2330,62 @@ mod tests {
     }
 
     #[test]
+    fn v13_migration_reopens_and_completes_the_existing_library_sync_backlog() {
+        let path = temporary_state_path();
+        {
+            let store = StateStore::new(path.clone()).expect("create current state");
+            let connection = store.open().expect("open current state");
+            connection
+                .execute_batch(
+                    r#"
+                    INSERT INTO pending_library_folder_sync(
+                      directory, updated_at_ms, attempt_count, next_attempt_at_ms, last_error
+                    ) VALUES ('D:\Music\Legacy\Blocked Album', 41, 3, 9999999999999, 'busy');
+                    INSERT INTO tag_overlays(
+                      track_key, directory, filename, rating, love_state, release_year,
+                      catalog_rating, catalog_love_state, catalog_release_year,
+                      catalog_import_run_id, last_operation_id, updated_at_ms
+                    ) VALUES (
+                      'overlay-only', 'D:\Music\Overlay\Unqueued Album', 'Track.mp3',
+                      5.0, 'neutral', 2000, NULL, 'neutral', 2000, 1, 1, 42
+                    );
+                    PRAGMA user_version = 12;
+                    "#,
+                )
+                .expect("simulate a blocked v12 backlog and an unqueued overlay");
+        }
+
+        let store = StateStore::new(path.clone()).expect("migrate v12 state");
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (2, 0));
+        let pending = store
+            .pending_library_folder_sync(2)
+            .expect("load reopened backlog");
+        assert_eq!(
+            pending
+                .iter()
+                .map(|item| item.directory.as_str())
+                .collect::<HashSet<_>>(),
+            HashSet::from([
+                r"D:\Music\Legacy\Blocked Album",
+                r"D:\Music\Overlay\Unqueued Album"
+            ])
+        );
+        let (attempt_count, next_attempt_at_ms): (i64, i64) = store
+            .open()
+            .expect("read reopened backlog")
+            .query_row(
+                "SELECT attempt_count, next_attempt_at_ms FROM pending_library_folder_sync WHERE directory = ?1",
+                params![r"D:\Music\Legacy\Blocked Album"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("reopened backlog row");
+        assert_eq!((attempt_count, next_attempt_at_ms), (0, 0));
+
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn verified_tag_and_undo_transactions_durably_queue_folder_sync() {
         let path = temporary_state_path();
         let store = StateStore::new(path.clone()).expect("state store");
@@ -2478,7 +2660,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_folder_sync_prioritizes_the_newest_edit() {
+    fn automatic_folder_sync_prioritizes_the_oldest_edit() {
         let path = temporary_state_path();
         let store = StateStore::new(path.clone()).expect("state store");
         let connection = store.open().expect("open queue");
@@ -2495,10 +2677,52 @@ mod tests {
 
         let pending = store
             .pending_library_folder_sync(1)
-            .expect("load newest pending folder");
-        assert_eq!(pending[0].directory, r"D:\Music\Newest Album");
+            .expect("load oldest pending folder");
+        assert_eq!(pending[0].directory, r"D:\Music\Older Album");
 
         drop(connection);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn transient_folder_sync_waits_without_exhausting_automatic_retries() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).expect("state store");
+        let directory = r"D:\Music\Artist\Busy Album";
+        {
+            let mut connection = store.open().expect("open queue");
+            let transaction = connection.transaction().expect("start queue transaction");
+            enqueue_pending_library_folder_sync(&transaction, directory, Some("Track.mp3"))
+                .expect("queue folder");
+            transaction.commit().expect("commit queue");
+        }
+
+        let pending = store
+            .pending_library_folder_sync(1)
+            .expect("load retryable folder")
+            .pop()
+            .expect("retryable folder");
+        assert!(
+            store
+                .defer_transient_library_folder_sync(&pending, "Music Library is busy", 60_000,)
+                .expect("schedule transient retry")
+        );
+
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
+        let (attempt_count, next_attempt_at_ms): (i64, i64) = store
+            .open()
+            .expect("read scheduled retry")
+            .query_row(
+                "SELECT attempt_count, next_attempt_at_ms FROM pending_library_folder_sync WHERE directory = ?1",
+                params![directory],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("scheduled retry row");
+        assert_eq!(attempt_count, 0);
+        assert!(next_attempt_at_ms > now_ms());
+
         drop(store);
         let _ = fs::remove_file(path);
     }
