@@ -1568,6 +1568,18 @@ mod tests {
         assert_eq!(page.items[0].original_year, Some(1999));
         assert_eq!(page.items[0].release_year, Some(2005));
 
+        let equals_page = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("artist=jónsi,aartist=sigur rós,album=takk,genre=post rock,year=1999,ryear=2005,publisher=emi,country=iceland,title=sæglópur".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("equals fielded track search");
+        assert_eq!(equals_page.items.len(), 1);
+        assert_eq!(equals_page.items[0].id, page.items[0].id);
+
         let country = track_page_from_connection(
             &connection,
             TrackPageRequest {
@@ -1719,7 +1731,7 @@ mod tests {
         let albums = album_page_from_connection(
             &connection,
             AlbumPageRequest {
-                search: Some("cr=80,love=1".to_owned()),
+                search: Some("cr:50..80,love:1..3".to_owned()),
                 ..AlbumPageRequest::default()
             },
         )
@@ -1747,6 +1759,16 @@ mod tests {
         .expect("album without Love search");
         assert_eq!(without_love.items.len(), 1);
         assert_eq!(without_love.items[0].id, "a2");
+
+        let multiple_loves = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("love:2..".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("album loved-track count search");
+        assert!(multiple_loves.items.is_empty());
     }
 
     #[test]

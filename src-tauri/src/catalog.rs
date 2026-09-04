@@ -654,8 +654,8 @@ enum CatalogSearchMatch {
     Country { value: String, exact: bool },
     ScoreGenreGroup,
     YearRange { from: Option<i32>, to: Option<i32> },
-    CompletenessMax(u8),
-    AlbumLove(bool),
+    CompletenessRange { from: Option<u32>, to: Option<u32> },
+    LovedTracksRange { from: Option<u32>, to: Option<u32> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -695,8 +695,8 @@ impl CatalogSearch {
             | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. }
-            | CatalogSearchMatch::CompletenessMax(_)
-            | CatalogSearchMatch::AlbumLove(_) => None,
+            | CatalogSearchMatch::CompletenessRange { .. }
+            | CatalogSearchMatch::LovedTracksRange { .. } => None,
         }
     }
 
@@ -806,32 +806,91 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "publisher" => Some(CatalogSearchField::Publisher),
         "country" => Some(CatalogSearchField::Country),
         "title" => Some(CatalogSearchField::Title),
-        _ => None,
-    }
-}
-
-fn parse_equals_search_field(value: &str) -> Option<CatalogSearchField> {
-    match value.trim().to_ascii_lowercase().as_str() {
         "cr" => Some(CatalogSearchField::Completeness),
         "love" => Some(CatalogSearchField::Love),
         _ => None,
     }
 }
 
-fn parse_search_integer(value: &str, field: CatalogSearchField) -> Result<u8, String> {
+fn split_search_field(value: &str) -> Option<(CatalogSearchField, &str)> {
+    let (separator, _) = value
+        .char_indices()
+        .find(|(_, character)| matches!(character, ':' | '='))?;
+    let field = parse_search_field(&value[..separator])?;
+    Some((field, value[separator + 1..].trim()))
+}
+
+fn parse_search_number(value: &str, field: CatalogSearchField) -> Result<u32, String> {
     let invalid = if field == CatalogSearchField::Completeness {
-        "cr must be a whole percentage from 0 through 100."
+        "cr bounds must be whole percentages from 0 through 100."
     } else {
-        "love must be 0 or 1."
+        "love bounds must be non-negative whole track counts."
     };
-    let parsed = value.trim().parse::<u8>().map_err(|_| invalid.to_owned())?;
-    if (field == CatalogSearchField::Completeness && parsed <= 100)
-        || (field == CatalogSearchField::Love && parsed <= 1)
-    {
+    let parsed = value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| invalid.to_owned())?;
+    if field != CatalogSearchField::Completeness || parsed <= 100 {
         Ok(parsed)
     } else {
         Err(invalid.to_owned())
     }
+}
+
+fn parse_search_number_range(
+    value: &str,
+    field: CatalogSearchField,
+) -> Result<(Option<u32>, Option<u32>), String> {
+    let value = value.trim();
+    let Some((raw_from, raw_to)) = value.split_once("..") else {
+        let number = parse_search_number(value, field)?;
+        return match field {
+            CatalogSearchField::Completeness => Ok((Some(0), Some(number))),
+            CatalogSearchField::Love if number == 0 => Ok((Some(0), Some(0))),
+            CatalogSearchField::Love if number == 1 => Ok((Some(1), None)),
+            CatalogSearchField::Love => {
+                Err("love must be 0, 1, or an inclusive range such as love:1..3.".to_owned())
+            }
+            _ => unreachable!("numeric range uses an album metric field"),
+        };
+    };
+    if raw_to.contains("..") {
+        return Err(format!(
+            "{} range must use one '..', for example {}:1..3.",
+            if field == CatalogSearchField::Completeness {
+                "cr"
+            } else {
+                "love"
+            },
+            if field == CatalogSearchField::Completeness {
+                "cr"
+            } else {
+                "love"
+            }
+        ));
+    }
+    let from = (!raw_from.trim().is_empty())
+        .then(|| parse_search_number(raw_from, field))
+        .transpose()?;
+    let to = (!raw_to.trim().is_empty())
+        .then(|| parse_search_number(raw_to, field))
+        .transpose()?;
+    let field_name = if field == CatalogSearchField::Completeness {
+        "cr"
+    } else {
+        "love"
+    };
+    if from.is_none() && to.is_none() {
+        return Err(format!(
+            "{field_name} range needs a starting or ending number."
+        ));
+    }
+    if from.zip(to).is_some_and(|(from, to)| from > to) {
+        return Err(format!(
+            "{field_name} range must start at or before its ending number."
+        ));
+    }
+    Ok((from, to))
 }
 
 fn build_fts_prefix_query(
@@ -954,17 +1013,8 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                     pending_not = false;
                 }
 
-                let (field, value, explicit_field) = raw
-                    .split_once(':')
-                    .and_then(|(field, value)| {
-                        parse_search_field(field).map(|field| (field, value.trim(), true))
-                    })
-                    .or_else(|| {
-                        raw.split_once('=').and_then(|(field, value)| {
-                            parse_equals_search_field(field)
-                                .map(|field| (field, value.trim(), true))
-                        })
-                    })
+                let (field, value, explicit_field) = split_search_field(raw)
+                    .map(|(field, value)| (field, value, true))
                     .unwrap_or((
                         inherited_field.unwrap_or(CatalogSearchField::Any),
                         raw,
@@ -1021,12 +1071,16 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                             }
                         }
                     },
-                    CatalogSearchField::Completeness => CatalogSearchMatch::CompletenessMax(
-                        parse_search_integer(exact.as_deref().unwrap_or(value), field)?,
-                    ),
-                    CatalogSearchField::Love => CatalogSearchMatch::AlbumLove(
-                        parse_search_integer(exact.as_deref().unwrap_or(value), field)? == 1,
-                    ),
+                    CatalogSearchField::Completeness => {
+                        let (from, to) =
+                            parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
+                        CatalogSearchMatch::CompletenessRange { from, to }
+                    }
+                    CatalogSearchField::Love => {
+                        let (from, to) =
+                            parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
+                        CatalogSearchMatch::LovedTracksRange { from, to }
+                    }
                     _ => match exact {
                         Some(value) => CatalogSearchMatch::Exact(value),
                         None => CatalogSearchMatch::Prefix(build_fts_prefix_query(
@@ -1217,7 +1271,8 @@ fn non_prefix_predicate(
             }
             Some(format!("({})", predicates.join(" AND ")))
         }
-        CatalogSearchMatch::CompletenessMax(_) | CatalogSearchMatch::AlbumLove(_) => None,
+        CatalogSearchMatch::CompletenessRange { .. }
+        | CatalogSearchMatch::LovedTracksRange { .. } => None,
     }
 }
 
@@ -1227,14 +1282,30 @@ fn album_level_predicate(
     params: &mut Vec<Value>,
 ) -> Option<String> {
     match matcher {
-        CatalogSearchMatch::CompletenessMax(maximum) => {
-            params.push(Value::Real(f64::from(*maximum) / 100.0));
-            Some(format!("{alias}.rating_completeness BETWEEN 0.0 AND ?"))
+        CatalogSearchMatch::CompletenessRange { from, to } => {
+            let mut predicates = Vec::new();
+            if let Some(from) = from {
+                params.push(Value::Real(f64::from(*from) / 100.0));
+                predicates.push(format!("{alias}.rating_completeness >= ?"));
+            }
+            if let Some(to) = to {
+                params.push(Value::Real(f64::from(*to) / 100.0));
+                predicates.push(format!("{alias}.rating_completeness <= ?"));
+            }
+            Some(format!("({})", predicates.join(" AND ")))
         }
-        CatalogSearchMatch::AlbumLove(has_love) => Some(format!(
-            "{alias}.loved_tracks {} 0",
-            if *has_love { ">" } else { "=" }
-        )),
+        CatalogSearchMatch::LovedTracksRange { from, to } => {
+            let mut predicates = Vec::new();
+            if let Some(from) = from {
+                params.push(Value::Integer(i64::from(*from)));
+                predicates.push(format!("{alias}.loved_tracks >= ?"));
+            }
+            if let Some(to) = to {
+                params.push(Value::Integer(i64::from(*to)));
+                predicates.push(format!("{alias}.loved_tracks <= ?"));
+            }
+            Some(format!("({})", predicates.join(" AND ")))
+        }
         _ => None,
     }
 }
@@ -1260,8 +1331,8 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::Country { .. }
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. }
-            | CatalogSearchMatch::CompletenessMax(_)
-            | CatalogSearchMatch::AlbumLove(_) => None,
+            | CatalogSearchMatch::CompletenessRange { .. }
+            | CatalogSearchMatch::LovedTracksRange { .. } => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -2500,8 +2571,13 @@ mod tests {
             "artist:kiss,aartist:def leppard,album:love gun,genre:hard rock,year:1985,ryear:2025,publisher:la-la land records,title:easy tonight",
         )
         .expect("fielded search");
+        let equals_search = parse_catalog_search(
+            "artist=kiss,aartist=def leppard,album=love gun,genre=hard rock,year=1985,ryear=2025,publisher=la-la land records,title=easy tonight",
+        )
+        .expect("equals fielded search");
 
         assert_eq!(search.groups.len(), 8);
+        assert_eq!(equals_search, search);
         assert_eq!(
             search.groups[0].alternatives[0].field,
             CatalogSearchField::Artist
@@ -2531,24 +2607,50 @@ mod tests {
     #[test]
     fn catalog_search_parses_album_completeness_and_love() {
         let search = parse_catalog_search("cr=80,love=1").expect("album metric search");
+        let colon_search = parse_catalog_search("cr:80,love:1").expect("colon album metric search");
         assert_eq!(search.groups.len(), 2);
+        assert_eq!(colon_search, search);
         assert_eq!(
             search.groups[0].alternatives[0],
             CatalogSearchAlternative {
                 field: CatalogSearchField::Completeness,
-                matcher: CatalogSearchMatch::CompletenessMax(80),
+                matcher: CatalogSearchMatch::CompletenessRange {
+                    from: Some(0),
+                    to: Some(80),
+                },
             }
         );
         assert_eq!(
             search.groups[1].alternatives[0],
             CatalogSearchAlternative {
                 field: CatalogSearchField::Love,
-                matcher: CatalogSearchMatch::AlbumLove(true),
+                matcher: CatalogSearchMatch::LovedTracksRange {
+                    from: Some(1),
+                    to: None,
+                },
+            }
+        );
+        let range_search =
+            parse_catalog_search("cr:50..80,love:1..3").expect("album metric ranges");
+        assert_eq!(
+            range_search.groups[0].alternatives[0].matcher,
+            CatalogSearchMatch::CompletenessRange {
+                from: Some(50),
+                to: Some(80),
+            }
+        );
+        assert_eq!(
+            range_search.groups[1].alternatives[0].matcher,
+            CatalogSearchMatch::LovedTracksRange {
+                from: Some(1),
+                to: Some(3),
             }
         );
         assert!(parse_catalog_search("cr=101").is_err());
         assert!(parse_catalog_search("cr=80.5").is_err());
         assert!(parse_catalog_search("love=2").is_err());
+        assert!(parse_catalog_search("cr:80..50").is_err());
+        assert!(parse_catalog_search("love:..").is_err());
     }
 
     #[test]

@@ -491,7 +491,7 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
 }
 
 function usesAdvancedLibrarySearch(search?: string): boolean {
-  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title)\s*:|(?:^|,)\s*(?:cr|love)\s*=|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
+  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
 function compareText(left: string, right: string, descending = false): number {
@@ -687,7 +687,8 @@ interface LibrarySearchAlternative {
   exact: boolean;
   yearFrom: number | null;
   yearTo: number | null;
-  numberValue: number | null;
+  numberFrom: number | null;
+  numberTo: number | null;
 }
 
 interface LibrarySearchGroup {
@@ -697,11 +698,9 @@ interface LibrarySearchGroup {
 
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
-const librarySearchColonFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title",
+const librarySearchFields = new Set<LibrarySearchField>([
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love",
 ]);
-
-const librarySearchEqualsFields = new Set<LibrarySearchField>(["cr", "love"]);
 
 const scoreGenreGroup = new Set([
   "action", "animation", "comedy", "documentary", "drama", "fantasy", "horror",
@@ -803,16 +802,44 @@ function parseLibrarySearchYearRange(
   return { yearFrom, yearTo };
 }
 
-function parseLibrarySearchInteger(value: string, field: "cr" | "love"): number {
-  const trimmed = value.trim();
+function parseLibrarySearchNumberRange(
+  value: string,
+  field: "cr" | "love",
+): { numberFrom: number | null; numberTo: number | null } {
+  const parts = value.trim().split("..");
+  if (parts.length > 2) {
+    throw new Error(`${field} range must use one '..', for example ${field}:1..3.`);
+  }
   const invalid = field === "cr"
-    ? "cr must be a whole percentage from 0 through 100."
-    : "love must be 0 or 1.";
-  if (!/^\d+$/u.test(trimmed)) throw new Error(invalid);
-  const number = Number(trimmed);
-  if (field === "cr" && number <= 100) return number;
-  if (field === "love" && number <= 1) return number;
-  throw new Error(invalid);
+    ? "cr bounds must be whole percentages from 0 through 100."
+    : "love bounds must be non-negative whole track counts.";
+  const parseBound = (bound: string): number | null => {
+    const trimmed = bound.trim();
+    if (!trimmed) return null;
+    if (!/^\d+$/u.test(trimmed)) throw new Error(invalid);
+    const number = Number(trimmed);
+    if (!Number.isSafeInteger(number) || (field === "cr" && number > 100) || number > 4_294_967_295) {
+      throw new Error(invalid);
+    }
+    return number;
+  };
+  if (parts.length === 1) {
+    const number = parseBound(parts[0]);
+    if (number === null) throw new Error(invalid);
+    if (field === "cr") return { numberFrom: 0, numberTo: number };
+    if (number === 0) return { numberFrom: 0, numberTo: 0 };
+    if (number === 1) return { numberFrom: 1, numberTo: null };
+    throw new Error("love must be 0, 1, or an inclusive range such as love:1..3.");
+  }
+  const numberFrom = parseBound(parts[0]);
+  const numberTo = parseBound(parts[1]);
+  if (numberFrom === null && numberTo === null) {
+    throw new Error(`${field} range needs a starting or ending number.`);
+  }
+  if (numberFrom !== null && numberTo !== null && numberFrom > numberTo) {
+    throw new Error(`${field} range must start at or before its ending number.`);
+  }
+  return { numberFrom, numberTo };
 }
 
 function parseLibrarySearch(query: string): LibrarySearchGroup[] {
@@ -839,13 +866,15 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       }
       const colonSeparator = raw.indexOf(":");
       const equalsSeparator = raw.indexOf("=");
-      const colonField = colonSeparator >= 0 ? raw.slice(0, colonSeparator).trim().toLocaleLowerCase() : "";
-      const equalsField = equalsSeparator >= 0 ? raw.slice(0, equalsSeparator).trim().toLocaleLowerCase() : "";
-      const hasColonField = librarySearchColonFields.has(colonField as LibrarySearchField);
-      const hasEqualsField = librarySearchEqualsFields.has(equalsField as LibrarySearchField);
-      const explicitField = hasColonField || hasEqualsField;
-      const separator = hasColonField ? colonSeparator : equalsSeparator;
-      const candidateField = hasColonField ? colonField : equalsField;
+      const separator = colonSeparator < 0
+        ? equalsSeparator
+        : equalsSeparator < 0
+          ? colonSeparator
+          : Math.min(colonSeparator, equalsSeparator);
+      const candidateField = separator >= 0
+        ? raw.slice(0, separator).trim().toLocaleLowerCase()
+        : "";
+      const explicitField = librarySearchFields.has(candidateField as LibrarySearchField);
       const field: LibrarySearchField = explicitField
         ? candidateField as LibrarySearchField
         : (inheritedField ?? "any");
@@ -855,11 +884,12 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       const exact = exactLibrarySearchValue(value);
       let yearFrom: number | null = null;
       let yearTo: number | null = null;
-      let numberValue: number | null = null;
+      let numberFrom: number | null = null;
+      let numberTo: number | null = null;
       if (field === "year" || field === "ryear") {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
       } else if (field === "cr" || field === "love") {
-        numberValue = parseLibrarySearchInteger(exact ?? value, field);
+        ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
       } else if (exact === null) {
         termCount += searchTerms(value).length;
         if (termCount > 32) throw new Error("Search can contain at most 32 words.");
@@ -873,7 +903,8 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         exact: exact !== null,
         yearFrom,
         yearTo,
-        numberValue,
+        numberFrom,
+        numberTo,
       });
       afterOr = false;
       continue;
@@ -958,13 +989,16 @@ function matchesLibrarySearchAlternative(
   }
   if (alternative.field === "cr") {
     const album = track.albumId ? albumStats.get(track.albumId) : undefined;
-    if (!album || album.totalTracks <= 0 || alternative.numberValue === null) return false;
-    return album.ratedTracks / album.totalTracks * 100 <= alternative.numberValue;
+    if (!album || album.totalTracks <= 0) return false;
+    const completeness = album.ratedTracks / album.totalTracks * 100;
+    return (alternative.numberFrom === null || completeness >= alternative.numberFrom)
+      && (alternative.numberTo === null || completeness <= alternative.numberTo);
   }
   if (alternative.field === "love") {
     const album = track.albumId ? albumStats.get(track.albumId) : undefined;
-    if (!album || alternative.numberValue === null) return false;
-    return alternative.numberValue === 1 ? album.lovedTracks > 0 : album.lovedTracks === 0;
+    if (!album) return false;
+    return (alternative.numberFrom === null || album.lovedTracks >= alternative.numberFrom)
+      && (alternative.numberTo === null || album.lovedTracks <= alternative.numberTo);
   }
   const values = librarySearchValues(track, alternative.field);
   if (

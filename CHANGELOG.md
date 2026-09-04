@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.25] - 2026-09-04
+
+### Changed
+
+- Every catalog search field now accepts either `:` or `=` as its separator, with `:` retained as Aurora's documented convention.
+- Completeness and loved-track-count searches now accept inclusive closed and open `..` ranges such as `cr:50..80` and `love:1..3`, while the existing `cr:80`, `love:1`, and `love:0` shorthands keep their meanings.
+- Updated the search guide and in-app help with equivalent-separator examples for text, country, completeness, and Love searches.
+
 ## [0.24.24] - 2026-09-04
 
 ### Added

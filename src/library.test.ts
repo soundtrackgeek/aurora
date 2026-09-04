@@ -275,6 +275,11 @@ describe("library presentation", () => {
     expect(filterTracks(tracks, "country:is", null)).toEqual([tracks[0]]);
     expect(filterTracks(tracks, "year:2011", null)).toEqual([]);
     expect(filterTracks(tracks, "ryear:2011", null)).toEqual([tracks[1]]);
+    expect(filterTracks(
+      tracks,
+      "artist=jónsi,aartist=sigur rós,album=takk,genre=post rock,year=1999,ryear=2005,publisher=emi,country=iceland,title=sæglópur",
+      null,
+    )).toEqual([tracks[0]]);
   });
 
   it("supports inclusive closed and open Year and Release Year ranges", () => {
@@ -297,8 +302,17 @@ describe("library presentation", () => {
     ]);
     expect(filterTracks(albumMetricTracks, "cr=50,love=1", null)).toEqual(albumMetricTracks.slice(0, 2));
     expect(filterTracks(albumMetricTracks, "love=0", null)).toEqual(albumMetricTracks.slice(2));
+    expect(filterTracks(albumMetricTracks, "cr:80", null)).toEqual(filterTracks(albumMetricTracks, "cr=80", null));
+    expect(filterTracks(albumMetricTracks, "love:1", null)).toEqual(filterTracks(albumMetricTracks, "love=1", null));
+    expect(filterTracks(albumMetricTracks, "cr:50..80", null)).toEqual(albumMetricTracks.slice(0, 2));
+    expect(filterTracks(albumMetricTracks, "cr:50..", null)).toEqual(albumMetricTracks.slice(0, 3));
+    expect(filterTracks(albumMetricTracks, "love:1..3", null)).toEqual(albumMetricTracks.slice(0, 2));
+    expect(filterTracks(albumMetricTracks, "love:..0", null)).toEqual(albumMetricTracks.slice(2));
+    expect(filterTracks(albumMetricTracks, "love:2..", null)).toEqual([]);
     expect(() => filterTracks(albumMetricTracks, "cr=101", null)).toThrow(/0 through 100/u);
-    expect(() => filterTracks(albumMetricTracks, "love=2", null)).toThrow(/0 or 1/u);
+    expect(() => filterTracks(albumMetricTracks, "love=2", null)).toThrow(/0, 1, or an inclusive range/u);
+    expect(() => filterTracks(albumMetricTracks, "cr:80..50", null)).toThrow(/start at or before/u);
+    expect(() => filterTracks(albumMetricTracks, "love:..", null)).toThrow(/starting or ending/u);
   });
 
   it("supports OR inheritance, NOT, negative fields, and exact quoted values", () => {
