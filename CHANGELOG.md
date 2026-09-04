@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.22] - 2026-09-04
+
+### Changed
+
+- Pinned local and CI Rust builds to 1.98.1 so routine `stable` updates no longer invalidate both Windows build caches unexpectedly.
+- Allowed trusted master and manual workflows to retain Rust dependency caches when a later step fails; pull requests remain restore-only and cannot publish failed-run caches.
+- Documented the pinned-toolchain policy for future automated changes.
+
 ## [0.24.21] - 2026-09-04
 
 ### Fixed
