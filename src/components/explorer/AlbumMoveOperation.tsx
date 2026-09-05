@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderOutput, LoaderCircle } from "lucide-react";
 import { libraryIntakeAdapter, previewLibraryRemoveAlbum, type LibraryIntakePreview } from "../../ingest";
+import { useLibraryIntakeProgress } from "../inbox/useLibraryIntakeProgress";
 import { loadInboxSettings } from "../../inbox";
 
 export interface AlbumMoveRequest {
@@ -16,6 +17,7 @@ export function AlbumMoveOperation({ request, onDismiss, onRemoved }: {
   onRemoved: (albumId: string, warnings: string[], destination: string) => Promise<void>;
 }) {
   const [preview, setPreview] = useState<LibraryIntakePreview | null>(null);
+  const { progress, reset: resetProgress } = useLibraryIntakeProgress(preview?.planId);
   const [stage, setStage] = useState<"preparing" | "ready" | "moving" | "completed" | "failed">("preparing");
   const [message, setMessage] = useState("Preparing move · you can keep browsing");
   const [review, setReview] = useState(false);
@@ -61,8 +63,9 @@ export function AlbumMoveOperation({ request, onDismiss, onRemoved }: {
     if (!preview?.canApply || applying.current) return;
     applying.current = true;
     setReview(false);
+    resetProgress();
     setStage("moving");
-    setMessage("Moving and verifying files · you can keep browsing");
+    setMessage("Waiting for Music Library · you can keep browsing");
     try {
       const result = await libraryIntakeAdapter.apply({ planId: preview.planId, sessionId: preview.sessionId });
       const destination = preview.albums[0]?.destinationPath ?? preview.category.destinationRoot;
@@ -81,11 +84,16 @@ export function AlbumMoveOperation({ request, onDismiss, onRemoved }: {
     }
   }
 
+  const currentProgress = stage === "moving" && progress?.operation === "applyBatch"
+    && progress.planId === preview?.planId ? progress : null;
+  const progressMessage = currentProgress
+    ? `${currentProgress.message}${currentProgress.stage === "transferring" && currentProgress.totalFiles > 0
+      ? ` · ${currentProgress.processedFiles}/${currentProgress.totalFiles} files` : ""}` : message;
   const busy = stage === "preparing" || stage === "moving";
   return createPortal(<>
     <section className="album-move-operation" role={stage === "failed" ? "alert" : "status"} aria-label={`${label}: ${request.album.title}`}>
       <strong>{busy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FolderOutput aria-hidden="true" />}{label} · {request.album.title}</strong>
-      <p>{message}</p>
+      <p>{progressMessage}</p>
       {stage === "ready" ? <button type="button" onClick={() => setReview(true)}>Review move</button> : null}
       {!busy ? <button type="button" onClick={onDismiss}>{stage === "ready" ? "Cancel" : "Dismiss"}</button> : null}
     </section>

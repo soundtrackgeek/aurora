@@ -200,6 +200,8 @@ pub struct LibraryIntakeApplyResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct LibraryIntakeProgress {
+    #[serde(default)]
+    plan_id: Option<String>,
     operation: String,
     stage: String,
     message: String,
@@ -1026,6 +1028,11 @@ where
     TRequest: Serialize,
     TResponse: DeserializeOwned,
 {
+    let plan_id = serde_json::to_value(&payload)
+        .map_err(|error| format!("Could not encode bridge progress identity: {error}"))?
+        .get("planId")
+        .and_then(|value| value.as_str())
+        .map(str::to_owned);
     let (exchange, request_file) = ExchangeFiles::create(bridge_directory)?;
     let request = ProtocolRequest {
         protocol_version: PROTOCOL_VERSION,
@@ -1063,7 +1070,14 @@ where
             "Aurora could not start the Music Library bridge: {error}"
         ))
     })?;
-    let status = wait_for_child(&mut child, timeout, operation, &exchange.progress_path, app)?;
+    let status = wait_for_child(
+        &mut child,
+        timeout,
+        operation,
+        &exchange.progress_path,
+        app,
+        plan_id.as_deref(),
+    )?;
     let response = read_protocol_response::<TResponse>(&exchange.response_path, operation);
 
     if !status.success() {
@@ -1086,14 +1100,16 @@ fn wait_for_child(
     operation: &str,
     progress_path: &Path,
     app: Option<&AppHandle>,
+    plan_id: Option<&str>,
 ) -> Result<ExitStatus, String> {
     let started = Instant::now();
     let mut last_progress = Vec::new();
     loop {
         if let Ok(bytes) = fs::read(progress_path)
             && bytes != last_progress
-            && let Ok(progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes)
+            && let Ok(mut progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes)
         {
+            progress.plan_id = plan_id.map(str::to_owned);
             if let Some(app) = app {
                 let _ = app.emit("library-intake-progress", progress);
             }

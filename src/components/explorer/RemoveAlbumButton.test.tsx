@@ -1,5 +1,5 @@
 import { useState, StrictMode } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as ingest from "../../ingest";
 import * as inbox from "../../inbox";
@@ -40,6 +40,11 @@ describe("album moves across navigation", () => {
     movedAlbumCount: 1, importRunId: 2, backupPath: null, albums: [], cleanupWarnings: [],
   };
   it.each(["remove", "inbox"] as const)("keeps a %s preview and apply attached to the original album after navigation", async (mode) => {
+    let reportProgress!: (progress: ingest.LibraryIntakeProgress) => void;
+    vi.spyOn(ingest, "listenLibraryIntakeProgress").mockImplementation(async (callback) => {
+      reportProgress = callback;
+      return () => {};
+    });
     const pendingPreview = deferred<ingest.LibraryIntakePreview>();
     const preview = mode === "remove"
       ? vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockReturnValue(pendingPreview.promise)
@@ -62,6 +67,20 @@ describe("album moves across navigation", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: mode === "remove" ? "Remove Album" : "Move to Inbox" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Go to playing album" }));
+    const progress: ingest.LibraryIntakeProgress = {
+      planId: "other-plan", operation: "applyBatch", stage: "cataloging",
+      message: "Updating the catalog and preserving its recovery backup",
+      completedAlbums: 1, totalAlbums: 1, processedFiles: 14, totalFiles: 14,
+      processedBytes: 203000000, totalBytes: 203000000,
+    };
+    act(() => reportProgress(progress));
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for Music Library");
+    act(() => reportProgress({ ...progress, planId: "remove-plan" }));
+    expect(screen.getByRole("status")).toHaveTextContent(progress.message);
+    act(() => reportProgress(progress));
+    expect(screen.getByRole("status")).toHaveTextContent(progress.message);
+    act(() => reportProgress({ ...progress, planId: "remove-plan", stage: "transferring", message: "Copied and verified track.mp3" }));
+    expect(screen.getByRole("status")).toHaveTextContent("14/14 files");
     pendingApply.resolve({ ...result, cleanupWarnings: ["Source retained for recovery"] });
     await waitFor(() => expect(onRemoved).toHaveBeenCalledWith("album-1", ["Source retained for recovery"], removalPreview().albums[0].destinationPath));
     expect(await screen.findByRole("alert")).toHaveTextContent("Source retained for recovery");

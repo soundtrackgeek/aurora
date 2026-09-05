@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.31] - 2026-09-05
+
+### Fixed
+- Album moves show their actual Music Library phase and transferred-file count, with request correlation so other background operations cannot replace the status.
+- Pair with Music Library 0.145.11 for targeted catalog removal without rebuilding retained track and search rows.
+
 ## [0.24.30] - 2026-09-05
 
 ### Fixed
