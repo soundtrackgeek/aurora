@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.29 adds verified album removal from the Albums sidebar while preserving window geometry and the Albums workspace after closing or updating.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.30 keeps album moves visible across navigation and preserves the selected album when another move finishes.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.29 slice
+## Current 0.24.30 slice
 
 - Aurora remembers window size, screen position, and maximized state. Restarting reloads previously loaded explorer pages, reopens the album and selected track, and restores the saved scroll offset after content is ready. Update installation saves window geometry before exiting. These saved positions are local to this device.
 
@@ -342,4 +342,6 @@ Back up the private key and passphrase separately and securely. Losing either pr
 
 The behavioral scope, performance target, source-of-truth decisions, and next sections are captured in [docs/app-brief.md](docs/app-brief.md).
 
-Albums sidebar **Remove Album** moves the complete album folder to `D:\MUSIC\_NOT\_ALBUMS\`, verifies the copy, removes the album through Music Library’s transactional importer, and cleans the source only after commit. The current Albums view immediately removes the row and refreshes. A confirmation shows the destination; collisions and changed sources are rejected, and cleanup warnings retain recovery information. Requires Aurora 0.24.29 and Music Library 0.145.9 or newer.
+Albums sidebar **Remove Album** moves the complete album folder to `D:\MUSIC\_NOT\_ALBUMS\`, verifies the copy, removes the album through Music Library’s transactional importer, and cleans the source only after commit. The current Albums view immediately removes the row and refreshes. A confirmation shows the destination; collisions and changed sources are rejected, and cleanup warnings retain recovery information. Requires Aurora 0.24.30 and Music Library 0.145.10 or newer.
+
+Album moves now retain their preview, confirmation, progress, and errors when navigating away. Music Library 0.145.10 fixes ordinary/verbatim Windows path resolution for both Remove Album and Move to Inbox. Aurora 0.24.30 keeps the original target and preserves any newly selected album when the move completes.

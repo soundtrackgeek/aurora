@@ -1,3 +1,4 @@
+import { AlbumMoveOperation, type AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
 import { RemoveAlbumButton } from "./components/explorer/RemoveAlbumButton";
 import { loadWorkspaceCheckpoint, saveWorkspaceCheckpoint, restoreWorkspaceScroll, loadWorkspacePages } from "./workspaceRestoration";
 import {
@@ -486,6 +487,7 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
 }
 
 function App() {
+  const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
   const [initialWorkspace] = useState(loadWorkspaceCheckpoint);
   const workspaceRef = useRef(initialWorkspace);
@@ -2686,25 +2688,29 @@ function App() {
     }
   }
 
-  async function handleAlbumRemoved(albumId: string, warnings: string[]) {
+  async function handleAlbumRemoved(albumId: string, warnings: string[], destination: string) {
     // Invalidate pending requests before removing the row, so stale detail/page responses cannot restore it.
-    albumRequestRef.current += 1;
+    if (selectedAlbumIdRef.current === albumId) albumRequestRef.current += 1;
     exploreRequestRef.current += 1;
     setIsLoadingMore(false);
     setExplorerLoadState("ready");
     setExplorerAlbums((current) => current.filter((album) => album.id !== albumId));
     setExplorerTracks((current) => current.filter((track) => track.albumId !== albumId));
+    setExplorerSelection((current) => current === null ? null : current.kind === "albums"
+      ? { ...current, albums: current.albums.filter((album) => album.id !== albumId) }
+      : { ...current, tracks: current.tracks.filter((track) => track.albumId !== albumId) });
     setSelectedAlbumId((current) => current === albumId ? null : current);
-    setAlbumTracks([]);
+    setAlbumTracks((current) => current.filter((track) => track.albumId !== albumId));
     if (selectedTrackRef.current?.albumId === albumId) setSelectedTrack(null);
     const message = warnings.length > 0
       ? `Album removed from Music Library. ${warnings.join(" ")}`
-      : "Album moved to D:\\MUSIC\\_NOT\\_ALBUMS and removed from Music Library.";
+      : `Album moved to ${destination} and removed from Music Library.`;
     try {
       await refreshCatalogIfChanged();
       setSyncMessage(message);
     } catch (error) {
       setSyncMessage(`${message} Catalog refresh needs a retry: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
   }
 
@@ -3058,7 +3064,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.29</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.30</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3405,7 +3411,8 @@ function App() {
                 onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                 onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                 onDeleteTracks={deleteExplorerAlbumTracks}
-                onAlbumMovedToInbox={refreshCatalogIfChanged}
+                onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
+                albumMoveBusy={albumMoveRequest !== null}
                 onSelectionChange={(selection) => {
                   setExplorerSelection(selection);
                   setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
@@ -3478,7 +3485,7 @@ function App() {
               chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
               ratingDigits={2}
             />
-            <RemoveAlbumButton key={explorerAlbumInspectorContext.album.id} album={explorerAlbumInspectorContext.album} onRemoved={handleAlbumRemoved} />
+            <RemoveAlbumButton disabled={albumMoveRequest !== null} onRequest={() => setAlbumMoveRequest((current) => current ?? { album: explorerAlbumInspectorContext.album, mode: "remove" })} />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
           <div className="inspector-scroll">
@@ -3530,6 +3537,8 @@ function App() {
           </div>
         ) : <EmptyInspector />}
       </aside>}
+
+      {albumMoveRequest ? <AlbumMoveOperation request={albumMoveRequest} onDismiss={() => setAlbumMoveRequest(null)} onRemoved={handleAlbumRemoved} /> : null}
 
       {queueOpen && (
         <QueuePanel

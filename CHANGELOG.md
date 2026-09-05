@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.30] - 2026-09-05
+
+### Fixed
+- Album move operations survive navigation, retain the original target and visible errors, and preserve the newly selected album.
+- Resolve catalog album folders consistently across ordinary and verbatim Windows paths for removal and Inbox moves (Music Library 0.145.10).
+
 ## [0.24.29] - 2026-09-05
 
 ### Added

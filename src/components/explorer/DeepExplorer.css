@@ -300,3 +300,9 @@
 .remove-album-action { margin-top: 16px; }
 .remove-album-action > button { width: 100%; justify-content: center; }
 .remove-album-action > p { color: #ff9eb2; overflow-wrap: anywhere; }
+
+.album-move-operation { position: fixed; z-index: 45; top: 78px; right: 18px; width: min(400px, calc(100vw - 36px)); padding: 14px; border: 1px solid #426276; border-radius: 8px; color: #e9edf2; background: #101722; box-shadow: 0 12px 40px #0008; }
+.album-move-operation strong { display: flex; align-items: center; gap: 8px; }
+.album-move-operation svg { width: 16px; height: 16px; flex-shrink: 0; }
+.album-move-operation p { margin: 8px 0; overflow-wrap: anywhere; }
+.album-move-operation button { margin-right: 8px; padding: 6px 12px; color: #e9edf2; background: #172c3d; border: 1px solid #426276; border-radius: 5px; cursor: pointer; }
