@@ -296,3 +296,7 @@
 @media (prefers-reduced-motion: reduce) {
   .deep-explorer * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.remove-album-action { margin-top: 16px; }
+.remove-album-action > button { width: 100%; justify-content: center; }
+.remove-album-action > p { color: #ff9eb2; overflow-wrap: anywhere; }

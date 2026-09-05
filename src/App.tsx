@@ -1,3 +1,4 @@
+import { RemoveAlbumButton } from "./components/explorer/RemoveAlbumButton";
 import { loadWorkspaceCheckpoint, saveWorkspaceCheckpoint, restoreWorkspaceScroll, loadWorkspacePages } from "./workspaceRestoration";
 import {
   Activity,
@@ -2685,6 +2686,28 @@ function App() {
     }
   }
 
+  async function handleAlbumRemoved(albumId: string, warnings: string[]) {
+    // Invalidate pending requests before removing the row, so stale detail/page responses cannot restore it.
+    albumRequestRef.current += 1;
+    exploreRequestRef.current += 1;
+    setIsLoadingMore(false);
+    setExplorerLoadState("ready");
+    setExplorerAlbums((current) => current.filter((album) => album.id !== albumId));
+    setExplorerTracks((current) => current.filter((track) => track.albumId !== albumId));
+    setSelectedAlbumId((current) => current === albumId ? null : current);
+    setAlbumTracks([]);
+    if (selectedTrackRef.current?.albumId === albumId) setSelectedTrack(null);
+    const message = warnings.length > 0
+      ? `Album removed from Music Library. ${warnings.join(" ")}`
+      : "Album moved to D:\\MUSIC\\_NOT\\_ALBUMS and removed from Music Library.";
+    try {
+      await refreshCatalogIfChanged();
+      setSyncMessage(message);
+    } catch (error) {
+      setSyncMessage(`${message} Catalog refresh needs a retry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async function deleteExplorerAlbumTracks(tracks: readonly Track[]) {
     const albumId = tracks[0]?.albumId;
     if (!albumId || tracks.some((track) => track.albumId !== albumId)) {
@@ -3035,7 +3058,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.28</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.29</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3455,6 +3478,7 @@ function App() {
               chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
               ratingDigits={2}
             />
+            <RemoveAlbumButton key={explorerAlbumInspectorContext.album.id} album={explorerAlbumInspectorContext.album} onRemoved={handleAlbumRemoved} />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
           <div className="inspector-scroll">

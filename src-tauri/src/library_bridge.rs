@@ -453,6 +453,40 @@ pub async fn preview_library_move_to_inbox(
 }
 
 #[tauri::command]
+pub async fn preview_library_remove_album(
+    app: AppHandle,
+    album_id: String,
+) -> Result<LibraryIntakePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| {
+            if album_id.trim().is_empty() {
+                return Err("Choose a library album to remove.".to_owned());
+            }
+            let inbox_path = r"D:\MUSIC\_NOT\_ALBUMS";
+            let result = invoke_bridge::<_, LibraryIntakePreview>(
+                &app,
+                "previewRemoveAlbum",
+                MoveToInboxPreviewPayload {
+                    album_id: album_id.trim(),
+                    inbox_path,
+                },
+                PREVIEW_TIMEOUT,
+            )?;
+            validate_preview(&result, LibraryCategoryId::Inbox)?;
+            if result.albums.len() != 1 || result.albums[0].action != LibraryIntakeAction::Remove {
+                return Err(update_music_library_message(
+                    "Music Library returned an invalid album removal preview.".to_owned(),
+                ));
+            }
+            Ok(result)
+        })
+    })
+    .await
+    .map_err(|error| format!("The album removal preview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 pub async fn apply_library_intake_batch(
     app: AppHandle,
     request: LibraryIntakeApplyRequest,

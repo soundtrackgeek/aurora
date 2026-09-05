@@ -1510,6 +1510,7 @@ pub fn run() {
             select_library_intake_folder,
             preview_library_intake_batch,
             preview_library_move_to_inbox,
+            library_bridge::preview_library_remove_album,
             apply_library_intake_batch,
             inbox_snapshot,
             inbox_settings,

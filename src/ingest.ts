@@ -216,3 +216,8 @@ export const libraryIntakeAdapter: LibraryIntakeAdapter = {
   previewMoveToInbox: previewLibraryMoveToInbox,
   apply: applyLibraryIntakeBatch,
 };
+
+export async function previewLibraryRemoveAlbum(albumId: string): Promise<LibraryIntakePreview> {
+  if (!isTauriRuntime()) throw new Error("Removing an album is available in the native Aurora app.");
+  return invoke<LibraryIntakePreview>("preview_library_remove_album", { albumId });
+}

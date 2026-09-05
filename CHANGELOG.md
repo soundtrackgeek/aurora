@@ -4,6 +4,11 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.29] - 2026-09-05
+
+### Added
+- Albums sidebar removal to `D:\MUSIC\_NOT\_ALBUMS`, using verified folder transfer and transactional catalog removal, with immediate Albums refresh and cleanup warnings. Requires Music Library 0.145.9 or newer.
+
 ## [0.24.28] - 2026-09-05
 
 ### Fixed
