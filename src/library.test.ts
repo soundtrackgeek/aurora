@@ -215,6 +215,21 @@ describe("library presentation", () => {
     expect(applyAlbumTrackMetricsProjection(album, tracks.slice(0, 1))).toBe(album);
   });
 
+  it("keeps the refreshed album genre consistent with its complete track list", () => {
+    const album: AlbumSummary = {
+      id: "album-1", title: "Aretha Now", artist: "Aretha Franklin", releaseYear: 1968,
+      genre: "Soul", totalTracks: 2, ratedTracks: 0, lovedTracks: 0,
+      durationSeconds: 300, rating: null, albumScore: null,
+    };
+    const currentTracks = [
+      { ...tracks[0], genre: "Southern Soul" },
+      { ...tracks[0], id: "second", trackKey: "second", genre: "Southern Soul" },
+    ];
+    expect(applyAlbumTrackMetricsProjection(album, currentTracks).genre).toBe("Southern Soul");
+    expect(applyAlbumTrackMetricsProjection(album, currentTracks.slice(0, 1)).genre).toBe("Soul");
+    expect(applyAlbumTrackMetricsProjection(album, [currentTracks[0], { ...currentTracks[1], genre: "Jazz" }]).genre).toBe("Soul");
+  });
+
   it("does not guess album metadata from a partial or mixed track result", () => {
     const album: AlbumSummary = {
       id: "album-1",

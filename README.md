@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.26 makes album completeness search follow Aurora's live projected ratings and makes transient Music Library synchronization retries durable.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.27 reconciles album genres discovered in the Tags editor with the album display and Music Library catalog.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.26 slice
+## Current 0.24.27 slice
+
+- Opening or reloading Tags projects the verified file metadata into the current library views. If the file genre differs from the catalog, Aurora queues those files for its existing Music Library synchronization without rewriting the MP3s. Complete album refreshes preserve the genre shared by their tracks.
 
 - Every catalog search field accepts either `:` or `=`. Aurora documents `:` as the convention, so `cr:50..80`, `love:1..3`, and `country:norway` are preferred, while their `=` forms remain valid. Completeness and loved-track counts support the same inclusive closed and open `..` ranges as years.
 

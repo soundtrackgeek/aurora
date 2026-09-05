@@ -38,6 +38,7 @@ interface ManualTagEditorProps {
   kind: "track" | "album";
   label: string;
   loadSnapshot: () => Promise<TagEditorSnapshot>;
+  onSnapshotLoaded?: (snapshot: TagEditorSnapshot) => void;
   saveSnapshot: (
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
@@ -249,7 +250,7 @@ function ArtworkField({
   );
 }
 
-export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot, artwork }: ManualTagEditorProps) {
+export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, saveSnapshot, artwork }: ManualTagEditorProps) {
   const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
   const [draft, setDraft] = useState<DraftText>(emptyDraft);
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
@@ -261,6 +262,8 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot, artwo
   const requestRef = useRef(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef(true);
+  const onSnapshotLoadedRef = useRef(onSnapshotLoaded);
+  useEffect(() => { onSnapshotLoadedRef.current = onSnapshotLoaded; }, [onSnapshotLoaded]);
   useEffect(() => {
     let cancelled = false;
     void loadGenreNames()
@@ -273,6 +276,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, saveSnapshot, artwo
     setDraft(draftForSnapshot(next));
     setSelectedFields(new Set());
     setPhase(nextPhase);
+    onSnapshotLoadedRef.current?.(next);
   }, []);
 
   const loadState = useCallback(async (showLoading: boolean) => {
@@ -544,6 +548,9 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     targetTrackSelectionJson,
   ]);
   const loadSnapshot = useCallback(() => readTagEditorState(requestTarget), [requestTarget]);
+  const onSnapshotLoaded = useCallback((next: TagEditorSnapshot) => {
+    if (next.liveTracks?.length) onTracksChange(next.liveTracks, next.catalogSync);
+  }, [onTracksChange]);
   const artwork = useMemo<AlbumArtworkEditor | undefined>(() => targetKind === "album" ? {
     currentUrl: albumCoverUrl(targetAlbumId!, 256),
     choose: () => selectAlbumCoverImage({ source: "library", target: requestTarget }),
@@ -596,6 +603,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     kind={target.kind === "album" || target.kind === "albums" ? "album" : "track"}
     label={target.label}
     loadSnapshot={loadSnapshot}
+    onSnapshotLoaded={onSnapshotLoaded}
     saveSnapshot={saveSnapshot}
     artwork={artwork}
   />;

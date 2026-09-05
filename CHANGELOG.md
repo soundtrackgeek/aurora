@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.27] - 2026-09-05
+
+### Fixed
+
+- Reading Tags now updates the visible track and album metadata from the verified MP3 values and queues files with stale catalog genres for Music Library synchronization. This fixes an album showing an old genre such as Soul while Tags shows Southern Soul, without rewriting any MP3 tags.
+- Album detail refreshes project the consistent genre from a complete track list instead of restoring an older album summary genre.
+
 ## [0.24.26] - 2026-09-04
 
 ### Changed

@@ -182,6 +182,8 @@ export interface TagEditorTrackState {
 
 export interface TagEditorSnapshot {
   tracks: TagEditorTrackState[];
+  liveTracks?: Track[];
+  catalogSync?: CatalogSync;
 }
 
 export interface TagEditorUpdateResult {
@@ -280,8 +282,10 @@ function browserTracksForTarget(target: TagEditorTarget): Track[] {
 }
 
 function browserTagEditorSnapshot(target: TagEditorTarget): TagEditorSnapshot {
+  const liveTracks = browserTracksForTarget(target);
   return {
-    tracks: browserTracksForTarget(target).map((track) => ({
+    liveTracks,
+    tracks: liveTracks.map((track) => ({
       trackId: track.id,
       trackKey: track.trackKey,
       revision: browserRevision(track),
@@ -316,7 +320,8 @@ function trackWithEditableTagValues(
 
 export async function readTagEditorState(target: TagEditorTarget): Promise<TagEditorSnapshot> {
   if (!isTauriRuntime()) return browserTagEditorSnapshot(target);
-  return invoke<TagEditorSnapshot>("tag_editor_state", { target });
+  const result = await invoke<TagEditorUpdateResult>("tag_editor_state", { target });
+  return { ...result.state, liveTracks: result.tracks, catalogSync: result.catalogSync };
 }
 
 export async function updateTagEditor(
@@ -355,7 +360,7 @@ export async function updateTagEditor(
     };
   }
   return invoke<TagEditorUpdateResult>("update_tag_editor", {
-    request: { target, expected, fields, values, artworkToken },
+    request: { target, expected: { tracks: expected.tracks }, fields, values, artworkToken },
   });
 }
 

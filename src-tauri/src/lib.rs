@@ -68,10 +68,7 @@ use ratings::{
 };
 use state_store::StateStore;
 use std::sync::Mutex;
-use tag_model::{
-    TagEditRequest, TagEditorSnapshot, TagEditorTarget, TagEditorUpdateRequest,
-    TagEditorUpdateResult,
-};
+use tag_model::{TagEditRequest, TagEditorTarget, TagEditorUpdateRequest, TagEditorUpdateResult};
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -1035,13 +1032,35 @@ async fn update_track_tags(
 async fn tag_editor_state(
     app: AppHandle,
     target: TagEditorTarget,
-) -> Result<TagEditorSnapshot, String> {
+) -> Result<TagEditorUpdateResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<TagState>();
-        let service = state
-            .lock()
-            .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
-        service.inspect_editor(target)
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            let mut result = {
+                let state = app.state::<TagState>();
+                let service = state
+                    .lock()
+                    .map_err(|_| "Aurora's tag reader stopped unexpectedly.".to_owned())?;
+                service.inspect_editor(target)?
+            };
+            let directories = result
+                .tracks
+                .iter()
+                .filter(|track| track.tag_sync_state.is_some())
+                .map(|track| track.directory.clone())
+                .collect::<Vec<_>>();
+            result.catalog_sync = Some(
+                coordinator
+                    .queue_after_edit(&app, &directories)
+                    .catalog_sync,
+            );
+            Ok::<TagEditorUpdateResult, String>(result)
+        });
+        let mut result = result?;
+        if let Some(sync) = &mut result.catalog_sync {
+            sync.projection_token = Some(projection_token);
+        }
+        Ok(result)
     })
     .await
     .map_err(|error| format!("The tag reader stopped unexpectedly: {error}"))?

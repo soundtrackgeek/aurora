@@ -79,6 +79,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TagEditor", () => {
+  it("projects freshly read file tags once without rereading when the parent updates", async () => {
+    const liveTracks = updatedTracks().map((track) => ({ ...track, genre: "Southern Soul" }));
+    const catalogSync = { status: "pending" as const, pendingFolderCount: 1, projectionToken: 4 };
+    tagMocks.read.mockResolvedValue({ ...snapshot(), liveTracks, catalogSync });
+    const onTracksChange = vi.fn();
+    const view = render(<TagEditor target={target} onTracksChange={onTracksChange} />);
+    await waitFor(() => expect(onTracksChange).toHaveBeenCalledWith(liveTracks, catalogSync));
+    view.rerender(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    expect(tagMocks.read).toHaveBeenCalledTimes(1);
+    expect(onTracksChange).toHaveBeenCalledTimes(1);
+    expect(tagMocks.update).not.toHaveBeenCalled();
+  });
+
   it("shows common album values, mixed track values, and the album MP3 count", async () => {
     render(<TagEditor target={target} onTracksChange={vi.fn()} />);
 

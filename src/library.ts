@@ -263,6 +263,9 @@ export function applyAlbumTrackMetricsProjection(
     lovedTracks,
     rating,
     albumScore,
+    genre: consistentAlbumValue(tracks.map((track) => track.genre)).consistent
+      ? tracks[0]?.genre ?? null
+      : current.genre,
   };
 }
 

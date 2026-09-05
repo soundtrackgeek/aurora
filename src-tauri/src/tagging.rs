@@ -439,14 +439,41 @@ impl TagService {
     pub(crate) fn inspect_editor(
         &self,
         target: TagEditorTarget,
-    ) -> Result<TagEditorSnapshot, String> {
+    ) -> Result<TagEditorUpdateResult, String> {
         let resolved = self.resolve_editor_target(&target)?;
+        self.inspect_resolved_editor(resolved)
+    }
+
+    fn inspect_resolved_editor(
+        &self,
+        resolved: Vec<ResolvedTrack>,
+    ) -> Result<TagEditorUpdateResult, String> {
+        let mut states = Vec::with_capacity(resolved.len());
         let mut tracks = Vec::with_capacity(resolved.len());
+        let mut changed_files = Vec::new();
         for track in resolved {
-            let (state, _) = editor_state_for_resolved(track)?;
-            tracks.push(state);
+            let (state, mut track) = editor_state_for_resolved(track)?;
+            if track.summary.genre != state.values.genre {
+                changed_files.push((
+                    track.summary.directory.clone(),
+                    track.summary.filename.clone(),
+                ));
+                track.summary.tag_sync_state = Some(TagSyncState::PendingImport);
+            }
+            apply_editable_values_to_summary(&mut track.summary, &state.values);
+            states.push(state);
+            tracks.push(track.summary);
         }
-        Ok(TagEditorSnapshot { tracks })
+        // Queue only after every file has been read consistently. Reading the editor
+        // must never rewrite the MP3s, but discovered stale catalog genres need repair.
+        if !changed_files.is_empty() {
+            self.store.queue_library_file_syncs(&changed_files)?;
+        }
+        Ok(TagEditorUpdateResult {
+            state: TagEditorSnapshot { tracks: states },
+            tracks,
+            catalog_sync: None,
+        })
     }
 
     pub(crate) fn editor_album_directory(
@@ -3143,6 +3170,48 @@ mod tests {
             audio_path: PathBuf::from(r"D:\Music\Fixture\01.mp3"),
             catalog_values: values,
         }
+    }
+
+    #[test]
+    fn editor_read_projects_external_genre_and_queues_sync_without_writing_audio() {
+        let target = fixture_path("external-editor-genre");
+        write_fixture(&target, Version::Id3v23);
+        let mut tag = Tag::read_from_path(&target).expect("read fixture");
+        tag.set_genre("Southern Soul");
+        tag.write_to_path(&target, Version::Id3v23)
+            .expect("set genre");
+        let before = fs::read(&target).expect("original bytes");
+        let state_path = target.with_extension("sqlite3");
+        let store = StateStore::new(state_path.clone()).expect("state");
+        let service = TagService::new(store.clone()).expect("service");
+        let mut resolved = resolved_track_fixture("1", "external-genre", "album-1");
+        resolved.audio_path = target.clone();
+        resolved.summary.directory = target.parent().unwrap().to_string_lossy().into_owned();
+        resolved.summary.filename = target.file_name().unwrap().to_string_lossy().into_owned();
+        let mut matching = resolved.clone();
+        matching.summary.genre = Some("Southern Soul".to_owned());
+        service
+            .inspect_resolved_editor(vec![matching])
+            .expect("matching genre");
+        assert!(
+            store
+                .pending_library_folder_sync(10)
+                .expect("empty queue")
+                .is_empty()
+        );
+        resolved.summary.genre = Some("Soul".to_owned());
+        let result = service
+            .inspect_resolved_editor(vec![resolved])
+            .expect("inspect");
+        assert_eq!(result.tracks[0].genre.as_deref(), Some("Southern Soul"));
+        assert!(result.tracks[0].tag_sync_state.is_some());
+        assert_eq!(
+            store.pending_library_folder_sync(10).expect("queue").len(),
+            1
+        );
+        assert_eq!(fs::read(&target).expect("unchanged file"), before);
+        fs::remove_file(target).expect("remove audio");
+        remove_state_fixture(&state_path);
     }
 
     #[test]
