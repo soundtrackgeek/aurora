@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.24.27"
+version = "0.24.28"
 description = "A fast, local-first explorer for a personal music universe"
 authors = ["Jørn Tillnes"]
 edition = "2024"
@@ -38,6 +38,7 @@ sha2 = "0.10.9"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "query", "rustls"] }
 keyring = { version = "3.6.1", features = ["windows-native"] }
 dotenvy = "0.15.7"
+tauri-plugin-window-state = "2.4.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = [

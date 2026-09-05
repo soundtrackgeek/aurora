@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime } from "./library";
 
@@ -76,7 +77,7 @@ export function useAuroraUpdater() {
     setState((current) => ({ ...current, phase: "downloading", progress: 0 }));
 
     try {
-      await update.downloadAndInstall((event: DownloadEvent) => {
+      await update.download((event: DownloadEvent) => {
         if (event.event === "Started") {
           total = event.data.contentLength ?? null;
         } else if (event.event === "Progress") {
@@ -87,6 +88,8 @@ export function useAuroraUpdater() {
           setState((current) => ({ ...current, phase: "installing", progress: 100 }));
         }
       });
+      await saveWindowState(StateFlags.SIZE | StateFlags.POSITION | StateFlags.MAXIMIZED);
+      await update.install();
     } catch (error) {
       setState((current) => ({
         ...current,

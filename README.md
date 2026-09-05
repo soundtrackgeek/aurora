@@ -1,10 +1,12 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.27 reconciles album genres discovered in the Tags editor with the album display and Music Library catalog.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.28 restores window geometry and the Albums workspace after closing or updating.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.27 slice
+## Current 0.24.28 slice
+
+- Aurora remembers window size, screen position, and maximized state. Restarting reloads previously loaded explorer pages, reopens the album and selected track, and restores the saved scroll offset after content is ready. Update installation saves window geometry before exiting. These saved positions are local to this device.
 
 - Opening or reloading Tags projects the verified file metadata into the current library views. If the file genre differs from the catalog, Aurora queues those files for its existing Music Library synchronization without rewriting the MP3s. Complete album refreshes preserve the genre shared by their tracks.
 

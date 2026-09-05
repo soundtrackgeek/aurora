@@ -1,3 +1,4 @@
+import { loadWorkspaceCheckpoint, saveWorkspaceCheckpoint, restoreWorkspaceScroll, loadWorkspacePages } from "./workspaceRestoration";
 import {
   Activity,
   Album,
@@ -485,6 +486,10 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
 
 function App() {
   const [initialViewPreferences] = useState(loadViewPreferences);
+  const [initialWorkspace] = useState(loadWorkspaceCheckpoint);
+  const workspaceRef = useRef(initialWorkspace);
+  const restoringScrollRef = useRef(false);
+  const scrollReadyRef = useRef(false);
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
@@ -620,7 +625,7 @@ function App() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const mainScrollRef = useRef<HTMLDivElement>(null);
-  const scrollPositionByDestinationRef = useRef<Partial<Record<SidebarDestination, number>>>({});
+  const scrollPositionByDestinationRef = useRef<Partial<Record<SidebarDestination, number>>>(initialWorkspace.scroll);
   const exploreRequestRef = useRef(0);
   const loadedExplorerRequestKeyRef = useRef<string | null>(null);
   const explorerCursorRef = useRef<ExplorerCursor | null>(null);
@@ -736,29 +741,31 @@ function App() {
     });
   }, [activeNav, explorerFilters, explorerView, inspectorView, selectedAlbumId, tagSelectionKind]);
 
+  const scrollExplorerView = explorerViewForDestination(activeNav);
+  scrollReadyRef.current = loadError !== null || (snapshot !== null && (scrollExplorerView === null
+    || explorerLoadState === "error"
+    || (explorerLoadState === "ready" && !explorerRestorationPendingRef.current && albumDetailState !== "loading"
+      && loadedExplorerRequestKeyRef.current === explorerRequestKey(scrollExplorerView, explorerFilters, explorerReloadToken))));
+
+  useEffect(() => {
+    if (explorerLoadState !== "ready" || explorerRestorationPendingRef.current
+      || loadedExplorerRequestKeyRef.current !== explorerRequestKey(explorerView, explorerFilters, explorerReloadToken)) return;
+    workspaceRef.current = {
+      ...workspaceRef.current,
+      explorerKey: explorerRequestKey(explorerView, explorerFilters, 0),
+      loaded: explorerTracks.length + explorerAlbums.length + explorerArtists.length,
+      trackKey: selectedTrack?.trackKey ?? null,
+    };
+    saveWorkspaceCheckpoint(workspaceRef.current);
+  }, [explorerLoadState, explorerView, explorerFilters, explorerReloadToken, explorerTracks.length, explorerAlbums.length, explorerArtists.length, selectedTrack]);
+
   useLayoutEffect(() => {
     const scrollContainer = mainScrollRef.current;
     if (!scrollContainer) return undefined;
-    const target = scrollPositionByDestinationRef.current[activeNav] ?? 0;
-    let attempts = 0;
-    let lastApplied: number | null = null;
-    let retryTimer: number | null = null;
-    const restore = () => {
-      const maximum = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
-      if (
-        lastApplied !== null
-        && scrollContainer.scrollTop !== lastApplied
-        && scrollContainer.scrollTop < maximum
-      ) return;
-      scrollContainer.scrollTop = target;
-      lastApplied = scrollContainer.scrollTop;
-      attempts += 1;
-      if (attempts < 10) retryTimer = window.setTimeout(restore, 50);
-    };
-    restore();
-    return () => {
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
-    };
+    restoringScrollRef.current = true;
+    return restoreWorkspaceScroll(scrollContainer, scrollPositionByDestinationRef.current[activeNav] ?? 0,
+      () => scrollReadyRef.current,
+      () => { restoringScrollRef.current = false; });
   }, [activeNav]);
 
   useEffect(() => {
@@ -1157,7 +1164,7 @@ function App() {
     const restoredAlbumId = handoffAlbumId
       ?? (preservingCurrentView && explorerView === "albums" ? selectedAlbumIdRef.current : null)
       ?? (restoringStoredView && explorerView === "albums" ? initialViewPreferences.selectedAlbumId : null);
-    const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : null;
+    const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : restoringStoredView ? initialWorkspace.trackKey : null;
     const preservedLoaded = explorerLoadedRef.current;
     const preservedCursor = explorerCursorRef.current;
     const requestId = ++exploreRequestRef.current;
@@ -1176,7 +1183,11 @@ function App() {
       if (!preservingCurrentView) setExplorerLoadState("loading");
       setExplorerError(null);
       setExplorerCursor(null);
-      void loadExplorerPage(explorerView, explorerFilters)
+      void loadWorkspacePages<ExplorerResult>(
+        (cursor) => loadExplorerPage(explorerView, explorerFilters, cursor),
+        restoringStoredView && initialWorkspace.explorerKey === explorerRequestKey(explorerView, explorerFilters, 0) ? initialWorkspace.loaded : 0,
+        () => cancelled,
+      )
         .then((page) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
           setExplorerTracks((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.tracks) : page.tracks);
@@ -1234,7 +1245,7 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId]);
+  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace]);
 
   useEffect(() => {
     if (
@@ -2399,7 +2410,7 @@ function App() {
 
   function setActiveNav(destination: SidebarDestination) {
     if (destination === activeNav) return;
-    if (mainScrollRef.current) {
+    if (mainScrollRef.current && !restoringScrollRef.current) {
       scrollPositionByDestinationRef.current[activeNav] = mainScrollRef.current.scrollTop;
     }
     setActiveNavState(destination);
@@ -3024,7 +3035,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.27</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.28</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3125,6 +3136,12 @@ function App() {
         <div
           className="main-scroll"
           ref={mainScrollRef}
+          onScroll={(event) => {
+            if (restoringScrollRef.current) return;
+            scrollPositionByDestinationRef.current[activeNav] = event.currentTarget.scrollTop;
+            workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
+            saveWorkspaceCheckpoint(workspaceRef.current);
+          }}
           data-text-size={activeDisplayPreferences.textSize}
           data-cover-size={activeDisplayPreferences.coverSize}
         >

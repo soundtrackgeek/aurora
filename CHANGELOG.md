@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.28] - 2026-09-05
+
+### Fixed
+
+- Restore window size, position, and maximized state across normal closes and updates; explicitly save geometry before the updater exits.
+- Persist explorer pagination, selected album track, and scroll offsets so restarting in Albums returns to the expanded album at the saved position, including albums beyond the first page and slow-loading detail.
+
 ## [0.24.27] - 2026-09-05
 
 ### Fixed

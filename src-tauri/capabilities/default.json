@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "updater:allow-check",
-    "updater:allow-download-and-install"
+    "updater:allow-download",
+    "updater:allow-install",
+    "window-state:allow-save-window-state"
   ]
 }
