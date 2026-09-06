@@ -8,7 +8,7 @@ use std::{
     path::Path,
     sync::{
         Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 use tauri::{AppHandle, Manager};
@@ -109,6 +109,8 @@ impl LibrarySyncReport {
 pub(crate) struct LibrarySyncCoordinator {
     edit_gate: Mutex<()>,
     bridge_gate: Mutex<()>,
+    background_gate: Mutex<()>,
+    foreground_waiters: AtomicUsize,
     next_projection_token: AtomicU64,
 }
 
@@ -117,6 +119,8 @@ impl Default for LibrarySyncCoordinator {
         Self {
             edit_gate: Mutex::new(()),
             bridge_gate: Mutex::new(()),
+            background_gate: Mutex::new(()),
+            foreground_waiters: AtomicUsize::new(0),
             next_projection_token: AtomicU64::new(1),
         }
     }
@@ -212,14 +216,41 @@ impl LibrarySyncCoordinator {
     }
 
     fn run(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
-        self.serialize_bridge_work(|| self.run_locked(app, priority_directories))
+        // A second polling worker must not repeat a target already being processed.
+        let Ok(_worker) = self.background_gate.try_lock() else {
+            return LibrarySyncReport {
+                catalog_sync: CatalogSync::pending(1, 0, None),
+                completed_directories: HashSet::new(),
+            };
+        };
+        self.run_locked(app, priority_directories)
     }
 
     pub(crate) fn serialize_bridge_work<T>(&self, operation: impl FnOnce() -> T) -> T {
+        self.foreground_waiters.fetch_add(1, Ordering::SeqCst);
         let _guard = self
             .bridge_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.foreground_waiters.fetch_sub(1, Ordering::SeqCst);
+        operation()
+    }
+
+    fn background_bridge_work<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _guard = match self.bridge_gate.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err("Aurora background sync yielded to a foreground operation".to_owned());
+            }
+        };
+        if self.foreground_waiters.load(Ordering::SeqCst) > 0 {
+            return Err("Aurora background sync yielded to a foreground operation".to_owned());
+        }
+        // Release the bridge after this single request, including between exact-file retries.
         operation()
     }
 
@@ -269,12 +300,14 @@ impl LibrarySyncCoordinator {
                     Vec::new()
                 };
                 sync_target_with_overlay_fallback(target, &overlay_filenames, |changed_files| {
-                    sync_existing_library_folders(
-                        app,
-                        vec![target.directory.clone()],
-                        changed_files,
-                    )
-                    .map(|_| ())
+                    self.background_bridge_work(|| {
+                        sync_existing_library_folders(
+                            app,
+                            vec![target.directory.clone()],
+                            changed_files,
+                        )
+                        .map(|_| ())
+                    })
                 })
             },
             |target| store.complete_library_folder_sync(target),
@@ -285,6 +318,8 @@ impl LibrarySyncCoordinator {
                         error,
                         TRANSIENT_RETRY_DELAY_MS,
                     )
+                } else if structural_library_sync_error(error) {
+                    store.block_library_folder_sync(target, error)
                 } else {
                     store.defer_library_folder_sync(target, error)
                 }
@@ -328,6 +363,7 @@ fn transient_library_sync_error(error: &str) -> bool {
         "music library took too long",
         "could not monitor the music library bridge",
         "database is locked",
+        "background sync yielded to a foreground operation",
         "music library must be updated (or installed if missing)",
     ]
     .iter()
@@ -354,7 +390,10 @@ fn sync_target_with_overlay_fallback(
     let Err(primary_error) = primary else {
         return Ok(());
     };
-    if target.filename.is_some() || transient_library_sync_error(&primary_error) {
+    if target.filename.is_some()
+        || transient_library_sync_error(&primary_error)
+        || structural_library_sync_error(&primary_error)
+    {
         return Err(primary_error);
     }
 
@@ -370,13 +409,18 @@ fn sync_target_with_overlay_fallback(
             continue;
         }
         if let Err(error) = synchronize(changed_files) {
-            if transient_library_sync_error(&error) {
+            if transient_library_sync_error(&error) || structural_library_sync_error(&error) {
                 return Err(error);
             }
             fallback_error.get_or_insert(error);
         }
     }
     Err(fallback_error.unwrap_or(primary_error))
+}
+
+fn structural_library_sync_error(error: &str) -> bool {
+    // Retrying each track cannot repair an album whose file identities differ from the catalog.
+    error.contains("metadata-only") && error.contains("add or remove catalog rows")
 }
 
 #[derive(Debug, Default)]
@@ -570,6 +614,54 @@ mod tests {
 
         assert_eq!(calls.get(), 1);
         assert_eq!(error, "database is locked");
+    }
+
+    #[test]
+    fn structural_mismatch_does_not_retry_every_overlay_track() {
+        let target = pending(r"D:\Music\Incomplete Album", 42);
+        let calls = std::cell::Cell::new(0);
+        let error = sync_target_with_overlay_fallback(&target, &["One.mp3".into(), "Two.mp3".into()], |_| {
+            calls.set(calls.get() + 1);
+            Err("Aurora existing-folder sync is metadata-only, but the prepared delta would add or remove catalog rows".into())
+        }).unwrap_err();
+        assert!(structural_library_sync_error(&error));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn background_yields_between_requests_and_never_passes_a_waiting_foreground() {
+        let coordinator = Arc::new(LibrarySyncCoordinator::default());
+        let gate = coordinator.bridge_gate.lock().unwrap();
+        let (entered, received) = std::sync::mpsc::channel();
+        let foreground = {
+            let coordinator = Arc::clone(&coordinator);
+            thread::spawn(move || coordinator.serialize_bridge_work(|| entered.send(()).unwrap()))
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while coordinator.foreground_waiters.load(Ordering::SeqCst) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "foreground registered"
+            );
+            thread::yield_now();
+        }
+        let error = coordinator
+            .background_bridge_work(|| -> Result<(), String> { panic!("background must yield") })
+            .unwrap_err();
+        assert!(transient_library_sync_error(&error));
+        drop(gate);
+        received.recv_timeout(Duration::from_secs(2)).unwrap();
+        foreground.join().unwrap();
+        assert!(coordinator.background_bridge_work(|| Ok(())).is_ok());
+        // A foreground waiter retains priority even if the mutex has just become free.
+        coordinator.foreground_waiters.store(1, Ordering::SeqCst);
+        assert!(
+            coordinator
+                .background_bridge_work(|| -> Result<(), String> {
+                    panic!("must not overtake foreground")
+                })
+                .is_err()
+        );
     }
 
     #[test]

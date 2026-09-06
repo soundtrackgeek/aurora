@@ -25,6 +25,28 @@ function Harness({ mode = "remove", onRemoved }: { mode?: "remove" | "inbox"; on
   </>;
 }
 describe("album moves across navigation", () => {
+  it("shows queue and preparation progress only for the requested album", async () => {
+    let report!: (progress: ingest.LibraryIntakeProgress) => void;
+    vi.spyOn(ingest, "listenLibraryIntakeProgress").mockImplementation(async (callback) => {
+      report = callback;
+      return () => {};
+    });
+    vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockReturnValue(new Promise(() => {}));
+    render(<Harness onRemoved={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Album" }));
+    await waitFor(() => expect(report).toBeDefined());
+    const progress: ingest.LibraryIntakeProgress = {
+      albumId: "another-album", operation: "previewRemoveAlbum", stage: "queued",
+      message: "Waiting for the current Music Library operation to finish.",
+      completedAlbums: 0, totalAlbums: 1, processedFiles: 0, totalFiles: 0, processedBytes: 0, totalBytes: 0,
+    };
+    act(() => report(progress));
+    expect(screen.getByRole("status")).not.toHaveTextContent(progress.message);
+    act(() => report({ ...progress, albumId: album.id }));
+    expect(screen.getByRole("status")).toHaveTextContent(progress.message);
+    act(() => report({ ...progress, albumId: album.id, stage: "starting", message: "Checking the selected album and preparing its move." }));
+    expect(screen.getByRole("status")).toHaveTextContent("Checking the selected album");
+  });
   function removalPreview(canApply = true): ingest.LibraryIntakePreview {
     return {
       planId: "remove-plan", sessionId: 7, sourcePath: "H:\\Synthwave\\Night Geometry",

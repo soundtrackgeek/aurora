@@ -202,6 +202,8 @@ pub struct LibraryIntakeApplyResult {
 struct LibraryIntakeProgress {
     #[serde(default)]
     plan_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    album_id: Option<String>,
     operation: String,
     stage: String,
     message: String,
@@ -460,8 +462,7 @@ pub async fn preview_library_remove_album(
     album_id: String,
 ) -> Result<LibraryIntakePreview, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let coordinator = app.state::<LibrarySyncCoordinator>();
-        coordinator.serialize_bridge_work(|| {
+        foreground_album_work(&app, "previewRemoveAlbum", Some(&album_id), None, || {
             if album_id.trim().is_empty() {
                 return Err("Choose a library album to remove.".to_owned());
             }
@@ -494,8 +495,7 @@ pub async fn apply_library_intake_batch(
     request: LibraryIntakeApplyRequest,
 ) -> Result<LibraryIntakeApplyResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let coordinator = app.state::<LibrarySyncCoordinator>();
-        coordinator.serialize_bridge_work(|| {
+        foreground_album_work(&app, "applyBatch", None, Some(&request.plan_id), || {
             validate_apply_request(&request)?;
             let mut result = invoke_bridge::<_, LibraryIntakeApplyResult>(
                 &app,
@@ -518,6 +518,55 @@ pub async fn apply_library_intake_batch(
     })
     .await
     .map_err(|error| format!("The album import worker stopped unexpectedly: {error}"))?
+}
+
+fn foreground_album_work<T>(
+    app: &AppHandle,
+    operation: &'static str,
+    album_id: Option<&str>,
+    plan_id: Option<&str>,
+    work: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let mut timing = crate::timing::Span::new(operation, plan_id.or(album_id).unwrap_or_default());
+    timing.stage("bridge_wait");
+    let report = |stage: &str, message: &str| {
+        let _ = app.emit(
+            "library-intake-progress",
+            LibraryIntakeProgress {
+                plan_id: plan_id.map(str::to_owned),
+                album_id: album_id.map(str::to_owned),
+                operation: operation.to_owned(),
+                stage: stage.to_owned(),
+                message: message.to_owned(),
+                completed_albums: 0,
+                total_albums: 1,
+                processed_files: 0,
+                total_files: 0,
+                processed_bytes: 0,
+                total_bytes: 0,
+            },
+        );
+    };
+    report(
+        "queued",
+        "Waiting for the current Music Library operation to finish.",
+    );
+    let result = app
+        .state::<LibrarySyncCoordinator>()
+        .serialize_bridge_work(|| {
+            timing.stage("bridge_running");
+            report(
+                "starting",
+                if operation == "previewRemoveAlbum" {
+                    "Checking the selected album and preparing its move."
+                } else {
+                    "Starting the reviewed album move."
+                },
+            );
+            work()
+        });
+    timing.finish(result.is_ok());
+    result
 }
 
 pub(crate) fn sync_existing_library_folders(
@@ -1104,6 +1153,11 @@ fn wait_for_child(
 ) -> Result<ExitStatus, String> {
     let started = Instant::now();
     let mut last_progress = Vec::new();
+    let mut last_progress_stage = String::new();
+    let mut timing = crate::timing::Span::new(
+        "bridge.process",
+        &format!("{operation} {}", plan_id.unwrap_or_default()),
+    );
     loop {
         if let Ok(bytes) = fs::read(progress_path)
             && bytes != last_progress
@@ -1111,12 +1165,35 @@ fn wait_for_child(
         {
             progress.plan_id = plan_id.map(str::to_owned);
             if let Some(app) = app {
+                if progress.stage != last_progress_stage {
+                    timing.stage(match progress.stage.as_str() {
+                        "validating" => "validating",
+                        "transferring" => "transferring",
+                        "verifying" => "verifying",
+                        "backingUp" => "backing_up",
+                        "cataloging" => "cataloging",
+                        "maintenance" => "maintenance",
+                        "searchIndex" => "search_index",
+                        "catalogRows" => "catalog_rows",
+                        "statistics" => "statistics",
+                        "charts" => "charts",
+                        "committing" => "committing",
+                        "artwork" => "artwork",
+                        "finalizing" => "finalizing",
+                        "completed" => "completed",
+                        _ => "bridge_work",
+                    });
+                    last_progress_stage.clone_from(&progress.stage);
+                }
                 let _ = app.emit("library-intake-progress", progress);
             }
             last_progress = bytes;
         }
         match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
+            Ok(Some(status)) => {
+                timing.finish(status.success());
+                return Ok(status);
+            }
             Ok(None) if started.elapsed() < timeout => thread::sleep(CHILD_POLL_INTERVAL),
             Ok(None) => {
                 let _ = child.kill();

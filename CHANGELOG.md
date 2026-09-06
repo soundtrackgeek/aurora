@@ -4,6 +4,14 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.33] - 2026-09-06
+
+### Fixed
+- Give foreground bridge operations priority between individual background sync requests and prevent overlapping retry workers.
+- Stop structural metadata-only catalog mismatch retries immediately without losing queued edits or overwriting newer work.
+- Distinguish removal queue wait from preparation and display Music Library's separate backup, search, catalog, statistics, chart, and commit phases. Record bridge queue and phase durations through the existing nonblocking timing logger.
+- Pair with Music Library 0.145.13 for album-scoped removal without full-catalog preview staging and comparisons.
+
 ## [0.24.32] - 2026-09-06
 
 ### Added

@@ -19,7 +19,7 @@ export function AlbumMoveOperation({ request, onDismiss, onRemoved }: {
   const [preview, setPreview] = useState<LibraryIntakePreview | null>(null);
   const { progress, reset: resetProgress } = useLibraryIntakeProgress(preview?.planId);
   const [stage, setStage] = useState<"preparing" | "ready" | "moving" | "completed" | "failed">("preparing");
-  const [message, setMessage] = useState("Preparing move · you can keep browsing");
+  const [message, setMessage] = useState("Waiting to prepare the album move · you can keep browsing");
   const [review, setReview] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const applying = useRef(false);
@@ -84,8 +84,10 @@ export function AlbumMoveOperation({ request, onDismiss, onRemoved }: {
     }
   }
 
-  const currentProgress = stage === "moving" && progress?.operation === "applyBatch"
-    && progress.planId === preview?.planId ? progress : null;
+  const currentProgress = (stage === "preparing" && progress?.operation === "previewRemoveAlbum"
+    && progress.albumId === request.album.id)
+    || (stage === "moving" && progress?.operation === "applyBatch"
+    && progress.planId === preview?.planId) ? progress : null;
   const progressMessage = currentProgress
     ? `${currentProgress.message}${currentProgress.stage === "transferring" && currentProgress.totalFiles > 0
       ? ` · ${currentProgress.processedFiles}/${currentProgress.totalFiles} files` : ""}` : message;

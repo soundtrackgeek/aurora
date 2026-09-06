@@ -90,6 +90,7 @@ export interface LibraryIntakeApplyResult {
 
 export interface LibraryIntakeProgress {
   planId?: string | null;
+  albumId?: string | null;
   operation: "previewBatch" | "applyBatch" | string;
   stage: string;
   message: string;

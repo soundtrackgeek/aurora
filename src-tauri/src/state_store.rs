@@ -1545,6 +1545,23 @@ impl StateStore {
         item: &PendingLibraryFolderSync,
         error_message: &str,
     ) -> Result<bool, String> {
+        self.record_library_folder_failure(item, error_message, false)
+    }
+
+    pub(crate) fn block_library_folder_sync(
+        &self,
+        item: &PendingLibraryFolderSync,
+        error_message: &str,
+    ) -> Result<bool, String> {
+        self.record_library_folder_failure(item, error_message, true)
+    }
+
+    fn record_library_folder_failure(
+        &self,
+        item: &PendingLibraryFolderSync,
+        error_message: &str,
+        blocked: bool,
+    ) -> Result<bool, String> {
         if item.directory.trim().is_empty() {
             return Err("Aurora refused an empty pending library-folder path.".to_owned());
         }
@@ -1554,12 +1571,19 @@ impl StateStore {
                 r#"
                 UPDATE pending_library_folder_sync
                 SET updated_at_ms = MAX(?1, updated_at_ms + 1),
-                    attempt_count = attempt_count + 1,
+                    attempt_count = CASE WHEN ?5 THEN ?6 ELSE attempt_count + 1 END,
                     next_attempt_at_ms = 0,
                     last_error = ?2
                 WHERE directory = ?3 AND updated_at_ms = ?4
                 "#,
-                params![now_ms(), error_message, &item.directory, item.token],
+                params![
+                    now_ms(),
+                    error_message,
+                    &item.directory,
+                    item.token,
+                    blocked,
+                    MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS
+                ],
             )
             .map(|changed| changed == 1)
             .map_err(|error| format!("Could not defer Aurora's library-folder sync: {error}"))
@@ -2612,6 +2636,35 @@ mod tests {
         assert_eq!(targets[0].directory, directory);
         assert_eq!(targets[0].filename.as_deref(), Some("Bonus.mp3"));
 
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn structural_failure_blocks_immediately_without_overwriting_newer_edits() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).unwrap();
+        let directory = r"D:\Music\Structurally incomplete album";
+        store
+            .queue_library_file_syncs(&[(directory.to_owned(), "Track.mp3".to_owned())])
+            .unwrap();
+        let old = store.pending_library_folder_sync(1).unwrap().pop().unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&old, "metadata-only catalog mismatch")
+                .unwrap()
+        );
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (0, 1));
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+        store
+            .queue_library_file_syncs(&[(directory.to_owned(), "Track.mp3".to_owned())])
+            .unwrap();
+        assert!(
+            !store
+                .block_library_folder_sync(&old, "stale failure")
+                .unwrap()
+        );
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
         drop(store);
         let _ = fs::remove_file(path);
     }
