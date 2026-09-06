@@ -271,9 +271,33 @@ pub(crate) struct ArtistHistoryInsight {
     pub(crate) last_played_at_ms: Option<i64>,
 }
 
+/// An immutable, cumulative session image captured on the playback thread.
+/// Times describe listening, never the time a delayed database write runs.
+#[derive(Clone, Debug)]
+pub(crate) struct HistoryCheckpoint {
+    session_id: String,
+    track: TrackSummary,
+    started_at_ms: i64,
+    ended_at_ms: Option<i64>,
+    listened_seconds: f64,
+    registered_play: bool,
+    registered_at_ms: Option<i64>,
+    threshold_seconds: u32,
+    outcome: &'static str,
+}
+
+impl HistoryCheckpoint {
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveHistorySession {
     session_id: String,
+    track: TrackSummary,
+    started_at_ms: i64,
+    registered_at_ms: Option<i64>,
     listened_seconds: f64,
     last_position_seconds: f64,
     configured_threshold_seconds: u32,
@@ -281,6 +305,79 @@ pub(crate) struct ActiveHistorySession {
     duration_seconds: Option<f64>,
     registered_play: bool,
     checkpoint_bucket: u64,
+}
+
+impl ActiveHistorySession {
+    pub(crate) fn checkpoint(&self) -> HistoryCheckpoint {
+        HistoryCheckpoint {
+            session_id: self.session_id.clone(),
+            track: self.track.clone(),
+            started_at_ms: self.started_at_ms,
+            ended_at_ms: None,
+            listened_seconds: self.listened_seconds,
+            registered_play: self.registered_play,
+            registered_at_ms: self.registered_at_ms,
+            threshold_seconds: self.configured_threshold_seconds,
+            outcome: "active",
+        }
+    }
+
+    fn register_if_played(&mut self) -> bool {
+        if !self.registered_play
+            && self.listened_seconds + f64::EPSILON >= self.effective_threshold_seconds
+        {
+            self.registered_play = true;
+            self.registered_at_ms = Some(state_sync::now_ms());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn observe(&mut self, position_seconds: f64) -> Option<HistoryCheckpoint> {
+        let position = position_seconds.max(0.0);
+        let delta = (position - self.last_position_seconds).max(0.0);
+        self.last_position_seconds = position;
+        if delta <= 0.0 {
+            return None;
+        }
+        self.listened_seconds += delta;
+        let became_played = self.register_if_played();
+        let bucket = (self.listened_seconds / HISTORY_CHECKPOINT_SECONDS).floor() as u64;
+        if !became_played && bucket == self.checkpoint_bucket {
+            return None;
+        }
+        self.checkpoint_bucket = bucket;
+        Some(self.checkpoint())
+    }
+
+    pub(crate) fn reset_position(&mut self, position_seconds: f64) {
+        self.last_position_seconds = position_seconds.max(0.0);
+    }
+
+    pub(crate) fn refresh_threshold(&mut self, configured: u32) -> Option<HistoryCheckpoint> {
+        if self.configured_threshold_seconds == configured {
+            return None;
+        }
+        self.configured_threshold_seconds = configured;
+        self.effective_threshold_seconds = effective_threshold_seconds(
+            configured,
+            self.duration_seconds
+                .map(|duration| duration.round() as i64),
+        );
+        self.register_if_played();
+        Some(self.checkpoint())
+    }
+
+    pub(crate) fn finish(&self, outcome: &'static str) -> Result<HistoryCheckpoint, String> {
+        if !matches!(outcome, "completed" | "skipped" | "interrupted") {
+            return Err("Aurora's listening outcome is invalid.".to_owned());
+        }
+        let mut checkpoint = self.checkpoint();
+        checkpoint.ended_at_ms = Some(state_sync::now_ms());
+        checkpoint.outcome = outcome;
+        Ok(checkpoint)
+    }
 }
 
 #[derive(Default)]
@@ -555,245 +652,144 @@ impl HistoryStore {
         Ok(value)
     }
 
-    pub(crate) fn begin_session(
+    /// Only cached configuration and in-memory values are used here.
+    pub(crate) fn capture_session(
         &self,
         track: &TrackSummary,
         position_seconds: f64,
-    ) -> Result<ActiveHistorySession, String> {
-        let configured = self.play_threshold_seconds()?;
-        let effective = effective_threshold_seconds(configured, track.duration_seconds);
-        let started_at = state_sync::now_ms();
-        let session_id = format!(
-            "session-{}-{started_at}-{}",
-            self.device_id,
-            next_session_sequence()
-        );
-        let mut connection = self.open()?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("Could not start Aurora's listening session: {error}"))?;
-        transaction
-            .execute(
-                r#"
-                INSERT INTO listening_sessions(
-                  session_id, track_key, title, artist, album, genre,
-                  directory, filename, duration_seconds, started_at_ms,
-                  ended_at_ms, listened_seconds, registered_play,
-                  registered_at_ms, threshold_seconds, outcome
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                          NULL, 0, 0, NULL, ?11, 'active')
-                "#,
-                params![
-                    session_id,
-                    track.track_key,
-                    track.title,
-                    track.artist,
-                    track.album,
-                    track.genre,
-                    track.directory,
-                    track.filename,
-                    track.duration_seconds,
-                    started_at,
-                    i64::from(configured),
-                ],
-            )
-            .map_err(|error| format!("Could not start Aurora's listening history: {error}"))?;
-        transaction
-            .execute(
-                "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1",
-                [],
-            )
-            .map_err(|error| format!("Could not checkpoint Aurora's listening start: {error}"))?;
-        transaction
-            .commit()
-            .map_err(|error| format!("Could not commit Aurora's listening start: {error}"))?;
-        Ok(ActiveHistorySession {
-            session_id,
+        configured: u32,
+    ) -> ActiveHistorySession {
+        let started_at_ms = state_sync::now_ms();
+        ActiveHistorySession {
+            session_id: format!(
+                "session-{}-{started_at_ms}-{}",
+                self.device_id,
+                next_session_sequence()
+            ),
+            track: track.clone(),
+            started_at_ms,
+            registered_at_ms: None,
             listened_seconds: 0.0,
             last_position_seconds: position_seconds.max(0.0),
             configured_threshold_seconds: configured,
-            effective_threshold_seconds: effective,
+            effective_threshold_seconds: effective_threshold_seconds(
+                configured,
+                track.duration_seconds,
+            ),
             duration_seconds: track.duration_seconds.map(|value| value.max(0) as f64),
             registered_play: false,
             checkpoint_bucket: 0,
-        })
+        }
     }
 
-    pub(crate) fn observe_position(
-        &self,
-        active: &mut ActiveHistorySession,
-        position_seconds: f64,
-    ) -> Result<(), String> {
-        let position = position_seconds.max(0.0);
-        let delta = (position - active.last_position_seconds).max(0.0);
-        active.last_position_seconds = position;
-        if delta <= 0.0 {
-            return Ok(());
-        }
-        active.listened_seconds += delta;
-        let became_played = !active.registered_play
-            && active.listened_seconds + f64::EPSILON >= active.effective_threshold_seconds;
-        if became_played {
-            active.registered_play = true;
-        }
-        let bucket = (active.listened_seconds / HISTORY_CHECKPOINT_SECONDS).floor() as u64;
-        if !became_played && bucket == active.checkpoint_bucket {
-            return Ok(());
-        }
-        active.checkpoint_bucket = bucket;
+    /// Called by the ordered persistence worker, never under PlaybackState's lock.
+    /// The stable session ID and cumulative values make retry after an uncertain
+    /// commit harmless; an old active checkpoint cannot reopen a finished session.
+    pub(crate) fn persist_checkpoint(&self, checkpoint: &HistoryCheckpoint) -> Result<(), String> {
+        let mut timing = crate::timing::Span::new("history.persist", checkpoint.session_id());
+        timing.stage("open");
         let mut connection = self.open()?;
+        timing.stage("begin_transaction");
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("Could not start a listening-progress checkpoint: {error}"))?;
-        let updated = transaction
-            .execute(
-                r#"
-                UPDATE listening_sessions
-                SET listened_seconds = ?1,
-                    registered_play = ?2,
-                    registered_at_ms = CASE
-                      WHEN registered_at_ms IS NULL AND ?2 = 1 THEN ?3
-                      ELSE registered_at_ms
-                    END
-                WHERE session_id = ?4 AND outcome = 'active'
-                "#,
-                params![
-                    active.listened_seconds,
-                    i64::from(active.registered_play),
-                    state_sync::now_ms(),
-                    active.session_id,
-                ],
+            .map_err(|error| format!("Could not start a listening-history checkpoint: {error}"))?;
+        timing.stage("write_session");
+        let updated = transaction.execute(
+            r#"
+            INSERT INTO listening_sessions(
+              session_id, track_key, title, artist, album, genre, directory, filename,
+              duration_seconds, started_at_ms, ended_at_ms, listened_seconds,
+              registered_play, registered_at_ms, threshold_seconds, outcome
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ON CONFLICT(session_id) DO UPDATE SET
+              ended_at_ms = excluded.ended_at_ms,
+              listened_seconds = MAX(listening_sessions.listened_seconds, excluded.listened_seconds),
+              registered_play = MAX(listening_sessions.registered_play, excluded.registered_play),
+              registered_at_ms = COALESCE(listening_sessions.registered_at_ms, excluded.registered_at_ms),
+              threshold_seconds = excluded.threshold_seconds,
+              outcome = excluded.outcome
+            WHERE listening_sessions.outcome = 'active' AND NOT (
+              listening_sessions.ended_at_ms IS excluded.ended_at_ms
+              AND listening_sessions.listened_seconds IS excluded.listened_seconds
+              AND listening_sessions.registered_play IS excluded.registered_play
+              AND listening_sessions.registered_at_ms IS excluded.registered_at_ms
+              AND listening_sessions.threshold_seconds IS excluded.threshold_seconds
+              AND listening_sessions.outcome IS excluded.outcome
             )
-            .map_err(|error| format!("Could not update Aurora's listening progress: {error}"))?;
-        if updated != 1 {
-            return Err("Aurora's active listening session changed unexpectedly.".to_owned());
+            "#,
+            params![checkpoint.session_id, checkpoint.track.track_key, checkpoint.track.title,
+                checkpoint.track.artist, checkpoint.track.album, checkpoint.track.genre,
+                checkpoint.track.directory, checkpoint.track.filename, checkpoint.track.duration_seconds,
+                checkpoint.started_at_ms, checkpoint.ended_at_ms, checkpoint.listened_seconds,
+                i64::from(checkpoint.registered_play), checkpoint.registered_at_ms,
+                i64::from(checkpoint.threshold_seconds), checkpoint.outcome],
+        ).map_err(|error| format!("Could not save Aurora's listening history: {error}"))?;
+        if updated != 0 {
+            timing.stage("update_revision");
+            transaction.execute(
+                "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1", [],
+            ).map_err(|error| format!("Could not checkpoint Aurora's listening history: {error}"))?;
         }
-        transaction
-            .execute(
-                "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1",
-                [],
-            )
-            .map_err(|error| format!("Could not checkpoint Aurora's listening progress: {error}"))?;
+        timing.stage("commit");
         transaction
             .commit()
-            .map_err(|error| format!("Could not commit Aurora's listening progress: {error}"))?;
-        if became_played {
+            .map_err(|error| format!("Could not commit Aurora's listening history: {error}"))?;
+        if updated != 0 && (checkpoint.registered_play || checkpoint.outcome != "active") {
             self.publish_in_background();
+        }
+        timing.finish(true);
+        Ok(())
+    }
+
+    // Synchronous adapters keep the existing history-contract tests independent
+    // of scheduling. Playback uses capture_session and the background writer.
+    #[cfg(test)]
+    fn begin_session(
+        &self,
+        track: &TrackSummary,
+        position: f64,
+    ) -> Result<ActiveHistorySession, String> {
+        let active = self.capture_session(track, position, self.play_threshold_seconds()?);
+        self.persist_checkpoint(&active.checkpoint())?;
+        Ok(active)
+    }
+
+    #[cfg(test)]
+    fn observe_position(
+        &self,
+        active: &mut ActiveHistorySession,
+        position: f64,
+    ) -> Result<(), String> {
+        if let Some(checkpoint) = active.observe(position) {
+            self.persist_checkpoint(&checkpoint)?;
         }
         Ok(())
     }
 
-    pub(crate) fn reset_position(&self, active: &mut ActiveHistorySession, position_seconds: f64) {
-        active.last_position_seconds = position_seconds.max(0.0);
+    #[cfg(test)]
+    fn reset_position(&self, active: &mut ActiveHistorySession, position: f64) {
+        active.reset_position(position);
     }
 
-    pub(crate) fn refresh_active_threshold(
+    #[cfg(test)]
+    fn refresh_active_threshold(
         &self,
         active: &mut ActiveHistorySession,
         configured: u32,
     ) -> Result<(), String> {
-        if active.configured_threshold_seconds == configured {
-            return Ok(());
+        if let Some(checkpoint) = active.refresh_threshold(configured) {
+            self.persist_checkpoint(&checkpoint)?;
         }
-        let effective_threshold_seconds = effective_threshold_seconds(
-            configured,
-            active
-                .duration_seconds
-                .map(|duration| duration.round() as i64),
-        );
-        let registered_play = active.registered_play
-            || active.listened_seconds + f64::EPSILON >= effective_threshold_seconds;
-        let mut connection = self.open()?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("Could not start the played-threshold update: {error}"))?;
-        let updated = transaction
-            .execute(
-                r#"
-                UPDATE listening_sessions
-                SET threshold_seconds = ?1,
-                    registered_play = ?2,
-                    registered_at_ms = CASE
-                      WHEN registered_at_ms IS NULL AND ?2 = 1 THEN ?3
-                      ELSE registered_at_ms
-                    END
-                WHERE session_id = ?4 AND outcome = 'active'
-                "#,
-                params![
-                    i64::from(configured),
-                    i64::from(registered_play),
-                    state_sync::now_ms(),
-                    active.session_id,
-                ],
-            )
-            .map_err(|error| format!("Could not apply Aurora's played threshold: {error}"))?;
-        if updated != 1 {
-            return Err("Aurora's active listening session changed unexpectedly.".to_owned());
-        }
-        transaction
-            .execute(
-                "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1",
-                [],
-            )
-            .map_err(|error| format!("Could not checkpoint Aurora's played threshold: {error}"))?;
-        transaction
-            .commit()
-            .map_err(|error| format!("Could not commit Aurora's played threshold: {error}"))?;
-        active.configured_threshold_seconds = configured;
-        active.effective_threshold_seconds = effective_threshold_seconds;
-        active.registered_play = registered_play;
         Ok(())
     }
 
-    pub(crate) fn finish_session(
+    #[cfg(test)]
+    fn finish_session(
         &self,
         active: &ActiveHistorySession,
         outcome: &'static str,
     ) -> Result<(), String> {
-        if !matches!(outcome, "completed" | "skipped" | "interrupted") {
-            return Err("Aurora's listening outcome is invalid.".to_owned());
-        }
-        let mut connection = self.open()?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("Could not start the listening outcome update: {error}"))?;
-        let updated = transaction
-            .execute(
-                r#"
-                UPDATE listening_sessions
-                SET ended_at_ms = ?1, listened_seconds = ?2,
-                    registered_play = ?3,
-                    registered_at_ms = CASE
-                      WHEN registered_at_ms IS NULL AND ?3 = 1 THEN ?1
-                      ELSE registered_at_ms
-                    END,
-                    outcome = ?4
-                WHERE session_id = ?5 AND outcome = 'active'
-                "#,
-                params![
-                    state_sync::now_ms(),
-                    active.listened_seconds,
-                    i64::from(active.registered_play),
-                    outcome,
-                    active.session_id,
-                ],
-            )
-            .map_err(|error| format!("Could not finish Aurora's listening history: {error}"))?;
-        if updated == 1 {
-            transaction
-                .execute(
-                    "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1",
-                    [],
-                )
-                .map_err(|error| format!("Could not checkpoint Aurora's listening outcome: {error}"))?;
-        }
-        transaction
-            .commit()
-            .map_err(|error| format!("Could not commit Aurora's listening outcome: {error}"))?;
-        if updated == 1 {
-            self.publish_in_background();
-        }
-        Ok(())
+        self.persist_checkpoint(&active.finish(outcome)?)
     }
 
     fn publish_in_background(&self) {
@@ -2409,6 +2405,55 @@ mod tests {
             registered_at_ms: Some(started_at_ms + 30_000),
             outcome: "completed".to_owned(),
         }
+    }
+
+    #[test]
+    fn delayed_and_retried_checkpoints_keep_capture_times_and_one_final_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new_with_tonehavn_directory(
+            directory.path().join("history.sqlite3"),
+            directory.path().join("remote"),
+            "device-test-delay".to_owned(),
+            "Test".to_owned(),
+            None,
+        )
+        .unwrap();
+        let mut active = store.capture_session(&track(240), 0.0, 3);
+        active.started_at_ms = 1_000;
+        let initial = active.checkpoint();
+        active.observe(3.0).unwrap();
+        active.registered_at_ms = Some(2_000);
+        let mut finished = active.finish("skipped").unwrap();
+        finished.ended_at_ms = Some(3_000);
+        // A busy worker may coalesce start/progress into this complete image.
+        store.persist_checkpoint(&finished).unwrap();
+        let connection = store.open().unwrap();
+        let revision: i64 = connection
+            .query_row("SELECT content_revision FROM history_meta", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        store.persist_checkpoint(&finished).unwrap();
+        store.persist_checkpoint(&initial).unwrap();
+        let row: (i64, i64, i64, i64, f64, String) = connection.query_row(
+            "SELECT started_at_ms, registered_at_ms, ended_at_ms, registered_play, listened_seconds, outcome FROM listening_sessions",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        ).unwrap();
+        assert_eq!(row, (1_000, 2_000, 3_000, 1, 3.0, "skipped".to_owned()));
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM listening_sessions", [], |row| row
+                    .get(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT content_revision FROM history_meta", [], |row| row
+                    .get(0))
+                .unwrap(),
+            revision
+        );
     }
 
     #[test]

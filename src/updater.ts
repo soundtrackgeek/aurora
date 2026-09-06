@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime } from "./library";
@@ -72,6 +73,7 @@ export function useAuroraUpdater() {
     const update = updateRef.current;
     if (!update) return;
 
+    let playbackPrepared = false;
     let downloaded = 0;
     let total: number | null = null;
     setState((current) => ({ ...current, phase: "downloading", progress: 0 }));
@@ -89,8 +91,15 @@ export function useAuroraUpdater() {
         }
       });
       await saveWindowState(StateFlags.SIZE | StateFlags.POSITION | StateFlags.MAXIMIZED);
+      await invoke("prepare_playback_shutdown");
+      playbackPrepared = true;
       await update.install();
     } catch (error) {
+      if (playbackPrepared) {
+        await invoke("cancel_playback_shutdown").catch((cancelError) => {
+          console.warn("Aurora could not release its playback exit checkpoint", cancelError);
+        });
+      }
       setState((current) => ({
         ...current,
         phase: "error",

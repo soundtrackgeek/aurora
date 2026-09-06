@@ -1,17 +1,20 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.33 prioritizes album removal over pending background synchronization and reports its actual queue and processing stages.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.34 keeps track changes responsive while listening-history and queue-state storage is slow.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.33 slice
+## Current 0.24.34 slice
+
+- Playback captures session IDs, start/end/play-registration times, and listening positions in memory, then persists cumulative history and queue-state snapshots on one ordered background worker. Slow database writes no longer hold the playback lock. Failed writes are retained and retried in order, with redundant queued checkpoints coalesced; playback reports persistence errors while continuing.
+- Closing Aurora and installing an update pause playback and drain pending local writes outside the playback lock. If local storage cannot finish within 30 seconds, normal close/update is cancelled and the app retains the queued work for retry. Unwritten in-memory events can still be lost after a forced termination, power loss, or process crash; already committed history remains durable.
 
 - Album removal preview and confirmation take priority over subsequent background bridge requests. A currently running request finishes safely; background retries release the bridge between individual requests instead of holding it across an album's retry loop. Structural metadata-only catalog mismatches stop automatically until another file edit requeues that folder, while transient conflicts retain their retry behavior.
 - Pair with Music Library **0.145.13** for album-scoped removal previews and atomic catalog deletion without whole-library TSV staging or comparisons. The full recovery backup and independently verified file move remain. An existing preview created by an older companion retains its original guarded workflow.
 - Removal displays queue wait separately from preparation, recovery backup, catalog update, search entries, totals, chart links, and commit. Bridge wait, execution, and phase durations use the existing nonblocking `%APPDATA%\com.soundtrackgeek.aurora\aurora-timing.jsonl` diagnostics. Waiting for another bridge request is distinct from time spent processing the selected album.
 
 - Playback diagnostics are written automatically to `%APPDATA%\com.soundtrackgeek.aurora\aurora-timing.jsonl` after starting this version. The previous rotation is `aurora-timing.previous.jsonl`; each file is limited to about 5 MiB. Records include UTC Unix timestamps in milliseconds, process/span IDs, version, shortcut keys or track keys (which can contain local music paths), stage timings, and outcomes. They remain local and are not part of OneDrive state synchronization.
-- The trace distinguishes shortcut dispatch, playback lock waits, playback/history/state work, tag-service and sync-coordinator waits, and MP3 copy, tag write, flush, replacement, verification, and cleanup. Log I/O runs on a dedicated thread; a bounded queue drops diagnostics rather than waiting, with loss counts reported on subsequent records. The final in-memory records may be lost on exit or a crash. After another delay, capture both log files promptly and note the track and approximate local time. The playback diagnostics introduced in 0.24.32 collect evidence; the album-removal fixes do not claim to resolve unrelated playback stalls.
+- The trace distinguishes shortcut dispatch, playback lock waits, playback/history/state work, tag-service and sync-coordinator waits, and MP3 copy, tag write, flush, replacement, verification, and cleanup. Log I/O runs on a dedicated thread; a bounded queue drops diagnostics rather than waiting, with loss counts reported on subsequent records. The final in-memory records may be lost on exit or a crash. After another delay, capture both log files promptly and note the track and approximate local time. History persistence also records database open, transaction, write, revision, and commit timings on its background worker, so further storage delays can be investigated without blocking playback.
 
 - Aurora remembers window size, screen position, and maximized state. Restarting reloads previously loaded explorer pages, reopens the album and selected track, and restores the saved scroll offset after content is ready. Update installation saves window geometry before exiting. These saved positions are local to this device.
 

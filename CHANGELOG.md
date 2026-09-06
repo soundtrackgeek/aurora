@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.34] - 2026-09-06
+
+### Fixed
+- Keep Next, playback refreshes, and other transport actions responsive during slow history/state writes by moving persistence to an ordered background worker. Preserve event timestamps, play thresholds, and stable session identities across retries.
+- Drain pending local history and queue state before normal exit or updater installation; keep the app open with pending work retained if storage cannot finish.
+
 ## [0.24.33] - 2026-09-06
 
 ### Fixed

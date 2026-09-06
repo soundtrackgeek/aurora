@@ -17,6 +17,7 @@ mod media_controls;
 mod musicbrainz;
 mod pcm_buffer;
 mod playback;
+mod playback_persistence;
 mod publishers;
 mod ratings;
 mod replay_gain;
@@ -117,6 +118,45 @@ async fn with_playback<T: Send + 'static>(
     })
     .await
     .map_err(|error| format!("Aurora's playback worker stopped unexpectedly: {error}"))?
+}
+
+fn flush_playback_for_exit(app: &AppHandle) -> Result<(), String> {
+    let pending = {
+        let state = app.state::<PlaybackState>();
+        let mut runtime = state
+            .lock()
+            .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+        runtime.prepare_for_shutdown()?
+    };
+    if let Err(error) = pending.flush(std::time::Duration::from_secs(30)) {
+        cancel_playback_shutdown(app.clone())?;
+        return Err(error);
+    }
+    // Remote mirroring is independent of the playback lock and local durability.
+    let _ = app.state::<HistoryStore>().publish_if_due(true);
+    Ok(())
+}
+
+#[tauri::command]
+async fn prepare_playback_shutdown(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || flush_playback_for_exit(&app))
+        .await
+        .map_err(|error| format!("Aurora's playback save worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+fn cancel_playback_shutdown(app: AppHandle) -> Result<(), String> {
+    app.state::<PlaybackState>()
+        .lock()
+        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?
+        .cancel_shutdown();
+    Ok(())
+}
+
+fn show_playback_save_error(app: &AppHandle, error: String) {
+    app.dialog().message(format!(
+        "Aurora stayed open to keep pending listening history and playback state. {error} Close the window again after storage recovers."
+    )).title("Playback updates are still pending").show(|_| {});
 }
 
 async fn with_playback_snapshot(
@@ -1300,15 +1340,23 @@ async fn track_history_insight(
 }
 
 #[tauri::command]
-fn set_history_play_threshold(app: AppHandle, play_threshold_seconds: u32) -> Result<u32, String> {
-    let history = app.state::<HistoryStore>();
-    let value = history.set_play_threshold_seconds(play_threshold_seconds)?;
-    let playback = app.state::<PlaybackState>();
-    let mut runtime = playback
-        .lock()
-        .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-    runtime.set_play_threshold_seconds(value);
-    Ok(value)
+async fn set_history_play_threshold(
+    app: AppHandle,
+    play_threshold_seconds: u32,
+) -> Result<u32, String> {
+    let save_app = app.clone();
+    let value = tauri::async_runtime::spawn_blocking(move || {
+        save_app
+            .state::<HistoryStore>()
+            .set_play_threshold_seconds(play_threshold_seconds)
+    })
+    .await
+    .map_err(|error| format!("Aurora's history-settings worker stopped unexpectedly: {error}"))??;
+    with_playback(app, "set_history_play_threshold", move |runtime| {
+        runtime.set_play_threshold_seconds(value);
+        Ok(value)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1466,13 +1514,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if let Err(error) = flush_playback_for_exit(window.app_handle()) {
+                    api.prevent_close();
+                    show_playback_save_error(window.app_handle(), error);
+                    return;
+                }
                 release_global_shortcuts(window.app_handle());
                 media_controls::release(window.app_handle());
-                let state = window.state::<PlaybackState>();
-                if let Ok(mut runtime) = state.lock() {
-                    let _ = runtime.persist_for_shutdown();
-                }
                 let laptop = window.state::<LaptopState>();
                 if let Ok(mut runtime) = laptop.lock() {
                     let _ = runtime.status(true);
@@ -1517,6 +1566,8 @@ pub fn run() {
             undo_musicbrainz_curation,
             export_musicbrainz_curation,
             playback_state,
+            prepare_playback_shutdown,
+            cancel_playback_shutdown,
             playback_rebind_catalog,
             playback_replace_queue,
             playback_append_queue,
@@ -1575,7 +1626,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Aurora")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if let Err(error) = flush_playback_for_exit(app) {
+                    api.prevent_exit();
+                    show_playback_save_error(app, error);
+                    return;
+                }
                 release_global_shortcuts(app);
                 media_controls::release(app);
             }

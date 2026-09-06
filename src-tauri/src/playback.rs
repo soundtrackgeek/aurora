@@ -3,8 +3,9 @@ use crate::{
         self, AudioSettingsRequest, AudioSettingsStatus, AudioSettingsStore, ReplayGainMode,
     },
     catalog::{self, TrackReference, TrackSummary},
-    history::{ActiveHistorySession, HistoryStore},
+    history::{ActiveHistorySession, HistoryCheckpoint, HistoryStore},
     pcm_buffer::PcmBufferSource,
+    playback_persistence::{PlaybackPersistence, PlaybackWrite},
     replay_gain::{self, ReplayGainAdjustment},
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
@@ -371,6 +372,9 @@ pub(crate) struct PlaybackRuntime {
     store: StateStore,
     history: HistoryStore,
     history_session: Option<ActiveHistorySession>,
+    history_threshold_seconds: u32,
+    persistence: PlaybackPersistence,
+    closing: bool,
     last_saved_position_bucket: u64,
 }
 
@@ -420,6 +424,8 @@ impl PlaybackRuntime {
             .and_then(|index| queue[index].duration_seconds)
             .map(|duration| stored.position_seconds.clamp(0.0, duration as f64))
             .unwrap_or(0.0);
+        let history_threshold_seconds = history.play_threshold_seconds()?;
+        let persistence = PlaybackPersistence::new(history.clone(), store.clone())?;
         Ok(Self {
             output: None,
             player: None,
@@ -454,6 +460,9 @@ impl PlaybackRuntime {
             store,
             history,
             history_session: None,
+            history_threshold_seconds,
+            persistence,
+            closing: false,
             last_saved_position_bucket: (position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS)
                 .floor() as u64,
         })
@@ -464,6 +473,9 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn current_track_for_shortcut(&mut self) -> Option<TrackSummary> {
+        if self.closing {
+            return None;
+        }
         self.synchronize_audio_runtime();
         self.current_track().cloned()
     }
@@ -621,33 +633,57 @@ impl PlaybackRuntime {
     }
 
     fn persist(&self) -> Result<(), String> {
-        self.store.save(&StoredPlaybackState {
-            queue: self
-                .queue
-                .iter()
-                .map(|track| StoredQueueEntry {
-                    track_id: track.id.clone(),
-                    track_key: Some(track.track_key.clone()),
-                    directory: Some(track.directory.clone()),
-                    filename: Some(track.filename.clone()),
-                })
-                .collect(),
-            current_index: self.current_index,
-            position_seconds: self.position_seconds,
-            volume: self.volume,
-            shuffle: self.shuffle,
-            repeat_mode: self.repeat_mode.as_stored().to_owned(),
-        })
+        self.persistence
+            .enqueue(PlaybackWrite::State(StoredPlaybackState {
+                queue: self
+                    .queue
+                    .iter()
+                    .map(|track| StoredQueueEntry {
+                        track_id: track.id.clone(),
+                        track_key: Some(track.track_key.clone()),
+                        directory: Some(track.directory.clone()),
+                        filename: Some(track.filename.clone()),
+                    })
+                    .collect(),
+                current_index: self.current_index,
+                position_seconds: self.position_seconds,
+                volume: self.volume,
+                shuffle: self.shuffle,
+                repeat_mode: self.repeat_mode.as_stored().to_owned(),
+            }))
     }
 
-    pub(crate) fn persist_for_shutdown(&mut self) -> Result<(), String> {
+    /// Capture the final state under the runtime lock, then let the caller drain
+    /// it after releasing that lock. A failed exit leaves playback safely paused.
+    pub(crate) fn prepare_for_shutdown(&mut self) -> Result<PlaybackPersistence, String> {
+        if self.closing {
+            return Ok(self.persistence.clone());
+        }
         self.reconcile_current_source();
         self.capture_position();
+        if let Some(player) = &self.player {
+            player.pause();
+        }
+        if self.status == PlaybackStatus::Playing {
+            self.status = PlaybackStatus::Paused;
+        }
         self.observe_history();
         self.finish_history("interrupted");
-        let history_result = self.history.publish_if_due(true).map(|_| ());
         self.persist()?;
-        history_result
+        self.closing = true;
+        Ok(self.persistence.clone())
+    }
+
+    pub(crate) fn cancel_shutdown(&mut self) {
+        self.closing = false;
+    }
+
+    fn ensure_not_closing(&self) -> Result<(), String> {
+        if self.closing {
+            Err("Aurora is saving playback before exit. Please wait.".to_owned())
+        } else {
+            Ok(())
+        }
     }
 
     fn capture_position(&mut self) {
@@ -691,29 +727,41 @@ impl PlaybackRuntime {
         }
     }
 
-    fn begin_history(&mut self) {
-        let Some(track) = self.current_track().cloned() else {
-            return;
-        };
-        match self.history.begin_session(&track, self.position_seconds) {
-            Ok(session) => self.history_session = Some(session),
-            Err(error) => self.history.record_error(error),
+    fn queue_history(&mut self, checkpoint: HistoryCheckpoint) {
+        if let Err(error) = self
+            .persistence
+            .enqueue(PlaybackWrite::History(Box::new(checkpoint)))
+        {
+            self.error = Some(error);
         }
     }
 
-    fn observe_history(&mut self) {
-        let Some(active) = self.history_session.as_mut() else {
+    fn begin_history(&mut self) {
+        let Some(track) = self.current_track() else {
             return;
         };
-        if let Err(error) = self.history.observe_position(active, self.position_seconds) {
-            self.history.record_error(error);
+        let session = self.history.capture_session(
+            track,
+            self.position_seconds,
+            self.history_threshold_seconds,
+        );
+        self.queue_history(session.checkpoint());
+        self.history_session = Some(session);
+    }
+
+    fn observe_history(&mut self) {
+        if let Some(checkpoint) = self
+            .history_session
+            .as_mut()
+            .and_then(|active| active.observe(self.position_seconds))
+        {
+            self.queue_history(checkpoint);
         }
     }
 
     fn reset_history_position(&mut self) {
         if let Some(active) = self.history_session.as_mut() {
-            self.history
-                .reset_position(active, self.position_seconds.max(0.0));
+            active.reset_position(self.position_seconds);
         }
     }
 
@@ -721,16 +769,20 @@ impl PlaybackRuntime {
         let Some(active) = self.history_session.take() else {
             return;
         };
-        if let Err(error) = self.history.finish_session(&active, outcome) {
-            self.history.record_error(error);
+        match active.finish(outcome) {
+            Ok(checkpoint) => self.queue_history(checkpoint),
+            Err(error) => self.error = Some(error),
         }
     }
 
     pub(crate) fn set_play_threshold_seconds(&mut self, value: u32) {
-        if let Some(active) = self.history_session.as_mut()
-            && let Err(error) = self.history.refresh_active_threshold(active, value)
+        self.history_threshold_seconds = value;
+        if let Some(checkpoint) = self
+            .history_session
+            .as_mut()
+            .and_then(|active| active.refresh_threshold(value))
         {
-            self.history.record_error(error);
+            self.queue_history(checkpoint);
         }
     }
 
@@ -940,26 +992,28 @@ impl PlaybackRuntime {
     pub(crate) fn snapshot(&mut self) -> PlaybackSnapshot {
         let mut timing = crate::timing::Span::new("playback.snapshot", "");
         timing.stage("synchronize_audio_runtime");
-        self.synchronize_audio_runtime();
-        if self.status == PlaybackStatus::Playing {
-            let ended = self.player.as_ref().is_none_or(Player::empty);
-            if ended {
-                timing.stage("finish_current");
-                self.finish_current();
-            } else {
-                timing.stage("capture_position");
-                self.capture_position();
-                timing.stage("history_observe");
-                self.observe_history();
-                timing.stage("preload_next_track");
-                self.start_next_preparation();
+        if !self.closing {
+            self.synchronize_audio_runtime();
+            if self.status == PlaybackStatus::Playing {
+                let ended = self.player.as_ref().is_none_or(Player::empty);
+                if ended {
+                    timing.stage("finish_current");
+                    self.finish_current();
+                } else {
+                    timing.stage("capture_position");
+                    self.capture_position();
+                    timing.stage("history_observe");
+                    self.observe_history();
+                    timing.stage("preload_next_track");
+                    self.start_next_preparation();
+                }
             }
-        }
-        let bucket = (self.position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS).floor() as u64;
-        if bucket != self.last_saved_position_bucket {
-            self.last_saved_position_bucket = bucket;
-            timing.stage("persist_state");
-            let _ = self.persist();
+            let bucket = (self.position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS).floor() as u64;
+            if bucket != self.last_saved_position_bucket {
+                self.last_saved_position_bucket = bucket;
+                timing.stage("persist_state");
+                let _ = self.persist();
+            }
         }
         timing.stage("build_snapshot");
         timing.finish(true);
@@ -972,7 +1026,13 @@ impl PlaybackRuntime {
             volume: self.volume,
             shuffle: self.shuffle,
             repeat_mode: self.repeat_mode,
-            error: self.error.clone(),
+            error: self.error.clone().or_else(|| {
+                self.persistence.error().map(|error| {
+                    format!(
+                        "Playback history/state is waiting to be saved; Aurora will retry. {error}"
+                    )
+                })
+            }),
             output_device_label: self.active_device_label.clone(),
             using_device_fallback: self.using_device_fallback,
             replay_gain_mode: self.audio_store.settings().replay_gain_mode,
@@ -989,6 +1049,7 @@ impl PlaybackRuntime {
         track_references: Vec<TrackReference>,
         start_track_key: String,
     ) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         let start_index = track_references
             .iter()
@@ -1015,6 +1076,7 @@ impl PlaybackRuntime {
         &mut self,
         track_references: Vec<TrackReference>,
     ) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         if track_references.is_empty() || track_references.len() > MAX_QUEUE_APPEND_BATCH {
             return Err(format!(
                 "Queue refill batches must contain between 1 and {MAX_QUEUE_APPEND_BATCH} tracks."
@@ -1040,6 +1102,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn rebind_catalog(&mut self) -> Result<PlaybackCatalogRebind, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if self.queue.is_empty() {
             return Ok(PlaybackCatalogRebind {
@@ -1126,6 +1189,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn toggle(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if self.current_index.is_none() {
             return Err("Choose a track before starting playback.".to_owned());
@@ -1166,6 +1230,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn play(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if self.status == PlaybackStatus::Playing {
             Ok(self.snapshot())
@@ -1175,6 +1240,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn pause(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if self.status == PlaybackStatus::Playing {
             self.toggle()
@@ -1184,6 +1250,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn next(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         let mut timing = crate::timing::Span::new(
             "playback.next",
             self.current_track()
@@ -1244,6 +1311,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn previous(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         self.capture_position();
         self.observe_history();
@@ -1272,6 +1340,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn stop(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if self.current_index.is_none() {
             return Ok(self.snapshot());
@@ -1292,6 +1361,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn seek(&mut self, position_seconds: f64) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         let duration = self
             .current_track()
@@ -1323,6 +1393,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn set_volume(&mut self, volume: f32) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if !volume.is_finite() {
             return Err("Volume must be a finite value.".to_owned());
@@ -1336,6 +1407,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn set_shuffle(&mut self, enabled: bool) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         self.invalidate_prepared_queue()
             .map_err(|error| self.set_error(error))?;
@@ -1349,6 +1421,7 @@ impl PlaybackRuntime {
         &mut self,
         repeat_mode: RepeatMode,
     ) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         self.invalidate_prepared_queue()
             .map_err(|error| self.set_error(error))?;
@@ -1359,6 +1432,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn remove_queue_item(&mut self, index: usize) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if index >= self.queue.len() {
             return Err("This queue item no longer exists.".to_owned());
@@ -1402,6 +1476,7 @@ impl PlaybackRuntime {
         from: usize,
         to: usize,
     ) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         if from >= self.queue.len() || to >= self.queue.len() {
             return Err("The queue changed before this reorder completed.".to_owned());
@@ -1422,6 +1497,7 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn clear_queue(&mut self) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
         self.capture_position();
         self.observe_history();
@@ -1491,6 +1567,7 @@ impl PlaybackRuntime {
         &mut self,
         request: AudioSettingsRequest,
     ) -> Result<AudioSettingsStatus, String> {
+        self.ensure_not_closing()?;
         self.reconcile_current_source();
         self.capture_position();
         self.observe_history();
@@ -1608,6 +1685,119 @@ mod tests {
             filename: format!("track-{index}.mp3"),
             catalog_import_run_id: 1,
         }
+    }
+
+    #[test]
+    fn prepared_next_and_ui_snapshot_finish_while_history_storage_is_blocked() {
+        let directory = tempfile::tempdir().unwrap();
+        let history_path = directory.path().join("history.sqlite3");
+        let history = HistoryStore::new(
+            history_path.clone(),
+            directory.path().join("remote"),
+            "device-playback-delay".to_owned(),
+            "Test".to_owned(),
+        )
+        .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let mut runtime = PlaybackRuntime::new(
+            store.clone(),
+            history.clone(),
+            AudioSettingsStore::load(directory.path().join("audio.json")),
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let sink_history = history.clone();
+        let sink_state = store.clone();
+        let mut first = true;
+        let persistence = PlaybackPersistence::start(move |write| {
+            if first {
+                first = false;
+                started_tx.send(()).unwrap();
+                // The test releases storage only AFTER Next and UI polling return.
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+            match write {
+                PlaybackWrite::History(checkpoint) => sink_history.persist_checkpoint(checkpoint),
+                PlaybackWrite::State(state) => sink_state.save(state),
+            }
+        })
+        .unwrap();
+        runtime.persistence = persistence.clone();
+        let channels = rodio::ChannelCount::new(2).unwrap();
+        let rate = SampleRate::new(48_000).unwrap();
+        let (mixer, _samples) = rodio::mixer::mixer(channels, rate);
+        let player = Player::connect_new(&mixer);
+        player.append(rodio::source::Zero::new(channels, rate));
+        player.append(rodio::source::Zero::new(channels, rate));
+        runtime.player = Some(player);
+        runtime.queue = vec![queue_track(1), queue_track(2)];
+        runtime.current_index = Some(0);
+        runtime.status = PlaybackStatus::Playing;
+        runtime.prepared_next = Some(PreparedTrack {
+            index: 1,
+            gain: ReplayGainAdjustment::default(),
+        });
+        let blocked_history = rusqlite::Connection::open(&history_path).unwrap();
+        blocked_history.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let blocked_state = store.open().unwrap();
+        blocked_state.execute_batch("BEGIN IMMEDIATE").unwrap();
+        runtime.begin_history();
+        runtime.history_session.as_mut().unwrap().observe(61.0);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let shared = Arc::new(Mutex::new(runtime));
+        let command_runtime = Arc::clone(&shared);
+        let (result_tx, result_rx) = mpsc::channel();
+        let command = std::thread::spawn(move || {
+            let next = command_runtime.lock().unwrap().next();
+            let refresh = command_runtime.lock().unwrap().snapshot();
+            result_tx.send((next, refresh)).unwrap();
+        });
+        let result = result_rx.recv_timeout(Duration::from_secs(2));
+        let before_release = crate::state_sync::now_ms();
+        blocked_history.execute_batch("COMMIT").unwrap();
+        blocked_state.execute_batch("COMMIT").unwrap();
+        release_tx.send(()).unwrap();
+        command.join().unwrap();
+        let (next, refresh) =
+            result.expect("Next and UI polling must finish while storage is blocked");
+        let next = next.unwrap();
+        assert_eq!(next.current_track.as_ref().unwrap().id, "2");
+        assert_eq!(refresh.current_track.as_ref().unwrap().id, "2");
+        assert_eq!(next.status, PlaybackStatus::Playing);
+        assert_eq!(refresh.position_seconds, 0.0);
+        persistence.flush(Duration::from_secs(5)).unwrap();
+        let connection = rusqlite::Connection::open(history_path).unwrap();
+        let rows: Vec<(String, f64, i64, Option<i64>, i64)> = connection.prepare(
+            "SELECT outcome, listened_seconds, started_at_ms, ended_at_ms, registered_play FROM listening_sessions ORDER BY rowid",
+        ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))
+            .unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "skipped");
+        assert_eq!(rows[0].1, 61.0);
+        assert_eq!(rows[0].4, 1);
+        assert!(rows[0].3.unwrap() <= before_release);
+        assert_eq!(rows[1].0, "active");
+        assert!(rows[1].2 <= before_release);
+        assert_eq!(rows[1].1, 0.0);
+        assert_eq!(store.load().unwrap().current_index, Some(1));
+        // Exit freezes new transport work, drains outside the runtime lock, and
+        // can be cancelled without reviving the already-finished history session.
+        let pending = shared.lock().unwrap().prepare_for_shutdown().unwrap();
+        assert!(shared.lock().unwrap().next().is_err());
+        pending.flush(Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            connection
+                .query_row::<String, _, _>(
+                    "SELECT outcome FROM listening_sessions ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            "interrupted"
+        );
+        shared.lock().unwrap().cancel_shutdown();
+        assert!(shared.lock().unwrap().ensure_not_closing().is_ok());
     }
 
     #[test]
