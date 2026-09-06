@@ -78,6 +78,8 @@ pub struct LibraryBridgeSupports {
     pub sync_existing_folders: bool,
     #[serde(default)]
     pub default_popm_rating_fallback: bool,
+    #[serde(default)]
+    pub bounded_existing_folder_sync: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -887,9 +889,12 @@ fn validate_capabilities(result: &LibraryBridgeCapabilities) -> Result<(), Strin
 }
 
 fn validate_tag_sync_capabilities(result: &LibraryBridgeCapabilities) -> Result<(), String> {
-    if !result.supports.sync_existing_folders || !result.supports.default_popm_rating_fallback {
+    if !result.supports.sync_existing_folders
+        || !result.supports.default_popm_rating_fallback
+        || !result.supports.bounded_existing_folder_sync
+    {
         return Err(update_music_library_message(
-            "Aurora needs Music Library 0.144.2 or newer for safe tag synchronization.".to_owned(),
+            "Aurora needs Music Library 0.145.14 or newer for bounded background tag synchronization.".to_owned(),
         ));
     }
     Ok(())
@@ -1540,11 +1545,12 @@ mod tests {
         assert_eq!(capabilities.categories.len(), 3);
         assert!(!capabilities.supports.sync_existing_folders);
         assert!(!capabilities.supports.default_popm_rating_fallback);
+        assert!(!capabilities.supports.bounded_existing_folder_sync);
         assert!(validate_tag_sync_capabilities(&capabilities).is_err());
     }
 
     #[test]
-    fn tag_sync_requires_the_default_popm_preservation_capability() {
+    fn tag_sync_requires_popm_preservation_and_bounded_background_work() {
         let capabilities = LibraryBridgeCapabilities {
             bridge_version: PROTOCOL_VERSION,
             categories: Vec::new(),
@@ -1557,10 +1563,19 @@ mod tests {
                 move_albums_to_inbox: true,
                 sync_existing_folders: true,
                 default_popm_rating_fallback: true,
+                bounded_existing_folder_sync: true,
             },
         };
 
         validate_tag_sync_capabilities(&capabilities).expect("safe tag-sync capability");
+        let mut legacy = capabilities.clone();
+        legacy.supports.bounded_existing_folder_sync = false;
+        let error =
+            validate_tag_sync_capabilities(&legacy).expect_err("old full-catalog helper refused");
+        assert!(error.contains("0.145.14"));
+        legacy.supports.bounded_existing_folder_sync = true;
+        legacy.supports.default_popm_rating_fallback = false;
+        assert!(validate_tag_sync_capabilities(&legacy).is_err());
     }
 
     #[test]

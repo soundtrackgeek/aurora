@@ -1,16 +1,16 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.34 keeps track changes responsive while listening-history and queue-state storage is slow.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.35 prevents automatic catalog reconciliation from holding up album removal previews.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.34 slice
+## Current 0.24.35 slice
 
 - Playback captures session IDs, start/end/play-registration times, and listening positions in memory, then persists cumulative history and queue-state snapshots on one ordered background worker. Slow database writes no longer hold the playback lock. Failed writes are retained and retried in order, with redundant queued checkpoints coalesced; playback reports persistence errors while continuing.
 - Closing Aurora and installing an update pause playback and drain pending local writes outside the playback lock. If local storage cannot finish within 30 seconds, normal close/update is cancelled and the app retains the queued work for retry. Unwritten in-memory events can still be lost after a forced termination, power loss, or process crash; already committed history remains durable.
 
 - Album removal preview and confirmation take priority over subsequent background bridge requests. A currently running request finishes safely; background retries release the bridge between individual requests instead of holding it across an album's retry loop. Structural metadata-only catalog mismatches stop automatically until another file edit requeues that folder, while transient conflicts retain their retry behavior.
-- Pair with Music Library **0.145.13** for album-scoped removal previews and atomic catalog deletion without whole-library TSV staging or comparisons. The full recovery backup and independently verified file move remain. An existing preview created by an older companion retains its original guarded workflow.
+- Pair with Music Library **0.145.14** for album-scoped removal previews and atomic catalog deletion without whole-library TSV staging or comparisons. The full recovery backup and independently verified file move remain. An existing preview created by an older companion retains its original guarded workflow.
 - Removal displays queue wait separately from preparation, recovery backup, catalog update, search entries, totals, chart links, and commit. Bridge wait, execution, and phase durations use the existing nonblocking `%APPDATA%\com.soundtrackgeek.aurora\aurora-timing.jsonl` diagnostics. Waiting for another bridge request is distinct from time spent processing the selected album.
 
 - Playback diagnostics are written automatically to `%APPDATA%\com.soundtrackgeek.aurora\aurora-timing.jsonl` after starting this version. The previous rotation is `aurora-timing.previous.jsonl`; each file is limited to about 5 MiB. Records include UTC Unix timestamps in milliseconds, process/span IDs, version, shortcut keys or track keys (which can contain local music paths), stage timings, and outcomes. They remain local and are not part of OneDrive state synchronization.
@@ -355,3 +355,6 @@ The behavioral scope, performance target, source-of-truth decisions, and next se
 Albums sidebar **Remove Album** moves the complete album folder to `D:\MUSIC\_NOT\_ALBUMS\`, verifies the copy, removes the album through Music Library’s transactional importer, and cleans the source only after commit. The current Albums view immediately removes the row and refreshes. A confirmation shows the destination; collisions and changed sources are rejected, and cleanup warnings retain recovery information. Requires Aurora 0.24.30 and Music Library 0.145.10 or newer.
 
 Album moves now retain their preview, confirmation, progress, and errors when navigating away. Music Library 0.145.10 fixes ordinary/verbatim Windows path resolution for both Remove Album and Move to Inbox. Aurora 0.24.30 keeps the original target and preserves any newly selected album when the move completes.
+
+Automatic catalog sync stays album-sized with Music Library 0.145.14. Albums requiring broader reconciliation remain blocked with their file edits and local overlays retained; review an import in Music Library before retrying sync. Background sync no longer starts a whole-catalog import that holds up removal previews.
+Aurora checks the companion bounded-sync capability before automatic tag sync; older Music Library helpers leave queued edits pending with an update message.

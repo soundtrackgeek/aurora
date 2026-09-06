@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.35] - 2026-09-06
+
+### Fixed
+- Stop automatic per-track retries when Music Library reports that an album needs reviewed reconciliation. Retain blocked edits and their error without allowing background sync to enter a whole-catalog import; pair with Music Library 0.145.14.
+
+- Require the companion bounded-sync capability before automatic tag sync, keeping queued edits pending when Music Library still needs an update.
+
 ## [0.24.34] - 2026-09-06
 
 ### Fixed

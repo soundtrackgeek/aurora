@@ -419,8 +419,9 @@ fn sync_target_with_overlay_fallback(
 }
 
 fn structural_library_sync_error(error: &str) -> bool {
-    // Retrying each track cannot repair an album whose file identities differ from the catalog.
-    error.contains("metadata-only") && error.contains("add or remove catalog rows")
+    // Both failures need reviewed reconciliation, not repeated automatic per-track attempts.
+    error.contains("background sync requires reviewed reconciliation")
+        || (error.contains("metadata-only") && error.contains("add or remove catalog rows"))
 }
 
 #[derive(Debug, Default)]
@@ -625,6 +626,21 @@ mod tests {
             Err("Aurora existing-folder sync is metadata-only, but the prepared delta would add or remove catalog rows".into())
         }).unwrap_err();
         assert!(structural_library_sync_error(&error));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn reviewed_reconciliation_blocks_without_trying_each_overlay_track() {
+        let target = pending("D:/Music/Needs review", 42);
+        let calls = std::cell::Cell::new(0);
+        let error = sync_target_with_overlay_fallback(
+            &target, &["One.mp3".into(), "Two.mp3".into()], |_| {
+                calls.set(calls.get() + 1);
+                Err("Could not sync album: Aurora background sync requires reviewed reconciliation: file edits retained".into())
+            },
+        ).unwrap_err();
+        assert!(structural_library_sync_error(&error));
+        assert!(!transient_library_sync_error(&error));
         assert_eq!(calls.get(), 1);
     }
 
