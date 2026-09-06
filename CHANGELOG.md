@@ -4,6 +4,11 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.36] - 2026-09-06
+
+### Fixed
+- Allow Tags to open albums with more than 100 file-versus-catalog genre differences. Queue reconciliation atomically under the existing folder limit without rewriting audio files.
+
 ## [0.24.35] - 2026-09-06
 
 ### Fixed

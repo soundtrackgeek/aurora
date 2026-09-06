@@ -1398,10 +1398,10 @@ impl StateStore {
         &self,
         files: &[(String, String)],
     ) -> Result<(), String> {
-        if files.is_empty() || files.len() > 100 {
-            return Err(
-                "Aurora can queue between 1 and 100 changed library files at once.".to_owned(),
-            );
+        // Album inspection can discover more than 100 stale genres. Bound this
+        // atomic queue operation by folders below, not tracks within an album.
+        if files.is_empty() {
+            return Err("Aurora needs at least one changed library file to queue.".to_owned());
         }
         if files
             .iter()

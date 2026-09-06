@@ -3222,9 +3222,32 @@ mod tests {
                 .is_empty()
         );
         resolved.summary.genre = Some("Soul".to_owned());
+        let mut paths = Vec::new();
+        let large_album = (0..141)
+            .map(|index| {
+                let path = target.with_extension(format!("{index}.mp3"));
+                fs::copy(&target, &path).expect("copy track fixture");
+                let mut track = resolved.clone();
+                track.audio_path = path.clone();
+                track.summary.id = index.to_string();
+                track.summary.track_key = format!("large-album-{index}");
+                track.summary.filename = path.file_name().unwrap().to_string_lossy().into_owned();
+                paths.push(path);
+                track
+            })
+            .collect();
         let result = service
-            .inspect_resolved_editor(vec![resolved])
+            .inspect_resolved_editor(large_album)
             .expect("inspect");
+        assert_eq!(result.state.tracks.len(), 141);
+        assert_eq!(result.tracks.len(), 141);
+        assert!(
+            result
+                .tracks
+                .iter()
+                .all(|track| track.genre.as_deref() == Some("Southern Soul")
+                    && track.tag_sync_state.is_some())
+        );
         assert_eq!(result.tracks[0].genre.as_deref(), Some("Southern Soul"));
         assert!(result.tracks[0].tag_sync_state.is_some());
         assert_eq!(
@@ -3232,6 +3255,12 @@ mod tests {
             1
         );
         assert_eq!(fs::read(&target).expect("unchanged file"), before);
+        let pending = store.pending_library_folder_sync_targets(10).unwrap();
+        assert_eq!(pending[0].filename, None);
+        for path in paths {
+            assert_eq!(fs::read(&path).expect("unchanged album track"), before);
+            fs::remove_file(path).unwrap();
+        }
         fs::remove_file(target).expect("remove audio");
         remove_state_fixture(&state_path);
     }
