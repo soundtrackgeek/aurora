@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.39] - 2026-09-06
+
+### Fixed
+- Prevent infinite scrolling from using the previous search cursor while a replacement search is debouncing or loading. Artist links replace the album list without appending to old results or cancelling the replacement request.
+- Preserve background-refresh results only when the loaded view and filters match the current search.
+
 ## [0.24.38] - 2026-09-06
 
 ### Fixed

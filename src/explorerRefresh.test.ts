@@ -44,15 +44,35 @@ describe("mergeRefreshedExplorerPage", () => {
   });
 
   it("keeps refresh preservation pending until the Explorer is visible again", () => {
-    const whileRatingsIsVisible = resolveExplorerRefreshPreservation(true, false);
+    const whileRatingsIsVisible = resolveExplorerRefreshPreservation(true, false, true);
 
     expect(whileRatingsIsVisible).toEqual({
       preservingCurrentView: false,
       pending: true,
     });
-    expect(resolveExplorerRefreshPreservation(whileRatingsIsVisible.pending, true)).toEqual({
+    expect(resolveExplorerRefreshPreservation(whileRatingsIsVisible.pending, true, true)).toEqual({
       preservingCurrentView: true,
       pending: false,
+    });
+  });
+});
+
+describe("search replacement", () => {
+  const previous = JSON.stringify(["albums", { query: "love=1 AND cr=99 NOT genre:scores OR soundtrack" }, 0]);
+  const artist = JSON.stringify(["albums", { query: 'aartist:"Bunny X"' }, 0]);
+
+  it("blocks pagination with the previous cursor while the artist search is pending", () => {
+    expect(shouldReuseExplorerPage(previous, artist, false)).toBe(false);
+    expect(shouldReuseExplorerPage(null, artist, false)).toBe(false);
+    expect(shouldReuseExplorerPage(artist, artist, false)).toBe(true);
+  });
+
+  it("consumes a background refresh without merging a different search", () => {
+    expect(resolveExplorerRefreshPreservation(true, true, previous === artist)).toEqual({
+      preservingCurrentView: false, pending: false,
+    });
+    expect(resolveExplorerRefreshPreservation(true, true, true)).toEqual({
+      preservingCurrentView: true, pending: false,
     });
   });
 });

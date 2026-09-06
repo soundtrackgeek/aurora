@@ -44,6 +44,8 @@ Punctuation in an unquoted value separates words. Use quotes when the entire sto
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
 
+Artist links open a fresh Albums search such as `aartist:"Bunny X"`, replacing the previous filters and results. Pagination waits for that search to load; background refreshes preserve the loaded list only for the same view and filters.
+
 `country:` uses Music Library's imported artist-origin record for the Album Artist. It accepts country names or two-letter codes, so `country:norway`, `country:NO`, and exact `country:"Norway"` all target the same origin data. Artists without an imported origin do not match.
 
 `cr:80` includes albums from 0% through 80% rating completeness, preserving the original maximum shorthand. `cr:50..80` includes albums from 50% through 80%, inclusive. Aurora calculates rated tracks divided by total tracks from the Music Library catalog plus Aurora's verified pending rating changes and queued missing-track deletions, so search results do not wait for Music Library synchronization. Bounds must be whole percentages from 0 through 100.

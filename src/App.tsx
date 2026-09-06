@@ -631,6 +631,7 @@ function App() {
   const scrollPositionByDestinationRef = useRef<Partial<Record<SidebarDestination, number>>>(initialWorkspace.scroll);
   const exploreRequestRef = useRef(0);
   const loadedExplorerRequestKeyRef = useRef<string | null>(null);
+  const loadedExplorerViewKeyRef = useRef<string | null>(null);
   const explorerCursorRef = useRef<ExplorerCursor | null>(null);
   const explorerLoadedRef = useRef(0);
   const explorerLoadingMoreRef = useRef(false);
@@ -1156,6 +1157,7 @@ function App() {
     const preservation = resolveExplorerRefreshPreservation(
       preserveExplorerOnReloadRef.current,
       explorerActive,
+      loadedExplorerViewKeyRef.current === explorerRequestKey(explorerView, explorerFilters, 0),
     );
     preserveExplorerOnReloadRef.current = preservation.pending;
     if (!explorerActive) return;
@@ -1202,6 +1204,7 @@ function App() {
           setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
           setExplorerLoadState("ready");
           loadedExplorerRequestKeyRef.current = requestKey;
+          loadedExplorerViewKeyRef.current = explorerRequestKey(explorerView, explorerFilters, 0);
           if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
@@ -2791,7 +2794,12 @@ function App() {
   }
 
   async function loadMoreExplorerResults() {
-    if (!explorerCursor || explorerLoadingMoreRef.current) return;
+    // During debounce, the visible cursor can still belong to the previous search.
+    // Pagination must not cancel its replacement request or append across searches.
+    if (!explorerCursor || explorerLoadingMoreRef.current
+      || explorerLoadState !== "ready"
+      || !shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current,
+        explorerRequestKey(explorerView, explorerFilters, explorerReloadToken), false)) return;
     const requestId = ++exploreRequestRef.current;
     explorerLoadingMoreRef.current = true;
     setIsLoadingMore(true);
@@ -3070,7 +3078,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.38</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.39</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

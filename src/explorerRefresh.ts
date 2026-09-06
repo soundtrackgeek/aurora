@@ -30,10 +30,11 @@ export function shouldReuseExplorerPage(
 export function resolveExplorerRefreshPreservation(
   pending: boolean,
   explorerActive: boolean,
+  matchesLoadedView: boolean,
 ): { preservingCurrentView: boolean; pending: boolean } {
   if (!explorerActive) {
     return { preservingCurrentView: false, pending };
   }
 
-  return { preservingCurrentView: pending, pending: false };
+  return { preservingCurrentView: pending && matchesLoadedView, pending: false };
 }
