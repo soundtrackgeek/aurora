@@ -217,7 +217,8 @@ pub(crate) fn attach_aurora_state(
             [store.path().to_string_lossy().as_ref()],
         )
         .map_err(|error| format!("Could not attach Aurora's live catalog state: {error}"))?;
-    refresh_live_album_rating_projection(connection)
+    refresh_live_album_rating_projection(connection)?;
+    crate::live_genres::prepare(connection)
 }
 
 pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> Result<(), String> {
@@ -231,8 +232,11 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
                 format!("Could not prepare Aurora's temporary album projection: {error}")
             })?;
     }
-    let projection = connection.execute_batch(
-        r#"
+    let projection = connection
+        .execute_batch(crate::live_genres::SCHEMA)
+        .and_then(|()| {
+            connection.execute_batch(
+                r#"
             DROP TABLE IF EXISTS temp.aurora_live_album_rating_state;
             CREATE TEMP TABLE aurora_live_album_rating_state (
               album_id TEXT PRIMARY KEY,
@@ -294,7 +298,8 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
             LEFT JOIN overlay_delta ON overlay_delta.album_id = album.id
             LEFT JOIN deleted ON deleted.album_id = album.id;
             "#,
-    );
+            )
+        });
     let restore = query_only.then(|| connection.pragma_update(None, "query_only", true));
     if let Some(Err(error)) = restore {
         return Err(format!(
@@ -413,6 +418,7 @@ pub(crate) fn apply_overlays(
     let Some(store) = store else {
         return Ok(());
     };
+    crate::live_genres::apply(tracks, store)?;
     let keys = tracks
         .iter()
         .map(|track| track.track_key.clone())
@@ -1307,7 +1313,12 @@ fn exact_text_predicate(
                 .iter()
                 .map(|column| {
                     params.push(Value::Text(value.to_owned()));
-                    format!("TRIM(COALESCE({alias}.{column}, '')) = ? COLLATE NOCASE")
+                    let expression = if *column == "canonical_genre" {
+                        crate::live_genres::track_sql(alias)
+                    } else {
+                        format!("{alias}.{column}")
+                    };
+                    format!("TRIM(COALESCE(({expression}), '')) = ? COLLATE NOCASE")
                 })
                 .collect::<Vec<_>>()
                 .join(" OR ")
@@ -1317,7 +1328,12 @@ fn exact_text_predicate(
         .sql_column()
         .expect("exact text search uses a text field");
     params.push(Value::Text(value.to_owned()));
-    format!("TRIM(COALESCE({alias}.{column}, '')) = ? COLLATE NOCASE")
+    let expression = if field == CatalogSearchField::Genre {
+        crate::live_genres::track_sql(alias)
+    } else {
+        format!("{alias}.{column}")
+    };
+    format!("TRIM(COALESCE(({expression}), '')) = ? COLLATE NOCASE")
 }
 
 fn non_prefix_predicate(
@@ -1358,7 +1374,8 @@ fn non_prefix_predicate(
             ))
         }
         CatalogSearchMatch::ScoreGenreGroup => Some(format!(
-            "LOWER(TRIM(COALESCE({alias}.canonical_genre, ''))) IN ({})",
+            "LOWER(TRIM(COALESCE(({}), ''))) IN ({})",
+            crate::live_genres::track_sql(alias),
             SCORE_GENRE_GROUP
                 .iter()
                 .map(|genre| {
@@ -1515,7 +1532,11 @@ pub(crate) fn push_track_search_predicates(
     for group in &search.groups {
         let mut alternatives = Vec::new();
         if let Some(match_query) = group_fts_query(group) {
-            alternatives.push("t.id IN (SELECT CAST(track_id AS INTEGER) FROM track_search_fts WHERE track_search_fts MATCH ?)".to_owned());
+            alternatives.push(format!(
+                "t.id IN ({})",
+                crate::live_genres::fts_matches("CAST(track_id AS INTEGER)")
+            ));
+            params.push(Value::Text(match_query.clone()));
             params.push(Value::Text(match_query));
         }
         alternatives.extend(
@@ -1545,10 +1566,11 @@ pub(crate) fn push_album_search_predicates(
     for group in &search.groups {
         let mut alternatives = Vec::new();
         if let Some(match_query) = group_fts_query(group) {
-            alternatives.push(
-                "a.id IN (SELECT album_id FROM track_search_fts WHERE track_search_fts MATCH ?)"
-                    .to_owned(),
-            );
+            alternatives.push(format!(
+                "a.id IN ({})",
+                crate::live_genres::fts_matches("album_id")
+            ));
+            params.push(Value::Text(match_query.clone()));
             params.push(Value::Text(match_query));
         }
         let track_predicates = group
@@ -1558,7 +1580,7 @@ pub(crate) fn push_album_search_predicates(
             .collect::<Vec<_>>();
         if !track_predicates.is_empty() {
             alternatives.push(format!(
-                "a.id IN (SELECT search_track.album_id FROM tracks AS search_track WHERE {})",
+                "EXISTS (SELECT 1 FROM tracks AS search_track WHERE search_track.album_id = a.id AND ({}))",
                 track_predicates.join(" OR ")
             ));
         }
@@ -1592,7 +1614,9 @@ pub(crate) fn load_search_tracks(
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
     attach_aurora_state(&connection, store)?;
-    let ranked_query = search.fts_only_query();
+    let ranked_query = (!crate::live_genres::has_changes(&connection))
+        .then(|| search.fts_only_query())
+        .flatten();
     let mut params = Vec::<Value>::new();
     let mut sql = String::from(
         r#"

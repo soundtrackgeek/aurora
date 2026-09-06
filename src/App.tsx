@@ -2174,6 +2174,12 @@ function App() {
       ...(snapshot?.tracks ?? []),
     ];
     const baselines = new Map(knownTracks.map((track) => [track.trackKey, track]));
+    if (explorerFilters.query.trim() && acceptedTracks.some((track) => {
+      const baseline = baselines.get(track.trackKey);
+      return baseline && baseline.genre !== track.genre;
+    })) {
+      setExplorerReloadToken((value) => value + 1);
+    }
 
     setSelectedTrack((current) => current ? project(current) : current);
     setExplorerTracks((current) => current.map(project));
@@ -3064,7 +3070,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.24.36</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.24.37</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

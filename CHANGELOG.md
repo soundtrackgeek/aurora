@@ -4,6 +4,13 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.37] - 2026-09-06
+
+### Fixed
+- Search pending file genres before filtering and counting albums, including `love=1 AND cr=99 NOT genre:scores OR soundtrack`. Album details use the same verified genres, preventing stale catalog values from flashing on selection.
+- Reuse unchanged file-tag reads and refresh active search results when the Tags editor discovers a genre change. Pending edits remain queued without rewriting MP3s or modifying the read-only catalog.
+- Start automatic sync when Tags discovers a pending genre, without resetting retry receipts when the album is opened again.
+
 ## [0.24.36] - 2026-09-06
 
 ### Fixed

@@ -13,6 +13,7 @@ mod laptop_mode;
 mod lastfm;
 mod library_bridge;
 mod library_sync;
+mod live_genres;
 mod media_controls;
 mod musicbrainz;
 mod pcm_buffer;

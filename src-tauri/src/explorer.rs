@@ -862,18 +862,17 @@ fn album_page_from_connection(
     let sort = album_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
     let origin_key = artist_key_sql("a.album_artist_display");
+    let live_genre = crate::live_genres::album_sql("a");
     let live_total_tracks = live_album_total_tracks_sql("a");
     let live_rated_tracks = live_album_rated_tracks_sql("a");
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, {live_total_tracks}, {live_rated_tracks}, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
-    if plain_match_query.is_some() {
-        sql.push_str(" JOIN album_search_fts ON album_search_fts.album_id = a.id");
-    }
     sql.push_str(" WHERE 1 = 1");
     if let Some(match_query) = plain_match_query {
-        sql.push_str(" AND album_search_fts MATCH ?");
+        sql.push_str(" AND a.id IN (SELECT album_id FROM album_search_fts WHERE album_search_fts MATCH ? AND album_id NOT IN (SELECT album_id FROM temp.aurora_live_album_genres) UNION ALL SELECT album_id FROM temp.aurora_live_album_genre_fts WHERE aurora_live_album_genre_fts MATCH ?)");
+        params.push(Value::Text(match_query.clone()));
         params.push(Value::Text(match_query));
     } else if let Some(search) = &parsed_search {
         push_album_search_predicates(&mut sql, &mut params, search);
@@ -1115,6 +1114,7 @@ pub(crate) fn load_album_detail(
 ) -> Result<AlbumDetail, String> {
     let album_id = validate_identity(&album_id, "Album identity", 512)?;
     let connection = open_catalog(&default_catalog_path()?)?;
+    attach_aurora_state(&connection, store)?;
     album_detail_from_connection(&connection, &album_id, Some(store))
 }
 
@@ -1125,7 +1125,7 @@ fn album_detail_from_connection(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, a.canonical_genre, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", artist_key_sql("a.album_artist_display")),
+            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", artist_key_sql("a.album_artist_display"), live_genre = crate::live_genres::album_sql("a")),
             [album_id],
             map_album_row,
         )
@@ -1297,6 +1297,154 @@ mod tests {
         refresh_live_album_rating_projection(&connection)
             .expect("initial live album rating projection");
         connection
+    }
+
+    #[test]
+    #[ignore = "reads the user's live pending files and catalog without modifying them"]
+    fn live_pending_soundtracks_are_excluded() {
+        let connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+        let state = std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("com.soundtrackgeek.aurora/aurora-state.sqlite3");
+        connection
+            .execute(
+                "ATTACH DATABASE ?1 AS aurora_state",
+                [state.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        let started = std::time::Instant::now();
+        refresh_live_album_rating_projection(&connection).unwrap();
+        eprintln!("Rating projection: {:?}", started.elapsed());
+        crate::live_genres::prepare(&connection).unwrap();
+        eprintln!("Pending projection: {:?}", started.elapsed());
+        let warm = std::time::Instant::now();
+        crate::live_genres::prepare(&connection).unwrap();
+        eprintln!("Warm genre projection: {:?}", warm.elapsed());
+        let query = "love=1 AND cr=99 NOT genre:scores OR soundtrack";
+        let page = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some(query.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        eprintln!(
+            "Filtered count: {}; elapsed: {:?}",
+            page.total_count,
+            started.elapsed()
+        );
+        for id in [
+            "mb:-7824740752243377155",
+            "mb:5736108169045400702",
+            "mb:8449046648640527658",
+        ] {
+            let detail = album_detail_from_connection(&connection, id, None).unwrap();
+            assert_eq!(detail.album.genre.as_deref(), Some("Soundtrack"));
+            let mut sql = "SELECT COUNT(*) FROM albums a WHERE a.id = ?".to_owned();
+            let mut params = vec![Value::Text(id.into())];
+            push_album_search_predicates(
+                &mut sql,
+                &mut params,
+                &parse_catalog_search(query).unwrap(),
+            );
+            let count: i64 = connection
+                .query_row(&sql, params_from_iter(params), |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "{id}");
+        }
+    }
+
+    #[test]
+    fn pending_file_genres_drive_search_counts_and_album_details() {
+        use id3::TagLike;
+        let connection = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        let mut tag = id3::Tag::new();
+        tag.set_genre("Soundtrack");
+        for filename in ["01.mp3", "02.mp3"] {
+            let path = directory.path().join(filename);
+            std::fs::write(&path, []).unwrap();
+            tag.write_to_path(path, id3::Version::Id3v24).unwrap();
+        }
+        let original = std::fs::read(directory.path().join("01.mp3")).unwrap();
+        connection.execute("UPDATE tracks SET file_path = ?1, canonical_genre = 'Classical' WHERE album_id = 'a1'", [&folder]).unwrap();
+        connection.execute_batch("UPDATE albums SET canonical_genre = 'Classical' WHERE id = 'a1'; DELETE FROM track_search_fts; INSERT INTO track_search_fts SELECT id, album_id, title, display_artist, album, album_artist_display, canonical_genre, publisher, file_path, filename FROM tracks;").unwrap();
+        connection.execute("INSERT INTO aurora_state.pending_library_folder_sync(directory, updated_at_ms) VALUES (?1, 1)", [&folder]).unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        crate::live_genres::prepare(&connection).unwrap();
+        assert!(
+            connection
+                .pragma_query_value(None, "query_only", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        for query in [
+            "love=1 AND cr=99 NOT genre:scores OR soundtrack",
+            "genre:classical",
+            "genre:\"Classical\"",
+        ] {
+            let page = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(query.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(page.total_count, 0, "{query}");
+        }
+        for query in [
+            "genre:soundtrack",
+            "genre:\"Soundtrack\"",
+            "soundtrack",
+            "genre:scores OR soundtrack",
+        ] {
+            let page = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(query.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(page.total_count, 1, "{query}");
+            assert_eq!(page.items[0].genre.as_deref(), Some("Soundtrack"));
+        }
+        let title_only = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("Sæglópur".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            title_only.total_count, 0,
+            "plain album search must not expand to track titles"
+        );
+        let detail = album_detail_from_connection(&connection, "a1", None).unwrap();
+        assert_eq!(detail.album.genre.as_deref(), Some("Soundtrack"));
+        assert_eq!(
+            original,
+            std::fs::read(directory.path().join("01.mp3")).unwrap()
+        );
+        // A new file edit invalidates the cache and re-enters the exclusion search.
+        tag.set_genre("Progressive Rock");
+        for filename in ["01.mp3", "02.mp3"] {
+            tag.write_to_path(directory.path().join(filename), id3::Version::Id3v24)
+                .unwrap();
+        }
+        crate::live_genres::prepare(&connection).unwrap();
+        let page = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(page.total_count, 1);
+        assert_eq!(page.items[0].genre.as_deref(), Some("Progressive Rock"));
     }
 
     #[test]

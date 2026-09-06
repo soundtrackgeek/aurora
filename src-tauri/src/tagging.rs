@@ -3257,6 +3257,18 @@ mod tests {
         assert_eq!(fs::read(&target).expect("unchanged file"), before);
         let pending = store.pending_library_folder_sync_targets(10).unwrap();
         assert_eq!(pending[0].filename, None);
+        // A subsequent catalog detail read projects the queued file genre, so opening
+        // Tags again does not reset the queue receipt or its retry/backoff state.
+        catalog::apply_overlays(std::slice::from_mut(&mut resolved.summary), Some(&store))
+            .expect("pending genre on detail reload");
+        assert_eq!(resolved.summary.genre.as_deref(), Some("Southern Soul"));
+        service
+            .inspect_resolved_editor(vec![resolved])
+            .expect("repeat inspection");
+        assert_eq!(
+            store.pending_library_folder_sync_targets(10).unwrap()[0].token,
+            pending[0].token
+        );
         for path in paths {
             assert_eq!(fs::read(&path).expect("unchanged album track"), before);
             fs::remove_file(path).unwrap();

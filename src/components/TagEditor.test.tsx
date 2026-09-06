@@ -84,12 +84,26 @@ describe("TagEditor", () => {
     const catalogSync = { status: "pending" as const, pendingFolderCount: 1, projectionToken: 4 };
     tagMocks.read.mockResolvedValue({ ...snapshot(), liveTracks, catalogSync });
     const onTracksChange = vi.fn();
-    const view = render(<TagEditor target={target} onTracksChange={onTracksChange} />);
+    const onCatalogSync = vi.fn();
+    const view = render(<TagEditor target={target} onTracksChange={onTracksChange} onCatalogSync={onCatalogSync} />);
     await waitFor(() => expect(onTracksChange).toHaveBeenCalledWith(liveTracks, catalogSync));
-    view.rerender(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    await waitFor(() => expect(onCatalogSync).toHaveBeenCalledWith(catalogSync));
+    view.rerender(<TagEditor target={target} onTracksChange={vi.fn()} onCatalogSync={onCatalogSync} />);
+    expect(onCatalogSync).toHaveBeenCalledTimes(1);
     expect(tagMocks.read).toHaveBeenCalledTimes(1);
     expect(onTracksChange).toHaveBeenCalledTimes(1);
     expect(tagMocks.update).not.toHaveBeenCalled();
+  });
+
+  it("does not announce a stale file-read projection as pending sync", async () => {
+    const catalogSync = { status: "pending" as const, pendingFolderCount: 1, projectionToken: 4 };
+    tagMocks.read.mockResolvedValue({ ...snapshot(), liveTracks: updatedTracks(), catalogSync });
+    const onCatalogSync = vi.fn();
+    const onTracksChange = vi.fn().mockReturnValue(false);
+    render(<TagEditor target={target} onTracksChange={onTracksChange} onCatalogSync={onCatalogSync} />);
+    await screen.findByDisplayValue("America Town");
+    expect(onTracksChange).toHaveBeenCalledTimes(1);
+    expect(onCatalogSync).not.toHaveBeenCalled();
   });
 
   it("shows common album values, mixed track values, and the album MP3 count", async () => {

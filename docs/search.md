@@ -103,6 +103,8 @@ This means “Bon Jovi or Def Leppard, and an Original Year from 1985 through 19
 
 Operators are recognized only as uppercase standalone words. Lowercase `and`, `or`, and `not` are treated as ordinary search words.
 
+Pending MP3 genre edits are included in catalog search before Music Library finishes importing them. Genre prefixes, exact genres, and score groups use the same pending values as album details; filtered counts and pagination follow those values. Unreadable files retain catalog metadata until they can be read again.
+
 ### NOT and exclusions
 
 Use uppercase `NOT` or a leading hyphen to exclude a group:

@@ -549,8 +549,16 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
   ]);
   const loadSnapshot = useCallback(() => readTagEditorState(requestTarget), [requestTarget]);
   const onSnapshotLoaded = useCallback((next: TagEditorSnapshot) => {
-    if (next.liveTracks?.length) onTracksChange(next.liveTracks, next.catalogSync);
-  }, [onTracksChange]);
+    const accepted = next.liveTracks?.length
+      ? onTracksChange(next.liveTracks, next.catalogSync)
+      : undefined;
+    const sync = next.catalogSync;
+    if (accepted !== false && sync && sync.status !== "synced" && onCatalogSync) {
+      void Promise.resolve().then(() => onCatalogSync(sync)).catch((error: unknown) => {
+        console.warn("Aurora could not refresh pending catalog sync after reading file tags", error);
+      });
+    }
+  }, [onTracksChange, onCatalogSync]);
   const artwork = useMemo<AlbumArtworkEditor | undefined>(() => targetKind === "album" ? {
     currentUrl: albumCoverUrl(targetAlbumId!, 256),
     choose: () => selectAlbumCoverImage({ source: "library", target: requestTarget }),
