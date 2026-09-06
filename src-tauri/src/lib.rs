@@ -25,6 +25,7 @@ mod state_store;
 mod state_sync;
 mod tag_model;
 mod tagging;
+mod timing;
 mod track_deletion;
 mod waveform;
 mod years;
@@ -97,14 +98,22 @@ enum AlbumCoverPickerRequest {
 
 async fn with_playback<T: Send + 'static>(
     app: AppHandle,
+    name: &'static str,
     operation: impl FnOnce(&mut PlaybackRuntime) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
+    let mut timing = timing::Span::new(name, "");
+    timing.stage("worker_queue");
     tauri::async_runtime::spawn_blocking(move || {
+        timing.stage("playback_lock_wait");
         let state = app.state::<PlaybackState>();
         let mut runtime = state
             .lock()
             .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
-        operation(&mut runtime)
+        timing.stage("playback_lock_held");
+        let result = operation(&mut runtime);
+        drop(runtime);
+        timing.finish(result.is_ok());
+        result
     })
     .await
     .map_err(|error| format!("Aurora's playback worker stopped unexpectedly: {error}"))?
@@ -112,10 +121,11 @@ async fn with_playback<T: Send + 'static>(
 
 async fn with_playback_snapshot(
     app: AppHandle,
+    name: &'static str,
     operation: impl FnOnce(&mut PlaybackRuntime) -> Result<PlaybackSnapshot, String> + Send + 'static,
 ) -> Result<PlaybackSnapshot, String> {
     let publish_app = app.clone();
-    let snapshot = with_playback(app, operation).await?;
+    let snapshot = with_playback(app, name, operation).await?;
     media_controls::publish(&publish_app, &snapshot);
     Ok(snapshot)
 }
@@ -809,13 +819,18 @@ async fn export_musicbrainz_curation(app: AppHandle) -> Result<CurationExportRes
 
 #[tauri::command]
 async fn playback_state(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, |runtime| Ok(runtime.snapshot())).await
+    with_playback_snapshot(app, "playback_state", |runtime| Ok(runtime.snapshot())).await
 }
 
 #[tauri::command]
 async fn playback_rebind_catalog(app: AppHandle) -> Result<PlaybackCatalogRebind, String> {
     let publish_app = app.clone();
-    let rebind = with_playback(app, PlaybackRuntime::rebind_catalog).await?;
+    let rebind = with_playback(
+        app,
+        "playback_rebind_catalog",
+        PlaybackRuntime::rebind_catalog,
+    )
+    .await?;
     media_controls::publish(&publish_app, &rebind.playback);
     Ok(rebind)
 }
@@ -826,7 +841,7 @@ async fn playback_replace_queue(
     track_references: Vec<TrackReference>,
     start_track_key: String,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| {
+    with_playback_snapshot(app, "playback_replace_queue", move |runtime| {
         runtime.replace_queue(track_references, start_track_key)
     })
     .await
@@ -837,42 +852,54 @@ async fn playback_append_queue(
     app: AppHandle,
     track_references: Vec<TrackReference>,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.append_queue(track_references)).await
+    with_playback_snapshot(app, "playback_append_queue", move |runtime| {
+        runtime.append_queue(track_references)
+    })
+    .await
 }
 
 #[tauri::command]
 async fn playback_toggle(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, PlaybackRuntime::toggle).await
+    with_playback_snapshot(app, "playback_toggle", PlaybackRuntime::toggle).await
 }
 
 #[tauri::command]
 async fn playback_next(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, PlaybackRuntime::next).await
+    with_playback_snapshot(app, "playback_next", PlaybackRuntime::next).await
 }
 
 #[tauri::command]
 async fn playback_previous(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, PlaybackRuntime::previous).await
+    with_playback_snapshot(app, "playback_previous", PlaybackRuntime::previous).await
 }
 
 #[tauri::command]
 async fn playback_stop(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, PlaybackRuntime::stop).await
+    with_playback_snapshot(app, "playback_stop", PlaybackRuntime::stop).await
 }
 
 #[tauri::command]
 async fn playback_seek(app: AppHandle, position_seconds: f64) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.seek(position_seconds)).await
+    with_playback_snapshot(app, "playback_seek", move |runtime| {
+        runtime.seek(position_seconds)
+    })
+    .await
 }
 
 #[tauri::command]
 async fn playback_set_volume(app: AppHandle, volume: f32) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.set_volume(volume)).await
+    with_playback_snapshot(app, "playback_set_volume", move |runtime| {
+        runtime.set_volume(volume)
+    })
+    .await
 }
 
 #[tauri::command]
 async fn playback_set_shuffle(app: AppHandle, enabled: bool) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.set_shuffle(enabled)).await
+    with_playback_snapshot(app, "playback_set_shuffle", move |runtime| {
+        runtime.set_shuffle(enabled)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -880,7 +907,10 @@ async fn playback_set_repeat_mode(
     app: AppHandle,
     repeat_mode: RepeatMode,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.set_repeat_mode(repeat_mode)).await
+    with_playback_snapshot(app, "playback_set_repeat_mode", move |runtime| {
+        runtime.set_repeat_mode(repeat_mode)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -888,7 +918,10 @@ async fn playback_remove_queue_item(
     app: AppHandle,
     index: usize,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.remove_queue_item(index)).await
+    with_playback_snapshot(app, "playback_remove_queue_item", move |runtime| {
+        runtime.remove_queue_item(index)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -897,12 +930,15 @@ async fn playback_move_queue_item(
     from: usize,
     to: usize,
 ) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, move |runtime| runtime.move_queue_item(from, to)).await
+    with_playback_snapshot(app, "playback_move_queue_item", move |runtime| {
+        runtime.move_queue_item(from, to)
+    })
+    .await
 }
 
 #[tauri::command]
 async fn playback_clear_queue(app: AppHandle) -> Result<PlaybackSnapshot, String> {
-    with_playback_snapshot(app, PlaybackRuntime::clear_queue).await
+    with_playback_snapshot(app, "playback_clear_queue", PlaybackRuntime::clear_queue).await
 }
 
 #[tauri::command]
@@ -1286,7 +1322,10 @@ fn global_shortcut_settings(app: AppHandle) -> Result<shortcuts::GlobalShortcutS
 
 #[tauri::command]
 async fn audio_settings(app: AppHandle) -> Result<AudioSettingsStatus, String> {
-    with_playback(app, |runtime| Ok(runtime.audio_settings_status())).await
+    with_playback(app, "audio_settings", |runtime| {
+        Ok(runtime.audio_settings_status())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1294,7 +1333,10 @@ async fn update_audio_settings(
     app: AppHandle,
     request: AudioSettingsRequest,
 ) -> Result<AudioSettingsStatus, String> {
-    with_playback(app, |runtime| runtime.update_audio_settings(request)).await
+    with_playback(app, "update_audio_settings", |runtime| {
+        runtime.update_audio_settings(request)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1356,6 +1398,7 @@ pub fn run() {
                     .or_else(|_| dotenvy::from_filename("../.env.local"));
             }
             let state_directory = app.path().app_data_dir()?;
+            timing::initialize(&state_directory);
             let state_path = state_directory.join("aurora-state.sqlite3");
             let remote_state_path =
                 state_sync::default_remote_state_path().map_err(std::io::Error::other)?;

@@ -164,6 +164,7 @@ enum ShortcutTagIntent {
 }
 
 struct ShortcutTagTask {
+    timing: crate::timing::Span,
     track_id: String,
     track_key: String,
     title: String,
@@ -182,12 +183,14 @@ pub(crate) struct ShortcutTagQueue {
 }
 
 impl ShortcutTagQueue {
-    fn enqueue(&self, app: &AppHandle, task: ShortcutTagTask) {
+    fn enqueue(&self, app: &AppHandle, mut task: ShortcutTagTask) {
+        task.timing.stage("queue_lock_wait");
         let should_start = {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            task.timing.stage("worker_queue");
             state.tasks.push_back(task);
             if state.running {
                 false
@@ -541,6 +544,8 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
     if state != ShortcutState::Pressed {
         return;
     }
+    let mut timing = crate::timing::Span::new("shortcut.received", &shortcut_value.to_string());
+    timing.stage("shortcut_binding_lock_wait");
     let action = {
         let state = app.state::<GlobalShortcutState>();
         let Ok(runtime) = state.lock() else {
@@ -552,12 +557,18 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
         return;
     };
     if matches!(action, ShortcutAction::Rating(_) | ShortcutAction::Love) {
+        timing.stage("optimistic_tag_action");
         let result = optimistic_tag_action(app, action);
-        let _ = app.emit(RESULT_EVENT, result);
+        let success = result.success;
+        timing.stage("emit_result");
+        let emitted = app.emit(RESULT_EVENT, result);
+        timing.finish(success && emitted.is_ok());
         return;
     }
     let app = app.clone();
+    timing.stage("worker_queue");
     tauri::async_runtime::spawn_blocking(move || {
+        timing.stage("execute_action");
         let result = match execute_action(&app, action) {
             Ok(result) => result,
             Err(message) => GlobalShortcutResult {
@@ -570,17 +581,23 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                 playback: None,
             },
         };
-        let _ = app.emit(RESULT_EVENT, result);
+        let success = result.success;
+        timing.stage("emit_result");
+        let emitted = app.emit(RESULT_EVENT, result);
+        timing.finish(success && emitted.is_ok());
     });
 }
 
 fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShortcutResult, String> {
     match action {
         ShortcutAction::PlayPause | ShortcutAction::Next => {
+            let mut timing = crate::timing::Span::new("shortcut.playback", action_name(action));
+            timing.stage("playback_lock_wait");
             let state = app.state::<PlaybackState>();
             let mut playback = state
                 .lock()
                 .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+            timing.stage("playback_lock_held");
             let snapshot = if action == ShortcutAction::PlayPause {
                 playback.toggle()?
             } else {
@@ -594,7 +611,9 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                 ShortcutAction::Next => "Playing next track",
                 _ => unreachable!(),
             };
+            timing.stage("media_controls_publish");
             crate::media_controls::publish(app, &snapshot);
+            timing.finish(true);
             Ok(GlobalShortcutResult {
                 action: action_name(action).to_owned(),
                 success: true,
@@ -610,11 +629,14 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
 }
 
 fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShortcutResult {
+    let mut timing = crate::timing::Span::new("shortcut.optimistic_tag", action_name(action));
+    timing.stage("playback_lock_wait");
     let result = (|| -> Result<(TrackSummary, TrackSummary, ShortcutTagTask), String> {
         let state = app.state::<PlaybackState>();
         let mut playback = state
             .lock()
             .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+        timing.stage("playback_lock_held");
         let previous = playback.current_track_for_shortcut().ok_or_else(|| {
             "Start a track in Aurora before using rating or Love shortcuts.".to_owned()
         })?;
@@ -625,6 +647,7 @@ fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShort
         optimistic.tag_sync_state = Some(TagSyncState::PendingImport);
         playback.refresh_track_tags(&optimistic);
         let task = ShortcutTagTask {
+            timing: crate::timing::Span::new("shortcut.tag_queue", &previous.track_key),
             track_id: previous.id.clone(),
             track_key: previous.track_key.clone(),
             title: previous.title.clone(),
@@ -633,6 +656,7 @@ fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShort
         Ok((previous, optimistic, task))
     })();
 
+    timing.finish(result.is_ok());
     match result {
         Ok((previous, optimistic, task)) => {
             let message = intent_message(&optimistic.title, task.intent);
@@ -661,7 +685,7 @@ fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShort
 
 fn drain_tag_queue(app: &AppHandle) {
     loop {
-        let Some(task) = app.state::<ShortcutTagQueue>().next() else {
+        let Some(mut task) = app.state::<ShortcutTagQueue>().next() else {
             return;
         };
         let action = match task.intent {
@@ -669,7 +693,9 @@ fn drain_tag_queue(app: &AppHandle) {
             ShortcutTagIntent::Rating(Some(rating)) => ShortcutAction::Rating(rating as u8),
             ShortcutTagIntent::Love(_) => ShortcutAction::Love,
         };
+        task.timing.stage("persist");
         let result = persist_tag_task(app, &task);
+        task.timing.finish(result.is_ok());
         let event = match result {
             Ok((mut sync, projection_token)) => {
                 sync.projection_token = Some(projection_token);
@@ -698,17 +724,22 @@ fn drain_tag_queue(app: &AppHandle) {
 }
 
 fn persist_tag_task(app: &AppHandle, task: &ShortcutTagTask) -> Result<(CatalogSync, u64), String> {
+    let mut timing = crate::timing::Span::new("shortcut.tag_persistence", &task.track_key);
+    timing.stage("coordinator_lock_wait");
     let coordinator = app.state::<LibrarySyncCoordinator>();
     let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+        timing.stage("tag_service_lock_wait");
         let mut updated = {
             let state = app.state::<TagState>();
             let service = state
                 .lock()
                 .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            timing.stage("inspect");
             let track = service.inspect(&task.track_id, &task.track_key)?.track;
             let expected = track.catalog_tag_values();
             let mut desired = expected.clone();
             apply_tag_intent_to_values(&mut desired, task.intent);
+            timing.stage("update");
             service.update(TagEditRequest {
                 track_id: track.id,
                 track_key: track.track_key,
@@ -716,6 +747,7 @@ fn persist_tag_task(app: &AppHandle, task: &ShortcutTagTask) -> Result<(CatalogS
                 desired,
             })?
         };
+        timing.stage("library_sync_queue");
         let directory = updated.track.directory.clone();
         let sync = coordinator.queue_after_edit(app, std::slice::from_ref(&directory));
         if sync.completed(&directory) {
@@ -724,6 +756,7 @@ fn persist_tag_task(app: &AppHandle, task: &ShortcutTagTask) -> Result<(CatalogS
         }
         Ok::<CatalogSync, String>(sync.catalog_sync)
     });
+    timing.finish(result.is_ok());
     Ok((result?, projection_token))
 }
 

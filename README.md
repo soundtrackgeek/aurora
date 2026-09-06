@@ -1,10 +1,13 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.31 shows request-specific transfer, catalog, and cleanup progress during album moves. Music Library 0.145.11 adds a targeted removal transaction that preserves retained track IDs and search rows, with the existing verified-copy, recovery-backup, and rollback safeguards.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.32 adds local timing diagnostics for delayed playback shortcuts and rating saves.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.31 slice
+## Current 0.24.32 slice
+
+- Playback diagnostics are written automatically to `%APPDATA%\com.soundtrackgeek.aurora\aurora-timing.jsonl` after starting this version. The previous rotation is `aurora-timing.previous.jsonl`; each file is limited to about 5 MiB. Records include UTC Unix timestamps in milliseconds, process/span IDs, version, shortcut keys or track keys (which can contain local music paths), stage timings, and outcomes. They remain local and are not part of OneDrive state synchronization.
+- The trace distinguishes shortcut dispatch, playback lock waits, playback/history/state work, tag-service and sync-coordinator waits, and MP3 copy, tag write, flush, replacement, verification, and cleanup. Log I/O runs on a dedicated thread; a bounded queue drops diagnostics rather than waiting, with loss counts reported on subsequent records. The final in-memory records may be lost on exit or a crash. After another delay, capture both log files promptly and note the track and approximate local time. This release adds evidence collection; it does not claim to fix the underlying stall.
 
 - Aurora remembers window size, screen position, and maximized state. Restarting reloads previously loaded explorer pages, reopens the album and selected track, and restores the saved scroll offset after content is ready. Update installation saves window geometry before exiting. These saved positions are local to this device.
 

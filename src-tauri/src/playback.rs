@@ -938,22 +938,31 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn snapshot(&mut self) -> PlaybackSnapshot {
+        let mut timing = crate::timing::Span::new("playback.snapshot", "");
+        timing.stage("synchronize_audio_runtime");
         self.synchronize_audio_runtime();
         if self.status == PlaybackStatus::Playing {
             let ended = self.player.as_ref().is_none_or(Player::empty);
             if ended {
+                timing.stage("finish_current");
                 self.finish_current();
             } else {
+                timing.stage("capture_position");
                 self.capture_position();
+                timing.stage("history_observe");
                 self.observe_history();
+                timing.stage("preload_next_track");
                 self.start_next_preparation();
             }
         }
         let bucket = (self.position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS).floor() as u64;
         if bucket != self.last_saved_position_bucket {
             self.last_saved_position_bucket = bucket;
+            timing.stage("persist_state");
             let _ = self.persist();
         }
+        timing.stage("build_snapshot");
+        timing.finish(true);
         PlaybackSnapshot {
             queue: self.queue.clone(),
             current_index: self.current_index,
@@ -1175,14 +1184,24 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn next(&mut self) -> Result<PlaybackSnapshot, String> {
+        let mut timing = crate::timing::Span::new(
+            "playback.next",
+            self.current_track()
+                .map(|t| t.track_key.as_str())
+                .unwrap_or_default(),
+        );
+        timing.stage("synchronize_audio_runtime");
         self.synchronize_audio_runtime();
         let prepared_index = self.prepared_next.as_ref().map(|prepared| prepared.index);
         let next = prepared_index
             .or_else(|| self.pending_next.as_ref().map(|pending| pending.next_index))
             .or_else(|| self.choose_next_index(self.repeat_mode == RepeatMode::All))
             .ok_or_else(|| "There is no next track in the queue.".to_owned())?;
+        timing.stage("capture_position");
         self.capture_position();
+        timing.stage("history_observe");
         self.observe_history();
+        timing.stage("history_finish");
         self.finish_history("skipped");
         if prepared_index == Some(next)
             && self.player.as_ref().is_some_and(|player| player.len() >= 2)
@@ -1193,22 +1212,35 @@ impl PlaybackRuntime {
             self.position_seconds = 0.0;
             self.preparation_attempted = false;
             let player = self.player.as_ref().expect("prepared track has a player");
+            timing.stage("prepared_skip_one");
             player.skip_one();
             player.play();
             self.status = PlaybackStatus::Playing;
+            timing.stage("history_begin");
             self.begin_history();
+            timing.stage("preload_following_track");
             self.start_next_preparation();
+            timing.stage("persist_state");
             self.persist()?;
-            return Ok(self.snapshot());
+            timing.stage("snapshot");
+            let snapshot = self.snapshot();
+            timing.finish(true);
+            return Ok(snapshot);
         }
         self.current_index = Some(next);
+        timing.stage("load_next_source");
         if let Err(error) = self.load_current(true, 0.0) {
             let error = self.set_error(error);
             return Err(error);
         }
+        timing.stage("history_begin");
         self.begin_history();
+        timing.stage("persist_state");
         self.persist()?;
-        Ok(self.snapshot())
+        timing.stage("snapshot");
+        let snapshot = self.snapshot();
+        timing.finish(true);
+        Ok(snapshot)
     }
 
     pub(crate) fn previous(&mut self) -> Result<PlaybackSnapshot, String> {

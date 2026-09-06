@@ -1221,11 +1221,15 @@ impl TagService {
     }
 
     pub(crate) fn update(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
+        let mut timing = crate::timing::Span::new("tag.update", &request.track_key);
+        timing.stage("validate_and_resolve");
         request.expected.validate()?;
         request.desired.validate()?;
         let resolved = catalog::resolve_track(&request.track_id, &request.track_key, &self.store)?;
+        timing.stage("read_original");
         let original_fingerprint = FileFingerprint::read(&resolved.audio_path)?;
         let (mut tag, version) = read_tag_for_write(&resolved.audio_path)?;
+        timing.stage("hash_original_audio");
         let original_payload_hash = audio_payload_hash(&resolved.audio_path)?;
         if FileFingerprint::read(&resolved.audio_path)? != original_fingerprint {
             return Err(
@@ -1240,11 +1244,14 @@ impl TagService {
             );
         }
         if current == request.desired {
-            return self.snapshot_with_values(resolved, current, None);
+            let result = self.snapshot_with_values(resolved, current, None);
+            timing.finish(result.is_ok());
+            return result;
         }
 
         let preserved_frames = non_target_frames(&tag);
         let target_path_text = resolved.audio_path.to_string_lossy().into_owned();
+        timing.stage("journal_begin");
         let operation_id = self.store.begin_tag_operation(
             &resolved.summary.track_key,
             &target_path_text,
@@ -1253,6 +1260,7 @@ impl TagService {
             &original_fingerprint.to_string(),
         )?;
         let (temp_path, backup_path) = operation_paths(&resolved.audio_path, operation_id)?;
+        timing.stage("journal_paths");
         self.store.set_operation_paths(
             operation_id,
             &temp_path.to_string_lossy(),
@@ -1266,24 +1274,29 @@ impl TagService {
                     "Aurora's safe-write paths already exist; no file was changed.".to_owned(),
                 );
             }
+            timing.stage("copy_working_file");
             fs::copy(&resolved.audio_path, &temp_path).map_err(|error| {
                 format!("Could not create the same-folder MP3 working copy: {error}")
             })?;
+            timing.stage("write_working_tags");
             apply_tag_changes(&mut tag, version, &current, &request.desired)?;
             tag.write_to_path(&temp_path, version)
                 .map_err(|error| format!("Could not write the MP3 working copy: {error}"))?;
+            timing.stage("flush_working_file");
             File::options()
                 .read(true)
                 .write(true)
                 .open(&temp_path)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| format!("Could not flush the MP3 working copy: {error}"))?;
+            timing.stage("verify_working_file");
             verify_written_file(
                 &temp_path,
                 &request.desired,
                 &preserved_frames,
                 &original_payload_hash,
             )?;
+            timing.stage("write_exclusion");
             let _write_exclusion = open_write_exclusion(&resolved.audio_path)?;
             if FileFingerprint::read(&resolved.audio_path)? != original_fingerprint {
                 return Err(
@@ -1291,6 +1304,7 @@ impl TagService {
                         .to_owned(),
                 );
             }
+            timing.stage("atomic_replace");
             if let Err(error) =
                 replace_file_atomic(&resolved.audio_path, &temp_path, Some(&backup_path))
             {
@@ -1310,11 +1324,13 @@ impl TagService {
                 });
             }
             recovery_required = true;
+            timing.stage("journal_replaced");
             if let Err(error) = self.store.mark_operation(operation_id, "replaced", None) {
                 return Err(format!(
                     "Aurora installed and retained the edit, but could not checkpoint its journal. It will verify the retained files at startup: {error}"
                 ));
             }
+            timing.stage("verify_backup");
             if FileFingerprint::read(&backup_path)?.to_string() != original_fingerprint.to_string()
             {
                 return Err(
@@ -1322,6 +1338,7 @@ impl TagService {
                         .to_owned(),
                 );
             }
+            timing.stage("verify_installed_file");
             if let Err(error) = verify_written_file(
                 &resolved.audio_path,
                 &request.desired,
@@ -1345,6 +1362,7 @@ impl TagService {
             return Err(error);
         }
 
+        timing.stage("journal_verified");
         if let Err(error) = self.store.finish_tag_operation(
             operation_id,
             &resolved.summary.track_key,
@@ -1358,12 +1376,16 @@ impl TagService {
                 "Aurora installed and verified the MP3 edit, but could not finish its journal. The retained files will be reconciled at startup: {error}"
             ));
         }
+        timing.stage("cleanup_backups");
         self.store.cleanup_completed_tag_backups().map_err(|error| {
             format!(
                 "Aurora installed and verified the MP3 edit, but could not remove its completed safety backup: {error}"
             )
         })?;
-        self.snapshot_with_values(resolved, request.desired, Some(operation_id))
+        timing.stage("snapshot_result");
+        let result = self.snapshot_with_values(resolved, request.desired, Some(operation_id));
+        timing.finish(result.is_ok());
+        result
     }
 
     pub(crate) fn undo(&self, track_id: &str, track_key: &str) -> Result<TrackTagSnapshot, String> {

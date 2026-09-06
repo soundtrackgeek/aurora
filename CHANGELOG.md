@@ -4,6 +4,12 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.32] - 2026-09-06
+
+### Added
+- Local rotating timing diagnostics for shortcut arrival, worker scheduling, playback lock waits and transitions, and rating-save stages to investigate intermittent delayed track changes.
+- A bounded background log writer keeps filesystem logging off playback and shortcut threads and reports dropped records.
+
 ## [0.24.31] - 2026-09-05
 
 ### Fixed
