@@ -4,6 +4,11 @@ All notable Aurora changes are recorded here.
 
 ## [Unreleased]
 
+## [0.24.38] - 2026-09-06
+
+### Fixed
+- Save newly selected artwork from Tags for albums without an existing cover. Embed and verify the cover in the selected MP3s without requiring a pre-existing archive image. New archive artwork still requires Music Library cover import. Existing archive replacements retain their validation and rollback safeguards.
+
 ## [0.24.37] - 2026-09-06
 
 ### Fixed

@@ -516,7 +516,7 @@ impl TagService {
         }
         let archive_entry = match (&request.target, artwork.as_ref()) {
             (TagEditorTarget::Album { album_id, .. }, Some(_)) => {
-                Some(catalog::resolve_cover_archive_entry(album_id)?)
+                catalog::resolve_cover_archive_entry(album_id)?
             }
             _ => None,
         };

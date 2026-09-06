@@ -2263,39 +2263,89 @@ fn catalog_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String
 }
 
 pub(crate) fn resolve_cover_path(album_id: &str) -> Result<PathBuf, String> {
-    resolve_cover_archive_entry(album_id).map(|entry| entry.path)
+    resolve_cover_archive_entry(album_id)?
+        .map(|entry| entry.path)
+        .ok_or_else(|| "No album cover is available.".to_owned())
 }
 
-pub(crate) fn resolve_cover_archive_entry(album_id: &str) -> Result<CoverArchiveEntry, String> {
+pub(crate) fn resolve_cover_archive_entry(
+    album_id: &str,
+) -> Result<Option<CoverArchiveEntry>, String> {
     if album_id.trim().is_empty() || album_id.chars().count() > 512 {
         return Err("Album identity is invalid.".to_owned());
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    let (cover_path, mime_type): (String, String) = connection
+    cover_archive_entry(&connection, album_id, Path::new(COVER_ROOT))
+}
+
+fn cover_archive_entry(
+    connection: &Connection,
+    album_id: &str,
+    cover_root: &Path,
+) -> Result<Option<CoverArchiveEntry>, String> {
+    let indexed: Option<(String, String)> = connection
         .query_row(
             "SELECT cache_path, mime_type FROM album_covers WHERE album_id = :album_id AND file_size_bytes > 0",
             named_params! { ":album_id": album_id },
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(|_| "No album cover is available.".to_owned())?;
+        .optional()
+        .map_err(|error| format!("Could not read the album-cover archive index: {error}"))?;
+    // A first cover is embedded in the MP3s without requiring an archive image.
+    // Only existing archive entries need an atomic replacement here.
+    let Some((cover_path, mime_type)) = indexed else {
+        return Ok(None);
+    };
 
-    let root = std::fs::canonicalize(COVER_ROOT)
+    let root = std::fs::canonicalize(cover_root)
         .map_err(|_| "The album-cover archive is unavailable.".to_owned())?;
     let candidate = std::fs::canonicalize(&cover_path)
         .map_err(|_| "The album cover is unavailable.".to_owned())?;
     if !candidate.starts_with(&root) || !candidate.is_file() {
         return Err("The album cover resolved outside the configured archive.".to_owned());
     }
-    Ok(CoverArchiveEntry {
+    Ok(Some(CoverArchiveEntry {
         path: candidate,
         mime_type,
-    })
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_cover_does_not_require_an_existing_archive_entry() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE album_covers (album_id TEXT, cache_path TEXT, mime_type TEXT, file_size_bytes INTEGER);
+             INSERT INTO album_covers VALUES ('empty', 'missing.png', 'image/png', 0);",
+        ).unwrap();
+        let missing_root = Path::new("missing-cover-archive");
+        for album_id in ["new", "empty"] {
+            assert!(
+                cover_archive_entry(&connection, album_id, missing_root)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO album_covers VALUES ('indexed', 'missing.png', 'image/png', 100);",
+            )
+            .unwrap();
+        assert!(cover_archive_entry(&connection, "indexed", missing_root).is_err());
+    }
+
+    #[test]
+    fn cover_index_errors_are_not_treated_as_absent_artwork() {
+        let connection = Connection::open_in_memory().unwrap();
+        let Err(error) = cover_archive_entry(&connection, "album", Path::new(".")) else {
+            panic!("missing schema must fail");
+        };
+        assert!(error.contains("Could not read the album-cover archive index"));
+    }
 
     #[test]
     fn snapshot_maps_musicbee_values_without_writing() {
