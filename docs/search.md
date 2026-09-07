@@ -54,6 +54,56 @@ Artist links open a fresh Albums search such as `aartist:"Bunny X"`, replacing t
 
 There are no `rating:` or `unrated:` search fields. Those remain Aurora collection filters and handoffs rather than query-language keywords.
 
+### Artist lifespans
+
+These fields use the imported MusicBrainz record for the **Album Artist**, on both Songs and Albums (and matching catalog results in Artists). `born:` and `dead:` require a Person; `founded:` and `dissolved:` require a Group. Missing artist records never match, including `dead:no` and `dissolved:no`.
+
+| Field | Closed range | Upper bound | Lower bound | Status |
+| --- | --- | --- | --- | --- |
+| Band dissolved | `dissolved:1999..2004` | `dissolved:..2004` | `dissolved:2004..` | `dissolved:yes`, `dissolved:no` |
+| Band founded | `founded:1999..2004` | `founded:..2004` | `founded:2004..` | — |
+| Person died | `dead:1999..2004` | `dead:..2004` | `dead:2004..` | `dead:yes`, `dead:no` |
+| Person born | `born:1966..1968` | `born:..2004` | `born:2004..` | — |
+
+All range boundaries are **inclusive**, like `year:`: `..2004` means through 2004 and `2004..` means from 2004 onward. Use `..2003` for strictly before 2004, or `2005..` for strictly after. A single year also works, e.g. `born:1966`. Partial dates with a known year work; absent or malformed years do not match year ranges. `yes` means an ended flag or a recorded end date; `no` requires an explicit non-ended flag and no end date. An ended artist without a known end year can match `yes` but cannot match a year range. The negative status spelling is `dead:no`.
+
+### Duration and album rating
+
+| Field | Closed range | Upper bound | Lower bound |
+| --- | --- | --- | --- |
+| Minutes | `minutes:33..44` | `minutes:..44` | `minutes:33..` |
+| Album rating (0–5 stars) | `ar:3..4` | `ar:..4.34` | `ar:4.34..` |
+
+`minutes:` uses total album duration on Albums and individual track duration on Songs. Stored seconds are compared without rounding to whole minutes; decimal bounds are supported. `ar:` always uses the containing album's catalog rating, including on Songs, using effective, calculated, then stored album rating in that order. It does not round ratings to whole or half stars. Pending edits may need Music Library synchronization before this catalog rating changes. Missing durations or ratings do not match ranges. Bounds are inclusive: `ar:..4.34` includes 4.34 and `minutes:33..` includes exactly 33 minutes. Single values such as `ar:4.34` are also accepted.
+
+### Chart status and ranks
+
+Chart searches use the imported catalog rank shown on the album or track, not a selected Charts period. Positive ranks indicate chart presence; missing, zero, or negative ranks match `no`.
+
+| Chart | Presence | Absence | Closed range | Lower bound | Upper bound |
+| --- | --- | --- | --- | --- | --- |
+| Billboard | `bb:yes` | `bb:no` | `bb:1..5` | `bb:5..` | `bb:..5` |
+| Official UK | `uk:yes` | `uk:no` | `uk:1..5` | `uk:5..` | `uk:..5` |
+| VG-lista | `vg:yes` | `vg:no` | `vg:1..5` | `vg:5..` | `vg:..5` |
+| Ti i skuddet (Songs only) | `ti:yes` | `ti:no` | `ti:1..5` | `ti:5..` | `ti:..5` |
+| Norsktoppen (Songs only) | `nt:yes` | `nt:no` | `nt:1..5` | `nt:5..` | `nt:..5` |
+
+On Albums, `bb:`, `uk:`, and `vg:` use album ranks; on Songs they use singles ranks. `ti:` and `nt:` have no album equivalent and return no Albums matches. Rank bounds must be positive whole numbers. `bb:5..` means rank 5 or numerically higher (a worse chart position); `bb:..5` means the top five. All boundaries are inclusive. `bb:1` finds rank 1 exactly. Unknown ranks never match numeric ranges.
+
+Combine new fields using the usual `AND`, comma, `OR`, and `NOT` operators; both `:` and `=` work:
+
+```text
+founded:1999..2004 AND dissolved:no
+born:1966..1968 AND dead:no
+minutes:33..44 AND ar:4.34..
+bb:..5 AND uk:yes AND vg:no
+ti:yes OR nt:yes
+dead:1999..2004 OR 2010..
+ar=3..4 AND NOT bb:yes
+```
+
+Reversed ranges, empty ranges (`..`), non-finite numbers, out-of-range ratings, and fractional years or ranks are rejected.
+
 ### Prefix and exact matching
 
 Unquoted text uses word-prefix matching:

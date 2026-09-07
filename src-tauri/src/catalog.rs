@@ -721,6 +721,21 @@ const MAX_FTS_SEARCH_TERMS: usize = 32;
 const MAX_SEARCH_ALTERNATIVES: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+enum ExtendedSearchField {
+    Dissolved,
+    Founded,
+    Dead,
+    Born,
+    Minutes,
+    AlbumRating,
+    Billboard,
+    Uk,
+    Vg,
+    Ti,
+    Nt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum CatalogSearchField {
     Any,
     Artist,
@@ -734,6 +749,7 @@ enum CatalogSearchField {
     Title,
     Completeness,
     Love,
+    Extended(ExtendedSearchField),
 }
 
 impl CatalogSearchField {
@@ -744,7 +760,8 @@ impl CatalogSearchField {
             | Self::ReleaseYear
             | Self::Country
             | Self::Completeness
-            | Self::Love => None,
+            | Self::Love
+            | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -761,7 +778,8 @@ impl CatalogSearchField {
             | Self::ReleaseYear
             | Self::Country
             | Self::Completeness
-            | Self::Love => None,
+            | Self::Love
+            | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
             Self::Album => Some("album"),
@@ -774,13 +792,31 @@ impl CatalogSearchField {
 
 #[derive(Clone, Debug, PartialEq)]
 enum CatalogSearchMatch {
+    Extended {
+        field: ExtendedSearchField,
+        from: Option<f64>,
+        to: Option<f64>,
+        present: Option<bool>,
+    },
     Prefix(String),
     Exact(String),
-    Country { value: String, exact: bool },
+    Country {
+        value: String,
+        exact: bool,
+    },
     ScoreGenreGroup,
-    YearRange { from: Option<i32>, to: Option<i32> },
-    CompletenessRange { from: Option<u32>, to: Option<u32> },
-    LovedTracksRange { from: Option<u32>, to: Option<u32> },
+    YearRange {
+        from: Option<i32>,
+        to: Option<i32>,
+    },
+    CompletenessRange {
+        from: Option<u32>,
+        to: Option<u32>,
+    },
+    LovedTracksRange {
+        from: Option<u32>,
+        to: Option<u32>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -821,7 +857,8 @@ impl CatalogSearch {
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. }
             | CatalogSearchMatch::CompletenessRange { .. }
-            | CatalogSearchMatch::LovedTracksRange { .. } => None,
+            | CatalogSearchMatch::LovedTracksRange { .. }
+            | CatalogSearchMatch::Extended { .. } => None,
         }
     }
 
@@ -922,6 +959,19 @@ fn tokenize_catalog_search(input: &str) -> Result<Vec<SearchToken>, String> {
 
 fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
     match value.trim().to_ascii_lowercase().as_str() {
+        "dissolved" => Some(CatalogSearchField::Extended(ExtendedSearchField::Dissolved)),
+        "founded" => Some(CatalogSearchField::Extended(ExtendedSearchField::Founded)),
+        "dead" => Some(CatalogSearchField::Extended(ExtendedSearchField::Dead)),
+        "born" => Some(CatalogSearchField::Extended(ExtendedSearchField::Born)),
+        "minutes" => Some(CatalogSearchField::Extended(ExtendedSearchField::Minutes)),
+        "ar" => Some(CatalogSearchField::Extended(
+            ExtendedSearchField::AlbumRating,
+        )),
+        "bb" => Some(CatalogSearchField::Extended(ExtendedSearchField::Billboard)),
+        "uk" => Some(CatalogSearchField::Extended(ExtendedSearchField::Uk)),
+        "vg" => Some(CatalogSearchField::Extended(ExtendedSearchField::Vg)),
+        "ti" => Some(CatalogSearchField::Extended(ExtendedSearchField::Ti)),
+        "nt" => Some(CatalogSearchField::Extended(ExtendedSearchField::Nt)),
         "artist" => Some(CatalogSearchField::Artist),
         "aartist" => Some(CatalogSearchField::AlbumArtist),
         "album" => Some(CatalogSearchField::Album),
@@ -943,6 +993,176 @@ fn split_search_field(value: &str) -> Option<(CatalogSearchField, &str)> {
         .find(|(_, character)| matches!(character, ':' | '='))?;
     let field = parse_search_field(&value[..separator])?;
     Some((field, value[separator + 1..].trim()))
+}
+
+fn parse_extended_search(
+    field: ExtendedSearchField,
+    value: &str,
+) -> Result<CatalogSearchMatch, String> {
+    use ExtendedSearchField::*;
+    if matches!(field, Dissolved | Dead | Billboard | Uk | Vg | Ti | Nt)
+        && matches!(value.to_ascii_lowercase().as_str(), "yes" | "no")
+    {
+        return Ok(CatalogSearchMatch::Extended {
+            field,
+            from: None,
+            to: None,
+            present: Some(value.eq_ignore_ascii_case("yes")),
+        });
+    }
+    let number = |raw: &str| -> Result<f64, String> {
+        let n = raw.parse::<f64>().map_err(|_| {
+            "Search requires a number, range, or supported yes/no value.".to_owned()
+        })?;
+        let valid = n.is_finite()
+            && n >= 0.0
+            && match field {
+                AlbumRating => n <= 5.0,
+                Minutes => true,
+                Dissolved | Founded | Dead | Born => {
+                    n.fract() == 0.0 && (1.0..=9999.0).contains(&n)
+                }
+                _ => n.fract() == 0.0 && (1.0..=i32::MAX as f64).contains(&n),
+            };
+        if valid {
+            Ok(n)
+        } else {
+            Err("Search bound is outside the supported range.".to_owned())
+        }
+    };
+    let (from, to) = if let Some((from, to)) = value.split_once("..") {
+        (
+            if from.is_empty() {
+                None
+            } else {
+                Some(number(from)?)
+            },
+            if to.is_empty() {
+                None
+            } else {
+                Some(number(to)?)
+            },
+        )
+    } else {
+        let n = number(value)?;
+        (Some(n), Some(n))
+    };
+    if (from.is_none() && to.is_none()) || matches!((from, to), (Some(a), Some(b)) if a > b) {
+        return Err("Search range needs an ordered lower or upper bound.".to_owned());
+    }
+    Ok(CatalogSearchMatch::Extended {
+        field,
+        from,
+        to,
+        present: None,
+    })
+}
+
+fn extended_search_predicate(
+    alias: &str,
+    album: bool,
+    matcher: &CatalogSearchMatch,
+    params: &mut Vec<Value>,
+) -> Option<String> {
+    use ExtendedSearchField::*;
+    let CatalogSearchMatch::Extended {
+        field,
+        from,
+        to,
+        present,
+    } = matcher
+    else {
+        return None;
+    };
+    let range = |column: &str, params: &mut Vec<Value>| {
+        let mut parts = Vec::new();
+        if let Some(n) = from {
+            params.push(Value::Real(*n));
+            parts.push(format!("{column} >= ?"));
+        }
+        if let Some(n) = to {
+            params.push(Value::Real(*n));
+            parts.push(format!("{column} <= ?"));
+        }
+        format!("({})", parts.join(" AND "))
+    };
+    if matches!(field, Dissolved | Founded | Dead | Born) {
+        let kind = if matches!(field, Dead | Born) {
+            "Person"
+        } else {
+            "Group"
+        };
+        let key = artist_key_sql(&format!("{alias}.album_artist_display"));
+        let condition = if let Some(present) = present {
+            if *present {
+                "(i.life_ended = 1 OR NULLIF(TRIM(i.life_end_date), '') IS NOT NULL)".to_owned()
+            } else {
+                "(i.life_ended = 0 AND NULLIF(TRIM(i.life_end_date), '') IS NULL)".to_owned()
+            }
+        } else {
+            let date = if matches!(field, Born | Founded) {
+                "i.life_begin_date"
+            } else {
+                "i.life_end_date"
+            };
+            format!(
+                "substr({date}, 1, 4) GLOB '[0-9][0-9][0-9][0-9]' AND {}",
+                range(&format!("CAST(substr({date}, 1, 4) AS INTEGER)"), params)
+            )
+        };
+        return Some(format!(
+            "EXISTS (SELECT 1 FROM musicbrainz_artist_infos AS i WHERE i.local_artist_key = {key} AND i.artist_type = '{kind}' COLLATE NOCASE AND {condition})"
+        ));
+    }
+    if *field == AlbumRating && !album {
+        let condition = extended_search_predicate("search_album", true, matcher, params)?;
+        return Some(format!(
+            "EXISTS (SELECT 1 FROM albums AS search_album WHERE search_album.id = {alias}.album_id AND {condition})"
+        ));
+    }
+    if album && matches!(field, Ti | Nt) {
+        return Some("0".to_owned());
+    }
+    let column = match field {
+        Minutes => format!(
+            "{alias}.{} / 60.0",
+            if album {
+                "total_seconds"
+            } else {
+                "time_seconds"
+            }
+        ),
+        AlbumRating => format!(
+            "COALESCE({alias}.effective_album_rating, {alias}.calculated_album_rating, {alias}.album_rating) / 20.0"
+        ),
+        Billboard => format!(
+            "{alias}.{}",
+            if album {
+                "billboard_rank"
+            } else {
+                "billboard_single_rank"
+            }
+        ),
+        Uk => format!("{alias}.official_uk_rank"),
+        Vg => format!("{alias}.vg_lista_rank"),
+        Ti => format!("{alias}.ti_i_skuddet_rank"),
+        Nt => format!("{alias}.norsktoppen_rank"),
+        _ => unreachable!(),
+    };
+    Some(if let Some(present) = present {
+        if *present {
+            format!("COALESCE({column}, 0) > 0")
+        } else {
+            format!("COALESCE({column}, 0) <= 0")
+        }
+    } else {
+        let predicate = range(&column, params);
+        if matches!(field, Billboard | Uk | Vg | Ti | Nt) {
+            format!("COALESCE(({column} > 0 AND {predicate}), 0)")
+        } else {
+            format!("COALESCE({predicate}, 0)")
+        }
+    })
 }
 
 fn parse_search_number(value: &str, field: CatalogSearchField) -> Result<u32, String> {
@@ -1153,6 +1373,9 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                 }
                 let exact = exact_search_value(value)?;
                 let matcher = match field {
+                    CatalogSearchField::Extended(field) => {
+                        parse_extended_search(field, exact.as_deref().unwrap_or(value))?
+                    }
                     CatalogSearchField::Year | CatalogSearchField::ReleaseYear => {
                         let field_name = if field == CatalogSearchField::Year {
                             "year"
@@ -1408,7 +1631,8 @@ fn non_prefix_predicate(
             Some(format!("({})", predicates.join(" AND ")))
         }
         CatalogSearchMatch::CompletenessRange { .. }
-        | CatalogSearchMatch::LovedTracksRange { .. } => None,
+        | CatalogSearchMatch::LovedTracksRange { .. }
+        | CatalogSearchMatch::Extended { .. } => None,
     }
 }
 
@@ -1502,7 +1726,8 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::ScoreGenreGroup
             | CatalogSearchMatch::YearRange { .. }
             | CatalogSearchMatch::CompletenessRange { .. }
-            | CatalogSearchMatch::LovedTracksRange { .. } => None,
+            | CatalogSearchMatch::LovedTracksRange { .. }
+            | CatalogSearchMatch::Extended { .. } => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -1548,6 +1773,9 @@ pub(crate) fn push_track_search_predicates(
         alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
             track_album_level_predicate("t", &alternative.matcher, params)
         }));
+        alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
+            extended_search_predicate("t", false, &alternative.matcher, params)
+        }));
         sql.push_str(if group.negated {
             " AND NOT ("
         } else {
@@ -1590,6 +1818,9 @@ pub(crate) fn push_album_search_predicates(
                 .iter()
                 .filter_map(|alternative| album_level_predicate("a", &alternative.matcher, params)),
         );
+        alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
+            extended_search_predicate("a", true, &alternative.matcher, params)
+        }));
         sql.push_str(if group.negated {
             " AND NOT ("
         } else {
@@ -2791,6 +3022,145 @@ mod tests {
         );
         assert!(parse_catalog_search("///").is_err());
         assert!(parse_catalog_search(&vec!["term"; 40].join(" ")).is_err());
+    }
+
+    #[test]
+    fn extended_search_executes_contextual_ranges_and_status() {
+        let db = Connection::open_in_memory().unwrap();
+        db.create_scalar_function(
+            "unicode_lower",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| Ok(ctx.get::<String>(0)?.to_lowercase()),
+        )
+        .unwrap();
+        db.execute_batch("CREATE TABLE albums (id INTEGER, album_artist_display TEXT, total_seconds REAL, effective_album_rating REAL, calculated_album_rating REAL, album_rating REAL, billboard_rank INTEGER, official_uk_rank INTEGER, vg_lista_rank INTEGER);
+            CREATE TABLE tracks (id INTEGER, album_id INTEGER, album_artist_display TEXT, time_seconds REAL, billboard_single_rank INTEGER, official_uk_rank INTEGER, vg_lista_rank INTEGER, ti_i_skuddet_rank INTEGER, norsktoppen_rank INTEGER);
+            CREATE TABLE musicbrainz_artist_infos (local_artist_key TEXT, artist_type TEXT, life_begin_date TEXT, life_end_date TEXT, life_ended INTEGER);
+            INSERT INTO albums VALUES (1, 'Band', 2400, 86.8, NULL, NULL, 5, 5, 5), (2, 'Person', 2641, NULL, NULL, NULL, NULL, 0, -1), (3, 'Unknown', NULL, NULL, NULL, NULL, 0, NULL, NULL);
+            INSERT INTO tracks VALUES (1, 1, 'Band', 120, 1, 1, 1, 1, 1), (2, 2, 'Person', 2400, NULL, 0, -1, NULL, 0), (3, 3, 'Unknown', NULL, 0, NULL, NULL, 0, NULL);
+            INSERT INTO musicbrainz_artist_infos VALUES ('band', 'Group', '1999-01', '2004', 1), ('person', 'Person', '1966', NULL, 0);").unwrap();
+        let run = |query: &str, album: bool| -> Vec<i64> {
+            let search = parse_catalog_search(query).unwrap();
+            let mut sql = if album {
+                "SELECT a.id FROM albums a WHERE 1=1"
+            } else {
+                "SELECT t.id FROM tracks t WHERE 1=1"
+            }
+            .to_owned();
+            let mut params = Vec::new();
+            if album {
+                push_album_search_predicates(&mut sql, &mut params, &search);
+            } else {
+                push_track_search_predicates(&mut sql, &mut params, &search);
+            }
+            db.prepare(&sql)
+                .unwrap()
+                .query_map(params_from_iter(params.iter()), |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        for album in [false, true] {
+            for query in [
+                "dissolved:1999..2004",
+                "dissolved:..2004",
+                "dissolved:2004..",
+                "dissolved:yes",
+                "founded:1999..2004",
+                "founded:..2004",
+                "founded:1999..",
+                "ar:3..4.34",
+                "ar:4.34..",
+                "ar:..4.34",
+            ] {
+                assert_eq!(run(query, album), vec![1], "{query} album={album}");
+            }
+            for query in ["born:1966..1968", "born:..2004", "born:1966..", "dead:no"] {
+                assert_eq!(run(query, album), vec![2], "{query}");
+            }
+            for query in [
+                "dead:yes",
+                "dead:1999..2004",
+                "dead:..2004",
+                "dead:2004..",
+                "dissolved:no",
+            ] {
+                assert!(run(query, album).is_empty(), "{query}");
+            }
+            for field in ["bb", "uk", "vg"] {
+                for suffix in ["yes", "1..5", "..5"] {
+                    assert_eq!(run(&format!("{field}:{suffix}"), album), vec![1]);
+                }
+                assert_eq!(run(&format!("{field}:no"), album), vec![2, 3]);
+                assert_eq!(
+                    run(&format!("{field}:5.."), album),
+                    if album { vec![1] } else { vec![] }
+                );
+            }
+            assert_eq!(
+                run("minutes:33..44", album),
+                if album { vec![1] } else { vec![2] }
+            );
+            assert_eq!(
+                run("minutes:33..", album),
+                if album { vec![1, 2] } else { vec![2] }
+            );
+            assert_eq!(
+                run("minutes:..44", album),
+                if album { vec![1] } else { vec![1, 2] }
+            );
+            assert_eq!(run("bb:no AND born:1966..1968", album), vec![2]);
+            assert_eq!(run("bb:yes OR no", album), vec![1, 2, 3]);
+            assert_eq!(run("-bb:yes", album), vec![2, 3]);
+            assert_eq!(run("ar=4.34", album), vec![1]);
+        }
+        for field in ["ti", "nt"] {
+            for suffix in ["yes", "1..5", "..5", "1.."] {
+                assert_eq!(run(&format!("{field}:{suffix}"), false), vec![1]);
+            }
+            assert_eq!(run(&format!("{field}:no"), false), vec![2, 3]);
+            assert!(run(&format!("{field}:yes"), true).is_empty());
+        }
+        db.execute_batch("UPDATE musicbrainz_artist_infos SET life_end_date = '2004', life_ended = 0 WHERE artist_type = 'Person'; UPDATE musicbrainz_artist_infos SET life_end_date = NULL, life_ended = 0 WHERE artist_type = 'Group';").unwrap();
+        for album in [false, true] {
+            for query in ["dead:yes", "dead:1999..2004", "dead:..2004", "dead:2004.."] {
+                assert_eq!(run(query, album), vec![2]);
+            }
+            assert_eq!(run("dissolved:no", album), vec![1]);
+            assert!(run("dead:no", album).is_empty());
+        }
+        db.execute_batch(
+            "UPDATE musicbrainz_artist_infos SET life_end_date = NULL, life_ended = 1;",
+        )
+        .unwrap();
+        assert_eq!(run("dead:yes", false), vec![2]);
+        assert_eq!(run("dissolved:yes", true), vec![1]);
+        assert!(run("dead:..2004", false).is_empty());
+        assert!(run("dissolved:..2004", true).is_empty());
+        db.execute_batch("UPDATE albums SET effective_album_rating = NULL, calculated_album_rating = 86.8 WHERE id = 1;").unwrap();
+        assert_eq!(run("ar:4.34", true), vec![1]);
+        db.execute_batch(
+            "UPDATE albums SET calculated_album_rating = NULL, album_rating = 86.8 WHERE id = 1;",
+        )
+        .unwrap();
+        assert_eq!(run("ar:4.34", false), vec![1]);
+        for query in [
+            "ar:NaN",
+            "ar:5.1",
+            "minutes:inf",
+            "minutes:-1",
+            "bb:0",
+            "bb:1.5",
+            "born:1966.5",
+            "dead:mo",
+            "born:yes",
+            "ar:..",
+            "minutes:44..33",
+            "bb:1..2..3",
+        ] {
+            assert!(parse_catalog_search(query).is_err(), "{query}");
+        }
     }
 
     #[test]

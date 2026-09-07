@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.41 — 2026-09-07
+
+- Added `dissolved:`, `founded:`, `dead:`, and `born:` artist lifespan searches, `minutes:` duration ranges, and decimal `ar:` album rating ranges.
+- Added context-sensitive `bb:`, `uk:`, and `vg:` chart status/rank searches, plus Songs-only `ti:` and `nt:`.
+- Documented all new fields, inclusive range boundaries, missing metadata, and combined examples in `docs/search.md`.
+
 ## 0.24.40 — 2026-09-07
 
 - Replace four fixed chart shortcuts with one year-selectable seasonal preset picker.
