@@ -71,6 +71,8 @@ pub(crate) struct ChartPeriod {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChartPageRequest {
+    #[serde(default)]
+    pub(crate) filters: ChartArtistFilters,
     pub(crate) kind: ChartKind,
     pub(crate) source: ChartSource,
     pub(crate) scope: ChartScope,
@@ -80,6 +82,70 @@ pub(crate) struct ChartPageRequest {
     #[serde(default)]
     pub(crate) year_basis: ChartYearBasis,
     pub(crate) limit: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChartArtistFilters {
+    #[serde(default)]
+    country: String,
+    #[serde(default)]
+    artist_type: String,
+    #[serde(default)]
+    status: String,
+}
+
+fn filtered_artist_keys(
+    connection: &Connection,
+    filters: &ChartArtistFilters,
+) -> Result<Option<std::collections::HashSet<String>>, String> {
+    if !["", "Person", "Group"].contains(&filters.artist_type.as_str())
+        || !["", "alive", "dead", "active", "disbanded"].contains(&filters.status.as_str())
+        || filters.country.chars().count() > 80
+    {
+        return Err("Invalid chart artist filters.".to_owned());
+    }
+    let mut keys: Option<std::collections::HashSet<String>> = None;
+    if !filters.country.trim().is_empty() {
+        let mut statement = connection
+            .prepare(
+                "SELECT local_artist_key FROM musicbrainz_artist_origin_countries
+             WHERE country_code = ?1 COLLATE NOCASE OR country_name = ?1 COLLATE NOCASE",
+            )
+            .map_err(|error| {
+                format!("Country filters require Music Library artist origin metadata: {error}")
+            })?;
+        keys = Some(
+            statement
+                .query_map([filters.country.trim()], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<_, _>>()
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    if !filters.artist_type.is_empty() || !filters.status.is_empty() {
+        let mut statement = connection.prepare(
+            "SELECT local_artist_key FROM musicbrainz_artist_infos
+             WHERE (?1 = '' OR artist_type = ?1 COLLATE NOCASE)
+               AND (?2 = ''
+                 OR (?2 = 'alive' AND artist_type = 'Person' COLLATE NOCASE AND life_ended = 0 AND NULLIF(TRIM(life_end_date), '') IS NULL)
+                 OR (?2 = 'dead' AND artist_type = 'Person' COLLATE NOCASE AND (life_ended = 1 OR NULLIF(TRIM(life_end_date), '') IS NOT NULL))
+                 OR (?2 = 'active' AND artist_type = 'Group' COLLATE NOCASE AND life_ended = 0 AND NULLIF(TRIM(life_end_date), '') IS NULL)
+                 OR (?2 = 'disbanded' AND artist_type = 'Group' COLLATE NOCASE AND (life_ended = 1 OR NULLIF(TRIM(life_end_date), '') IS NOT NULL)))",
+        ).map_err(|error| format!("Type and status filters require Music Library artist information: {error}"))?;
+        let matching = statement
+            .query_map([&filters.artist_type, &filters.status], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<std::collections::HashSet<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        keys = Some(match keys {
+            Some(country_keys) => country_keys.intersection(&matching).cloned().collect(),
+            None => matching,
+        });
+    }
+    Ok(keys)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -481,7 +547,6 @@ fn score_select(year_basis: ChartYearBasis) -> String {
            CAST({year_column} AS TEXT)
     FROM ranked AS a
     ORDER BY a.score_rank
-    LIMIT 100
     "#,
     )
 }
@@ -727,7 +792,6 @@ fn query_album_scores(
             WHERE album_score IS NOT NULL
               AND {year_column} BETWEEN :from_year AND :to_year
             ORDER BY album_score DESC, album COLLATE NOCASE, id
-            LIMIT 5
             "#,
         ))
         .map_err(|error| format!("Could not prepare the Aurora Score shelf: {error}"))?;
@@ -777,11 +841,28 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     } else {
         ChartScope::Period
     };
-    let rows = query_rows(connection, &request)?;
+    let mut rows = query_rows(connection, &request)?;
     let chart_date = rows.first().and_then(|row| row.chart_date.clone());
     let weeks = query_weeks(connection, &request)?;
-    let (entries, total_entries) = entries_from_rows(rows, effective_scope, request.limit);
-    let album_score_entries = query_album_scores(connection, &request.period, request.year_basis)?;
+    let artist_keys = filtered_artist_keys(connection, &request.filters)?;
+    if let Some(keys) = &artist_keys {
+        rows.retain(|row| keys.contains(&row.artist_key));
+    }
+    let calculation_scope = if source_shape(request.source) == SourceShape::Score {
+        for (index, row) in rows.iter_mut().enumerate() {
+            row.rank = index as i64 + 1;
+        }
+        ChartScope::Week
+    } else {
+        effective_scope
+    };
+    let (entries, total_entries) = entries_from_rows(rows, calculation_scope, request.limit);
+    let mut album_score_entries =
+        query_album_scores(connection, &request.period, request.year_basis)?;
+    if let Some(keys) = &artist_keys {
+        album_score_entries.retain(|album| keys.contains(&album.artist.trim().to_lowercase()));
+    }
+    album_score_entries.truncate(5);
     let mut response_request = request;
     response_request.scope = effective_scope;
     Ok(ChartPage {
@@ -1175,6 +1256,79 @@ pub(crate) fn load_chart_queue(
 mod tests {
     use super::*;
 
+    #[test]
+    fn artist_filters_combine_country_type_and_known_status() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE musicbrainz_artist_infos (local_artist_key TEXT, artist_type TEXT, life_ended INTEGER, life_end_date TEXT);
+            CREATE TABLE musicbrainz_artist_origin_countries (local_artist_key TEXT, country_code TEXT, country_name TEXT);
+            INSERT INTO musicbrainz_artist_infos VALUES ('alive', 'Person', 0, NULL), ('unknown', 'Person', NULL, NULL), ('dead', 'Person', 1, NULL), ('dated', 'Person', 0, '2000'), ('band', 'Group', 1, NULL), ('active', 'Group', 0, NULL);
+            INSERT INTO musicbrainz_artist_origin_countries VALUES ('alive', 'NO', 'Norway'), ('unknown', 'NO', 'Norway'), ('dead', 'US', 'United States'), ('band', 'NO', 'Norway');").unwrap();
+        let mut filters = ChartArtistFilters {
+            country: " norway ".into(),
+            artist_type: "Person".into(),
+            status: "alive".into(),
+        };
+        assert_eq!(
+            filtered_artist_keys(&connection, &filters)
+                .unwrap()
+                .unwrap(),
+            std::collections::HashSet::from(["alive".to_owned()])
+        );
+        filters.country.clear();
+        filters.status = "dead".into();
+        assert_eq!(
+            filtered_artist_keys(&connection, &filters)
+                .unwrap()
+                .unwrap(),
+            std::collections::HashSet::from(["dead".to_owned(), "dated".to_owned()])
+        );
+        filters.artist_type = "Group".into();
+        filters.status = "disbanded".into();
+        assert_eq!(
+            filtered_artist_keys(&connection, &filters)
+                .unwrap()
+                .unwrap(),
+            std::collections::HashSet::from(["band".to_owned()])
+        );
+        filters.status = "active".into();
+        assert_eq!(
+            filtered_artist_keys(&connection, &filters)
+                .unwrap()
+                .unwrap(),
+            std::collections::HashSet::from(["active".to_owned()])
+        );
+        let empty = Connection::open_in_memory().unwrap();
+        assert!(
+            filtered_artist_keys(&empty, &ChartArtistFilters::default())
+                .unwrap()
+                .is_none()
+        );
+        assert!(filtered_artist_keys(&empty, &filters).is_err());
+    }
+
+    #[test]
+    fn filters_apply_before_limit_and_to_score_shelf() {
+        let connection = score_connection();
+        connection.execute_batch("CREATE TABLE musicbrainz_artist_infos (local_artist_key TEXT, artist_type TEXT, life_ended INTEGER, life_end_date TEXT);
+            INSERT INTO musicbrainz_artist_infos VALUES ('test artist', 'Person', 0, NULL);
+            INSERT INTO albums VALUES ('unmatched', 'Higher Score', 'Unknown', 1985, 1985, 2000, 100, NULL, NULL, 0);").unwrap();
+        for index in 0..105 {
+            connection.execute("INSERT INTO albums VALUES (?1, 'Higher Score', 'Unknown', 1985, 1985, 2000, 100, NULL, NULL, 0)", [format!("unmatched-{index}")]).unwrap();
+        }
+        let mut request = score_request(ChartYearBasis::Year);
+        request.limit = 1;
+        request.filters.artist_type = "Person".into();
+        let page = query_page(&connection, request.clone()).unwrap();
+        assert_eq!(page.total_entries, 1);
+        assert_eq!(page.entries[0].title, "Year Match");
+        assert_eq!(page.album_score_entries.len(), 1);
+        request.filters.status = "dead".into();
+        let page = query_page(&connection, request).unwrap();
+        assert_eq!(page.total_entries, 0);
+        assert!(page.entries.is_empty());
+        assert!(page.album_score_entries.is_empty());
+    }
+
     fn row(title: &str, rank: i64, week: u8) -> RawChartRow {
         RawChartRow {
             _year: 1985,
@@ -1230,6 +1384,7 @@ mod tests {
     #[test]
     fn requests_reject_incompatible_sources_and_unbounded_periods() {
         let mut request = ChartPageRequest {
+            filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
             source: ChartSource::AuroraScore,
             scope: ChartScope::Period,
@@ -1304,6 +1459,7 @@ mod tests {
 
     fn score_request(year_basis: ChartYearBasis) -> ChartPageRequest {
         ChartPageRequest {
+            filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,
             source: ChartSource::AuroraScore,
             scope: ChartScope::Period,
@@ -1399,6 +1555,7 @@ mod tests {
         let path = catalog::default_catalog_path().expect("catalog path");
         let connection = catalog::open_catalog(&path).expect("open catalog");
         let base = ChartPageRequest {
+            filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
             source: ChartSource::OfficialUk,
             scope: ChartScope::Week,
@@ -1417,6 +1574,29 @@ mod tests {
         let weekly = query_page(&connection, base.clone()).expect("weekly chart");
         assert!(!weekly.entries.is_empty());
         assert_eq!(weekly.entries[0].position, 1);
+        let filtered = query_page(
+            &connection,
+            ChartPageRequest {
+                filters: ChartArtistFilters {
+                    country: "GB".into(),
+                    artist_type: "Group".into(),
+                    status: String::new(),
+                },
+                ..base.clone()
+            },
+        )
+        .expect("live country and type filters");
+        assert!(!filtered.entries.is_empty());
+        assert!(filtered.total_entries < weekly.total_entries);
+        let keys = filtered_artist_keys(&connection, &filtered.request.filters)
+            .unwrap()
+            .unwrap();
+        assert!(
+            filtered
+                .entries
+                .iter()
+                .all(|entry| keys.contains(&entry.artist_key))
+        );
         let weekly_detail = query_item_detail(
             &connection,
             ChartItemDetailRequest {
@@ -1439,6 +1619,7 @@ mod tests {
         assert!(!period.entries.is_empty());
         assert!(period.entries[0].appearances >= period.entries[0].weeks_at_number_one);
         let score_request = ChartPageRequest {
+            filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,
             source: ChartSource::AuroraScore,
             scope: ChartScope::Period,

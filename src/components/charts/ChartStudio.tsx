@@ -1,24 +1,20 @@
 import {
   ArrowDown,
   ArrowUp,
-  CalendarRange,
   ChartColumn,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Disc3,
   Heart,
-  Info,
   Library,
   LoaderCircle,
   Minus,
   Play,
   RefreshCw,
   Star,
-  Trophy,
-  X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   chartPresets,
   loadChartEntryTrack,
@@ -42,6 +38,7 @@ import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import "./ChartStudio.css";
+import { ChartPeriodControls } from "./ChartPeriodControls";
 
 export type ChartLoadState = "loading" | "ready" | "error";
 
@@ -150,29 +147,6 @@ function movementLabel(entry: ChartEntry) {
   return <span className="chart-movement is-down"><ArrowDown aria-hidden="true" /> {Math.abs(entry.movement)}</span>;
 }
 
-function CustomPeriodDialog({ initial, onClose, onApply }: { initial: ChartPeriod; onClose: () => void; onApply: (period: ChartPeriod) => void }) {
-  const [draft, setDraft] = useState(initial);
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const fromKey = draft.fromYear * 100 + draft.fromWeek;
-    const toKey = draft.toYear * 100 + draft.toWeek;
-    if (fromKey > toKey) return;
-    onApply({ ...draft, label: draft.label.trim() || `${draft.fromYear} W${draft.fromWeek}–${draft.toYear} W${draft.toWeek}` });
-  }
-  return <div className="chart-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-    <form className="chart-dialog" role="dialog" aria-modal="true" aria-labelledby="chart-dialog-title" onSubmit={submit}>
-      <header><div><p className="eyebrow">Custom period</p><h2 id="chart-dialog-title">Build a chart window</h2></div><button type="button" aria-label="Close custom period" onClick={onClose}><X aria-hidden="true" /></button></header>
-      <label>Label<input value={draft.label} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} /></label>
-      <div className="chart-dialog__range">
-        <fieldset><legend>From</legend><label>Year<input type="number" min="1890" max="2200" value={draft.fromYear} onChange={(event) => setDraft((current) => ({ ...current, fromYear: Number(event.target.value) }))} /></label><label>Week<input type="number" min="1" max="53" value={draft.fromWeek} onChange={(event) => setDraft((current) => ({ ...current, fromWeek: Number(event.target.value) }))} /></label></fieldset>
-        <fieldset><legend>To</legend><label>Year<input type="number" min="1890" max="2200" value={draft.toYear} onChange={(event) => setDraft((current) => ({ ...current, toYear: Number(event.target.value) }))} /></label><label>Week<input type="number" min="1" max="53" value={draft.toWeek} onChange={(event) => setDraft((current) => ({ ...current, toWeek: Number(event.target.value) }))} /></label></fieldset>
-      </div>
-      <p><Info aria-hidden="true" /> Period charts compare weeks at #1 first, then #2, #3 and onward. Total position points break the final tie.</p>
-      <footer><button type="button" className="button button--quiet" onClick={onClose}>Cancel</button><button type="submit" className="button button--primary"><CalendarRange aria-hidden="true" /> Apply period</button></footer>
-    </form>
-  </div>;
-}
-
 function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: string | null; onRetry: () => void }) {
   return <div className={`chart-feedback${state === "error" ? " is-error" : ""}`} role={state === "error" ? "alert" : "status"}>
     {state === "error" ? <Disc3 aria-hidden="true" /> : <LoaderCircle className="is-spinning" aria-hidden="true" />}
@@ -190,7 +164,6 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const [detail, setDetail] = useState<ChartItemDetail | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
-  const [customOpen, setCustomOpen] = useState(false);
   const requestIdRef = useRef(0);
   const selectionIdRef = useRef(0);
   const selectedEntryRef = useRef<ChartEntry | null>(selectedEntry);
@@ -293,8 +266,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   })();
 
   function applyPeriod(period: ChartPeriod) {
-    setCustomOpen(false);
-    setRequest((current) => ({ ...current, period, selectedYear: period.fromYear, selectedWeek: period.fromWeek, scope: "week" }));
+    setRequest((current) => ({ ...current, period, selectedYear: period.fromYear, selectedWeek: period.fromWeek, scope: "period" }));
   }
 
   function changeKind(kind: ChartKind) {
@@ -342,12 +314,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </div>
     </header>
 
-    <div className="chart-presets" aria-label="Chart period presets">
-      {chartPresets.map((preset, index) => <button type="button" className={request.period.label === preset.label ? "is-active" : undefined} onClick={() => applyPeriod(preset)} key={preset.label}>
-        {index === 0 ? <Trophy aria-hidden="true" /> : <CalendarRange aria-hidden="true" />}<span>{preset.label}</span>
-      </button>)}
-      <button type="button" className={!chartPresets.some((preset) => preset.label === request.period.label) ? "is-active" : undefined} onClick={() => setCustomOpen(true)}><CalendarRange aria-hidden="true" /><span>{chartPresets.some((preset) => preset.label === request.period.label) ? "Custom" : request.period.label}</span></button>
-    </div>
+    <ChartPeriodControls period={request.period} filters={request.filters} onApply={applyPeriod} onFilters={(filters) => setRequest((current) => ({ ...current, filters }))} />
 
     <section className="chart-calendar" aria-label={`${request.period.label} chart calendar`}>
       <button type="button" aria-label="Previous period" onClick={() => setRequest((current) => ({ ...current, period: { ...current.period, fromYear: current.period.fromYear - 1, toYear: current.period.toYear - 1, label: current.period.label.replace(/\d{4}/g, (year) => String(Number(year) - 1)) }, selectedYear: current.selectedYear - 1 }))}><ChevronLeft aria-hidden="true" /></button>
@@ -386,6 +353,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `Week ${page.request.selectedWeek} · ${formatDate(page.chartDate)}` : `${page.request.period.label} · ranked by position finishes`}</p></div></div>
           <button type="button" className="button button--primary" disabled={queueBusy || !page.entries.length} onClick={() => void playChart()}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play this chart</button>
         </header>
+        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(20, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the artist filters."}</p>
         <div className="chart-table" role="table" aria-label={page.chartTitle}>
           <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" ? "Wks" : "Points"}</span><span>Library</span></div>
           {page.entries.slice(0, 20).map((entry) => {
@@ -426,7 +394,6 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
         <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
       </section>
     </>}
-    {customOpen ? <CustomPeriodDialog initial={request.period} onClose={() => setCustomOpen(false)} onApply={applyPeriod} /> : null}
   </section>;
 }
 

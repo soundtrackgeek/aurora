@@ -15,6 +15,7 @@ export interface ChartPeriod {
 }
 
 export interface ChartPageRequest {
+  filters?: ChartArtistFilters;
   kind: ChartKind;
   source: ChartSource;
   scope: ChartScope;
@@ -23,6 +24,37 @@ export interface ChartPageRequest {
   selectedWeek: number;
   yearBasis: ChartYearBasis;
   limit: number;
+}
+
+export interface ChartArtistFilters {
+  country: string;
+  artistType: "" | "Person" | "Group";
+  status: "" | "alive" | "dead" | "active" | "disbanded";
+}
+
+export const emptyChartFilters: ChartArtistFilters = { country: "", artistType: "", status: "" };
+
+export const periodSeasons = [
+  { name: "Spring", detail: "March – May", from: 3, to: 5 },
+  { name: "Summer", detail: "June – August", from: 6, to: 8 },
+  { name: "Fall", detail: "September – November", from: 9, to: 11 },
+  { name: "Winter", detail: "December – February", from: 12, to: 2 },
+  { name: "Christmas", detail: "December", from: 12, to: 12 },
+  { name: "New Year", detail: "January", from: 1, to: 1 },
+  { name: "Full year", detail: "January – December", from: 1, to: 12 },
+] as const;
+
+// Include the ISO weeks touching the chosen calendar months.
+export function monthPeriod(fromYear: number, fromMonth: number, toYear: number, toMonth: number, label: string): ChartPeriod {
+  function iso(date: Date) {
+    date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+    const year = date.getUTCFullYear();
+    const week = Math.ceil(((date.valueOf() - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
+    return { year, week };
+  }
+  const from = iso(new Date(Date.UTC(fromYear, fromMonth - 1, 1)));
+  const to = iso(new Date(Date.UTC(toYear, toMonth, 0)));
+  return { fromYear, fromWeek: from.year < fromYear ? 1 : from.week, toYear, toWeek: to.year > toYear ? 53 : to.week, label };
 }
 
 export interface ChartWeek {
@@ -159,6 +191,25 @@ const previewScores: AlbumScoreEntry[] = [
   { id: "preview-score-kind-blue", title: "Kind of Blue", artist: "Miles Davis", originalYear: 1959, releaseYear: 1985, score: 390.2 },
 ];
 
+// Fixed browser-demo metadata, separate from the native catalog authority.
+const previewArtistMetadata: Record<string, [string, string, string, string]> = {
+  "Marillion": ["GB", "United Kingdom", "Group", "active"],
+  "Duran Duran": ["GB", "United Kingdom", "Group", "active"],
+  "Paul Hardcastle": ["GB", "United Kingdom", "Person", "alive"],
+  "Madonna": ["US", "United States", "Person", "alive"],
+  "Miles Davis": ["US", "United States", "Person", "dead"],
+};
+
+function previewArtistMatches(artist: string, filters = emptyChartFilters): boolean {
+  if (!Object.values(filters).some(Boolean)) return true;
+  const metadata = previewArtistMetadata[artist];
+  if (!metadata) return false;
+  const [code, country, type, status] = metadata;
+  return (!filters.country.trim() || [code, country].some((value) => value.toLowerCase() === filters.country.trim().toLowerCase()))
+    && (!filters.artistType || filters.artistType === type)
+    && (!filters.status || filters.status === status);
+}
+
 function previewWeeks(period: ChartPeriod): ChartWeek[] {
   if (period.fromYear === period.toYear) {
     return Array.from({ length: period.toWeek - period.fromWeek + 1 }, (_, index) => ({
@@ -207,14 +258,14 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
   const scores = previewScores
     .filter((album) => {
       const year = scoreYear(album);
-      return year !== null && year >= request.period.fromYear && year <= request.period.toYear;
+      return year !== null && year >= request.period.fromYear && year <= request.period.toYear && previewArtistMatches(album.artist, request.filters);
     })
     .sort((left, right) => right.score - left.score);
   const useScores = request.kind === "albums";
-  const entries = (useScores ? scoreEntries(scores) : previewEntries).map((entry, index) => ({
+  const entries = (useScores ? scoreEntries(scores) : previewEntries).filter((entry) => previewArtistMatches(entry.artist, request.filters)).map((entry, index) => ({
     ...entry,
     position: index + 1,
-    sourcePosition: index + 1,
+    sourcePosition: entry.sourcePosition,
     totalPoints: request.scope === "period" ? entry.totalPoints : Math.max(1, 101 - index),
   }));
   const effectiveRequest = { ...request, scope: annualOnly ? "period" as const : request.scope };
@@ -227,7 +278,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     annualOnly,
     chartDate: effectiveRequest.scope === "week" ? "1985-06-09" : null,
     weeks: annualOnly ? [] : previewWeeks(request.period),
-    entries,
+    entries: entries.slice(0, request.limit),
     totalEntries: entries.length,
     albumScoreEntries: scores.slice(0, 5),
   };
@@ -290,6 +341,9 @@ export async function loadChartEntryTrack(trackId: string): Promise<Track> {
 }
 
 export async function loadChartQueue(request: ChartPageRequest): Promise<Track[]> {
-  if (!isTauriRuntime()) return request.kind === "singles" ? previewTracks : previewTracks.slice(0, 5);
+  if (!isTauriRuntime()) {
+    const ids = new Set(browserChartPage(request).entries.map((entry) => entry.matchedTrackId));
+    return request.kind === "singles" ? previewTracks.filter((track) => ids.has(track.id)) : [];
+  }
   return invoke<Track[]>("chart_queue_tracks", { request });
 }

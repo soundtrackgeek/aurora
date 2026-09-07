@@ -67,22 +67,34 @@ describe("ChartStudio", () => {
     expect(screen.queryByText("Rocky IV")).not.toBeInTheDocument();
   });
 
-  it("accepts a custom week range", async () => {
+  it("accepts a custom week range in the full row", async () => {
     renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });
-    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
-    fireEvent.change(screen.getByLabelText("Label"), { target: { value: "My 1995 run" } });
-    const yearInputs = screen.getAllByLabelText("Year");
-    const weekInputs = screen.getAllByLabelText("Week");
-    fireEvent.change(yearInputs[0], { target: { value: "1995" } });
-    fireEvent.change(yearInputs[1], { target: { value: "1995" } });
-    fireEvent.change(weekInputs[0], { target: { value: "7" } });
-    fireEvent.change(weekInputs[1], { target: { value: "13" } });
-    fireEvent.click(screen.getByRole("button", { name: /Apply period/i }));
+    fireEvent.change(screen.getByLabelText("From Year"), { target: { value: "1995" } });
+    fireEvent.change(screen.getByLabelText("To Year"), { target: { value: "1995" } });
+    fireEvent.change(screen.getByLabelText("From Week"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("To Week"), { target: { value: "13" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply range" }));
+    expect(await screen.findByRole("heading", { name: "Official UK Singles · 1995 W7 – 1995 W13" })).toBeInTheDocument();
+  });
 
+  it("selects winter across a year boundary from one preset picker", async () => {
+    renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });
-    expect(screen.getByRole("button", { name: "My 1995 run" })).toHaveClass("is-active");
-    expect(screen.getByText("1995")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Preset period/ }));
+    fireEvent.change(screen.getByLabelText("Preset year"), { target: { value: "1989" } });
+    fireEvent.click(screen.getByRole("button", { name: /Winter/ }));
+    expect(await screen.findByRole("heading", { name: "Official UK Singles · Winter 1989" })).toBeInTheDocument();
+    expect(screen.getByText("1989–1990")).toBeInTheDocument();
+  });
+
+  it("rejects a backwards custom range", async () => {
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.change(screen.getByLabelText("From Year"), { target: { value: "1990" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply range" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("chronological");
+    expect(screen.getByRole("heading", { name: "Official UK Singles Chart" })).toBeInTheDocument();
   });
 
   it("preserves the selected entry and inspector mode during a catalog refresh", async () => {

@@ -1,10 +1,10 @@
 # Aurora
 
-Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.39 fixes artist-link search replacement: pagination and background refreshes cannot mix albums from the previous search into the new results.
+Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.40 refreshes Charts with a seasonal period picker, an inline custom week/month range, and advanced artist country, type, and lifespan filters.
 
 ![Aurora design reference](Aurora.png)
 
-## Current 0.24.39 slice
+## Current 0.24.40 slice
 
 - Playback captures session IDs, start/end/play-registration times, and listening positions in memory, then persists cumulative history and queue-state snapshots on one ordered background worker. Slow database writes no longer hold the playback lock. Failed writes are retained and retried in order, with redundant queued checkpoints coalesced; playback reports persistence errors while continuing.
 - Closing Aurora and installing an update pause playback and drain pending local writes outside the playback lock. If local storage cannot finish within 30 seconds, normal close/update is cancelled and the app retains the queued work for retry. Unwritten in-memory events can still be lost after a forced termination, power loss, or process crash; already committed history remains durable.

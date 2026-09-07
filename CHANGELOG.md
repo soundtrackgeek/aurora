@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.40 — 2026-09-07
+
+- Replace four fixed chart shortcuts with one year-selectable seasonal preset picker.
+- Add an inline From/To Year and Week/Month custom range with chronological validation.
+- Add an accessible advanced-filter dialog for artist country, Person/Group, and Alive/Dead/Active/Disbanded status using Music Library's stored MusicBrainz metadata.
+- Apply filters before result limits, including chart counts, playback queues, and the Aurora Score shelf. Unknown metadata does not match active filters.
+
+
 All notable Aurora changes are recorded here.
 
 ## [Unreleased]

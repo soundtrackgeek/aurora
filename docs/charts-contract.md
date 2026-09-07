@@ -30,3 +30,11 @@ Chart history remains useful when an item is absent from the library. A matched 
 ## State and authority
 
 The chart tables and Album Score are read-only catalog data. Track ratings and Love shown beside matched entries use the existing MP3-authoritative tag workflow and Aurora overlay reconciliation. Changing them never mutates a historical chart row or the shared Music Library database.
+
+## Period controls and artist filters (0.24.40)
+
+The single preset picker offers Spring, Summer, Fall, Winter, Christmas, New Year, and Full year for a chosen year. Winter ends in the following February. The custom row accepts inclusive year/week or year/month ranges; months map to touching ISO weeks within the selected years, with January/December boundaries clamped to that year's week range. Annual sources continue to use years only. Applying a range opens its period chart.
+
+Advanced artist filters combine country (exact name or code, case-insensitive), Person/Group, and current stored lifespan status. Country comes from `musicbrainz_artist_origin_countries`; type and lifespan come from `musicbrainz_artist_infos`. Alive and Active require an explicit `life_ended = 0` and no end date; Dead and Disbanded require an ended flag or end date for the corresponding artist type. Missing metadata is excluded when its filter is active. Joint credits require an exact artist-key record; individual members are not guessed. Missing metadata tables produce an actionable error only when needed.
+
+Filtering happens before ranking limits and counts. Playback uses the same filtered page. The score shelf also applies artist filters before choosing its five albums. Chart history and the catalog remain read-only. Status is current metadata, not reconstructed historical status at the selected chart date.
