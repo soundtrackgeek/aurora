@@ -102,8 +102,20 @@ pub(crate) struct PlaybackCatalogRebind {
 }
 
 struct PreparedTrack {
+    started: Arc<AtomicBool>,
     index: usize,
     gain: ReplayGainAdjustment,
+}
+
+// Rodio publishes the source's initial position before pulling its first sample.
+// Queue length is not a completion signal: skip_one decrements it synchronously.
+fn append_tracked_source(player: &Player, source: impl Source + Send + 'static) -> Arc<AtomicBool> {
+    let started = Arc::new(AtomicBool::new(false));
+    let signal = Arc::clone(&started);
+    player.append(source.periodic_access(Duration::from_secs(1), move |_| {
+        signal.store(true, Ordering::Release);
+    }));
+    started
 }
 
 type PreparedSource = (Box<dyn Source + Send>, ReplayGainAdjustment);
@@ -367,6 +379,7 @@ pub(crate) struct PlaybackRuntime {
     current_gain: ReplayGainAdjustment,
     media_cache: PlaybackMediaCache,
     prepared_next: Option<PreparedTrack>,
+    position_source_started: Option<Arc<AtomicBool>>,
     pending_next: Option<PendingTrackPreparation>,
     preparation_attempted: bool,
     store: StateStore,
@@ -455,6 +468,7 @@ impl PlaybackRuntime {
             },
             media_cache: PlaybackMediaCache::default(),
             prepared_next: None,
+            position_source_started: None,
             pending_next: None,
             preparation_attempted: false,
             store,
@@ -481,6 +495,7 @@ impl PlaybackRuntime {
     }
 
     fn close_output(&mut self) {
+        self.position_source_started = None;
         self.prepared_next = None;
         self.pending_next = None;
         self.preparation_attempted = false;
@@ -594,7 +609,7 @@ impl PlaybackRuntime {
         let player = self.player.as_ref().expect("player initialized");
         player.stop();
         player.set_volume(volume);
-        player.append(source);
+        self.position_source_started = Some(append_tracked_source(player, source));
         if position_seconds > 0.0 {
             player
                 .try_seek(Duration::from_secs_f64(position_seconds))
@@ -687,6 +702,14 @@ impl PlaybackRuntime {
     }
 
     fn capture_position(&mut self) {
+        // A requested skip can still expose the previous source's position.
+        // Keep the new session's baseline until its own source is consumed.
+        if let Some(started) = &self.position_source_started {
+            if !started.load(Ordering::Acquire) {
+                return;
+            }
+            self.position_source_started = None;
+        }
         if matches!(
             self.status,
             PlaybackStatus::Playing | PlaybackStatus::Paused
@@ -909,8 +932,9 @@ impl PlaybackRuntime {
         if player.len() != 1 {
             return;
         }
-        player.append(source);
+        let started = append_tracked_source(player, source);
         self.prepared_next = Some(PreparedTrack {
+            started,
             index: pending.next_index,
             gain,
         });
@@ -926,6 +950,7 @@ impl PlaybackRuntime {
             .unwrap_or_default() as f64;
         self.observe_history();
         self.finish_history("completed");
+        self.position_source_started = Some(prepared.started);
         self.current_index = Some(prepared.index);
         self.current_gain = prepared.gain;
         self.preparation_attempted = false;
@@ -1276,6 +1301,7 @@ impl PlaybackRuntime {
             && self.player.as_ref().is_some_and(|player| player.len() >= 2)
         {
             let prepared = self.prepared_next.take().expect("prepared track exists");
+            self.position_source_started = Some(prepared.started);
             self.current_index = Some(next);
             self.current_gain = prepared.gain;
             self.position_seconds = 0.0;
@@ -1690,6 +1716,81 @@ mod tests {
     }
 
     #[test]
+    fn prepared_skip_does_not_credit_previous_track_position() {
+        let directory = tempfile::tempdir().unwrap();
+        let history_path = directory.path().join("history.sqlite3");
+        let history = HistoryStore::new(
+            history_path.clone(),
+            directory.path().join("remote"),
+            "transition-test".to_owned(),
+            "Test".to_owned(),
+        )
+        .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let mut runtime = PlaybackRuntime::new(
+            store,
+            history,
+            AudioSettingsStore::load(directory.path().join("audio.json")),
+        )
+        .unwrap();
+        let (player, mut samples) = Player::new();
+        let channels = rodio::ChannelCount::new(1).unwrap();
+        let rate = SampleRate::new(1_000).unwrap();
+        player.append(rodio::source::Zero::new(channels, rate));
+        let started = append_tracked_source(&player, rodio::source::Zero::new(channels, rate));
+        runtime.player = Some(player);
+        runtime.queue = vec![queue_track(1), queue_track(2)];
+        runtime.current_index = Some(0);
+        runtime.status = PlaybackStatus::Playing;
+        runtime.prepared_next = Some(PreparedTrack {
+            started,
+            index: 1,
+            gain: ReplayGainAdjustment::default(),
+        });
+        runtime.begin_history();
+        for _ in 0..41_000 {
+            samples.next();
+        }
+        runtime.snapshot();
+        let next = runtime.next().unwrap();
+        // skip_one is asynchronous: the old source still reports about 41 seconds.
+        assert!(runtime.player.as_ref().unwrap().get_pos().as_secs_f64() > 40.0);
+        assert_eq!(next.position_seconds, 0.0);
+        for _ in 0..20_000 {
+            samples.next();
+        }
+        runtime.snapshot();
+        runtime.queue_history(runtime.history_session.as_ref().unwrap().checkpoint());
+        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        let connection = rusqlite::Connection::open(history_path).unwrap();
+        let read = || {
+            connection.query_row::<(f64, i64), _, _>(
+            "SELECT listened_seconds, registered_play FROM listening_sessions ORDER BY rowid DESC LIMIT 1",
+            [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+        };
+        let (seconds, plays) = read();
+        assert!(
+            (19.9..20.1).contains(&seconds),
+            "credited {seconds} seconds"
+        );
+        assert_eq!(plays, 0);
+        for _ in 0..9_000 {
+            samples.next();
+        }
+        runtime.snapshot();
+        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        assert_eq!(read().1, 0);
+        for _ in 0..2_000 {
+            samples.next();
+        }
+        runtime.snapshot();
+        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        let (seconds, plays) = read();
+        assert!((30.9..31.1).contains(&seconds));
+        assert_eq!(plays, 1);
+    }
+
+    #[test]
     fn prepared_next_and_ui_snapshot_finish_while_history_storage_is_blocked() {
         let directory = tempfile::tempdir().unwrap();
         let history_path = directory.path().join("history.sqlite3");
@@ -1731,12 +1832,13 @@ mod tests {
         let (mixer, _samples) = rodio::mixer::mixer(channels, rate);
         let player = Player::connect_new(&mixer);
         player.append(rodio::source::Zero::new(channels, rate));
-        player.append(rodio::source::Zero::new(channels, rate));
+        let started = append_tracked_source(&player, rodio::source::Zero::new(channels, rate));
         runtime.player = Some(player);
         runtime.queue = vec![queue_track(1), queue_track(2)];
         runtime.current_index = Some(0);
         runtime.status = PlaybackStatus::Playing;
         runtime.prepared_next = Some(PreparedTrack {
+            started,
             index: 1,
             gain: ReplayGainAdjustment::default(),
         });
@@ -1879,6 +1981,7 @@ mod tests {
         let mut queue = (0..MAX_PLAYBACK_QUEUE).map(queue_track).collect::<Vec<_>>();
         let mut current_index = 181;
         let mut prepared = Some(PreparedTrack {
+            started: Arc::new(AtomicBool::new(false)),
             index: 182,
             gain: ReplayGainAdjustment::default(),
         });

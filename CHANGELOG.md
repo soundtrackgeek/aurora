@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.25.1] - 2026-09-08
+
+### Fixed
+
+- Preserve the platform-specific Network Mode default while allowing Windows Clippy checks to recognize the intentional manual implementation.
+
+- Prevent asynchronous preloaded-track skips from crediting the previous song’s position to the new listening session and registering plays too early. Keep new-track position at zero until the audio queue completes the skip, without blocking playback commands.
+- Add an audio-queue regression covering a skip after 41 seconds followed by 20 seconds of listening and the 30-second play threshold.
+
 ## [0.25.0] - 2026-09-08
 
 ### Added

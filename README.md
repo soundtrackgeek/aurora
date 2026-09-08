@@ -1,5 +1,9 @@
 # Aurora
 
+## Playback history correction (0.25.1)
+
+Skipping to a preloaded song now waits for the audio queue to retire the previous source before reading its position. This prevents the previous song’s elapsed time from inflating the new song’s listening time or registering a play before the configured threshold. Existing history is preserved.
+
 ## macOS Network Mode (0.25.0)
 
 Build locally with `npm ci` then `npm run tauri -- build --debug --bundles app` (omit `--debug` for a release build). The macOS Tauri override selects app/DMG bundles and disables updater artifacts; this does not publish a signed/notarized Mac release.

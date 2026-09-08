@@ -23,6 +23,10 @@ pub(crate) struct ConnectionSettings {
     pub(crate) music_roots: Vec<RootMapping>,
 }
 
+#[allow(
+    clippy::derivable_impls,
+    reason = "Network Mode defaults to true on macOS"
+)]
 impl Default for ConnectionSettings {
     fn default() -> Self {
         Self {
