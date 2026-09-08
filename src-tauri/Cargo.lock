@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.25.2"
+version = "0.25.3"
 dependencies = [
  "cpal",
  "dotenvy",
@@ -191,6 +191,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "thiserror 2.0.20",
+ "uuid",
  "windows 0.61.3",
 ]
 

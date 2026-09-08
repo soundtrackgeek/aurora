@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.3] - 2026-09-08
+
+### Added
+
+- Tonehavn trusted-device sign-in, session verification/restoration and server-side sign-out in Connections. Store session credentials in the native credential vault, require verified HTTPS without redirects, and keep passwords and authenticator codes out of saved settings. Remote music editing remains disabled.
+
+
 ## [0.25.2] - 2026-09-08
 
 ### Fixed

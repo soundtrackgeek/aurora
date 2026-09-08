@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { TonehavnSettingsPanel } from "./TonehavnSettingsPanel";
 
 interface Connections {
   networkMode: boolean;
@@ -45,5 +46,6 @@ export function ConnectionSettingsPanel() {
     {error && <p className="settings-error" role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
     <button type="button" className="button button--primary" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save connections"}</button>
+    <TonehavnSettingsPanel />
   </section>;
 }

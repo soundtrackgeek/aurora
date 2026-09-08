@@ -1,5 +1,12 @@
 # Aurora
 
+## Tonehavn authentication (0.25.3)
+
+Open **Settings → Connections → Tonehavn account** and enter the same HTTPS server address, username, password and six-digit authenticator code used by Tonehavn. Aurora requests its own trusted session, stores the session cookie and CSRF token in macOS Keychain (Windows Credential Manager on Windows), and never saves the password or authenticator code. Only the server address and a device ID are stored in local `tonehavn-auth.json`; nothing is synchronized through OneDrive. HTTPS certificates are verified and redirects are rejected.
+
+Opening Connections verifies a saved session and refreshes its anti-forgery token. **Verify saved session** retries after connection failures. Expired or revoked sessions require a fresh sign-in. **Sign out of Tonehavn** revokes the session on the server before removing its local credential; if the server is unavailable, reconnect and retry. The connection works without restarting Aurora. This release adds authentication only: rating, Love and tag editing are still disabled in Network Mode.
+
+
 ## Playback history correction (0.25.1)
 
 Skipping to a preloaded song now waits for the audio queue to retire the previous source before reading its position. This prevents the previous song’s elapsed time from inflating the new song’s listening time or registering a play before the configured threshold. Existing history is preserved.

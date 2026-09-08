@@ -548,3 +548,6 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .connection-settings label { display: grid; gap: 6px; }
 .connection-settings input:not([type="checkbox"]) { width: 100%; min-width: 0; padding: 9px; background: #101820; color: inherit; border: 1px solid #43525c; border-radius: 6px; }
 .connection-settings__mapping { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+
+.tonehavn-settings { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+.tonehavn-settings fieldset { border: 0; padding: 0; display: grid; gap: 12px; min-width: 0; }

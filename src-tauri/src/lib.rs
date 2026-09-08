@@ -30,6 +30,7 @@ mod state_sync;
 mod tag_model;
 mod tagging;
 mod timing;
+mod tonehavn;
 mod track_deletion;
 mod waveform;
 mod years;
@@ -1432,6 +1433,33 @@ fn save_connection_settings(
     )
 }
 
+#[tauri::command]
+async fn tonehavn_status(app: AppHandle) -> Result<tonehavn::Status, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tonehavn::status(&root))
+        .await
+        .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn tonehavn_login(
+    app: AppHandle,
+    request: tonehavn::Login,
+) -> Result<tonehavn::Status, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tonehavn::login(&root, request))
+        .await
+        .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn tonehavn_logout(app: AppHandle) -> Result<tonehavn::Status, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tonehavn::logout(&root))
+        .await
+        .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1557,6 +1585,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            tonehavn_status,
+            tonehavn_login,
+            tonehavn_logout,
             connection_settings,
             save_connection_settings,
             library_snapshot,
