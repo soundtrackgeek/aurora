@@ -16,7 +16,7 @@ it("awaits the window checkpoint after downloading and before installer exit", a
   const events: string[] = [];
   const update = { version: "1.0.0", download: vi.fn(async () => { events.push("download"); }), install: vi.fn(async () => { events.push("install"); }), close: vi.fn() };
   vi.mocked(check).mockResolvedValue(update as unknown as Awaited<ReturnType<typeof check>>);
-  vi.mocked(invoke).mockImplementation(async () => { events.push("playback"); });
+  vi.mocked(invoke).mockImplementation(async (command) => { events.push(command === "restart_after_update" ? "restart" : "playback"); });
   let finishSave: () => void = () => undefined;
   vi.mocked(saveWindowState).mockImplementation(() => new Promise<void>((resolve) => { events.push("save"); finishSave = resolve; }));
   const { result, unmount } = renderHook(useAuroraUpdater);
@@ -26,7 +26,7 @@ it("awaits the window checkpoint after downloading and before installer exit", a
   expect(events).toEqual(["download", "save"]);
   expect(saveWindowState).toHaveBeenCalledWith(7);
   await act(async () => { finishSave(); await installing; });
-  expect(events).toEqual(["download", "save", "playback", "install"]);
+  expect(events).toEqual(["download", "save", "playback", "install", "restart"]);
   expect(invoke).toHaveBeenCalledWith("prepare_playback_shutdown");
   unmount();
 });
@@ -75,5 +75,54 @@ it("reports a failed checkpoint and keeps Aurora open instead of losing geometry
   await act(async () => { await result.current.install(); });
   expect(result.current.state.phase).toBe("error");
   expect(update.install).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("reports a manual no-update check inside the app", async () => {
+  vi.stubEnv("DEV", false);
+  vi.mocked(check).mockResolvedValue(null);
+  const { result, unmount } = renderHook(useAuroraUpdater);
+  await waitFor(() => expect(check).toHaveBeenCalled());
+  await act(async () => { await result.current.checkForUpdate(true); });
+  expect(result.current.state.phase).toBe("upToDate");
+  expect(result.current.state.isPromptOpen).toBe(true);
+  unmount();
+});
+
+it("does not replace or install a second update while installation is pending", async () => {
+  vi.stubEnv("DEV", false);
+  let finishDownload: () => void = () => undefined;
+  const update = { version: "1.0.0", download: vi.fn(() => new Promise<void>(resolve => { finishDownload = resolve; })), install: vi.fn(), close: vi.fn() };
+  vi.mocked(check).mockResolvedValue(update as unknown as Awaited<ReturnType<typeof check>>);
+  vi.mocked(saveWindowState).mockResolvedValue(undefined);
+  vi.mocked(invoke).mockResolvedValue(undefined);
+  const { result, unmount } = renderHook(useAuroraUpdater);
+  await waitFor(() => expect(result.current.state.phase).toBe("available"));
+  let pending: Promise<void>;
+  await act(async () => { pending = result.current.install(); });
+  const checks = vi.mocked(check).mock.calls.length;
+  await act(async () => { await result.current.checkForUpdate(true); await result.current.install(); });
+  expect(check).toHaveBeenCalledTimes(checks);
+  expect(update.download).toHaveBeenCalledTimes(1);
+  await act(async () => { finishDownload(); await pending; });
+  expect(invoke).toHaveBeenCalledWith("restart_after_update");
+  unmount();
+});
+
+it("waits for an in-flight check before using an update resource", async () => {
+  vi.stubEnv("DEV", false);
+  const update = { version: "1.0.0", download: vi.fn(), install: vi.fn(), close: vi.fn() };
+  vi.mocked(check).mockResolvedValueOnce(update as unknown as Awaited<ReturnType<typeof check>>);
+  const { result, unmount } = renderHook(useAuroraUpdater);
+  await waitFor(() => expect(result.current.state.phase).toBe("available"));
+  let finishCheck: (value: null) => void = () => undefined;
+  vi.mocked(check).mockImplementationOnce(() => new Promise(resolve => { finishCheck = resolve; }));
+  let pending: Promise<void>;
+  await act(async () => { pending = result.current.checkForUpdate(); });
+  await act(async () => { await result.current.install(); });
+  expect(update.download).not.toHaveBeenCalled();
+  await act(async () => { finishCheck(null); await pending; });
+  expect(update.close).toHaveBeenCalledTimes(1);
+  expect(result.current.state.version).toBeNull();
   unmount();
 });

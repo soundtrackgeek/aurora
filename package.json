@@ -1,7 +1,7 @@
 {
   "name": "aurora",
   "private": true,
-  "version": "0.25.4",
+  "version": "0.25.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:version": "node scripts/check-version.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:release": "node --test scripts/release-assets-checks.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

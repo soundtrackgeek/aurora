@@ -1,3 +1,9 @@
 {
-  "bundle": { "targets": ["app", "dmg"], "createUpdaterArtifacts": false }
+  "bundle": {
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "createUpdaterArtifacts": true
+  }
 }

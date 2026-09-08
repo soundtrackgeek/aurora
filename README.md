@@ -1,5 +1,25 @@
 # Aurora
 
+## macOS installers and in-app updates (0.25.5)
+
+Every version bump on `master` builds Windows installers and a **universal macOS DMG** (Apple Silicon and Intel). Release publication waits for both platforms, Apple signature/notarization checks, updater signatures, and a combined `latest.json`. The Mac updater uses the signed `.app.tar.gz` archive; the DMG is for first installation. Download the DMG from GitHub Releases, open it, and drag the app into Applications before launching it.
+
+Use the toolbar’s **Check for updates** button to check from inside the app. Available updates download, install, and restart the app. Automatic checks remain enabled according to the app’s existing settings. App data and the music catalog remain outside the application bundle. Aurora saves pending playback/history before installing.
+
+The repositories already have their Tauri updater signing keys. Standard Mac distribution additionally needs a **Developer ID Application** certificate and Apple notarization credentials. These are different from an App Store Apple Distribution certificate. Release builds fail rather than publish an unsigned or unnotarized Mac app.
+
+To configure both repositories from a local `.p12` export, run this helper in either repository:
+
+```sh
+python3 scripts/configure-macos-signing.py /absolute/path/DeveloperID.p12 --repo soundtrackgeek/aurora --repo soundtrackgeek/music_backup_v5
+```
+
+It prompts privately for the export password and an Apple app-specific password, validates the certificate type, and sends values directly to GitHub secrets. It does not print secret values. Required secrets: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (app-specific), and `APPLE_TEAM_ID`. Alternatively, notarization can use `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY` (the `.p8` contents), with the same certificate secrets. Keep signing files outside the repository.
+
+Reference: [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/) and [Tauri updater artifacts](https://v2.tauri.app/plugin/updater/). First deployment still requires configuring those Apple secrets and verifying the published release on a Mac. Do not rotate the existing Tauri updater keys: installed apps trust their current public keys.
+
+For an unsigned local development build only, use `npm run tauri -- build --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'`. This is not a distributable notarized release.
+
 ## Remote rating and Love edits (0.25.4)
 
 With **Network Mode** enabled, sign in under **Settings → Connections → Tonehavn account**, then use a song’s inline stars or heart. Tonehavn **0.38.5 or newer** resolves the exact Windows file path inside its approved roots, checks the expected rating/Love values, verifies the MP3 edit, and updates the authoritative PC Music Library catalog. Aurora then mirrors the confirmed values into the local Mac catalog and recalculates that album’s rating metrics in one transaction. The Mac never directly modifies the remote MP3.
@@ -24,7 +44,7 @@ Skipping to a preloaded song now waits for the audio queue to retire the previou
 
 ## macOS Network Mode (0.25.0)
 
-Build locally with `npm ci` then `npm run tauri -- build --debug --bundles app` (omit `--debug` for a release build). The macOS Tauri override selects app/DMG bundles and disables updater artifacts; this does not publish a signed/notarized Mac release.
+For local Mac builds, use the development build command in the macOS installation section above; production releases require the signing credentials described there.
 
 In **Settings → Connections**, choose Network Mode, enter an absolute **local catalog file** path, a mounted `_musicbackup` **sync folder**, and source-to-mounted music/artwork roots. Quit and reopen Aurora after saving. For example, `D:\MUSIC` can map to `/Volumes/HomePC/MUSIC`. Finder chooses mount names; use the actual mounted folder, not the example. Original Windows catalog identities remain unchanged. Add the `C:\_code\music_backup_v5\AlbumCovers` archive root if you use it.
 

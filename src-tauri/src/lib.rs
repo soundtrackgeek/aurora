@@ -150,6 +150,11 @@ async fn prepare_playback_shutdown(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn restart_after_update(app: AppHandle) {
+    app.restart();
+}
+
+#[tauri::command]
 fn cancel_playback_shutdown(app: AppHandle) -> Result<(), String> {
     app.state::<PlaybackState>()
         .lock()
@@ -1632,6 +1637,7 @@ pub fn run() {
             export_musicbrainz_curation,
             playback_state,
             prepare_playback_shutdown,
+            restart_after_update,
             cancel_playback_shutdown,
             playback_rebind_catalog,
             playback_replace_queue,

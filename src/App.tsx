@@ -458,17 +458,17 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
   onInstall: () => void;
   onDismiss: () => void;
 }) {
-  const isWorking = phase === "downloading" || phase === "installing";
+  const isWorking = phase === "checking" || phase === "downloading" || phase === "installing";
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
         <div className="update-dialog__icon"><Download aria-hidden="true" /></div>
         <div>
           <p className="eyebrow">Aurora update</p>
-          <h2 id="update-title">Version {version ?? "unknown"} is ready</h2>
-          <p>{message || "Install the latest Aurora build now. The app will close, update in place, and restart."}</p>
+          <h2 id="update-title">{phase === "checking" ? "Checking for updates…" : phase === "upToDate" ? "Aurora is up to date" : phase === "error" ? "Update couldn’t complete" : `Version ${version ?? "unknown"} is ready`}</h2>
+          <p>{phase === "checking" ? "Looking for a newer Aurora release…" : message || "Install the latest Aurora build now. The app will close, update in place, and restart."}</p>
         </div>
-        {isWorking && (
+        {isWorking && phase !== "checking" && (
           <div className="update-progress" aria-live="polite">
             <div className="update-progress__track"><span style={{ width: `${progress ?? 12}%` }} /></div>
             <span>{phase === "installing" ? "Installing…" : progress === null ? "Downloading…" : `Downloading ${progress}%`}</span>
@@ -476,10 +476,10 @@ function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss 
         )}
         {phase === "error" && <p className="update-error" role="alert">{message}</p>}
         <div className="update-dialog__actions">
-          <button type="button" className="button button--quiet" onClick={onDismiss} disabled={isWorking}>Later</button>
-          <button type="button" className="button button--primary" onClick={onInstall} disabled={isWorking}>
+          <button type="button" className="button button--quiet" onClick={onDismiss} disabled={isWorking}>{version ? "Later" : "Close"}</button>
+          {version && <button type="button" className="button button--primary" onClick={onInstall} disabled={isWorking}>
             {isWorking ? "Updating…" : "Install and restart"}
-          </button>
+          </button>}
         </div>
       </section>
     </div>
@@ -3078,7 +3078,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.5</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3157,6 +3157,7 @@ function App() {
           />
           <button type="button" aria-label="Audio settings" title="Audio settings" onClick={() => openSettings("audio")}><AudioLines aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
+          {!updater.state.version && <button type="button" aria-label="Check for updates" title="Check for updates" onClick={() => void updater.checkForUpdate(true)}><Download aria-hidden="true" /></button>}
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
           <button
             type="button"

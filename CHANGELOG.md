@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.5] - 2026-09-08
+
+### Added
+
+- Universal macOS DMG installers and signed updater archives in each version-bump release, with Apple signing/notarization verification and a combined Windows/Apple Silicon/Intel updater manifest. Publish only after all platform assets pass validation.
+- Private interactive helper for configuring Apple signing credentials in GitHub secrets.
+
+### Fixed
+
+- Restart Aurora after an in-app Mac update, expose manual update checks with visible results, and prevent overlapping installation/check operations.
+
 ## [0.25.4] - 2026-09-08
 
 ### Added

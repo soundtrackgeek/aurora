@@ -26,3 +26,14 @@ src-tauri/target/
 *.njsproj
 *.sln
 *.sw?
+
+# Release staging
+release-assets/
+release-inputs/
+release-notes.md
+
+# Apple signing material
+*.p12
+*.p8
+.private_keys/
+.macos-signing/

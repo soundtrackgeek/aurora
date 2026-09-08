@@ -6,7 +6,7 @@ import { isTauriRuntime } from "./library";
 
 const UPDATE_INTERVAL_MS = 60_000;
 
-export type UpdatePhase = "idle" | "available" | "downloading" | "installing" | "error";
+export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
 export interface UpdateState {
   phase: UpdatePhase;
@@ -28,17 +28,24 @@ export function useAuroraUpdater() {
   const [state, setState] = useState(initialState);
   const updateRef = useRef<Update | null>(null);
   const checkingRef = useRef(false);
+  const installingRef = useRef(false);
   const promptedVersionsRef = useRef(new Set<string>());
 
-  const checkForUpdate = useCallback(async () => {
-    if (!isTauriRuntime() || import.meta.env.DEV || checkingRef.current) return;
+  const checkForUpdate = useCallback(async (manual = false) => {
+    if (!isTauriRuntime() || import.meta.env.DEV || checkingRef.current || installingRef.current) return;
     checkingRef.current = true;
+    if (manual) setState({ ...initialState, phase: "checking", isPromptOpen: true });
 
     try {
       const update = await check({ timeout: 15_000 });
-      if (!update) return;
+      if (!update) {
+        if (updateRef.current) await updateRef.current.close();
+        updateRef.current = null;
+        setState({ ...initialState, phase: "upToDate", message: "You’re running the latest Aurora version.", isPromptOpen: manual });
+        return;
+      }
 
-      if (updateRef.current && updateRef.current.version !== update.version) {
+      if (updateRef.current) {
         await updateRef.current.close();
       }
       updateRef.current = update;
@@ -49,10 +56,11 @@ export function useAuroraUpdater() {
         version: update.version,
         progress: null,
         message: update.body ?? null,
-        isPromptOpen: firstPrompt,
+        isPromptOpen: manual || firstPrompt,
       });
     } catch (error) {
       console.warn("Aurora update check failed", error);
+      if (manual) setState({ ...initialState, phase: "error", message: error instanceof Error ? error.message : String(error), isPromptOpen: true });
     } finally {
       checkingRef.current = false;
     }
@@ -71,7 +79,8 @@ export function useAuroraUpdater() {
 
   const install = useCallback(async () => {
     const update = updateRef.current;
-    if (!update) return;
+    if (!update || installingRef.current || checkingRef.current) return;
+    installingRef.current = true;
 
     let playbackPrepared = false;
     let downloaded = 0;
@@ -94,6 +103,7 @@ export function useAuroraUpdater() {
       await invoke("prepare_playback_shutdown");
       playbackPrepared = true;
       await update.install();
+      await invoke("restart_after_update");
     } catch (error) {
       if (playbackPrepared) {
         await invoke("cancel_playback_shutdown").catch((cancelError) => {
@@ -107,6 +117,8 @@ export function useAuroraUpdater() {
         message: error instanceof Error ? error.message : String(error),
         isPromptOpen: true,
       }));
+    } finally {
+      installingRef.current = false;
     }
   }, []);
 
