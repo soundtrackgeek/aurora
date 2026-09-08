@@ -165,13 +165,14 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.25.1"
+version = "0.25.2"
 dependencies = [
  "cpal",
  "dotenvy",
  "id3",
  "image",
  "keyring",
+ "libc",
  "lofty",
  "percent-encoding",
  "reqwest",

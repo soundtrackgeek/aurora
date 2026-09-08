@@ -84,6 +84,32 @@ pub(crate) fn open_read(path: &Path) -> Result<SnapshotConnection, String> {
     })
 }
 
+// macOS F_FULLFSYNC is unavailable on SMB. Fall back only for ENOTSUP;
+// fsync still requests the server flush, and every other error is preserved.
+pub(crate) fn sync_file(file: &fs::File) -> std::io::Result<()> {
+    let result = file.sync_all();
+    #[cfg(target_os = "macos")]
+    return finish_mac_sync(file, result);
+    #[cfg(not(target_os = "macos"))]
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn finish_mac_sync(file: &fs::File, result: std::io::Result<()>) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    match result {
+        Err(error) if error.raw_os_error() == Some(libc::ENOTSUP) => {
+            // SAFETY: file owns this valid descriptor for the duration of fsync.
+            if unsafe { libc::fsync(file.as_raw_fd()) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        }
+        other => other,
+    }
+}
+
 // Copy into an exclusively-created file on the destination filesystem before
 // atomic publication. Dropping the temporary removes failed/incomplete transfers.
 pub(crate) fn upload(source: &Path, directory: &Path) -> Result<tempfile::TempPath, String> {
@@ -91,7 +117,8 @@ pub(crate) fn upload(source: &Path, directory: &Path) -> Result<tempfile::TempPa
     let mut input = fs::File::open(source).map_err(|e| e.to_string())?;
     std::io::copy(&mut input, &mut staged).map_err(|e| e.to_string())?;
     staged.flush().map_err(|e| e.to_string())?;
-    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+    sync_file(staged.as_file())
+        .map_err(|e| format!("Could not flush the uploaded snapshot: {e}"))?;
     // Close the writable handle before another SMB reader validates the file.
     Ok(staged.into_temp_path())
 }
@@ -99,6 +126,16 @@ pub(crate) fn upload(source: &Path, directory: &Path) -> Result<tempfile::TempPa
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_flush_falls_back_only_for_unsupported_full_sync() {
+        let file = tempfile::tempfile().unwrap();
+        finish_mac_sync(&file, Err(std::io::Error::from_raw_os_error(libc::ENOTSUP))).unwrap();
+        let error =
+            finish_mac_sync(&file, Err(std::io::Error::from_raw_os_error(libc::EIO))).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EIO));
+    }
+
     #[test]
     fn staged_snapshot_is_independent_and_upload_is_complete() {
         let dir = tempfile::tempdir().unwrap();

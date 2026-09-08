@@ -1675,7 +1675,7 @@ fn mirror_tonehavn_snapshots(local: &Path, remote: &Path) -> Result<(), String> 
                 .read(true)
                 .write(true)
                 .open(&temporary)
-                .and_then(|file| file.sync_all())
+                .and_then(|file| crate::snapshot_io::sync_file(&file))
                 .map_err(|error| {
                     format!("Could not flush Tonehavn's OneDrive history backup: {error}")
                 })?;
@@ -2312,7 +2312,7 @@ fn restore_local_history(remote: &Path, local: &Path, device_id: &str) -> Result
             .read(true)
             .write(true)
             .open(&temporary)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| crate::snapshot_io::sync_file(&file))
             .map_err(|error| format!("Could not flush Aurora's restored history: {error}"))?;
         validate_history_database(&temporary, Some(device_id))?;
         fs::rename(&temporary, local)

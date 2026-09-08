@@ -615,7 +615,7 @@ fn preserve_previous_remote(remote_path: &Path) -> Result<(), String> {
         .read(true)
         .write(true)
         .open(&temporary)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| crate::snapshot_io::sync_file(&file))
         .map_err(|error| format!("Could not flush the previous OneDrive snapshot: {error}"))?;
     validate_database(&temporary)?;
     if previous.is_file() {
@@ -654,7 +654,7 @@ fn replace_closed_local(remote_path: &Path, local_path: &Path) -> Result<(), Str
         .read(true)
         .write(true)
         .open(&replacement)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| crate::snapshot_io::sync_file(&file))
         .map_err(|error| format!("Could not flush Aurora's newer OneDrive state: {error}"))?;
     validate_database(&replacement)?;
 
@@ -679,7 +679,7 @@ fn copy_snapshot_to_new_local(remote_path: &Path, local_path: &Path) -> Result<(
         .read(true)
         .write(true)
         .open(&temporary)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| crate::snapshot_io::sync_file(&file))
         .map_err(|error| format!("Could not flush Aurora's restored state: {error}"))?;
     validate_database(&temporary)?;
     fs::rename(&temporary, local_path)

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2] - 2026-09-08
+
+### Fixed
+
+- Publish Mac state and listening-history snapshots over SMB when full-disk flush is unsupported. Fall back to `fsync` only for that error; preserve other flush failures and snapshot validation.
+
+
 ## [0.25.1] - 2026-09-08
 
 ### Fixed
