@@ -30,9 +30,9 @@ struct DeviceSettingsFile {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PathMappingStatus {
-    desktop_root: &'static str,
-    laptop_root: &'static str,
-    active_root: &'static str,
+    desktop_root: String,
+    laptop_root: String,
+    active_root: String,
     available: bool,
 }
 
@@ -242,14 +242,40 @@ fn set_laptop_mode_runtime(enabled: bool) {
 }
 
 pub(crate) fn resolve_device_path(path: &Path) -> PathBuf {
+    if crate::connections::network_mode() {
+        return crate::connections::resolve(path, &crate::connections::active().music_roots, false)
+            .unwrap_or_else(|| path.to_path_buf());
+    }
+    if !cfg!(windows) && path.is_absolute() {
+        return path.to_path_buf();
+    }
     remap_path(path, laptop_mode_enabled())
 }
 
 pub(crate) fn catalog_path_for_device_path(path: &Path) -> PathBuf {
+    if crate::connections::network_mode() {
+        return crate::connections::resolve(path, &crate::connections::active().music_roots, true)
+            .unwrap_or_else(|| path.to_path_buf());
+    }
+    if !cfg!(windows) && path.is_absolute() {
+        return path.to_path_buf();
+    }
     remap_path(path, false)
 }
 
 pub(crate) fn path_mapping_statuses() -> Vec<PathMappingStatus> {
+    if crate::connections::network_mode() {
+        return crate::connections::active()
+            .music_roots
+            .into_iter()
+            .map(|m| PathMappingStatus {
+                available: Path::new(&m.mounted_root).is_dir(),
+                desktop_root: m.catalog_root,
+                laptop_root: m.mounted_root.clone(),
+                active_root: m.mounted_root,
+            })
+            .collect();
+    }
     let laptop_mode = laptop_mode_enabled();
     PATH_MAPPINGS
         .iter()
@@ -260,9 +286,9 @@ pub(crate) fn path_mapping_statuses() -> Vec<PathMappingStatus> {
                 *desktop_root
             };
             PathMappingStatus {
-                desktop_root,
-                laptop_root,
-                active_root,
+                desktop_root: (*desktop_root).to_owned(),
+                laptop_root: (*laptop_root).to_owned(),
+                active_root: active_root.to_owned(),
                 available: Path::new(active_root).is_dir(),
             }
         })

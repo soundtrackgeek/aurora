@@ -1198,6 +1198,7 @@ fn discover_ffmpeg_executable() -> Result<PathBuf, String> {
 }
 
 fn hidden_command(executable: &Path) -> Command {
+    #[allow(unused_mut)]
     let mut command = Command::new(executable);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);

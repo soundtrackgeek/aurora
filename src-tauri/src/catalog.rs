@@ -10,12 +10,10 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env,
     path::{Component, Path, PathBuf},
     time::Duration,
 };
 
-const CATALOG_RELATIVE_PATH: &str = "com.local.musiclibrary\\music-library.sqlite3";
 pub(crate) const COVER_ROOT: &str = r"C:\_code\music_backup_v5\AlbumCovers";
 
 #[derive(Clone, Debug)]
@@ -148,10 +146,7 @@ pub(crate) struct LibrarySnapshot {
 }
 
 pub(crate) fn default_catalog_path() -> Result<PathBuf, String> {
-    let app_data = env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| "Windows APPDATA is unavailable.".to_owned())?;
-    Ok(app_data.join(CATALOG_RELATIVE_PATH))
+    crate::connections::native_catalog_path()
 }
 
 pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
@@ -2507,7 +2502,11 @@ pub(crate) fn resolve_cover_archive_entry(
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
-    cover_archive_entry(&connection, album_id, Path::new(COVER_ROOT))
+    cover_archive_entry(
+        &connection,
+        album_id,
+        &device_mode::resolve_device_path(Path::new(COVER_ROOT)),
+    )
 }
 
 fn cover_archive_entry(
@@ -2531,7 +2530,7 @@ fn cover_archive_entry(
 
     let root = std::fs::canonicalize(cover_root)
         .map_err(|_| "The album-cover archive is unavailable.".to_owned())?;
-    let candidate = std::fs::canonicalize(&cover_path)
+    let candidate = std::fs::canonicalize(device_mode::resolve_device_path(Path::new(&cover_path)))
         .map_err(|_| "The album cover is unavailable.".to_owned())?;
     if !candidate.starts_with(&root) || !candidate.is_file() {
         return Err("The album cover resolved outside the configured archive.".to_owned());

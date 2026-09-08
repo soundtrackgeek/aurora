@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.0] - 2026-09-08
+
+### Added
+
+- Bound Mac snapshot-download waits and outstanding workers so a busy SMB file cannot indefinitely block startup; keep Network Mode shutdown local.
+
+- Stage Mac sync snapshots locally before SQLite validation, comparison, or sealing; upload complete files before atomic publication to avoid SMB SQLite locking delays.
+
+- Mac Network Mode with local catalog selection, mounted music/artwork roots, configurable snapshot sync, native artwork URLs and Keychain support. Network Mode blocks music-file mutations and recovery. macOS app/DMG packaging uses a platform override.
+
 ## 0.24.41 — 2026-09-07
 
 - Added `dissolved:`, `founded:`, `dead:`, and `born:` artist lifespan searches, `minutes:` duration ranges, and decimal `ar:` album rating ranges.

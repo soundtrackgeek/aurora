@@ -2,7 +2,9 @@ use rusqlite::Connection;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(any(not(target_os = "macos"), test))]
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -1082,6 +1084,9 @@ where
     TRequest: Serialize,
     TResponse: DeserializeOwned,
 {
+    if !matches!(operation, "capabilities") {
+        crate::connections::require_music_writes()?;
+    }
     let plan_id = serde_json::to_value(&payload)
         .map_err(|error| format!("Could not encode bridge progress identity: {error}"))?
         .get("planId")
@@ -1295,12 +1300,23 @@ fn update_music_library_message(detail: String) -> String {
 }
 
 fn discover_music_library_executable() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let candidate = std::env::var_os(MUSIC_LIBRARY_EXE_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from("/Applications/Music Library.app/Contents/MacOS/music-library")
+            });
+        validate_executable(&candidate)
+    }
+    #[cfg(not(target_os = "macos"))]
     discover_music_library_executable_from(
         std::env::var_os(MUSIC_LIBRARY_EXE_ENV),
         std::env::var_os("LOCALAPPDATA"),
     )
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn discover_music_library_executable_from(
     override_path: Option<OsString>,
     local_app_data: Option<OsString>,
@@ -1322,7 +1338,10 @@ fn validate_executable(candidate: &Path) -> Result<PathBuf, String> {
     let plausible_name = candidate
         .file_name()
         .and_then(OsStr::to_str)
-        .is_some_and(|name| name.eq_ignore_ascii_case("music-library.exe"));
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("music-library.exe")
+                || (cfg!(target_os = "macos") && name == "music-library")
+        });
     if !plausible_name {
         return Err(format!(
             "The {MUSIC_LIBRARY_EXE_ENV} path must point to music-library.exe."

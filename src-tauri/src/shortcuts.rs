@@ -632,6 +632,7 @@ fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShort
     let mut timing = crate::timing::Span::new("shortcut.optimistic_tag", action_name(action));
     timing.stage("playback_lock_wait");
     let result = (|| -> Result<(TrackSummary, TrackSummary, ShortcutTagTask), String> {
+        crate::connections::require_music_writes()?;
         let state = app.state::<PlaybackState>();
         let mut playback = state
             .lock()

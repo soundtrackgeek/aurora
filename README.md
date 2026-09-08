@@ -1,5 +1,19 @@
 # Aurora
 
+## macOS Network Mode (0.25.0)
+
+Build locally with `npm ci` then `npm run tauri -- build --debug --bundles app` (omit `--debug` for a release build). The macOS Tauri override selects app/DMG bundles and disables updater artifacts; this does not publish a signed/notarized Mac release.
+
+In **Settings → Connections**, choose Network Mode, enter an absolute **local catalog file** path, a mounted `_musicbackup` **sync folder**, and source-to-mounted music/artwork roots. Quit and reopen Aurora after saving. For example, `D:\MUSIC` can map to `/Volumes/HomePC/MUSIC`. Finder chooses mount names; use the actual mounted folder, not the example. Original Windows catalog identities remain unchanged. Add the `C:\_code\music_backup_v5\AlbumCovers` archive root if you use it.
+
+The default catalog on Mac is `~/Library/Application Support/com.local.musiclibrary/music-library.sqlite3`. Copy a consistent, closed SQLite snapshot locally before opening it. The catalog is separate from Aurora state synchronization and is not automatically refreshed from the PC in this version. Close both apps before replacing its local working copy.
+
+On Mac a blank sync folder disables sync, while playback/history remain local. Mac snapshot validation and sealing run in local temporary files; only complete snapshots are transferred to SMB. A configured SMB folder reuses verified Aurora state snapshots and per-device history snapshots; newer state is applied only at startup and conflicting branches remain untouched. Mount shares before launch. Missing shares preserve local data and show unavailable status. Mac snapshot downloads have a three-second wait limit and at most four outstanding workers. Network Mode saves on quit locally; snapshot publication resumes during the next running session instead of blocking quit on SMB. Keep the working catalog off SMB. OneDrive need only run on the home PC.
+
+Local Mac validation covered playback, seeking, artwork, connection settings and session restoration. End-to-end snapshot synchronization remains unverified on the current SMB setup: reads of the PC state snapshot intermittently stall even though a separate upload/readback probe succeeds. A timeout or pending-sync status means cross-device changes have not been confirmed.
+
+Network Mode is read-only for music files: tag edits, rating/Love writes, intake, conversion, deletion, companion mutations and tag recovery are blocked. Listening history and player state still save locally and synchronize. Native macOS media-key/Now Playing integration and remote edit delegation are not included. The companion defaults to `/Applications/Music Library.app/Contents/MacOS/music-library`; `AURORA_MUSIC_LIBRARY_EXE` can override its path.
+
 Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.41 adds catalog search for artist lifespans, duration, decimal album ratings, and chart ranks. See [the search guide](docs/search.md) for syntax and examples.
 
 ![Aurora design reference](Aurora.png)

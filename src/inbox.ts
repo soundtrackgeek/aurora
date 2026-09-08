@@ -1,3 +1,4 @@
+import { protocolUrl } from "./protocolUrl";
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./library";
 import type { EditableTagField, EditableTagValues } from "./tags";
@@ -161,7 +162,7 @@ export function inboxCoverUrl(
       ? `/__aurora-preview-cover/preview-freak?size=${size}`
       : null;
   }
-  return `http://aurora-cover.localhost/inbox/${encodeURIComponent(album.artworkSourcePath)}?size=${size}&revision=${album.modifiedAtMs}`;
+  return `${protocolUrl("aurora-cover", "inbox", album.artworkSourcePath)}?size=${size}&revision=${album.modifiedAtMs}`;
 }
 
 const previewTracks = [

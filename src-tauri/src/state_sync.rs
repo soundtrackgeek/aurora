@@ -1,10 +1,11 @@
 use crate::state_store::{SCHEMA_VERSION, StateStore};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Serialize;
+#[cfg(windows)]
+use std::ffi::c_void;
 use std::{
     collections::HashSet,
     env,
-    ffi::c_void,
     fs::{self, File},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -43,6 +44,13 @@ pub(crate) struct StateMirrorStatus {
 }
 
 pub(crate) fn default_remote_state_path() -> Result<PathBuf, String> {
+    let folder = crate::connections::active().sync_folder;
+    if !folder.is_empty() {
+        return Ok(PathBuf::from(folder).join("aurora-state.sqlite3"));
+    }
+    if cfg!(target_os = "macos") || crate::connections::network_mode() {
+        return Ok(PathBuf::new());
+    }
     let profile = env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .ok_or_else(|| "Windows USERPROFILE is unavailable.".to_owned())?;
@@ -56,6 +64,17 @@ pub(crate) fn prepare_state_before_open(
     local_path: &Path,
     remote_path: &Path,
 ) -> StartupSyncOutcome {
+    if !remote_path.is_file() {
+        return StartupSyncOutcome::None;
+    }
+    let snapshot = match crate::snapshot_io::LocalSnapshot::new(remote_path) {
+        Ok(snapshot) => snapshot,
+        Err(message) => return StartupSyncOutcome::Unavailable(message),
+    };
+    prepare_state_from_snapshot(local_path, &snapshot.path)
+}
+
+fn prepare_state_from_snapshot(local_path: &Path, remote_path: &Path) -> StartupSyncOutcome {
     if !remote_path.is_file() {
         return StartupSyncOutcome::None;
     }
@@ -130,6 +149,14 @@ impl StateSyncService {
     }
 
     pub(crate) fn sync_now(&mut self, bypass_throttle: bool) -> StateMirrorStatus {
+        if self.remote_path.as_os_str().is_empty() {
+            return self.status(
+                "disabled",
+                "Sync is off. Choose a sync folder in Settings → Connections and restart Aurora."
+                    .to_owned(),
+                None,
+            );
+        }
         match self.try_sync(bypass_throttle) {
             Ok(status) => status,
             Err(error) => self.status("unavailable", error, None),
@@ -312,6 +339,8 @@ fn ensure_sync_identity(store: &StateStore) -> Result<(), String> {
 }
 
 fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool, String> {
+    let remote_snapshot = crate::snapshot_io::LocalSnapshot::new(remote_path)?;
+    let remote_path = remote_snapshot.path.as_path();
     let connection = Connection::open_with_flags(
         local_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
@@ -479,7 +508,8 @@ fn publish_snapshot(
     let remote_parent = remote_path
         .parent()
         .ok_or_else(|| "Aurora's OneDrive state path has no parent directory.".to_owned())?;
-    let temporary = remote_parent.join(format!(".aurora-state-{}.tmp.sqlite3", new_token("sync")));
+    let stage = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let temporary = stage.path().join("state.sqlite3");
     if temporary.exists() {
         return Err("Aurora's OneDrive snapshot staging path already exists.".to_owned());
     }
@@ -511,6 +541,10 @@ fn publish_snapshot(
     validate_database(&temporary)?
         .ok_or_else(|| "Aurora's staged snapshot is missing sync metadata.".to_owned())?;
 
+    let uploaded = crate::snapshot_io::upload(&temporary, remote_parent)?;
+    let temporary: &Path = uploaded.as_ref();
+    validate_database(temporary)?
+        .ok_or_else(|| "The uploaded snapshot is missing sync metadata.".to_owned())?;
     let remote_now = if remote_path.is_file() {
         validate_database(remote_path)?
     } else {
@@ -522,7 +556,7 @@ fn publish_snapshot(
         _ => false,
     };
     if !remote_matches {
-        let _ = fs::remove_file(&temporary);
+        let _ = fs::remove_file(temporary);
         return Err(
             "The OneDrive state changed while Aurora prepared its snapshot. Both versions were retained."
                 .to_owned(),
@@ -531,9 +565,9 @@ fn publish_snapshot(
 
     if remote_path.is_file() {
         preserve_previous_remote(remote_path)?;
-        replace_file_atomic(remote_path, &temporary)?;
+        replace_file_atomic(remote_path, temporary)?;
     } else {
-        fs::rename(&temporary, remote_path).map_err(|error| {
+        fs::rename(temporary, remote_path).map_err(|error| {
             format!("Could not publish Aurora's OneDrive state snapshot: {error}")
         })?;
     }
@@ -691,11 +725,8 @@ pub(crate) fn consistent_copy(source: &Path, destination: &Path) -> Result<(), S
 }
 
 fn validate_database(path: &Path) -> Result<Option<SyncMetadata>, String> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-    )
-    .map_err(|error| format!("Could not open the Aurora state snapshot: {error}"))?;
+    let connection = crate::snapshot_io::open_read(path)
+        .map_err(|error| format!("Could not open the Aurora state snapshot: {error}"))?;
     connection
         .busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|error| format!("Could not configure Aurora's snapshot validation: {error}"))?;

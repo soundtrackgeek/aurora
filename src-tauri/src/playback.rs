@@ -1229,6 +1229,7 @@ impl PlaybackRuntime {
         Ok(self.snapshot())
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn play(&mut self) -> Result<PlaybackSnapshot, String> {
         self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
@@ -1239,6 +1240,7 @@ impl PlaybackRuntime {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn pause(&mut self) -> Result<PlaybackSnapshot, String> {
         self.ensure_not_closing()?;
         self.synchronize_audio_runtime();

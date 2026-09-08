@@ -3,7 +3,7 @@ use crate::{
     state_store::{StateStore, StoredQueueEntry},
     state_sync,
 };
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -438,7 +438,10 @@ impl HistoryStore {
             format!("Could not create Aurora's listening-history folder: {error}")
         })?;
         let remote_path = remote_directory.join(format!("aurora-history-{device_id}.sqlite3"));
-        let restore_warning = if !path.is_file() && remote_path.is_file() {
+        let restore_warning = if !remote_directory.as_os_str().is_empty()
+            && !path.is_file()
+            && remote_path.is_file()
+        {
             restore_local_history(&remote_path, &path, &device_id)
                 .err()
                 .map(|error| {
@@ -1488,6 +1491,11 @@ impl HistoryStore {
     }
 
     fn refresh_tonehavn_backup(&self) {
+        if self.remote_directory.as_os_str().is_empty()
+            || (crate::connections::network_mode() && !self.remote_directory.is_dir())
+        {
+            return;
+        }
         let Some(local) = &self.tonehavn_directory else {
             return;
         };
@@ -1499,6 +1507,9 @@ impl HistoryStore {
     }
 
     pub(crate) fn publish_if_due(&self, force: bool) -> Result<String, String> {
+        if self.remote_directory.as_os_str().is_empty() {
+            return Ok("Sync is off; listening history is saved locally.".to_owned());
+        }
         {
             let shared = self
                 .shared
@@ -1541,10 +1552,8 @@ impl HistoryStore {
             }
             shared.last_publish_attempt_ms = Some(now);
         }
-        let temporary = self.remote_directory.join(format!(
-            ".aurora-history-{}-{now}.tmp.sqlite3",
-            self.device_id
-        ));
+        let stage = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let temporary = stage.path().join("history.sqlite3");
         if temporary.exists() {
             return Err("Aurora's history snapshot staging path already exists.".to_owned());
         }
@@ -1568,16 +1577,19 @@ impl HistoryStore {
                     })?;
             }
             validate_history_database(&temporary, Some(&self.device_id))?;
+            let uploaded = crate::snapshot_io::upload(&temporary, &self.remote_directory)?;
+            let temporary: &Path = uploaded.as_ref();
+            validate_history_database(temporary, Some(&self.device_id))?;
             if self.remote_path.is_file() {
-                state_sync::replace_file_atomic(&self.remote_path, &temporary)
+                state_sync::replace_file_atomic(&self.remote_path, temporary)
             } else {
-                fs::rename(&temporary, &self.remote_path).map_err(|error| {
+                fs::rename(temporary, &self.remote_path).map_err(|error| {
                     format!("Could not publish Aurora's OneDrive history snapshot: {error}")
                 })
             }
         })();
         if publish_result.is_err() {
-            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(temporary);
         }
         publish_result?;
         let connection = self.open()?;
@@ -2216,15 +2228,14 @@ fn accumulate_summary(
     Ok(())
 }
 
-fn open_valid_history_source(path: &Path) -> Result<Option<(HistoryMetadata, Connection)>, String> {
+fn open_valid_history_source(
+    path: &Path,
+) -> Result<Option<(HistoryMetadata, crate::snapshot_io::SnapshotConnection)>, String> {
     if !path.is_file() {
         return Ok(None);
     }
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-    )
-    .map_err(|error| format!("Could not open an Aurora history snapshot: {error}"))?;
+    let connection = crate::snapshot_io::open_read(path)
+        .map_err(|error| format!("Could not open an Aurora history snapshot: {error}"))?;
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(|error| format!("Could not configure an Aurora history snapshot: {error}"))?;
@@ -2242,11 +2253,8 @@ fn open_valid_history_source(path: &Path) -> Result<Option<(HistoryMetadata, Con
 }
 
 fn read_history_metadata(path: &Path) -> Result<HistoryMetadata, String> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-    )
-    .map_err(|error| format!("Could not open Aurora's history metadata: {error}"))?;
+    let connection = crate::snapshot_io::open_read(path)
+        .map_err(|error| format!("Could not open Aurora's history metadata: {error}"))?;
     read_metadata(&connection)
 }
 

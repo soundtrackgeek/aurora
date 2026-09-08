@@ -1,3 +1,4 @@
+import { protocolUrl } from "./protocolUrl";
 import { invoke } from "@tauri-apps/api/core";
 import type { CatalogSync } from "./tags";
 
@@ -55,7 +56,7 @@ export function displayTrackArtist(track: Track): string {
 
 export function artistPortraitUrl(artist: string, size: 64 | 128 = 64): string | null {
   if (!isTauriRuntime() || !artist.trim()) return null;
-  return `http://aurora-artist.localhost/artist/${encodeURIComponent(artist)}?size=${size}`;
+  return `${protocolUrl("aurora-artist", "artist", artist)}?size=${size}`;
 }
 
 export function catalogRefreshIsConsistent(
@@ -408,7 +409,7 @@ export function albumCoverUrl(albumId: string | null, size: 64 | 128 | 256 | 512
       ? `/__aurora-preview-cover/${encodeURIComponent(previewId)}?size=${size}`
       : null;
   }
-  return `http://aurora-cover.localhost/album/${encodeURIComponent(albumId)}?size=${size}`;
+  return `${protocolUrl("aurora-cover", "album", albumId)}?size=${size}`;
 }
 
 export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {

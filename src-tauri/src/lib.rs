@@ -2,6 +2,7 @@ mod artwork;
 mod audio_settings;
 mod catalog;
 mod charts;
+mod connections;
 mod curation;
 mod curation_store;
 mod device_mode;
@@ -23,6 +24,7 @@ mod publishers;
 mod ratings;
 mod replay_gain;
 mod shortcuts;
+mod snapshot_io;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -257,6 +259,7 @@ async fn apply_inbox_tags(
     app: AppHandle,
     request: InboxTagApplyRequest,
 ) -> Result<InboxTagApplyResult, String> {
+    connections::require_music_writes()?;
     let cover = artwork::selected_cover(&app, request.artwork_token.as_deref())?;
     let recovery_root = app
         .path()
@@ -330,6 +333,7 @@ async fn embed_inbox_album_cover(
     app: AppHandle,
     request: InboxCoverEmbedRequest,
 ) -> Result<InboxCoverEmbedResult, String> {
+    connections::require_music_writes()?;
     let monitored_roots = app
         .state::<InboxState>()
         .lock()
@@ -344,6 +348,7 @@ async fn embed_inbox_album_cover(
 
 #[tauri::command]
 async fn rename_inbox_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
+    connections::require_music_writes()?;
     tauri::async_runtime::spawn_blocking(move || inbox::rename_album(request))
         .await
         .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
@@ -354,6 +359,7 @@ async fn rename_inbox_albums(
     app: AppHandle,
     request: InboxBatchRenameRequest,
 ) -> Result<InboxBatchRenameResult, String> {
+    connections::require_music_writes()?;
     let monitored_roots = app
         .state::<InboxState>()
         .lock()
@@ -369,6 +375,7 @@ async fn convert_inbox_lossless(
     app: AppHandle,
     request: InboxConvertRequest,
 ) -> Result<InboxConvertResult, String> {
+    connections::require_music_writes()?;
     let monitored_roots = app
         .state::<InboxState>()
         .lock()
@@ -508,6 +515,7 @@ async fn delete_album_track(
     album_id: String,
     track_references: Vec<TrackReference>,
 ) -> Result<TrackDeletionResult, String> {
+    connections::require_music_writes()?;
     tauri::async_runtime::spawn_blocking(move || {
         let coordinator = app.state::<LibrarySyncCoordinator>();
         let (result, projection_token) = coordinator.serialize_tag_edit(|| {
@@ -1262,6 +1270,7 @@ async fn refresh_external_tag_changes(
 
 #[tauri::command]
 async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, String> {
+    connections::require_music_writes()?;
     tauri::async_runtime::spawn_blocking(move || {
         let coordinator = app.state::<LibrarySyncCoordinator>();
         let projection_token = coordinator.reserve_background_projection_token();
@@ -1407,6 +1416,22 @@ fn release_global_shortcuts(app: &AppHandle) {
     }
 }
 
+#[tauri::command]
+fn connection_settings(app: AppHandle) -> Result<connections::ConnectionSettings, String> {
+    connections::read(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+fn save_connection_settings(
+    app: AppHandle,
+    settings: connections::ConnectionSettings,
+) -> Result<(), String> {
+    connections::save(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &settings,
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1447,6 +1472,7 @@ pub fn run() {
                     .or_else(|_| dotenvy::from_filename("../.env.local"));
             }
             let state_directory = app.path().app_data_dir()?;
+            connections::initialize(&state_directory).map_err(std::io::Error::other)?;
             timing::initialize(&state_directory);
             let state_path = state_directory.join("aurora-state.sqlite3");
             let remote_state_path =
@@ -1467,9 +1493,9 @@ pub fn run() {
                     .adopt_device_id(&device_id)
                     .map_err(std::io::Error::other)?;
             }
-            let history_directory = remote_state_path.parent().ok_or_else(|| {
-                std::io::Error::other("Aurora's OneDrive state path has no parent directory.")
-            })?;
+            let history_directory = remote_state_path
+                .parent()
+                .unwrap_or(std::path::Path::new(""));
             let history = HistoryStore::new(
                 history_path,
                 history_directory.to_path_buf(),
@@ -1477,7 +1503,7 @@ pub fn run() {
                 device_settings.device_name().to_owned(),
             )
             .map_err(std::io::Error::other)?;
-            let mut laptop_runtime = LaptopModeRuntime::new(
+            let laptop_runtime = LaptopModeRuntime::new(
                 device_settings,
                 store.clone(),
                 remote_state_path,
@@ -1489,7 +1515,6 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             let initial_playback = runtime.snapshot();
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
-            let _ = laptop_runtime.status(true);
             app.manage(store);
             app.manage(history);
             app.manage(Mutex::new(runtime));
@@ -1524,12 +1549,16 @@ pub fn run() {
                 release_global_shortcuts(window.app_handle());
                 media_controls::release(window.app_handle());
                 let laptop = window.state::<LaptopState>();
-                if let Ok(mut runtime) = laptop.lock() {
+                if !connections::network_mode()
+                    && let Ok(mut runtime) = laptop.lock()
+                {
                     let _ = runtime.status(true);
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
+            connection_settings,
+            save_connection_settings,
             library_snapshot,
             catalog_revision,
             artist_tracks,

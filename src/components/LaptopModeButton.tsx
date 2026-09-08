@@ -19,7 +19,8 @@ export function LaptopModeButton({ status, busy, error, onToggle }: LaptopModeBu
   const enabled = status?.laptopMode ?? false;
   const syncState = error ? "conflict" : (status?.syncState ?? "pending");
   const message = error ?? status?.settingWarning ?? status?.message ?? "Checking Aurora state sync…";
-  const label = enabled ? "Disable Laptop Mode" : "Enable Laptop Mode";
+  const network = status?.modeLabel === "Network Mode";
+  const label = network ? "Network Mode (configure in Settings → Connections)" : enabled ? "Disable Laptop Mode" : "Enable Laptop Mode";
 
   return (
     <div className={`laptop-mode-control is-${syncState}`}>
@@ -29,7 +30,7 @@ export function LaptopModeButton({ status, busy, error, onToggle }: LaptopModeBu
         aria-label={`${label}. ${message}`}
         aria-describedby="laptop-mode-details"
         aria-pressed={enabled}
-        disabled={busy || status === null}
+        disabled={busy || status === null || network}
         onClick={onToggle}
       >
         {enabled ? <Laptop aria-hidden="true" /> : <Monitor aria-hidden="true" />}
@@ -38,7 +39,7 @@ export function LaptopModeButton({ status, busy, error, onToggle }: LaptopModeBu
       <div className="laptop-mode-popover" id="laptop-mode-details" role="tooltip">
         <div className="laptop-mode-popover__heading">
           <span>{syncIcon(status, busy)}</span>
-          <div><strong>{status?.modeLabel ?? "Device Mode"}</strong><small>{enabled ? "Catalog paths remapped" : "Catalog paths unchanged"}</small></div>
+          <div><strong>{status?.modeLabel ?? "Device Mode"}</strong><small>{enabled || network ? "Catalog paths remapped" : "Catalog paths unchanged"}</small></div>
         </div>
         <p>{message}</p>
         <div className="laptop-mode-mappings">

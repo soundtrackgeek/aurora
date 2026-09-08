@@ -39,7 +39,9 @@ import {
 } from "../displayPreferences";
 import { loadInboxSettings, updateDiscogsCredentials, updateLastFmCredentials, type InboxSettingsStatus } from "../inbox";
 
-export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata";
+import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
+
+export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata" | "connections";
 
 interface SettingsDialogProps {
   shortcutStatus: GlobalShortcutStatus;
@@ -139,7 +141,7 @@ export function SettingsDialog({
   const metadataValidationError = Boolean(lastFmApiKey.trim()) !== Boolean(lastFmSharedSecret.trim())
     ? "Enter both the Last.fm API key and shared secret."
     : null;
-  const activeTitle = tab === "display" ? "Display" : tab === "audio" ? "Audio" : tab === "metadata" ? "Metadata" : "Global shortcuts";
+  const activeTitle = tab === "connections" ? "Connections" : tab === "display" ? "Display" : tab === "audio" ? "Audio" : tab === "metadata" ? "Metadata" : "Global shortcuts";
   const activeSaving = tab === "display" ? false : tab === "audio" ? audioSaving : tab === "metadata" ? metadataSaving : shortcutSaving;
   const activeDirty = tab === "display" ? displayDirty : tab === "audio" ? audioDirty : tab === "metadata" ? metadataDirty : shortcutsDirty;
   const activeError = tab === "display" ? null : tab === "audio" ? audioError : tab === "metadata" ? metadataValidationError ?? metadataError : shortcutError;
@@ -203,10 +205,11 @@ export function SettingsDialog({
           <button type="button" role="tab" aria-selected={tab === "audio"} onClick={() => setTab("audio")}><Volume2 aria-hidden="true" /> Audio</button>
           <button type="button" role="tab" aria-selected={tab === "shortcuts"} onClick={() => setTab("shortcuts")}><Keyboard aria-hidden="true" /> Shortcuts</button>
           <button type="button" role="tab" aria-selected={tab === "metadata"} onClick={() => setTab("metadata")}><Tags aria-hidden="true" /> Metadata</button>
+          <button type="button" role="tab" aria-selected={tab === "connections"} onClick={() => setTab("connections")}>Connections</button>
         </nav>
 
         <div className="settings-dialog__body">
-          {tab === "display" ? (
+          {tab === "connections" ? <ConnectionSettingsPanel /> : tab === "display" ? (
             <DisplaySettingsPanel
               preferences={displayDraft}
               selectedView={selectedDisplayView}
@@ -257,7 +260,7 @@ export function SettingsDialog({
           )}
         </div>
 
-        <footer className="settings-dialog__footer">
+        {tab !== "connections" && <footer className="settings-dialog__footer">
           <button type="button" className="button button--quiet" onClick={onClose}>Cancel</button>
           <button
             type="button"
@@ -265,7 +268,7 @@ export function SettingsDialog({
             disabled={activeSaving || !activeDirty || (tab === "metadata" && Boolean(metadataValidationError)) || (tab === "shortcuts" && (Boolean(validationError) || Boolean(recordingAction)))}
             onClick={saveActiveTab}
           >{activeSaving ? "Saving…" : "Save changes"}</button>
-        </footer>
+        </footer>}
       </section>
     </div>
   );

@@ -20,9 +20,10 @@ use id3::{
 use image::ImageFormat;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(windows)]
+use std::ffi::c_void;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::c_void,
     fs::{self, File, OpenOptions},
     io::{Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
@@ -421,8 +422,10 @@ enum OperationEditorFieldsJournal {
 impl TagService {
     pub(crate) fn new(store: StateStore) -> Result<Self, String> {
         let service = Self { store };
-        service.recover_interrupted_operations()?;
-        let _ = service.store.cleanup_completed_tag_backups();
+        if !crate::connections::network_mode() {
+            service.recover_interrupted_operations()?;
+            let _ = service.store.cleanup_completed_tag_backups();
+        }
         Ok(service)
     }
 
@@ -440,6 +443,7 @@ impl TagService {
         &self,
         target: TagEditorTarget,
     ) -> Result<TagEditorUpdateResult, String> {
+        crate::connections::require_music_writes()?;
         let resolved = self.resolve_editor_target(&target)?;
         self.inspect_resolved_editor(resolved)
     }
@@ -448,6 +452,7 @@ impl TagService {
         &self,
         resolved: Vec<ResolvedTrack>,
     ) -> Result<TagEditorUpdateResult, String> {
+        crate::connections::require_music_writes()?;
         let mut states = Vec::with_capacity(resolved.len());
         let mut tracks = Vec::with_capacity(resolved.len());
         let mut changed_files = Vec::new();
@@ -503,6 +508,7 @@ impl TagService {
         request: TagEditorUpdateRequest,
         artwork: Option<CanonicalCover>,
     ) -> Result<TagEditorUpdateResult, String> {
+        crate::connections::require_music_writes()?;
         request.validate()?;
         if request.artwork_token.is_some() != artwork.is_some() {
             return Err(
@@ -861,6 +867,7 @@ impl TagService {
         expected: &TagEditorSnapshot,
         changed_keys: &HashSet<String>,
     ) -> Result<TagEditorUpdateResult, String> {
+        crate::connections::require_music_writes()?;
         let resolved = match self.resolve_editor_update_target(target, expected) {
             Ok(resolved) => resolved,
             Err(primary_error) if matches!(target, TagEditorTarget::Albums { .. }) => {
@@ -1054,6 +1061,9 @@ impl TagService {
         &self,
         requested_limit: usize,
     ) -> Result<TagReconciliationReport, String> {
+        if crate::connections::network_mode() {
+            return Ok(TagReconciliationReport::new(false));
+        }
         let limit = requested_limit.clamp(1, MAX_PENDING_RECONCILIATION_BATCH);
         let mut overlays = self.store.pending_overlays(limit + 1)?;
         let has_more = overlays.len() > limit;
@@ -1221,6 +1231,7 @@ impl TagService {
     }
 
     pub(crate) fn update(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
+        crate::connections::require_music_writes()?;
         let mut timing = crate::timing::Span::new("tag.update", &request.track_key);
         timing.stage("validate_and_resolve");
         request.expected.validate()?;
@@ -1389,6 +1400,7 @@ impl TagService {
     }
 
     pub(crate) fn undo(&self, track_id: &str, track_key: &str) -> Result<TrackTagSnapshot, String> {
+        crate::connections::require_music_writes()?;
         let resolved = catalog::resolve_track(track_id, track_key, &self.store)?;
         let operation = self
             .store

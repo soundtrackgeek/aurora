@@ -67,7 +67,11 @@ impl ArtworkSelectionRegistry {
             self.selections.pop_front();
         }
         SelectedArtwork {
-            preview_url: format!("http://aurora-cover.localhost/selected/{token}?size=256"),
+            preview_url: if cfg!(target_os = "macos") {
+                format!("aurora-cover://localhost/selected/{token}?size=256")
+            } else {
+                format!("http://aurora-cover.localhost/selected/{token}?size=256")
+            },
             token,
             file_name,
         }

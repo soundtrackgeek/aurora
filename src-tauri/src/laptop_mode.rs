@@ -41,6 +41,11 @@ impl LaptopModeRuntime {
     }
 
     pub(crate) fn set_enabled(&mut self, enabled: bool) -> Result<LaptopModeStatus, String> {
+        if crate::connections::network_mode() {
+            return Err(
+                "Change Network Mode in Settings → Connections, then restart Aurora.".to_owned(),
+            );
+        }
         self.settings.set_laptop_mode(enabled)?;
         Ok(self.status(true))
     }
@@ -48,7 +53,9 @@ impl LaptopModeRuntime {
     fn combined_status(&self, mirror: StateMirrorStatus) -> LaptopModeStatus {
         LaptopModeStatus {
             laptop_mode: self.settings.laptop_mode(),
-            mode_label: if self.settings.laptop_mode() {
+            mode_label: if crate::connections::network_mode() {
+                "Network Mode"
+            } else if self.settings.laptop_mode() {
                 "Laptop Mode"
             } else {
                 "Desktop Mode"

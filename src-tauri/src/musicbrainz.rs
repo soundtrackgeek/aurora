@@ -178,6 +178,11 @@ struct ReleaseDecision {
 }
 
 pub(crate) fn default_source_paths() -> Result<(PathBuf, PathBuf), String> {
+    let configured = crate::connections::active().sync_folder;
+    if !configured.is_empty() {
+        let root = PathBuf::from(configured);
+        return Ok((root.join(CACHE_FILENAME), root.join(OVERLAY_FILENAME)));
+    }
     let profile = env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .ok_or_else(|| "Windows USERPROFILE is unavailable.".to_owned())?;
