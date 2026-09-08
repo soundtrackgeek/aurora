@@ -39,7 +39,7 @@ export function TonehavnSettingsPanel() {
 
   return <section className="tonehavn-settings" aria-labelledby="tonehavn-heading">
     <h3 id="tonehavn-heading">Tonehavn account</h3>
-    <p>Connect Aurora as a trusted device using your Tonehavn account. Remote music editing will be added separately.</p>
+    <p>Connect Aurora as a trusted device using your Tonehavn account. A connected PC can apply whole-star ratings and Love edits. Other tag edits remain on the PC.</p>
     <fieldset disabled={busy}>
       <label>Tonehavn server address<input type="url" value={server} disabled={status?.savedSession} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="https://your-pc.ts.net" onChange={e => setServer(e.target.value)} /></label>
       {!status?.savedSession && <>

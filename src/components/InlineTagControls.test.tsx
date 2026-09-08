@@ -3,26 +3,26 @@ import { describe, expect, it, vi } from "vitest";
 import { InlineLoveControl, InlineRatingControl } from "./InlineTagControls";
 
 describe("Explore inline tag controls", () => {
-  it("offers half-star hit areas and emits the clicked rating", () => {
+  it("offers whole-star hit areas and emits the clicked rating", () => {
     const onRatingChange = vi.fn();
     const onRowDoubleClick = vi.fn();
     render(
       <div onDoubleClick={onRowDoubleClick}>
         <InlineRatingControl
           title="Annabel"
-          rating={3.5}
+          rating={3}
           busy={false}
           onRatingChange={onRatingChange}
         />
       </div>,
     );
 
-    const target = screen.getByRole("button", { name: "Rate Annabel 4.5 stars" });
+    const target = screen.getByRole("button", { name: "Rate Annabel 4.0 stars" });
     fireEvent.click(target);
     fireEvent.doubleClick(target);
-    expect(onRatingChange).toHaveBeenCalledWith(4.5);
+    expect(onRatingChange).toHaveBeenCalledWith(4);
     expect(onRowDoubleClick).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Rate Annabel 3.5 stars" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Rate Annabel 3.0 stars" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("toggles Love directly and exposes the busy state", () => {

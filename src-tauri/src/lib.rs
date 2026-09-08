@@ -22,6 +22,7 @@ mod playback;
 mod playback_persistence;
 mod publishers;
 mod ratings;
+mod remote_affinity;
 mod replay_gain;
 mod shortcuts;
 mod snapshot_io;
@@ -1094,6 +1095,9 @@ async fn update_track_tags(
                 service.update(request)?
             };
             refresh_playback_track_tags(&app, &result.track);
+            if connections::network_mode() {
+                return Ok::<TrackTagSnapshot, String>(result);
+            }
             let directory = result.track.directory.clone();
             let sync = coordinator.queue_after_edit(&app, std::slice::from_ref(&directory));
             if sync.completed(&directory) {

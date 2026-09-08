@@ -400,6 +400,92 @@ pub(crate) fn logout(root: &Path) -> Result<Status, String> {
     ))
 }
 
+pub(crate) fn edit_affinity(
+    root: &Path,
+    source_path: &str,
+    expected: &crate::tag_model::TagValues,
+    desired: &crate::tag_model::TagValues,
+) -> Result<(), String> {
+    use crate::tag_model::LoveState;
+    let _guard = AUTH_LOCK
+        .lock()
+        .map_err(|_| "Tonehavn authentication is unavailable.")?;
+    let config = read_config(root)?;
+    if config.server.is_empty() {
+        return Err("Sign in to Tonehavn in Settings → Connections before editing.".into());
+    }
+    let server = origin(&config.server)?;
+    let mut saved = read_credential(&server)?
+        .ok_or("Sign in to Tonehavn in Settings → Connections before editing.")?;
+    let client = client()?;
+    let response = request(
+        &client,
+        Method::GET,
+        &server,
+        "/api/v1/auth/session",
+        Some(&saved),
+    )
+    .send()
+    .map_err(|_| "Tonehavn is unavailable. No edit was sent.")?;
+    let current = envelope(response)?;
+    saved.csrf = current.csrf_token;
+    save_credential(&saved)?;
+    let mut body = serde_json::json!({"sourcePath":source_path, "expected":{"rating":expected.rating.map(|r|r as u8),"loved":expected.love_state==LoveState::Loved}});
+    if desired.rating != expected.rating {
+        body["rating"] = serde_json::json!(desired.rating.map_or(0, |r| r as u8));
+    }
+    if desired.love_state != expected.love_state {
+        body["loved"] = serde_json::json!(desired.love_state == LoveState::Loved);
+    }
+    if desired == expected {
+        return Ok(());
+    }
+    let response = request(&client,Method::POST,&server,"/api/v1/aurora/affinity",Some(&saved)).timeout(Duration::from_secs(120)).json(&body).send()
+        .map_err(|_| "No confirmed edit receipt arrived. The PC may have applied it; reload the track before trying again.")?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("Tonehavn could not resolve this file. Install Tonehavn 0.38.4 or newer and ensure its catalog includes the exact MP3.".into());
+    }
+    if response.status() == StatusCode::CONFLICT {
+        return Err(
+            "The PC file or rating/Love values changed. If you just edited this song, wait for Tonehavn’s catalog refresh to finish; otherwise reload the track before trying again."
+                .into(),
+        );
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Tonehavn did not confirm the edit (HTTP {}). Reload the track before retrying.",
+            response.status().as_u16()
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Receipt {
+        track_id: uuid::Uuid,
+        rating: Option<i64>,
+        loved: bool,
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(65_537)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "The PC edit response was interrupted. Reload the track before retrying.")?;
+    if bytes.len() > 65_536 {
+        return Err("The PC edit response was oversized. Reload the track before retrying.".into());
+    }
+    let receipt: Receipt = serde_json::from_slice(&bytes)
+        .map_err(|_| "The PC edit receipt was invalid. Reload the track before retrying.")?;
+    if receipt.track_id.is_nil()
+        || receipt.rating != desired.rating.map(|r| (r * 20.0) as i64)
+        || receipt.loved != (desired.love_state == LoveState::Loved)
+    {
+        return Err(
+            "The PC receipt did not match the requested edit. Reload the track before retrying."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

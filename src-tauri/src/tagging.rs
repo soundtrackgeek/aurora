@@ -1231,6 +1231,9 @@ impl TagService {
     }
 
     pub(crate) fn update(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
+        if crate::connections::network_mode() {
+            return self.update_remote_affinity(request);
+        }
         crate::connections::require_music_writes()?;
         let mut timing = crate::timing::Span::new("tag.update", &request.track_key);
         timing.stage("validate_and_resolve");
@@ -1546,6 +1549,52 @@ impl TagService {
         if let Some(values) = restored_editor_values {
             apply_full_editor_undo_projection(&mut snapshot, &values);
         }
+        Ok(snapshot)
+    }
+
+    fn update_remote_affinity(&self, request: TagEditRequest) -> Result<TrackTagSnapshot, String> {
+        crate::remote_affinity::validate_change(&request.expected, &request.desired)?;
+        let resolved = catalog::resolve_track(&request.track_id, &request.track_key, &self.store)?;
+        let source_path = format!(
+            "{}\\{}",
+            resolved.summary.directory.trim_end_matches(['\\', '/']),
+            resolved.summary.filename
+        );
+        let root = self
+            .store
+            .path()
+            .parent()
+            .ok_or("Aurora’s data directory is unavailable.")?;
+        crate::tonehavn::edit_affinity(root, &source_path, &request.expected, &request.desired)?;
+        let mirrored = crate::remote_affinity::update_local_catalog(
+            &catalog::default_catalog_path()?,
+            &resolved,
+            &request.desired,
+        );
+        let resolved = if mirrored.is_ok() {
+            catalog::resolve_track(&request.track_id, &request.track_key, &self.store)?
+        } else {
+            resolved
+        };
+        let mut snapshot = self.snapshot_with_values(resolved, request.desired, None)?;
+        snapshot.track.can_undo_tag_edit = false;
+        snapshot.tag_state.can_undo = false;
+        snapshot.catalog_sync = Some(crate::library_sync::CatalogSync {
+            status: if mirrored.is_ok() {
+                crate::library_sync::CatalogSyncStatus::Synced
+            } else {
+                crate::library_sync::CatalogSyncStatus::Blocked
+            },
+            message: Some(match mirrored {
+                Ok(()) => "PC MP3 and both catalogs updated.".into(),
+                Err(error) => format!(
+                    "The PC edit succeeded. Refresh the Mac catalog to finish mirroring it: {error}"
+                ),
+            }),
+            pending_folder_count: 0,
+            blocked_folder_count: usize::from(snapshot.tag_state.sync_state.is_some()),
+            projection_token: None,
+        });
         Ok(snapshot)
     }
 

@@ -40,10 +40,10 @@ export function InlineRatingControl({
       {[1, 2, 3, 4, 5].map((star) => (
         <span className="inline-rating__star" key={star}>
           <RatingIcon rating={rating} star={star} />
-          {[star - 0.5, star].map((value) => (
+          {[star].map((value) => (
             <button
               type="button"
-              className={value === star ? "inline-rating__full" : "inline-rating__half"}
+              className="inline-rating__whole"
               aria-label={allowClear && rating === value
                 ? `Clear rating for ${title}`
                 : `Rate ${title} ${value.toFixed(1)} stars`}

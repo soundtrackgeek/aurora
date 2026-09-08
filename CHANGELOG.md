@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.4] - 2026-09-08
+
+### Added
+
+- Send Network Mode inline whole-star rating and Love edits to Tonehavn 0.38.5 or newer through the saved trusted session, with exact-file identity and expected-value checks. Mirror confirmed values and album aggregates into the local Mac catalog; retain an overlay and report a refresh requirement if local mirroring fails.
+
+### Changed
+
+- Song rating hit targets select whole stars. Calculated album ratings retain fractional values. General tags, Ban, undo, and other music-file mutations remain disabled in Network Mode.
+
+
 ## [0.25.3] - 2026-09-08
 
 ### Added

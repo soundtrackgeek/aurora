@@ -1,10 +1,21 @@
 # Aurora
 
+## Remote rating and Love edits (0.25.4)
+
+With **Network Mode** enabled, sign in under **Settings → Connections → Tonehavn account**, then use a song’s inline stars or heart. Tonehavn **0.38.5 or newer** resolves the exact Windows file path inside its approved roots, checks the expected rating/Love values, verifies the MP3 edit, and updates the authoritative PC Music Library catalog. Aurora then mirrors the confirmed values into the local Mac catalog and recalculates that album’s rating metrics in one transaction. The Mac never directly modifies the remote MP3.
+
+Song edits accept whole stars (1–5), unrated, and Love on/off. The player can clear its current rating. Album averages may be fractional. General tag editing, Ban, remote undo, and keyboard edit shortcuts are outside this first remote-edit slice. The PC remains authoritative; unrelated PC edits and imports still require the existing catalog refresh. Reopen or refresh Music Library views to see local catalog changes.
+
+Conflicting edits are rejected. If no receipt arrives, the PC may have applied the edit: reload the track before retrying. If the PC succeeds but the local catalog cannot be updated, Aurora preserves a tag overlay and reports that a catalog refresh is needed; it does not reapply the MP3 edit automatically. Tonehavn may need its background catalog publication to finish before another edit to the same file is accepted. Keep the catalog on local Mac storage.
+
+
+Verified on macOS against Tonehavn 0.38.5: inline four-star and Love edits reached the PC MP3, the consistent PC Music Library snapshot, and the Mac catalog with matching album aggregates. At this library size, Tonehavn’s full serving-catalog refresh took about 16 minutes; another edit to the same file can be rejected until publication finishes.
+
 ## Tonehavn authentication (0.25.3)
 
 Open **Settings → Connections → Tonehavn account** and enter the same HTTPS server address, username, password and six-digit authenticator code used by Tonehavn. Aurora requests its own trusted session, stores the session cookie and CSRF token in macOS Keychain (Windows Credential Manager on Windows), and never saves the password or authenticator code. Only the server address and a device ID are stored in local `tonehavn-auth.json`; nothing is synchronized through OneDrive. HTTPS certificates are verified and redirects are rejected.
 
-Opening Connections verifies a saved session and refreshes its anti-forgery token. **Verify saved session** retries after connection failures. Expired or revoked sessions require a fresh sign-in. **Sign out of Tonehavn** revokes the session on the server before removing its local credential; if the server is unavailable, reconnect and retry. The connection works without restarting Aurora. This release adds authentication only: rating, Love and tag editing are still disabled in Network Mode.
+Opening Connections verifies a saved session and refreshes its anti-forgery token. **Verify saved session** retries after connection failures. Expired or revoked sessions require a fresh sign-in. **Sign out of Tonehavn** revokes the session on the server before removing its local credential; if the server is unavailable, reconnect and retry. The connection works without restarting Aurora. Authentication supports the remote rating/Love workflow described above.
 
 
 ## Playback history correction (0.25.1)
@@ -23,7 +34,7 @@ On Mac a blank sync folder disables sync, while playback/history remain local. M
 
 macOS SMB servers may reject full-disk flush with “Operation not supported.” Version 0.25.2 falls back to a normal `fsync` only for that specific error, retaining snapshot validation and atomic replacement. All other flush errors still stop publication. Conflicting changes on two devices remain protected; resolve which player state to retain before continuing sync. Mac validation covered playback, artwork, local catalog refresh, startup with an unavailable sync folder, PC-to-Mac state restoration, and matching state/history revisions after Mac publication to the Windows SMB share. The PC then restored the Mac-published track at its saved position without a reported conflict.
 
-Network Mode is read-only for music files: tag edits, rating/Love writes, intake, conversion, deletion, companion mutations and tag recovery are blocked. Listening history and player state still save locally and synchronize. Native macOS media-key/Now Playing integration and remote edit delegation are not included. The companion defaults to `/Applications/Music Library.app/Contents/MacOS/music-library`; `AURORA_MUSIC_LIBRARY_EXE` can override its path.
+Network Mode blocks direct music-file writes: supported rating/Love changes are delegated to Tonehavn; general tag edits, intake, conversion, deletion, local companion mutations and tag recovery are blocked. Listening history and player state still save locally and synchronize. Native macOS media-key/Now Playing integration and remote edit delegation are not included. The companion defaults to `/Applications/Music Library.app/Contents/MacOS/music-library`; `AURORA_MUSIC_LIBRARY_EXE` can override its path.
 
 Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.41 adds catalog search for artist lifespans, duration, decimal album ratings, and chart ranks. See [the search guide](docs/search.md) for syntax and examples.
 

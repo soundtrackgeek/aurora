@@ -32,7 +32,7 @@ export function ConnectionSettingsPanel() {
   if (!draft) return <p role="status">{error || "Loading connections…"}</p>;
   return <section className="connection-settings">
     <p>Keep your catalog on this computer. Mount music and sync folders in Finder before opening Aurora.</p>
-    <label><input type="checkbox" checked={draft.networkMode} onChange={e => setDraft({ ...draft, networkMode: e.target.checked })} /> Network Mode — browse and play; music-file edits are disabled</label>
+    <label><input type="checkbox" checked={draft.networkMode} onChange={e => setDraft({ ...draft, networkMode: e.target.checked })} /> Network Mode — play over SMB; rating and Love edits use Tonehavn</label>
     <label>Local catalog file<input value={draft.catalogPath} placeholder="Blank uses Music Library’s local database" onChange={e => setDraft({ ...draft, catalogPath: e.target.value })} /></label>
     <label>Sync folder<input value={draft.syncFolder} placeholder="Mounted _musicbackup folder; blank disables sync on Mac" onChange={e => setDraft({ ...draft, syncFolder: e.target.value })} /></label>
     <p>Sync exchanges verified Aurora state and listening-history snapshots. The music catalog is updated separately. An unavailable share leaves local data intact.</p>
