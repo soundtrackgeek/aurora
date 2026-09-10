@@ -1124,6 +1124,31 @@ function App() {
     };
   }, [libraryReady, refreshCatalogIfChanged]);
 
+  const refreshSelectedAlbumPopularity = useCallback((albumId: string, requestId: number) => {
+    void loadAlbumPopularity(albumId).then((popularity) => {
+      if (requestId !== albumRequestRef.current) return;
+      setAlbumTracks((current) => applyAlbumPopularity(current, popularity));
+    }).catch(() => {
+      // Cached evidence remains visible when Last.fm is offline or not configured.
+    });
+  }, []);
+
+  const refreshSelectedAlbumFiles = useCallback((albumId: string, requestId: number) => {
+    void loadAlbumDetail(albumId).then((detail) => {
+      if (requestId !== albumRequestRef.current) return;
+      const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
+      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
+      setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
+      setAlbumTracksTruncated(detail.tracksTruncated);
+      setSelectedTrack((current) => detail.tracks.find((track) => track.trackKey === current?.trackKey) ?? detail.tracks[0] ?? null);
+    }).catch((error: unknown) => {
+      // Keep the local tracks usable if the music share cannot be refreshed.
+      console.warn("Aurora could not refresh album files", error);
+    }).finally(() => {
+      if (requestId === albumRequestRef.current) refreshSelectedAlbumPopularity(albumId, requestId);
+    });
+  }, [refreshSelectedAlbumPopularity]);
+
   useEffect(() => {
     const candidates = [
       ...(snapshot?.tracks ?? []),
@@ -1211,7 +1236,7 @@ function App() {
             if (!preservingCurrentView) {
               setAlbumDetailState("loading");
             }
-            void loadAlbumDetail(restoredAlbumId)
+            void loadAlbumDetail(restoredAlbumId, { localOnly: true })
               .then((detail) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
                 const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
@@ -1222,7 +1247,7 @@ function App() {
                 setAlbumTracksTruncated(detail.tracksTruncated);
                 setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
                 setAlbumDetailState("ready");
-                refreshSelectedAlbumPopularity(restoredAlbumId, albumDetailRequestId);
+                refreshSelectedAlbumFiles(restoredAlbumId, albumDetailRequestId);
               })
               .catch((error: unknown) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
@@ -1251,7 +1276,7 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace]);
+  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles]);
 
   useEffect(() => {
     if (
@@ -2653,7 +2678,7 @@ function App() {
     setTagSelectionKind("album");
     if (inspectorViewRef.current !== "tags") setInspectorView("album");
     setAlbumDetailState("loading");
-    void loadAlbumDetail(album.id)
+    void loadAlbumDetail(album.id, { localOnly: true })
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
         const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
@@ -2662,22 +2687,13 @@ function App() {
         setAlbumTracksTruncated(detail.tracksTruncated);
         setSelectedTrack(detail.tracks[0] ?? null);
         setAlbumDetailState("ready");
-        refreshSelectedAlbumPopularity(album.id, requestId);
+        refreshSelectedAlbumFiles(album.id, requestId);
       })
       .catch((error: unknown) => {
         if (requestId !== albumRequestRef.current) return;
         console.warn("Aurora could not open album details", error);
         setAlbumDetailState("error");
       });
-  }
-
-  function refreshSelectedAlbumPopularity(albumId: string, requestId: number) {
-    void loadAlbumPopularity(albumId).then((popularity) => {
-      if (requestId !== albumRequestRef.current) return;
-      setAlbumTracks((current) => applyAlbumPopularity(current, popularity));
-    }).catch(() => {
-      // Cached evidence remains visible when Last.fm is offline or not configured.
-    });
   }
 
   async function playExplorerAlbum(album: ExplorerAlbum) {
@@ -3078,7 +3094,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.9</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.10</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

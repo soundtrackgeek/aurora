@@ -414,6 +414,14 @@ pub(crate) fn apply_overlays(
         return Ok(());
     };
     crate::live_genres::apply(tracks, store)?;
+    apply_saved_overlays(tracks, store)
+}
+
+// Local album previews must never probe music files on a mounted share.
+pub(crate) fn apply_saved_overlays(
+    tracks: &mut [TrackSummary],
+    store: &StateStore,
+) -> Result<(), String> {
     let keys = tracks
         .iter()
         .map(|track| track.track_key.clone())

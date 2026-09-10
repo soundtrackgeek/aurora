@@ -1114,14 +1114,56 @@ pub(crate) fn load_album_detail(
 ) -> Result<AlbumDetail, String> {
     let album_id = validate_identity(&album_id, "Album identity", 512)?;
     let connection = open_catalog(&default_catalog_path()?)?;
-    attach_aurora_state(&connection, store)?;
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS aurora_state",
+            [store.path().to_string_lossy().as_ref()],
+        )
+        .map_err(|e| format!("Could not attach album edit state: {e}"))?;
+    crate::live_genres::prepare_album(&connection, &album_id)?;
     album_detail_from_connection(&connection, &album_id, Some(store))
+}
+
+pub(crate) fn load_local_album_detail(
+    album_id: String,
+    store: &StateStore,
+) -> Result<AlbumDetail, String> {
+    let album_id = validate_identity(&album_id, "Album identity", 512)?;
+    let connection = open_catalog(&default_catalog_path()?)?;
+    local_album_detail_from_connection(&connection, &album_id, store)
+}
+
+fn local_album_detail_from_connection(
+    connection: &Connection,
+    album_id: &str,
+    store: &StateStore,
+) -> Result<AlbumDetail, String> {
+    // Empty temporary projections let the shared queries use catalog genres.
+    // Do not attach/rebuild global live state: that reads pending music files.
+    connection
+        .pragma_update(None, "query_only", false)
+        .map_err(|e| e.to_string())?;
+    let prepared = connection.execute_batch(crate::live_genres::SCHEMA);
+    connection
+        .pragma_update(None, "query_only", true)
+        .map_err(|e| e.to_string())?;
+    prepared.map_err(|e| format!("Could not prepare local album details: {e}"))?;
+    album_detail_with_file_refresh(connection, album_id, Some(store), false)
 }
 
 fn album_detail_from_connection(
     connection: &Connection,
     album_id: &str,
     store: Option<&StateStore>,
+) -> Result<AlbumDetail, String> {
+    album_detail_with_file_refresh(connection, album_id, store, true)
+}
+
+fn album_detail_with_file_refresh(
+    connection: &Connection,
+    album_id: &str,
+    store: Option<&StateStore>,
+    refresh_files: bool,
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
@@ -1140,8 +1182,12 @@ fn album_detail_from_connection(
         .map_err(|error| format!("Could not read the album tracks: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the album tracks: {error}"))?;
-    apply_overlays(&mut tracks, store)?;
-    let deleted_track_keys = if let Some(store) = store {
+    if refresh_files {
+        apply_overlays(&mut tracks, store)?;
+    } else if let Some(store) = store {
+        crate::catalog::apply_saved_overlays(&mut tracks, store)?;
+    }
+    let deleted_track_keys = if let Some(store) = store.filter(|_| refresh_files) {
         ratings::pending_deleted_track_keys_for_album(connection, album_id, store)?
     } else {
         HashSet::new()
@@ -2270,6 +2316,113 @@ mod tests {
         assert_eq!(detail.tracks[0].title, "Sæglópur");
         assert_eq!(detail.tracks[0].display_artist.as_deref(), Some("Jónsi"));
         assert!(!detail.tracks_truncated);
+    }
+
+    #[test]
+    fn local_album_returns_saved_edits_before_pending_file_reconciliation() {
+        use crate::tag_model::{LoveState, TagValues};
+        use id3::TagLike;
+
+        let connection = fixture();
+        connection
+            .execute("ALTER TABLE albums ADD COLUMN album_rating REAL", [])
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        let mut tag = id3::Tag::new();
+        tag.set_genre("Soundtrack");
+        let path = directory.path().join("01.mp3");
+        std::fs::write(&path, []).unwrap();
+        tag.write_to_path(&path, id3::Version::Id3v24).unwrap();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a1'",
+                [&folder],
+            )
+            .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        store
+            .queue_library_file_syncs(&[
+                (folder.clone(), "01.mp3".into()),
+                (folder.clone(), "02.mp3".into()),
+            ])
+            .unwrap();
+        let key = crate::catalog::normalize_track_key(&folder, "01.mp3");
+        store
+            .upsert_overlay(
+                &key,
+                &folder,
+                "01.mp3",
+                &TagValues {
+                    rating: Some(5.0),
+                    love_state: LoveState::Loved,
+                    release_year: Some(2005),
+                },
+                &TagValues {
+                    rating: Some(4.0),
+                    love_state: LoveState::Neutral,
+                    release_year: Some(2006),
+                },
+                1,
+                None,
+            )
+            .unwrap();
+
+        connection.execute_batch("DETACH DATABASE aurora_state; DROP TABLE temp.aurora_live_track_genres; DROP TABLE temp.aurora_live_album_genres;").unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        let local = local_album_detail_from_connection(&connection, "a1", &store).unwrap();
+        assert!(
+            connection
+                .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert_eq!(
+            local.tracks.len(),
+            2,
+            "local reads do not probe pending missing files"
+        );
+        assert_eq!(local.tracks[0].genre.as_deref(), Some("Post-rock"));
+        assert_eq!(local.tracks[0].rating, Some(4.0));
+        assert_eq!(local.tracks[0].release_year, Some(2006));
+        assert!(!local.tracks[0].loved);
+        assert_eq!(local.album.rated_tracks, 1);
+        assert_eq!(local.album.loved_tracks, 0);
+
+        let refreshed = album_detail_from_connection(&connection, "a1", Some(&store)).unwrap();
+        assert_eq!(
+            refreshed.tracks.len(),
+            1,
+            "background refresh still reconciles deletion"
+        );
+        assert_eq!(refreshed.tracks[0].genre.as_deref(), Some("Soundtrack"));
+        assert_eq!(refreshed.tracks[0].rating, Some(4.0));
+    }
+
+    #[test]
+    fn album_genre_preparation_excludes_other_pending_albums() {
+        use id3::TagLike;
+        let connection = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        let mut tag = id3::Tag::new();
+        tag.set_genre("Soundtrack");
+        for filename in ["01.mp3", "02.mp3", "03.mp3"] {
+            let path = directory.path().join(filename);
+            std::fs::write(&path, []).unwrap();
+            tag.write_to_path(&path, id3::Version::Id3v24).unwrap();
+        }
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id IN ('a1', 'a2')",
+                [&folder],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO aurora_state.pending_library_folder_sync(directory, updated_at_ms) VALUES (?1, 1)", [&folder]).unwrap();
+        crate::live_genres::prepare_album(&connection, "a1").unwrap();
+        let selected = album_detail_from_connection(&connection, "a1", None).unwrap();
+        let other = album_detail_from_connection(&connection, "a2", None).unwrap();
+        assert_eq!(selected.album.genre.as_deref(), Some("Soundtrack"));
+        assert_eq!(other.album.genre.as_deref(), Some("Post-rock"));
     }
 
     #[test]

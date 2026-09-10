@@ -622,7 +622,7 @@ export async function exploreArtists(request: ArtistPageRequest): Promise<Artist
   return invoke<ArtistPage>("explore_artists", { request });
 }
 
-export async function loadAlbumDetail(albumId: string): Promise<AlbumDetail> {
+export async function loadAlbumDetail(albumId: string, options: { localOnly?: boolean } = {}): Promise<AlbumDetail> {
   if (!isTauriRuntime()) {
     const album = browserAlbumSummaries().find((candidate) => candidate.id === albumId);
     if (!album) throw new Error("That album is no longer available.");
@@ -630,7 +630,7 @@ export async function loadAlbumDetail(albumId: string): Promise<AlbumDetail> {
     const popularity = { tracks: tracks.filter((track) => track.playCount !== null).sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0)).slice(0, 3).map((track, index) => ({ trackKey: track.trackKey, rank: index + 1 })) };
     return { album, tracks: applyAlbumPopularity(tracks, popularity), tracksTruncated: false, popularity };
   }
-  return invoke<AlbumDetail>("album_detail", { albumId });
+  return invoke<AlbumDetail>("album_detail", { albumId, localOnly: options.localOnly ?? false });
 }
 
 export async function loadAlbumPopularity(albumId: string): Promise<AlbumPopularity> {

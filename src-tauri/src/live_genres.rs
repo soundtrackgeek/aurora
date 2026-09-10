@@ -134,6 +134,14 @@ pub(crate) const SCHEMA: &str = r#"
 "#;
 
 pub(crate) fn prepare(connection: &Connection) -> Result<(), String> {
+    prepare_scope(connection, None)
+}
+
+pub(crate) fn prepare_album(connection: &Connection, album_id: &str) -> Result<(), String> {
+    prepare_scope(connection, Some(album_id))
+}
+
+fn prepare_scope(connection: &Connection, album_id: Option<&str>) -> Result<(), String> {
     let query_only: bool = connection
         .pragma_query_value(None, "query_only", |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -143,8 +151,8 @@ pub(crate) fn prepare(connection: &Connection) -> Result<(), String> {
     let result = (|| -> rusqlite::Result<()> {
         connection.execute_batch(SCHEMA)?;
         connection.execute_batch("DELETE FROM temp.aurora_live_track_genres; DELETE FROM temp.aurora_live_album_genres; DELETE FROM temp.aurora_live_genre_fts; DELETE FROM temp.aurora_live_album_genre_fts;")?;
-        let mut statement = connection.prepare("SELECT t.id, t.album_id, t.file_path, t.filename, t.canonical_genre FROM aurora_state.pending_library_folder_sync p CROSS JOIN tracks t ON t.file_path = p.directory AND (p.filename IS NULL OR p.filename = t.filename)")?;
-        let rows = statement.query_map([], |r| {
+        let mut statement = connection.prepare("SELECT t.id, t.album_id, t.file_path, t.filename, t.canonical_genre FROM aurora_state.pending_library_folder_sync p CROSS JOIN tracks t ON t.file_path = p.directory AND (p.filename IS NULL OR p.filename = t.filename) WHERE (?1 IS NULL OR t.album_id = ?1)")?;
+        let rows = statement.query_map([album_id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, Option<String>>(1)?,

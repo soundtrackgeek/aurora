@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.10] - 2026-09-10
+
+### Fixed
+
+- Show local album tracks and saved rating/Love edits before checking pending music files, keeping slow Mac music shares out of the initial album loading path.
+- Scope background genre reconciliation to the selected album, retain local results on refresh failure, and ignore stale refreshes after switching albums.
+- Avoid repeating file reconciliation for Last.fm popularity and record local versus live album timing stages.
+
 ## [0.25.9] - 2026-09-10
 
 ### Fixed

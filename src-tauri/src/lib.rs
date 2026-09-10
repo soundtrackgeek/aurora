@@ -472,12 +472,24 @@ async fn explore_artists(app: AppHandle, request: ArtistPageRequest) -> Result<A
 }
 
 #[tauri::command]
-async fn album_detail(app: AppHandle, album_id: String) -> Result<AlbumDetail, String> {
+async fn album_detail(
+    app: AppHandle,
+    album_id: String,
+    local_only: Option<bool>,
+) -> Result<AlbumDetail, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        let mut detail = explorer::load_album_detail(album_id, &store)?;
+        let mut span = timing::Span::new("album_detail", &album_id);
+        let mut detail = if local_only.unwrap_or(false) {
+            span.stage("local_catalog");
+            explorer::load_local_album_detail(album_id, &store)?
+        } else {
+            span.stage("live_file_refresh");
+            explorer::load_album_detail(album_id, &store)?
+        };
         detail.popularity =
             lastfm::cached_album_popularity(&detail.album.artist, &detail.tracks, &store);
+        span.finish(true);
         Ok(detail)
     })
     .await
@@ -488,7 +500,7 @@ async fn album_detail(app: AppHandle, album_id: String) -> Result<AlbumDetail, S
 async fn album_popularity(app: AppHandle, album_id: String) -> Result<AlbumPopularity, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        let detail = explorer::load_album_detail(album_id, &store)?;
+        let detail = explorer::load_local_album_detail(album_id, &store)?;
         Ok(lastfm::refresh_album_popularity(
             &detail.album.artist,
             &detail.tracks,
