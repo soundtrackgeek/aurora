@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.25.12] - 2026-09-10
+
+### Fixed
+
+- Pending tag recovery restores orphaned retry entries and gives previously blocked folders one fresh attempt. Guarded per-file metadata sync can import ratings even when missing bonus tracks prevent whole-album reconciliation; unresolved folder differences remain queued for review.
+
 ## [0.25.11] - 2026-09-10
 
 ### Fixed

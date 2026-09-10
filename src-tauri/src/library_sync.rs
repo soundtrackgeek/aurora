@@ -390,10 +390,7 @@ fn sync_target_with_overlay_fallback(
     let Err(primary_error) = primary else {
         return Ok(());
     };
-    if target.filename.is_some()
-        || transient_library_sync_error(&primary_error)
-        || structural_library_sync_error(&primary_error)
-    {
+    if target.filename.is_some() || transient_library_sync_error(&primary_error) {
         return Err(primary_error);
     }
 
@@ -409,7 +406,7 @@ fn sync_target_with_overlay_fallback(
             continue;
         }
         if let Err(error) = synchronize(changed_files) {
-            if transient_library_sync_error(&error) || structural_library_sync_error(&error) {
+            if transient_library_sync_error(&error) {
                 return Err(error);
             }
             fallback_error.get_or_insert(error);
@@ -419,7 +416,7 @@ fn sync_target_with_overlay_fallback(
 }
 
 fn structural_library_sync_error(error: &str) -> bool {
-    // Both failures need reviewed reconciliation, not repeated automatic per-track attempts.
+    // Retain the folder for reviewed reconciliation even after guarded per-file updates.
     error.contains("background sync requires reviewed reconciliation")
         || (error.contains("metadata-only") && error.contains("add or remove catalog rows"))
 }
@@ -618,30 +615,57 @@ mod tests {
     }
 
     #[test]
-    fn structural_mismatch_does_not_retry_every_overlay_track() {
-        let target = pending(r"D:\Music\Incomplete Album", 42);
-        let calls = std::cell::Cell::new(0);
-        let error = sync_target_with_overlay_fallback(&target, &["One.mp3".into(), "Two.mp3".into()], |_| {
-            calls.set(calls.get() + 1);
-            Err("Aurora existing-folder sync is metadata-only, but the prepared delta would add or remove catalog rows".into())
-        }).unwrap_err();
-        assert!(structural_library_sync_error(&error));
-        assert_eq!(calls.get(), 1);
+    fn structural_folder_failure_attempts_guarded_files_but_retains_folder() {
+        for error in [
+            "Aurora existing-folder sync is metadata-only, but the prepared delta would add or remove catalog rows",
+            "Aurora background sync requires reviewed reconciliation",
+        ] {
+            let directory = TempDir::new().unwrap();
+            for file in ["One.mp3", "Two.mp3"] {
+                std::fs::write(directory.path().join(file), b"audio").unwrap();
+            }
+            let target = pending(&directory.path().to_string_lossy(), 42);
+            let calls = std::cell::Cell::new(0);
+            let result = sync_target_with_overlay_fallback(
+                &target,
+                &["One.mp3".into(), "Two.mp3".into()],
+                |files| {
+                    calls.set(calls.get() + 1);
+                    if files.is_empty() {
+                        Err(error.to_owned())
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(result.unwrap_err(), error);
+            assert_eq!(calls.get(), 3);
+        }
     }
 
     #[test]
-    fn reviewed_reconciliation_blocks_without_trying_each_overlay_track() {
-        let target = pending("D:/Music/Needs review", 42);
+    fn one_rejected_exact_file_does_not_starve_the_other_pending_files() {
+        let directory = TempDir::new().unwrap();
+        for file in ["One.mp3", "Two.mp3"] {
+            std::fs::write(directory.path().join(file), b"audio").unwrap();
+        }
+        let target = pending(&directory.path().to_string_lossy(), 43);
         let calls = std::cell::Cell::new(0);
-        let error = sync_target_with_overlay_fallback(
-            &target, &["One.mp3".into(), "Two.mp3".into()], |_| {
-                calls.set(calls.get() + 1);
-                Err("Could not sync album: Aurora background sync requires reviewed reconciliation: file edits retained".into())
+        let result = sync_target_with_overlay_fallback(
+            &target,
+            &["One.mp3".into(), "Two.mp3".into()],
+            |_| {
+                let call = calls.get();
+                calls.set(call + 1);
+                if call < 2 {
+                    Err("Aurora background sync requires reviewed reconciliation".into())
+                } else {
+                    Ok(())
+                }
             },
-        ).unwrap_err();
-        assert!(structural_library_sync_error(&error));
-        assert!(!transient_library_sync_error(&error));
-        assert_eq!(calls.get(), 1);
+        );
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 3);
     }
 
     #[test]

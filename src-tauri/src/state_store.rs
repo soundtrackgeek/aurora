@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -476,6 +476,12 @@ impl StateStore {
                 .map_err(|error| {
                     format!("Could not queue Aurora's complete live tag backlog: {error}")
                 })?;
+        }
+        if current < 14 {
+            transaction.execute(
+                "UPDATE pending_library_folder_sync SET attempt_count = 0, next_attempt_at_ms = 0",
+                [],
+            ).map_err(|error| format!("Could not reopen pending metadata sync after the recovery upgrade: {error}"))?;
         }
         let synchronized_tables = [
             "playback_queue",
@@ -1019,6 +1025,23 @@ impl StateStore {
             )
         }
         .map_err(|error| format!("Could not reconcile Aurora's tag overlay: {error}"))?;
+        if changed == 1 && values != catalog_values {
+            // A successful bridge can still leave a real mismatch (for example
+            // legacy release-year tags). Restore lost work, without resetting a
+            // blocked folder's budget or overwriting a newer queued edit.
+            connection.execute(
+                "INSERT INTO pending_library_folder_sync(directory, filename, updated_at_ms)
+                 SELECT directory, CASE WHEN COUNT(*) = 1 THEN MIN(filename) ELSE NULL END,
+                        MAX(updated_at_ms)
+                 FROM tag_overlays
+                 WHERE directory = ?1 COLLATE NOCASE
+                   AND NOT EXISTS (SELECT 1 FROM pending_library_folder_sync WHERE directory = ?1 COLLATE NOCASE)
+                   AND (SELECT COUNT(*) FROM pending_library_folder_sync) < ?2
+                 GROUP BY directory COLLATE NOCASE
+                 ON CONFLICT(directory) DO NOTHING",
+                params![&overlay.directory, MAX_PENDING_LIBRARY_FOLDER_SYNCS as i64],
+            ).map_err(|error| format!("Could not restore Aurora's pending metadata sync: {error}"))?;
+        }
         Ok(changed == 1)
     }
 
@@ -2047,6 +2070,70 @@ mod tests {
                 .is_empty()
         );
 
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn reconciliation_restores_orphaned_sync_without_resetting_blocked_work() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).unwrap();
+        let key = r"d:\music\album\track.mp3";
+        let directory = r"D:\Music\Album";
+        let catalog = TagValues {
+            rating: Some(4.0),
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let desired = TagValues {
+            release_year: Some(2012),
+            ..catalog.clone()
+        };
+        store
+            .upsert_overlay(key, directory, "Track.mp3", &catalog, &desired, 1, None)
+            .unwrap();
+        let overlay = store.pending_overlays(1).unwrap().remove(0);
+        assert!(
+            store
+                .reconcile_pending_overlay_if_current(&overlay, &catalog, &desired, 2)
+                .unwrap()
+        );
+        let target = store.pending_library_folder_sync(1).unwrap().remove(0);
+        assert_eq!(target.filename.as_deref(), Some("Track.mp3"));
+        store
+            .block_library_folder_sync(&target, "needs review")
+            .unwrap();
+        let overlay = store.pending_overlays(1).unwrap().remove(0);
+        store
+            .reconcile_pending_overlay_if_current(&overlay, &catalog, &desired, 2)
+            .unwrap();
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+        let count: i64 = store
+            .open()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM pending_library_folder_sync",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // The release upgrade gives existing blocked work one fresh guarded attempt.
+        store
+            .open()
+            .unwrap()
+            .pragma_update(None, "user_version", 13)
+            .unwrap();
+        drop(store);
+        let store = StateStore::new(path.clone()).unwrap();
+        assert_eq!(store.pending_library_folder_sync(1).unwrap().len(), 1);
+        let target = store.pending_library_folder_sync(1).unwrap().remove(0);
+        store
+            .block_library_folder_sync(&target, "still needs review")
+            .unwrap();
+        drop(store);
+        let store = StateStore::new(path.clone()).unwrap();
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
         drop(store);
         let _ = fs::remove_file(path);
     }
