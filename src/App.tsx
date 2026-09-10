@@ -159,6 +159,7 @@ import {
   shouldUseExplorerTagSelection,
 } from "./viewPreferences";
 import {
+  createExplorerRefreshQueue,
   mergeRefreshedExplorerPage,
   refreshedExplorerCursor,
   resolveExplorerRefreshPreservation,
@@ -323,6 +324,7 @@ async function loadExplorerPage(
   view: ExplorerView,
   filters: ExplorerFilters,
   cursor?: ExplorerCursor,
+  localOnly = true,
 ): Promise<ExplorerResult> {
   const shared = {
     pageSize: 50,
@@ -344,7 +346,7 @@ async function loadExplorerPage(
       sort: explorerSorts.tracks.includes(filters.sort)
         ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "albumAsc" | "albumDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
         : "newest",
-    });
+    }, { localOnly });
     return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   if (view === "albums") {
@@ -360,7 +362,7 @@ async function loadExplorerPage(
       sort: explorerSorts.albums.includes(filters.sort)
         ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
         : "yearDesc",
-    });
+    }, { localOnly });
     return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   const page = await exploreArtists({
@@ -372,7 +374,7 @@ async function loadExplorerPage(
         : filters.sort === "artistDesc"
           ? "nameDesc"
           : "nameAsc",
-  });
+  }, { localOnly });
   return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor, totalCount: page.totalCount };
 }
 
@@ -634,6 +636,8 @@ function App() {
   const loadedExplorerViewKeyRef = useRef<string | null>(null);
   const explorerCursorRef = useRef<ExplorerCursor | null>(null);
   const explorerLoadedRef = useRef(0);
+  const explorerLocalOnlyRef = useRef(true);
+  const [queueExplorerRefresh] = useState(() => createExplorerRefreshQueue<ExplorerResult>());
   const explorerLoadingMoreRef = useRef(false);
   const albumRequestRef = useRef(0);
   const artistRequestRef = useRef(0);
@@ -1124,6 +1128,38 @@ function App() {
     };
   }, [libraryReady, refreshCatalogIfChanged]);
 
+  const refreshExplorerFiles = useCallback((
+    view: ExplorerView, filters: ExplorerFilters, targetCount: number, requestId: number,
+    cancelled: () => boolean = () => false,
+  ) => {
+    const obsolete = () => cancelled() || requestId !== exploreRequestRef.current;
+    queueExplorerRefresh({
+      load: () => loadWorkspacePages<ExplorerResult>(
+        (cursor) => loadExplorerPage(view, filters, cursor, false), targetCount, obsolete,
+      ),
+      cancelled: obsolete,
+      apply: (page) => {
+        // Replace the complete loaded window: merging would retain albums that
+        // no longer satisfy a pending genre/completeness filter.
+        setExplorerTracks(page.tracks);
+        setExplorerAlbums(page.albums);
+        setExplorerArtists(page.artists);
+        setExplorerCursor(page.nextCursor);
+        setExplorerCount({ key: explorerCountKey(view, filters), total: page.totalCount });
+        explorerLocalOnlyRef.current = false;
+        const selected = selectedAlbumIdRef.current;
+        if (view === "albums" && selected && !page.albums.some((album) => album.id === selected)) {
+          albumRequestRef.current += 1;
+          setSelectedAlbumId(null);
+          setAlbumTracks([]);
+          setAlbumTracksTruncated(false);
+          setAlbumDetailState("ready");
+        }
+      },
+      failed: (error) => console.warn("Aurora kept local search results after file refresh failed", error),
+    });
+  }, [queueExplorerRefresh]);
+
   const refreshSelectedAlbumPopularity = useCallback((albumId: string, requestId: number) => {
     void loadAlbumPopularity(albumId).then((popularity) => {
       if (requestId !== albumRequestRef.current) return;
@@ -1187,6 +1223,7 @@ function App() {
     preserveExplorerOnReloadRef.current = preservation.pending;
     if (!explorerActive) return;
     const preservingCurrentView = preservation.preservingCurrentView;
+    const localOnly = !preservingCurrentView || explorerLocalOnlyRef.current;
     const requestKey = explorerRequestKey(explorerView, explorerFilters, explorerReloadToken);
     if (shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current, requestKey, preservingCurrentView)) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
@@ -1213,8 +1250,9 @@ function App() {
       if (!preservingCurrentView) setExplorerLoadState("loading");
       setExplorerError(null);
       setExplorerCursor(null);
+      explorerLocalOnlyRef.current = localOnly;
       void loadWorkspacePages<ExplorerResult>(
-        (cursor) => loadExplorerPage(explorerView, explorerFilters, cursor),
+        (cursor) => loadExplorerPage(explorerView, explorerFilters, cursor, localOnly),
         restoringStoredView && initialWorkspace.explorerKey === explorerRequestKey(explorerView, explorerFilters, 0) ? initialWorkspace.loaded : 0,
         () => cancelled,
       )
@@ -1259,6 +1297,9 @@ function App() {
           }
           if (handoffAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
           explorerRestorationPendingRef.current = false;
+          if (localOnly) refreshExplorerFiles(explorerView, explorerFilters,
+            Math.max(preservingCurrentView ? preservedLoaded : 0, page.tracks.length + page.albums.length + page.artists.length),
+            requestId, () => cancelled);
         })
         .catch((error: unknown) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
@@ -1276,7 +1317,7 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles]);
+  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles, refreshExplorerFiles]);
 
   useEffect(() => {
     if (
@@ -2817,16 +2858,20 @@ function App() {
       || !shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current,
         explorerRequestKey(explorerView, explorerFilters, explorerReloadToken), false)) return;
     const requestId = ++exploreRequestRef.current;
+    const localOnly = explorerLocalOnlyRef.current;
+    const loadedBefore = explorerLoadedRef.current;
     explorerLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
-      const page = await loadExplorerPage(explorerView, explorerFilters, explorerCursor);
+      const page = await loadExplorerPage(explorerView, explorerFilters, explorerCursor, localOnly);
       if (requestId !== exploreRequestRef.current) return;
       setExplorerTracks((current) => [...current, ...page.tracks]);
       setExplorerAlbums((current) => [...current, ...page.albums]);
       setExplorerArtists((current) => [...current, ...page.artists]);
       setExplorerCursor(page.nextCursor);
       setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
+      if (localOnly) refreshExplorerFiles(explorerView, explorerFilters,
+        loadedBefore + page.tracks.length + page.albums.length + page.artists.length, requestId);
     } catch (error) {
       if (requestId === exploreRequestRef.current) {
         setExplorerError(error instanceof Error ? error.message : String(error));
@@ -3094,7 +3139,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.10</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.11</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

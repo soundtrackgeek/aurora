@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  createExplorerRefreshQueue,
   mergeRefreshedExplorerPage,
   refreshedExplorerCursor,
   resolveExplorerRefreshPreservation,
@@ -74,5 +75,74 @@ describe("search replacement", () => {
     expect(resolveExplorerRefreshPreservation(true, true, true)).toEqual({
       preservingCurrentView: true, pending: false,
     });
+  });
+});
+
+describe("background search reconciliation", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  }
+
+  it("keeps local results usable while a file refresh is pending, then replaces excluded matches", async () => {
+    const refresh = createExplorerRefreshQueue<string[]>();
+    const network = deferred<string[]>();
+    let visible = ["local-match", "now-excluded-by-genre"];
+    refresh({ load: () => network.promise, cancelled: () => false,
+      apply: (value) => { visible = value; }, failed: () => {} });
+    expect(visible).toEqual(["local-match", "now-excluded-by-genre"]);
+    network.resolve(["local-match"]);
+    await vi.waitFor(() => expect(visible).toEqual(["local-match"]));
+  });
+
+  it("serializes refreshes and drops obsolete searches and pagination windows", async () => {
+    const refresh = createExplorerRefreshQueue<number>();
+    const first = deferred<number>();
+    let request = 1;
+    const applied = vi.fn();
+    const failed = vi.fn();
+    refresh({ load: () => first.promise, cancelled: () => request !== 1, apply: applied, failed });
+    request = 2;
+    const superseded = vi.fn(async () => 50);
+    refresh({ load: superseded, cancelled: () => request !== 2, apply: applied, failed });
+    request = 3; // The user loaded another local page before reconciliation finished.
+    const latest = vi.fn(async () => 100);
+    refresh({ load: latest, cancelled: () => request !== 3, apply: applied, failed });
+    expect(latest).not.toHaveBeenCalled();
+    first.resolve(1);
+    await vi.waitFor(() => expect(applied).toHaveBeenCalledExactlyOnceWith(100));
+    expect(superseded).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("retains local results on failure and continues with the next search", async () => {
+    const refresh = createExplorerRefreshQueue<string[]>();
+    const network = deferred<string[]>();
+    let visible = ["local"];
+    const failed = vi.fn();
+    refresh({ load: () => network.promise, cancelled: () => false,
+      apply: (value) => { visible = value; }, failed });
+    network.reject(new Error("Share unavailable"));
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce());
+    expect(visible).toEqual(["local"]);
+    refresh({ load: async () => ["next"], cancelled: () => false,
+      apply: (value) => { visible = value; }, failed });
+    await vi.waitFor(() => expect(visible).toEqual(["next"]));
+  });
+
+  it("does not apply or report errors after leaving the search", async () => {
+    const refresh = createExplorerRefreshQueue<number>();
+    const network = deferred<number>();
+    let cancelled = false;
+    const apply = vi.fn();
+    const failed = vi.fn();
+    refresh({ load: () => network.promise, cancelled: () => cancelled, apply, failed });
+    cancelled = true;
+    network.reject(new Error("Obsolete"));
+    await network.promise.catch(() => {});
+    expect(apply).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
   });
 });

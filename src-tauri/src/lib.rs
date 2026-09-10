@@ -433,30 +433,42 @@ async fn search_tracks(app: AppHandle, query: String) -> Result<Vec<TrackSummary
 }
 
 #[tauri::command]
-async fn explore_tracks(app: AppHandle, request: TrackPageRequest) -> Result<TrackPage, String> {
+async fn explore_tracks(
+    app: AppHandle,
+    request: TrackPageRequest,
+    local_only: Option<bool>,
+) -> Result<TrackPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        explorer::load_track_page(request, &store)
+        explorer::load_track_page(request, &store, local_only.unwrap_or(false))
     })
     .await
     .map_err(|error| format!("The track explorer stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
-async fn explore_albums(app: AppHandle, request: AlbumPageRequest) -> Result<AlbumPage, String> {
+async fn explore_albums(
+    app: AppHandle,
+    request: AlbumPageRequest,
+    local_only: Option<bool>,
+) -> Result<AlbumPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        explorer::load_album_page(request, &store)
+        explorer::load_album_page(request, &store, local_only.unwrap_or(false))
     })
     .await
     .map_err(|error| format!("The album explorer stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
-async fn explore_artists(app: AppHandle, request: ArtistPageRequest) -> Result<ArtistPage, String> {
+async fn explore_artists(
+    app: AppHandle,
+    request: ArtistPageRequest,
+    local_only: Option<bool>,
+) -> Result<ArtistPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        let mut page = explorer::load_artist_page(request, &store)?;
+        let mut page = explorer::load_artist_page(request, &store, local_only.unwrap_or(false))?;
         let history = app.state::<HistoryStore>();
         let insights = history.artist_insights()?;
         for artist in &mut page.items {

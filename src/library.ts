@@ -607,19 +607,19 @@ function previewArtistPage(request: ArtistPageRequest): ArtistPage {
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
 }
 
-export async function exploreTracks(request: TrackPageRequest): Promise<TrackPage> {
+export async function exploreTracks(request: TrackPageRequest, options: { localOnly?: boolean } = {}): Promise<TrackPage> {
   if (!isTauriRuntime()) return previewTrackPage(request);
-  return invoke<TrackPage>("explore_tracks", { request });
+  return invoke<TrackPage>("explore_tracks", { request, localOnly: options.localOnly ?? false });
 }
 
-export async function exploreAlbums(request: AlbumPageRequest): Promise<AlbumPage> {
+export async function exploreAlbums(request: AlbumPageRequest, options: { localOnly?: boolean } = {}): Promise<AlbumPage> {
   if (!isTauriRuntime()) return previewAlbumPage(request);
-  return invoke<AlbumPage>("explore_albums", { request });
+  return invoke<AlbumPage>("explore_albums", { request, localOnly: options.localOnly ?? false });
 }
 
-export async function exploreArtists(request: ArtistPageRequest): Promise<ArtistPage> {
+export async function exploreArtists(request: ArtistPageRequest, options: { localOnly?: boolean } = {}): Promise<ArtistPage> {
   if (!isTauriRuntime()) return previewArtistPage(request);
-  return invoke<ArtistPage>("explore_artists", { request });
+  return invoke<ArtistPage>("explore_artists", { request, localOnly: options.localOnly ?? false });
 }
 
 export async function loadAlbumDetail(albumId: string, options: { localOnly?: boolean } = {}): Promise<AlbumDetail> {

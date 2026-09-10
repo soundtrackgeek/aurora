@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.11] - 2026-09-10
+
+### Fixed
+
+- Open saved startup searches and Library track, album, and artist searches from local catalog data and saved rating-completeness edits before checking pending music files.
+- Reconcile pending genres and deletions in the background, replacing results, counts, and cursors together while retaining local results if the share fails. Serialize refreshes and discard superseded search/pagination work.
+
 ## [0.25.10] - 2026-09-10
 
 ### Fixed

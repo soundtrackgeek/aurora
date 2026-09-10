@@ -1076,28 +1076,49 @@ fn artist_page_from_connection(
 pub(crate) fn load_track_page(
     request: TrackPageRequest,
     store: &StateStore,
+    local_only: bool,
 ) -> Result<TrackPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
-    attach_aurora_state(&connection, store)?;
-    track_page_from_connection(&connection, request, Some(store))
+    prepare_search_state(&connection, store, local_only)?;
+    if local_only {
+        let mut page = track_page_from_connection(&connection, request, None)?;
+        crate::catalog::apply_saved_overlays(&mut page.items, store)?;
+        Ok(page)
+    } else {
+        track_page_from_connection(&connection, request, Some(store))
+    }
 }
 
 pub(crate) fn load_album_page(
     request: AlbumPageRequest,
     store: &StateStore,
+    local_only: bool,
 ) -> Result<AlbumPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
-    attach_aurora_state(&connection, store)?;
+    prepare_search_state(&connection, store, local_only)?;
     album_page_from_connection(&connection, request)
 }
 
 pub(crate) fn load_artist_page(
     request: ArtistPageRequest,
     store: &StateStore,
+    local_only: bool,
 ) -> Result<ArtistPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
-    attach_aurora_state(&connection, store)?;
+    prepare_search_state(&connection, store, local_only)?;
     artist_page_from_connection(&connection, request)
+}
+
+fn prepare_search_state(
+    connection: &Connection,
+    store: &StateStore,
+    local_only: bool,
+) -> Result<(), String> {
+    if local_only {
+        crate::catalog::attach_local_aurora_state(connection, store)
+    } else {
+        attach_aurora_state(connection, store)
+    }
 }
 
 fn validate_identity(value: &str, label: &str, max_chars: usize) -> Result<String, String> {
@@ -1986,6 +2007,168 @@ mod tests {
         )
         .expect("album loved-track count search");
         assert!(multiple_loves.items.is_empty());
+    }
+
+    #[test]
+    fn local_search_preserves_saved_completeness_without_probing_pending_files() {
+        use crate::tag_model::{LoveState, TagValues};
+        let connection = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a1'",
+                [&folder],
+            )
+            .unwrap();
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        store
+            .queue_library_file_syncs(&[(folder.clone(), "02.mp3".into())])
+            .unwrap();
+        store
+            .upsert_overlay(
+                &crate::catalog::normalize_track_key(&folder, "02.mp3"),
+                &folder,
+                "02.mp3",
+                &TagValues {
+                    rating: None,
+                    love_state: LoveState::Neutral,
+                    release_year: Some(2005),
+                },
+                &TagValues {
+                    rating: Some(5.0),
+                    love_state: LoveState::Neutral,
+                    release_year: Some(2005),
+                },
+                1,
+                None,
+            )
+            .unwrap();
+        // A local search must not invoke even the file-existence SQL function.
+        connection
+            .create_scalar_function(
+                "aurora_file_missing",
+                2,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                |_| -> rusqlite::Result<i64> { Err(rusqlite::Error::InvalidQuery) },
+            )
+            .unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        prepare_search_state(&connection, &store, true).unwrap();
+        assert!(
+            connection
+                .pragma_query_value(None, "query_only", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        let complete = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("cr:100..100".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(complete.items.iter().any(|album| album.id == "a1"));
+        let query = "love=1 AND cr=99 NOT genre:scores OR soundtrack";
+        let albums = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some(query.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            !albums.items.iter().any(|album| album.id == "a1"),
+            "saved ratings already exclude the completed album"
+        );
+        track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some(query.into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                search: Some(query.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn saved_search_reconciles_pending_genres_after_local_results() {
+        use id3::TagLike;
+        let connection = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        let mut tag = id3::Tag::new();
+        tag.set_genre("Soundtrack");
+        for filename in ["01.mp3", "02.mp3"] {
+            let path = directory.path().join(filename);
+            std::fs::write(&path, []).unwrap();
+            tag.write_to_path(path, id3::Version::Id3v24).unwrap();
+        }
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a1'",
+                [&folder],
+            )
+            .unwrap();
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        store
+            .queue_library_file_syncs(&[
+                (folder.clone(), "01.mp3".into()),
+                (folder, "02.mp3".into()),
+            ])
+            .unwrap();
+        let request = AlbumPageRequest {
+            search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+            ..Default::default()
+        };
+        prepare_search_state(&connection, &store, true).unwrap();
+        let local = album_page_from_connection(&connection, request.clone()).unwrap();
+        assert!(local.items.iter().any(|album| album.id == "a1"));
+        refresh_live_album_rating_projection(&connection).unwrap();
+        crate::live_genres::prepare(&connection).unwrap();
+        let live = album_page_from_connection(&connection, request).unwrap();
+        assert!(!live.items.iter().any(|album| album.id == "a1"));
+        assert!(live.total_count < local.total_count);
+    }
+
+    #[test]
+    #[ignore = "reads the local catalog to measure the saved search; uses disposable Aurora state"]
+    fn local_saved_search_latency() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let started = std::time::Instant::now();
+        let page = load_album_page(
+            AlbumPageRequest {
+                search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+                page_size: Some(50),
+                ..Default::default()
+            },
+            &store,
+            true,
+        )
+        .unwrap();
+        eprintln!(
+            "Local saved search: {:?}, {} albums, {} matches",
+            started.elapsed(),
+            page.items.len(),
+            page.total_count
+        );
     }
 
     #[test]

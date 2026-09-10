@@ -216,7 +216,31 @@ pub(crate) fn attach_aurora_state(
     crate::live_genres::prepare(connection)
 }
 
+pub(crate) fn attach_local_aurora_state(
+    connection: &Connection,
+    store: &StateStore,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS aurora_state",
+            [store.path().to_string_lossy().as_ref()],
+        )
+        .map_err(|error| format!("Could not attach local search edits: {error}"))?;
+    // Saved rating deltas are local. File-based deletions and genres are reconciled
+    // by the background search, never while showing the first results.
+    project_live_album_ratings(connection, false)
+}
+
 pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> Result<(), String> {
+    project_live_album_ratings(connection, true)
+}
+
+fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> Result<(), String> {
+    let missing_file = if refresh_files {
+        "aurora_file_missing(track.file_path, track.filename) = 1"
+    } else {
+        "0"
+    };
     let query_only = connection
         .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
         .map_err(|error| format!("Could not inspect the catalog read-only guard: {error}"))?;
@@ -230,7 +254,7 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
     let projection = connection
         .execute_batch(crate::live_genres::SCHEMA)
         .and_then(|()| {
-            connection.execute_batch(
+            connection.execute_batch(&format!(
                 r#"
             DROP TABLE IF EXISTS temp.aurora_live_album_rating_state;
             CREATE TEMP TABLE aurora_live_album_rating_state (
@@ -251,7 +275,7 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
               JOIN aurora_state.pending_library_folder_sync AS pending
                 ON track.file_path = pending.directory
                AND (pending.filename IS NULL OR track.filename = pending.filename)
-              WHERE aurora_file_missing(track.file_path, track.filename) = 1
+              WHERE {missing_file}
             ),
             overlay_delta(album_id, rated_delta) AS (
               SELECT track.album_id,
@@ -280,7 +304,7 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
               LEFT JOIN aurora_state.tag_overlays AS overlay
                 ON track.file_path = overlay.directory
                AND track.filename = overlay.filename
-              WHERE aurora_file_missing(track.file_path, track.filename) = 1
+              WHERE {missing_file}
               GROUP BY track.album_id
             )
             SELECT album.id,
@@ -293,7 +317,7 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
             LEFT JOIN overlay_delta ON overlay_delta.album_id = album.id
             LEFT JOIN deleted ON deleted.album_id = album.id;
             "#,
-            )
+            ))
         });
     let restore = query_only.then(|| connection.pragma_update(None, "query_only", true));
     if let Some(Err(error)) = restore {
