@@ -3630,12 +3630,14 @@ mod tests {
         let (mut tag, version) = read_tag_for_write(&path).expect("read seeded fixture");
         let before = read_editable_tag_values(&tag).expect("editable values before");
         let fields = [
+            EditableTagField::Title,
             EditableTagField::Artist,
             EditableTagField::Album,
             EditableTagField::Rating,
             EditableTagField::TrackTotal,
         ];
         let patch = EditableTagValues {
+            title: Some("Corrected Title".to_owned()),
             artist: Some("New Artist".to_owned()),
             album: Some("New Album".to_owned()),
             rating: Some(4.5),
@@ -3658,6 +3660,7 @@ mod tests {
         )
         .expect("verify full edit");
         let written = Tag::read_from_path(&path).expect("read written tag");
+        assert_eq!(written.title(), Some("Corrected Title"));
         assert!(written.extended_texts().any(|text| {
             text.description == DISPLAY_ARTIST_DESCRIPTION && text.value == "New Artist"
         }));

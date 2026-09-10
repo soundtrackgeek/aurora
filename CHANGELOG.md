@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.25.6] - 2026-09-10
+
+### Fixed
+
+- Verified that title edits are written to MP3 TIT2 tags while preserving audio and unrelated tags. Music Library 0.145.20 accepts corrected titles during automatic metadata synchronization.
+
 ## [0.25.5] - 2026-09-08
 
 ### Added

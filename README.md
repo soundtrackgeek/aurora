@@ -1,5 +1,7 @@
 # Aurora
 
+Title corrections made in Aurora are saved and verified in the MP3 files themselves. Music Library 0.145.20 or later imports these titles and subsequent ratings automatically, including title search updates. Previously exhausted sync entries need a retry after updating Music Library.
+
 ## macOS installers and in-app updates (0.25.5)
 
 Every version bump on `master` builds Windows installers and a **universal macOS DMG** (Apple Silicon and Intel). Release publication waits for both platforms, Apple signature/notarization checks, updater signatures, and a combined `latest.json`. The Mac updater uses the signed `.app.tar.gz` archive; the DMG is for first installation. Download the DMG from GitHub Releases, open it, and drag the app into Applications before launching it.
