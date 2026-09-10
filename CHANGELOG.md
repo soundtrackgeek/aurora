@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.8] - 2026-09-10
+
+### Fixed
+
+- Normalize Windows and Unix release-note line endings before combining signed platform assets.
+- Wait for the initial tag-editor load before testing focus refresh, avoiding a CI timing race.
+
 ## [0.25.7] - 2026-09-10
 
 ### Fixed

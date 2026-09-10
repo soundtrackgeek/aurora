@@ -9,6 +9,8 @@ export function mergeAssets({ inputDir, outputDir, version, tag, repository }) {
   for (const platform of ['windows', 'macos']) {
     const folder = path.join(inputDir, platform);
     const manifest = JSON.parse(fs.readFileSync(path.join(folder, `manifest-${platform}.json`), 'utf8'));
+    if (typeof manifest.notes !== 'string') throw new Error('Release notes must be text');
+    manifest.notes = manifest.notes.replace(/\r\n?/g, '\n');
     if (manifest.version !== version || (notes !== undefined && notes !== manifest.notes)) throw new Error('Release versions or notes differ');
     notes = manifest.notes;
     for (const file of fs.readdirSync(folder)) {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Track } from "../library";
 import type { EditableTagValues, TagEditorSnapshot, TagEditorTarget } from "../tags";
@@ -309,15 +309,17 @@ describe("TagEditor", () => {
   });
 
   it("refreshes on focus only while the draft is clean", async () => {
-    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    await act(async () => {
+      render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    });
     const album = await screen.findByLabelText("Album");
     expect(tagMocks.read).toHaveBeenCalledTimes(1);
 
-    window.dispatchEvent(new Event("focus"));
+    fireEvent.focus(window);
     await waitFor(() => expect(tagMocks.read).toHaveBeenCalledTimes(2));
 
     fireEvent.change(album, { target: { value: "Unsaved album name" } });
-    window.dispatchEvent(new Event("focus"));
+    fireEvent.focus(window);
     expect(tagMocks.read).toHaveBeenCalledTimes(2);
   });
 });

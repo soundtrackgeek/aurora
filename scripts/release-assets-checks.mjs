@@ -64,3 +64,20 @@ test('rejects updater URLs outside the intended release', t => {
   fs.writeFileSync(file, JSON.stringify(manifest));
   assert.throws(() => mergeAssets(args), /does not belong to this release/);
 });
+
+test('accepts Windows CRLF notes while rejecting genuinely different notes', t => {
+  const args = fixture(t);
+  for (const platform of ['windows', 'macos']) {
+    const file = path.join(args.inputDir, platform, `manifest-${platform}.json`);
+    const manifest = JSON.parse(fs.readFileSync(file));
+    manifest.notes = platform === 'windows' ? 'Release notes\r\nSecond line' : 'Release notes\nSecond line';
+    fs.writeFileSync(file, JSON.stringify(manifest));
+  }
+  assert.equal(mergeAssets(args).notes, 'Release notes\nSecond line');
+  fs.rmSync(args.outputDir, { recursive: true });
+  const file = path.join(args.inputDir, 'macos', 'manifest-macos.json');
+  const manifest = JSON.parse(fs.readFileSync(file));
+  manifest.notes += ' different content';
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  assert.throws(() => mergeAssets(args), /versions or notes differ/);
+});
