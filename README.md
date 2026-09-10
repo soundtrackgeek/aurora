@@ -416,3 +416,5 @@ Album moves now retain their preview, confirmation, progress, and errors when na
 
 Automatic catalog sync stays album-sized with Music Library 0.145.14. Albums requiring broader reconciliation remain blocked with their file edits and local overlays retained; review an import in Music Library before retrying sync. Background sync no longer starts a whole-catalog import that holds up removal previews.
 Aurora checks the companion bounded-sync capability before automatic tag sync; older Music Library helpers leave queued edits pending with an update message.
+
+The macOS release gate verifies both architectures with `xcrun lipo "$executable" -verify_arch arm64` and `xcrun lipo "$executable" -verify_arch x86_64`, followed by signature and notarization validation.
