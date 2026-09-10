@@ -14,7 +14,7 @@ use std::{
 type GenreCache = HashMap<PathBuf, (u64, SystemTime, Option<String>)>;
 static CACHE: OnceLock<Mutex<GenreCache>> = OnceLock::new();
 
-fn read_genre(directory: &str, filename: &str) -> Option<Option<String>> {
+pub(crate) fn read_genre(directory: &str, filename: &str) -> Option<Option<String>> {
     if Path::new(filename).components().count() != 1 {
         return None;
     }
@@ -116,6 +116,7 @@ fn read_genre_frame(path: &Path) -> Option<Option<String>> {
 }
 
 pub(crate) const SCHEMA: &str = r#"
+    CREATE TEMP TABLE IF NOT EXISTS aurora_verified_files (track_id INTEGER PRIMARY KEY, missing INTEGER NOT NULL, genre_known INTEGER NOT NULL, genre TEXT);
     CREATE TEMP TABLE IF NOT EXISTS aurora_live_track_genres (
       track_id INTEGER PRIMARY KEY, album_id TEXT, genre TEXT
     );
@@ -133,14 +134,17 @@ pub(crate) const SCHEMA: &str = r#"
     );
 "#;
 
+#[cfg(test)]
 pub(crate) fn prepare(connection: &Connection) -> Result<(), String> {
     prepare_scope(connection, None)
 }
 
+#[cfg(test)]
 pub(crate) fn prepare_album(connection: &Connection, album_id: &str) -> Result<(), String> {
     prepare_scope(connection, Some(album_id))
 }
 
+#[cfg(test)]
 fn prepare_scope(connection: &Connection, album_id: Option<&str>) -> Result<(), String> {
     let query_only: bool = connection
         .pragma_query_value(None, "query_only", |r| r.get(0))
@@ -172,7 +176,17 @@ fn prepare_scope(connection: &Connection, album_id: Option<&str>) -> Result<(), 
                 )?;
             }
         }
-        connection.execute_batch(r#"
+        build_search_projection(connection)?;
+        Ok(())
+    })();
+    connection
+        .pragma_update(None, "query_only", query_only)
+        .map_err(|e| e.to_string())?;
+    result.map_err(|e| format!("Could not project pending file genres: {e}"))
+}
+
+fn build_search_projection(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(r#"
           INSERT INTO temp.aurora_live_genre_fts
           SELECT t.id, t.album_id, t.title, t.display_artist, t.album, t.album_artist_display,
                  live.genre, t.publisher, t.file_path, t.filename
@@ -181,18 +195,34 @@ fn prepare_scope(connection: &Connection, album_id: Option<&str>) -> Result<(), 
           SELECT t.album_id, MIN(CASE WHEN live.track_id IS NOT NULL THEN live.genre ELSE t.canonical_genre END)
           FROM tracks t LEFT JOIN temp.aurora_live_track_genres live ON live.track_id = t.id
           WHERE t.album_id IN (SELECT album_id FROM temp.aurora_live_track_genres)
+            AND t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)
           GROUP BY t.album_id
           HAVING COUNT(DISTINCT COALESCE(CASE WHEN live.track_id IS NOT NULL THEN live.genre ELSE t.canonical_genre END, '')) = 1;
           INSERT INTO temp.aurora_live_album_genre_fts
           SELECT a.id, a.album, a.album_artist_display, live.genre, a.publisher
           FROM temp.aurora_live_album_genres live JOIN albums a ON a.id = live.album_id;
-        "#)?;
-        Ok(())
+        "#)
+}
+
+pub(crate) fn prepare_cached(connection: &Connection) -> Result<(), String> {
+    let query_only: bool = connection
+        .pragma_query_value(None, "query_only", |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    connection
+        .pragma_update(None, "query_only", false)
+        .map_err(|e| e.to_string())?;
+    let result = (|| -> rusqlite::Result<()> {
+        connection.execute_batch(SCHEMA)?;
+        connection.execute_batch("DELETE FROM temp.aurora_live_track_genres; DELETE FROM temp.aurora_live_album_genres; DELETE FROM temp.aurora_live_genre_fts; DELETE FROM temp.aurora_live_album_genre_fts;
+          INSERT INTO temp.aurora_live_track_genres SELECT t.id, t.album_id, o.genre
+          FROM temp.aurora_verified_files o JOIN tracks t ON t.id=o.track_id
+          WHERE o.missing=0 AND o.genre_known=1 AND o.genre IS NOT t.canonical_genre;")?;
+        build_search_projection(connection)
     })();
     connection
         .pragma_update(None, "query_only", query_only)
         .map_err(|e| e.to_string())?;
-    result.map_err(|e| format!("Could not project pending file genres: {e}"))
+    result.map_err(|e| format!("Could not project verified genres: {e}"))
 }
 
 pub(crate) fn apply(tracks: &mut [TrackSummary], store: &StateStore) -> Result<(), String> {

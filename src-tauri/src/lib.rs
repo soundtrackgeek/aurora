@@ -7,6 +7,7 @@ mod curation;
 mod curation_store;
 mod device_mode;
 mod explorer;
+mod file_observations;
 mod genres;
 mod history;
 mod inbox;
@@ -587,6 +588,13 @@ async fn delete_album_track(
             for resolved in resolved_tracks {
                 match track_deletion::remove_verified_mp3(&resolved.audio_path) {
                     Ok(()) => {
+                        if let Err(message) = file_observations::record_deleted(&store, &resolved.summary) {
+                            failures.push(TrackDeletionFailure {
+                                track_key: resolved.summary.track_key.clone(),
+                                title: resolved.summary.title.clone(),
+                                message: format!("The MP3 was deleted, but its local correction could not be saved: {message}"),
+                            });
+                        }
                         deleted_track_keys.push(resolved.summary.track_key);
                         changed_directories.insert(resolved.summary.directory);
                     }

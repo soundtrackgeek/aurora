@@ -16,17 +16,28 @@ pub(crate) fn remove_verified_mp3(path: &Path) -> Result<(), String> {
 
     match fs::remove_file(path) {
         Ok(()) => {}
-        Err(_error) if !path.exists() => {}
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && path
+                    .parent()
+                    .zip(path.file_name())
+                    .is_some_and(|(parent, filename)| {
+                        crate::file_observations::confirmed_missing(
+                            &parent.to_string_lossy(),
+                            &filename.to_string_lossy(),
+                        )
+                    }) => {}
         Err(error) => {
             return Err(format!(
                 "Aurora could not delete the MP3 from disk: {error}"
             ));
         }
     }
-    if path.exists() {
-        return Err("Aurora could not verify that the MP3 was deleted from disk.".to_owned());
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Aurora could not verify the MP3 deletion: {error}")),
+        Ok(_) => Err("Aurora could not verify that the MP3 was deleted from disk.".to_owned()),
     }
-    Ok(())
 }
 
 #[cfg(test)]

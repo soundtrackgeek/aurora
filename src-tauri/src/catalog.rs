@@ -194,9 +194,9 @@ pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), 
                 {
                     return Ok(0_i64);
                 }
-                let path =
-                    device_mode::resolve_device_path(Path::new(&directory)).join(filename_path);
-                Ok(i64::from(!path.is_file()))
+                Ok(i64::from(crate::file_observations::confirmed_missing(
+                    &directory, &filename,
+                )))
             },
         )
         .map_err(|error| format!("Could not configure live catalog file checks: {error}"))
@@ -212,8 +212,9 @@ pub(crate) fn attach_aurora_state(
             [store.path().to_string_lossy().as_ref()],
         )
         .map_err(|error| format!("Could not attach Aurora's live catalog state: {error}"))?;
-    refresh_live_album_rating_projection(connection)?;
-    crate::live_genres::prepare(connection)
+    crate::file_observations::refresh(connection, store, None)?;
+    project_live_album_ratings(connection, false)?;
+    crate::live_genres::prepare_cached(connection)
 }
 
 pub(crate) fn attach_local_aurora_state(
@@ -228,9 +229,12 @@ pub(crate) fn attach_local_aurora_state(
         .map_err(|error| format!("Could not attach local search edits: {error}"))?;
     // Saved rating deltas are local. File-based deletions and genres are reconciled
     // by the background search, never while showing the first results.
-    project_live_album_ratings(connection, false)
+    crate::file_observations::load(connection, store)?;
+    project_live_album_ratings(connection, false)?;
+    crate::live_genres::prepare_cached(connection)
 }
 
+#[cfg(test)]
 pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> Result<(), String> {
     project_live_album_ratings(connection, true)
 }
@@ -239,7 +243,12 @@ fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> R
     let missing_file = if refresh_files {
         "aurora_file_missing(track.file_path, track.filename) = 1"
     } else {
-        "0"
+        "track.id IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)"
+    };
+    let deletion_join = if refresh_files {
+        "JOIN aurora_state.pending_library_folder_sync AS pending ON track.file_path = pending.directory AND (pending.filename IS NULL OR track.filename = pending.filename)"
+    } else {
+        ""
     };
     let query_only = connection
         .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
@@ -272,9 +281,7 @@ fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> R
               UNION
               SELECT DISTINCT track.album_id
               FROM tracks AS track
-              JOIN aurora_state.pending_library_folder_sync AS pending
-                ON track.file_path = pending.directory
-               AND (pending.filename IS NULL OR track.filename = pending.filename)
+              {deletion_join}
               WHERE {missing_file}
             ),
             overlay_delta(album_id, rated_delta) AS (
@@ -298,9 +305,7 @@ fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> R
                        ELSE CASE WHEN track.normalized_rating IS NOT NULL THEN 1 ELSE 0 END
                      END)
               FROM tracks AS track
-              JOIN aurora_state.pending_library_folder_sync AS pending
-                ON track.file_path = pending.directory
-               AND (pending.filename IS NULL OR track.filename = pending.filename)
+              {deletion_join}
               LEFT JOIN aurora_state.tag_overlays AS overlay
                 ON track.file_path = overlay.directory
                AND track.filename = overlay.filename
@@ -2395,8 +2400,10 @@ pub(crate) fn pending_deleted_catalog_file(
     if !is_pending {
         return Ok(false);
     }
-    let audio_path = catalog_audio_path(directory, filename)?;
-    Ok(!audio_path.is_file())
+    catalog_audio_path(directory, filename)?;
+    Ok(crate::file_observations::confirmed_missing(
+        directory, filename,
+    ))
 }
 
 fn album_tag_tracks_from_connection(

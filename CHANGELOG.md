@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.13] - 2026-09-10
+
+### Fixed
+
+- Persist verified pending deletions and file genres in a device-local correction cache, so restarted searches and album views do not resurrect known deleted bonus tracks or forget genre exclusions. Recalculate album completeness from cached deletions and current saved ratings.
+- Treat unavailable folders as unknown rather than deleted; preserve verified corrections while offline, revalidate restored files, and invalidate observations after a new track import. Keep the cache independent of synced catalog/state snapshots.
+- Save successful Aurora deletions immediately and exclude verified missing tracks before search/detail pagination.
+
 ## [0.25.12] - 2026-09-10
 
 ### Fixed

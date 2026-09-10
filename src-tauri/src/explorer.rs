@@ -11,7 +11,6 @@ use crate::{
 };
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 const DEFAULT_PAGE_SIZE: u16 = 50;
 const MAX_PAGE_SIZE: u16 = 100;
@@ -600,7 +599,9 @@ fn track_page_from_connection(
     }
     let sort = track_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
-    let mut predicates = String::from(" WHERE 1 = 1");
+    let mut predicates = String::from(
+        " WHERE t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)",
+    );
     if let Some(search) = &parsed_search {
         push_track_search_predicates(&mut predicates, &mut params, search);
     }
@@ -1080,13 +1081,10 @@ pub(crate) fn load_track_page(
 ) -> Result<TrackPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
     prepare_search_state(&connection, store, local_only)?;
-    if local_only {
-        let mut page = track_page_from_connection(&connection, request, None)?;
-        crate::catalog::apply_saved_overlays(&mut page.items, store)?;
-        Ok(page)
-    } else {
-        track_page_from_connection(&connection, request, Some(store))
-    }
+    let mut page = track_page_from_connection(&connection, request, None)?;
+    crate::catalog::apply_saved_overlays(&mut page.items, store)?;
+    crate::file_observations::apply_genres(&connection, &mut page.items)?;
+    Ok(page)
 }
 
 pub(crate) fn load_album_page(
@@ -1141,8 +1139,9 @@ pub(crate) fn load_album_detail(
             [store.path().to_string_lossy().as_ref()],
         )
         .map_err(|e| format!("Could not attach album edit state: {e}"))?;
-    crate::live_genres::prepare_album(&connection, &album_id)?;
-    album_detail_from_connection(&connection, &album_id, Some(store))
+    crate::file_observations::refresh(&connection, store, Some(&album_id))?;
+    crate::live_genres::prepare_cached(&connection)?;
+    album_detail_with_file_refresh(&connection, &album_id, Some(store), false)
 }
 
 pub(crate) fn load_local_album_detail(
@@ -1159,19 +1158,12 @@ fn local_album_detail_from_connection(
     album_id: &str,
     store: &StateStore,
 ) -> Result<AlbumDetail, String> {
-    // Empty temporary projections let the shared queries use catalog genres.
-    // Do not attach/rebuild global live state: that reads pending music files.
-    connection
-        .pragma_update(None, "query_only", false)
-        .map_err(|e| e.to_string())?;
-    let prepared = connection.execute_batch(crate::live_genres::SCHEMA);
-    connection
-        .pragma_update(None, "query_only", true)
-        .map_err(|e| e.to_string())?;
-    prepared.map_err(|e| format!("Could not prepare local album details: {e}"))?;
+    crate::file_observations::load(connection, store)?;
+    crate::live_genres::prepare_cached(connection)?;
     album_detail_with_file_refresh(connection, album_id, Some(store), false)
 }
 
+#[cfg(test)]
 fn album_detail_from_connection(
     connection: &Connection,
     album_id: &str,
@@ -1195,7 +1187,7 @@ fn album_detail_with_file_refresh(
         .map_err(|_| "Album is no longer available in the catalog.".to_owned())?;
     let mut statement = connection
         .prepare(&format!(
-            "SELECT {TRACK_COLUMNS} FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE t.album_id = ? ORDER BY COALESCE(t.disc_number, 0), COALESCE(t.track_number, 0), t.id LIMIT 101"
+            "SELECT {TRACK_COLUMNS} FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) WHERE t.album_id = ? AND t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1) ORDER BY COALESCE(t.disc_number, 0), COALESCE(t.track_number, 0), t.id LIMIT 101"
         ))
         .map_err(|error| format!("Could not prepare the album tracks: {error}"))?;
     let mut tracks = statement
@@ -1207,11 +1199,12 @@ fn album_detail_with_file_refresh(
         apply_overlays(&mut tracks, store)?;
     } else if let Some(store) = store {
         crate::catalog::apply_saved_overlays(&mut tracks, store)?;
+        crate::file_observations::apply_genres(connection, &mut tracks)?;
     }
     let deleted_track_keys = if let Some(store) = store.filter(|_| refresh_files) {
         ratings::pending_deleted_track_keys_for_album(connection, album_id, store)?
     } else {
-        HashSet::new()
+        crate::file_observations::deleted_keys(connection, album_id)?
     };
     tracks.retain(|track| !deleted_track_keys.contains(&track.track_key));
     let tracks_truncated = tracks.len() > usize::from(MAX_PAGE_SIZE);
@@ -2007,6 +2000,287 @@ mod tests {
         )
         .expect("album loved-track count search");
         assert!(multiple_loves.items.is_empty());
+    }
+
+    #[test]
+    fn verified_bonus_deletions_survive_restart_offline_and_state_replacement() {
+        let connection = fixture();
+        connection
+            .execute("ALTER TABLE albums ADD COLUMN album_rating REAL", [])
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let music = root.path().join("Kiss");
+        std::fs::create_dir(&music).unwrap();
+        let folder = music.to_string_lossy().into_owned();
+        connection
+            .execute_batch(
+                "DELETE FROM tracks WHERE album_id='a1';
+          UPDATE albums SET total_tracks=16, rated_tracks=12, total_seconds=1600 WHERE id='a1';",
+            )
+            .unwrap();
+        for number in 1..=16 {
+            let filename = format!("{number:02}.mp3");
+            connection.execute("INSERT INTO tracks(id, import_run_id, album_id, title, album_artist_display, album, canonical_genre, love, normalized_rating, time_seconds, file_path, filename, track_number)
+              VALUES (?1, 1, 'a1', ?2, 'Sigur Rós', 'Takk...', 'Post-rock', 'L', ?3, 100, ?4, ?2, ?5)",
+              rusqlite::params![100+number, filename, if number <= 12 { Some(100) } else { None }, folder, number]).unwrap();
+            if number <= 12 {
+                std::fs::write(music.join(&filename), []).unwrap();
+            }
+        }
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let state_path = root.path().join("state.sqlite3");
+        let store = StateStore::new(state_path.clone()).unwrap();
+        store
+            .queue_library_file_syncs(&[
+                (folder.clone(), "13.mp3".into()),
+                (folder.clone(), "14.mp3".into()),
+                (folder.clone(), "15.mp3".into()),
+                (folder.clone(), "16.mp3".into()),
+            ])
+            .unwrap();
+        attach_aurora_state(&connection, &store).unwrap();
+        assert_eq!(
+            local_album_detail_from_connection(&connection, "a1", &store)
+                .unwrap()
+                .tracks
+                .len(),
+            12
+        );
+        let request = AlbumPageRequest {
+            search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+            ..Default::default()
+        };
+        assert!(
+            !album_page_from_connection(&connection, request.clone())
+                .unwrap()
+                .items
+                .iter()
+                .any(|a| a.id == "a1")
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM tracks WHERE album_id='a1'", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            16,
+            "catalog remains untouched"
+        );
+
+        let first = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("album:\"Takk...\"".into()),
+                page_size: Some(10),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(first.total_count, 12);
+        assert_eq!(first.items.len(), 10);
+        let second = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("album:\"Takk...\"".into()),
+                page_size: Some(10),
+                cursor: first.next_cursor,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(second.items.len(), 2);
+        assert!(second.next_cursor.is_none());
+
+        // Reopen the store, replace its sync queue, and make the share unavailable.
+        drop(store);
+        let store = StateStore::new(state_path).unwrap();
+        store
+            .open()
+            .unwrap()
+            .execute("DELETE FROM pending_library_folder_sync", [])
+            .unwrap();
+        std::fs::rename(&music, root.path().join("offline")).unwrap();
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        crate::catalog::attach_local_aurora_state(&connection, &store).unwrap();
+        let restarted = local_album_detail_from_connection(&connection, "a1", &store).unwrap();
+        assert_eq!(restarted.tracks.len(), 12);
+        assert_eq!(restarted.album.rated_tracks, 12);
+        assert_eq!(restarted.album.total_tracks, 12);
+        assert!(
+            !album_page_from_connection(&connection, request.clone())
+                .unwrap()
+                .items
+                .iter()
+                .any(|a| a.id == "a1")
+        );
+        store
+            .queue_library_file_syncs(&[(folder.clone(), "13.mp3".into())])
+            .unwrap();
+        crate::file_observations::refresh(&connection, &store, Some("a1")).unwrap();
+        assert_eq!(
+            local_album_detail_from_connection(&connection, "a1", &store)
+                .unwrap()
+                .tracks
+                .len(),
+            12,
+            "offline refresh retains evidence"
+        );
+
+        store
+            .open()
+            .unwrap()
+            .execute("DELETE FROM pending_library_folder_sync", [])
+            .unwrap();
+        std::fs::rename(root.path().join("offline"), &music).unwrap();
+        std::fs::write(music.join("13.mp3"), []).unwrap();
+        crate::file_observations::refresh(&connection, &store, Some("a1")).unwrap();
+        assert_eq!(
+            local_album_detail_from_connection(&connection, "a1", &store)
+                .unwrap()
+                .tracks
+                .len(),
+            13,
+            "restored files clear their deletion"
+        );
+        connection
+            .execute(
+                "UPDATE tracks SET import_run_id=2 WHERE filename='14.mp3'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            local_album_detail_from_connection(&connection, "a1", &store)
+                .unwrap()
+                .tracks
+                .len(),
+            14,
+            "a new catalog import invalidates old observations"
+        );
+    }
+
+    #[test]
+    fn verified_genres_survive_an_offline_restart() {
+        use id3::TagLike;
+        let connection = fixture();
+        let root = tempfile::tempdir().unwrap();
+        let music = root.path().join("music");
+        std::fs::create_dir(&music).unwrap();
+        let folder = music.to_string_lossy().into_owned();
+        for filename in ["01.mp3", "02.mp3"] {
+            let path = music.join(filename);
+            std::fs::write(&path, []).unwrap();
+            let mut tag = id3::Tag::new();
+            tag.set_genre("Soundtrack");
+            tag.write_to_path(path, id3::Version::Id3v24).unwrap();
+        }
+        connection
+            .execute(
+                "UPDATE tracks SET file_path=?1 WHERE album_id='a1'",
+                [&folder],
+            )
+            .unwrap();
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let state_path = root.path().join("state.sqlite3");
+        let store = StateStore::new(state_path.clone()).unwrap();
+        store
+            .queue_library_file_syncs(&[
+                (folder.clone(), "01.mp3".into()),
+                (folder, "02.mp3".into()),
+            ])
+            .unwrap();
+        attach_aurora_state(&connection, &store).unwrap();
+        let request = AlbumPageRequest {
+            search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+            ..Default::default()
+        };
+        assert!(
+            !album_page_from_connection(&connection, request.clone())
+                .unwrap()
+                .items
+                .iter()
+                .any(|a| a.id == "a1")
+        );
+        drop(store);
+        std::fs::rename(music, root.path().join("offline")).unwrap();
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let store = StateStore::new(state_path).unwrap();
+        crate::catalog::attach_local_aurora_state(&connection, &store).unwrap();
+        assert!(
+            !album_page_from_connection(&connection, request)
+                .unwrap()
+                .items
+                .iter()
+                .any(|a| a.id == "a1")
+        );
+        let tracks = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("genre:soundtrack".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(tracks.items.len(), 2);
+    }
+
+    #[test]
+    #[ignore = "reads pending files from AURORA_PROFILE and writes a disposable correction cache to AURORA_OBSERVATIONS_OUTPUT"]
+    fn export_verified_profile_observations() {
+        let profile = std::path::PathBuf::from(
+            std::env::var_os("AURORA_PROFILE").expect("profile directory"),
+        );
+        let output = std::path::PathBuf::from(
+            std::env::var_os("AURORA_OBSERVATIONS_OUTPUT").expect("output cache path"),
+        );
+        crate::connections::initialize(&profile).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let state_path = directory.path().join("state.sqlite3");
+        let source = Connection::open_with_flags(
+            profile.join("aurora-state.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        source
+            .execute("VACUUM INTO ?1", [state_path.to_string_lossy().as_ref()])
+            .unwrap();
+        let store = StateStore::new(state_path).unwrap();
+        let connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+        attach_aurora_state(&connection, &store).unwrap();
+        let started = std::time::Instant::now();
+        let local = load_album_page(
+            AlbumPageRequest {
+                search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+                ..Default::default()
+            },
+            &store,
+            true,
+        )
+        .unwrap();
+        eprintln!(
+            "Local corrected search {:?}: {} matches",
+            started.elapsed(),
+            local.total_count
+        );
+        let kiss = load_local_album_detail("mb:-4652150120059075938".into(), &store).unwrap();
+        eprintln!(
+            "Kiss: {} tracks, {} rated",
+            kiss.tracks.len(),
+            kiss.album.rated_tracks
+        );
+        assert_eq!(kiss.tracks.len(), 12);
+        assert_eq!(kiss.album.rated_tracks, 12);
+        assert!(!local.items.iter().any(|a| a.id == kiss.album.id));
+        std::fs::copy(crate::file_observations::cache_path(&store), output).unwrap();
     }
 
     #[test]
