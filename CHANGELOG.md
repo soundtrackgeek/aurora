@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.25.15] - 2026-09-10
+
+### Fixed
+
+- Keep every track chart ranking fully visible before the popularity flame and artist name in album details; title and artist text truncate instead of overlapping TI ranks.
+
 ## [0.25.14] - 2026-09-10
 
 ### Fixed

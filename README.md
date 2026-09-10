@@ -1,5 +1,7 @@
 # Aurora
 
+Album-detail track rows reserve the full width of chart rankings before displaying the popularity flame and artist name, preventing overlapping TI ranks.
+
 Pending tag recovery restores orphaned retry entries and gives previously blocked folders one fresh attempt. Guarded per-file metadata sync can import ratings even when missing bonus tracks prevent whole-album reconciliation; unresolved folder differences remain queued for review. Use Aurora 0.25.12 with Music Library 0.145.23 or newer for this recovery.
 
 Title corrections made in Aurora are saved and verified in the MP3 files themselves. Music Library 0.145.20 or later imports these titles and subsequent ratings automatically, including title search updates. Previously exhausted sync entries need a retry after updating Music Library.

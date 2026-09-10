@@ -129,6 +129,8 @@
 .deep-explorer-table tr.is-current-track .deep-explorer-track-title strong { color: #bdeef5; }
 .deep-explorer-track-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .deep-explorer-track-title > span { min-width: 0; }
+/* Reserve chart text before allocating space to the title and artist. */
+.deep-explorer-track-heading > .catalog-chart-ranks { flex: 0 0 auto; }
 .deep-explorer-track-heading { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .deep-explorer-track-title strong,
 .deep-explorer-track-title small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
