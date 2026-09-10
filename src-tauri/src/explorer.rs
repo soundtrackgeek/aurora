@@ -705,7 +705,7 @@ fn track_page_from_connection(
 }
 
 fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
-    let effective_rating: Option<i64> = row.get(10)?;
+    let effective_rating: Option<f64> = row.get(10)?;
     Ok(AlbumSummary {
         id: row.get(0)?,
         title: row
@@ -733,7 +733,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
         rated_tracks: row.get(6)?,
         loved_tracks: row.get(7)?,
         duration_seconds: row.get(8)?,
-        rating: effective_rating.map(|rating| rating as f64 / 20.0),
+        rating: effective_rating.map(|rating| rating / 20.0),
         album_score: row.get(9)?,
         formats: match row.as_ref().column_index("formats") {
             Ok(index) => row
@@ -867,7 +867,7 @@ fn album_page_from_connection(
     let live_total_tracks = live_album_total_tracks_sql("a");
     let live_rated_tracks = live_album_rated_tracks_sql("a");
     let mut sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
     sql.push_str(" WHERE 1 = 1");
@@ -2880,6 +2880,61 @@ mod tests {
         let other = album_detail_from_connection(&connection, "a2", None).unwrap();
         assert_eq!(selected.album.genre.as_deref(), Some("Soundtrack"));
         assert_eq!(other.album.genre.as_deref(), Some("Post-rock"));
+    }
+
+    #[test]
+    fn deleted_affinity_does_not_return_after_an_unrelated_album_refresh() {
+        let connection = fixture();
+        let directory = tempfile::TempDir::new().unwrap();
+        let path = directory.path().to_string_lossy().into_owned();
+        std::fs::write(directory.path().join("02.mp3"), b"remaining").unwrap();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path=?1 WHERE album_id='a1'",
+                [&path],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO aurora_state.pending_library_folder_sync(directory, filename, updated_at_ms) VALUES (?1, '01.mp3', 1)", [&path]).unwrap();
+        for refresh in 0..3 {
+            if refresh == 1 {
+                connection
+                    .execute(
+                        "UPDATE albums SET publisher='Updated tag' WHERE id='a3'",
+                        [],
+                    )
+                    .unwrap();
+            }
+            refresh_live_album_rating_projection(&connection).unwrap();
+            let page =
+                album_page_from_connection(&connection, AlbumPageRequest::default()).unwrap();
+            let album = page.items.iter().find(|album| album.id == "a1").unwrap();
+            assert_eq!(album.total_tracks, 1);
+            assert_eq!(album.rated_tracks, 0);
+            assert_eq!(album.loved_tracks, 0);
+            assert_eq!(album.duration_seconds, 268);
+            assert_eq!(album.rating, None);
+            assert_eq!(album.album_score, None);
+        }
+
+        // The correction also survives a fresh local connection and a drained
+        // sync queue while the catalog still contains the deleted track.
+        connection
+            .execute_batch("DETACH DATABASE aurora_state")
+            .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        store
+            .queue_library_file_syncs(&[(path, "01.mp3".into())])
+            .unwrap();
+        attach_aurora_state(&connection, &store).unwrap();
+        connection.execute_batch("DELETE FROM aurora_state.pending_library_folder_sync; DETACH DATABASE aurora_state;").unwrap();
+        crate::catalog::attach_local_aurora_state(&connection, &store).unwrap();
+        let page = album_page_from_connection(&connection, AlbumPageRequest::default()).unwrap();
+        let album = page.items.iter().find(|album| album.id == "a1").unwrap();
+        assert_eq!(album.total_tracks, 1);
+        assert_eq!(album.loved_tracks, 0);
+        assert_eq!(album.duration_seconds, 268);
+        assert_eq!(album.rating, None);
+        assert_eq!(album.album_score, None);
     }
 
     #[test]

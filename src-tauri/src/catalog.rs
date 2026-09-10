@@ -321,7 +321,38 @@ fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> R
             JOIN affected ON affected.album_id = album.id
             LEFT JOIN overlay_delta ON overlay_delta.album_id = album.id
             LEFT JOIN deleted ON deleted.album_id = album.id;
+
+            DROP TABLE IF EXISTS temp.aurora_live_album_metrics;
+            CREATE TEMP TABLE aurora_live_album_metrics AS
+            WITH remaining AS (
+              SELECT track.album_id,
+                     CASE WHEN overlay.track_key IS NOT NULL THEN overlay.rating * 20.0
+                          ELSE {track_rating} END AS rating,
+                     CASE WHEN overlay.track_key IS NOT NULL THEN overlay.love_state = 'loved'
+                          ELSE COALESCE(track.love = 'L', 0) END AS loved,
+                     MAX(0, COALESCE(track.time_seconds, 0)) AS seconds
+              FROM temp.aurora_live_album_rating_state affected
+              JOIN tracks track ON track.album_id = affected.album_id
+              LEFT JOIN aurora_state.tag_overlays overlay
+                ON track.file_path = overlay.directory AND track.filename = overlay.filename
+              WHERE NOT ({missing_file})
+            ), metrics AS (
+              SELECT affected.album_id,
+                     AVG(CASE WHEN remaining.rating > 0 THEN remaining.rating END) AS rating,
+                     COALESCE(SUM(remaining.loved), 0) AS loved_tracks,
+                     COALESCE(SUM(remaining.seconds), 0) AS total_seconds,
+                     COALESCE(SUM(CASE WHEN remaining.rating = 100 THEN remaining.seconds ELSE 0 END), 0) AS five_star_seconds
+              FROM temp.aurora_live_album_rating_state affected
+              LEFT JOIN remaining ON remaining.album_id = affected.album_id
+              GROUP BY affected.album_id
+            )
+            SELECT album_id, rating, loved_tracks, total_seconds,
+                   ((rating * 0.5 + CASE WHEN total_seconds > 0 THEN five_star_seconds * 100.0 / total_seconds ELSE 0 END
+                     + five_star_seconds / 60.0 * 0.3) / 10.0) + loved_tracks * 100.0 AS album_score
+            FROM metrics;
+            CREATE UNIQUE INDEX temp.aurora_live_album_metrics_id ON aurora_live_album_metrics(album_id);
             "#,
+                track_rating = crate::ratings::TRACK_RATING_SQL,
             ))
         });
     let restore = query_only.then(|| connection.pragma_update(None, "query_only", true));

@@ -87,6 +87,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Every catalog search field accepts either `:` or `=`. Aurora documents `:` as the convention, so `cr:50..80`, `love:1..3`, and `country:norway` are preferred, while their `=` forms remain valid. Completeness and loved-track counts support the same inclusive closed and open `..` ranges as years.
 
 - Album cards, expanded Album Detail, and the Albums sidebar inspector show rating values with two decimal places, such as Album Rating **4.33** and Album Score **5.39**.
+- Album cards recalculate pending rating and deletion metrics from surviving tracks during refreshes, including unrated albums whose rating and score must clear. Successful track deletion also updates the open album immediately.
 
 - Local development and both Windows CI jobs use Rust 1.98.1 instead of floating `stable`. Trusted master and manual runs may retain dependency caches after a later failure, while pull requests remain restore-only.
 
@@ -328,7 +329,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Visible local provenance and source availability for the catalog, curated overlay, and broad cache; missing optional databases never block normal library browsing.
 - Explicit overlay export creates a new, complete Music Library-compatible SQLite snapshot in Aurora's app-data `exports` folder. Aurora never mutates the live shared overlay; publishing the exported file remains a deliberate user step.
 - Album cover grids with a MusicBee-style inline track panel directly beneath the selected cover row. Clicking the same cover or the close control collapses the panel without replacing the grid or losing the browsing position.
-- Every album card and expanded detail shows the stored effective Album Rating as five stars with half-star support alongside the numeric Album Score. The currently playing track has its own animated left signal, independent from the selected row used for inspection or editing.
+- Album cards show the catalog Album Rating and numeric Album Score, with surviving-track calculations replacing stale metrics while ratings or verified deletions are pending. Expanded details also recalculate from the complete track list, with half-star visuals. The currently playing track has its own animated left signal, independent from the selected row used for inspection or editing.
 - Bounded album track details retain playback activation, keyboard row navigation, inline tag controls, and a right inspector whose Album, Track, and Artist tabs stay scoped to the selected album.
 - A vertical multi-file inspector tag editor plus existing inline half-star rating and Love/Neutral/Ban controls, with read-only duration and optional Last.fm popularity in the Track view.
 - Direct Explore-row rating and Love controls: click either half of a star for an exact 0.5 step or click the heart to toggle Love, and Aurora saves to the MP3 immediately with per-row verification feedback.

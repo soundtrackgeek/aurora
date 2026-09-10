@@ -215,6 +215,19 @@ describe("library presentation", () => {
     expect(applyAlbumTrackMetricsProjection(album, tracks.slice(0, 1))).toBe(album);
   });
 
+  it("clears rating and score when deletion removes the only rated and loved track", () => {
+    const remaining = { ...tracks[0], id: "remaining", trackKey: "remaining", rating: null, loved: false };
+    const album: AlbumSummary = {
+      id: "album-1", title: "Takk...", artist: "Sigur Rós", releaseYear: 2005,
+      genre: "Post-rock", totalTracks: 1, ratedTracks: 0, lovedTracks: 0,
+      durationSeconds: 473, rating: 5, albumScore: 112,
+    };
+    const projected = applyAlbumTrackMetricsProjection(album, [remaining]);
+    expect(projected.rating).toBeNull();
+    expect(projected.albumScore).toBeNull();
+    expect(projected.lovedTracks).toBe(0);
+  });
+
   it("keeps the refreshed album genre consistent with its complete track list", () => {
     const album: AlbumSummary = {
       id: "album-1", title: "Aretha Now", artist: "Aretha Franklin", releaseYear: 1968,

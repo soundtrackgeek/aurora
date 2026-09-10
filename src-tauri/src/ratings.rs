@@ -12,7 +12,7 @@ const MAX_ALBUMS: usize = 14;
 const MAX_QUEUE: usize = 100;
 const MAX_PENDING_DELETION_TARGETS: usize = 256;
 
-const TRACK_RATING_SQL: &str = r#"COALESCE(normalized_rating, CASE trim(rating_raw)
+pub(crate) const TRACK_RATING_SQL: &str = r#"COALESCE(normalized_rating, CASE trim(rating_raw)
   WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
   WHEN '1.5' THEN 30 WHEN '2' THEN 40 WHEN '2.0' THEN 40
   WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60

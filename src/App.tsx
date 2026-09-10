@@ -2811,7 +2811,7 @@ function App() {
       setPublisherAlbumTracks((current) => current.filter((candidate) => !isDeleted(candidate)));
       setExplorerAlbums((current) => removesAlbum
         ? current.filter((album) => album.id !== albumId)
-        : current.map((album) => album.id === albumId ? {
+        : current.map((album) => album.id === albumId ? applyAlbumTrackMetricsProjection({
           ...album,
           totalTracks: Math.max(0, album.totalTracks - deletedTracks.length),
           ratedTracks: Math.max(0, album.ratedTracks - deletedRated),
@@ -2819,7 +2819,7 @@ function App() {
           durationSeconds: album.durationSeconds === null
             ? null
             : Math.max(0, album.durationSeconds - deletedDuration),
-        } : album));
+        }, albumTracks.filter((candidate) => !isDeleted(candidate))) : album));
       setSnapshot((current) => current ? {
         ...current,
         tracks: current.tracks.filter((candidate) => !isDeleted(candidate)),
@@ -3139,7 +3139,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.13</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.14</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

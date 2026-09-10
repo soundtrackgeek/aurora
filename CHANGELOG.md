@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.14] - 2026-09-10
+
+### Fixed
+
+- Recalculate affected album-card ratings, scores, Love counts, and duration from surviving tracks and saved ratings during local and background refreshes. Deleting the only rated/loved track no longer lets stale catalog metrics reappear when another album updates.
+- Recalculate the open album immediately after successful track deletion.
+
 ## [0.25.13] - 2026-09-10
 
 ### Fixed
