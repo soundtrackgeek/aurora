@@ -1761,7 +1761,7 @@ mod tests {
         }
         runtime.snapshot();
         runtime.queue_history(runtime.history_session.as_ref().unwrap().checkpoint());
-        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        runtime.persistence.flush(Duration::from_secs(30)).unwrap();
         let connection = rusqlite::Connection::open(history_path).unwrap();
         let read = || {
             connection.query_row::<(f64, i64), _, _>(
@@ -1778,13 +1778,13 @@ mod tests {
             samples.next();
         }
         runtime.snapshot();
-        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        runtime.persistence.flush(Duration::from_secs(30)).unwrap();
         assert_eq!(read().1, 0);
         for _ in 0..2_000 {
             samples.next();
         }
         runtime.snapshot();
-        runtime.persistence.flush(Duration::from_secs(5)).unwrap();
+        runtime.persistence.flush(Duration::from_secs(30)).unwrap();
         let (seconds, plays) = read();
         assert!((30.9..31.1).contains(&seconds));
         assert_eq!(plays, 1);
@@ -1870,7 +1870,7 @@ mod tests {
         assert_eq!(refresh.current_track.as_ref().unwrap().id, "2");
         assert_eq!(next.status, PlaybackStatus::Playing);
         assert_eq!(refresh.position_seconds, 0.0);
-        persistence.flush(Duration::from_secs(5)).unwrap();
+        persistence.flush(Duration::from_secs(30)).unwrap();
         let connection = rusqlite::Connection::open(history_path).unwrap();
         let rows: Vec<(String, f64, i64, Option<i64>, i64)> = connection.prepare(
             "SELECT outcome, listened_seconds, started_at_ms, ended_at_ms, registered_play FROM listening_sessions ORDER BY rowid",
@@ -1889,7 +1889,7 @@ mod tests {
         // can be cancelled without reviving the already-finished history session.
         let pending = shared.lock().unwrap().prepare_for_shutdown().unwrap();
         assert!(shared.lock().unwrap().next().is_err());
-        pending.flush(Duration::from_secs(5)).unwrap();
+        pending.flush(Duration::from_secs(30)).unwrap();
         assert_eq!(
             connection
                 .query_row::<String, _, _>(

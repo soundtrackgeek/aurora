@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.9] - 2026-09-10
+
+### Fixed
+
+- Use supported Windows atomic-replacement flags and retry temporary sharing/lock conflicts without deleting existing settings or snapshots.
+- Run storage-heavy Rust CI tests serially and allow longer test-only persistence waits; retain production save deadlines and surface shortcut migration errors in test failures.
+
 ## [0.25.8] - 2026-09-10
 
 ### Fixed

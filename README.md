@@ -420,3 +420,5 @@ Aurora checks the companion bounded-sync capability before automatic tag sync; o
 The macOS release gate verifies both architectures with `xcrun lipo "$executable" -verify_arch arm64` and `xcrun lipo "$executable" -verify_arch x86_64`, followed by signature and notarization validation.
 
 Release-note comparisons normalize Windows and Unix line endings; version, note content, artifact and signature checks remain required.
+
+Windows settings/snapshot replacement retries temporary sharing conflicts for up to one second. Release verification runs Rust tests serially to reduce disk contention; playback tests retain their content assertions with a longer test-only storage deadline.

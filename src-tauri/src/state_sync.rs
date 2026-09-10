@@ -845,25 +845,32 @@ pub(crate) fn replace_file_atomic(target: &Path, replacement: &Path) -> Result<(
 
     let target = wide(target);
     let replacement = wide(replacement);
-    // SAFETY: Both paths are owned, NUL-terminated UTF-16 buffers that outlive the call.
-    let result = unsafe {
-        ReplaceFileW(
-            target.as_ptr(),
-            replacement.as_ptr(),
-            std::ptr::null(),
-            0x0000_0001,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        Err(format!(
-            "Windows could not atomically replace Aurora's state snapshot: {}",
-            std::io::Error::last_os_error()
-        ))
-    } else {
-        Ok(())
+    let mut last_error = std::io::Error::other("File replacement did not run");
+    for attempt in 0..20 {
+        // SAFETY: Both paths are owned, NUL-terminated UTF-16 buffers that outlive the call.
+        let result = unsafe {
+            ReplaceFileW(
+                target.as_ptr(),
+                replacement.as_ptr(),
+                std::ptr::null(),
+                0, // REPLACEFILE_WRITE_THROUGH is unsupported; callers flush before replacing.
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if result != 0 {
+            return Ok(());
+        }
+        last_error = std::io::Error::last_os_error();
+        // Only retry sharing/lock violations: other errors may describe a partial replacement.
+        if !matches!(last_error.raw_os_error(), Some(32 | 33)) || attempt == 19 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
+    Err(format!(
+        "Windows could not atomically replace Aurora's state snapshot: {last_error}"
+    ))
 }
 
 #[cfg(not(windows))]
@@ -879,6 +886,39 @@ mod tests {
         state_store::{StoredPlaybackState, StoredQueueEntry},
         tag_model::{LoveState, TagValues},
     };
+
+    #[test]
+    fn atomic_replacement_preserves_target_when_replacement_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("settings.json");
+        fs::write(&target, b"original").unwrap();
+        assert!(replace_file_atomic(&target, &directory.path().join("missing")).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_replacement_waits_for_a_temporary_windows_sharing_lock() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("settings.json");
+        let replacement = directory.path().join("replacement.json");
+        fs::write(&target, b"original").unwrap();
+        fs::write(&replacement, b"updated").unwrap();
+        let locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&replacement)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            drop(locked);
+        });
+        let result = replace_file_atomic(&target, &replacement);
+        release.join().unwrap();
+        result.unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"updated");
+    }
 
     fn temporary_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

@@ -1028,7 +1028,11 @@ mod tests {
         let persisted: ShortcutSettingsFile =
             serde_json::from_slice(&fs::read(&path).expect("read migrated settings"))
                 .expect("decode migrated settings");
-        assert_eq!(persisted.version, SETTINGS_VERSION);
+        assert_eq!(
+            persisted.version, SETTINGS_VERSION,
+            "{:?}",
+            restored.warning
+        );
         assert_eq!(persisted.bindings[4].accelerator, "Ctrl+Alt+Numpad2");
         let _ = fs::remove_file(path);
     }
