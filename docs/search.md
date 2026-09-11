@@ -289,3 +289,5 @@ The Genre Atlas also repeats its genre-name search inside the atlas for convenie
 - If `cr` or `love` is rejected, use whole, non-negative bounds in ascending order. Completeness bounds are limited to 0–100; a single `love` value remains limited to the `0` and `1` shorthands, while positive exact counts use a repeated range such as `love:3..3`. Either `:` or `=` is accepted.
 - If `genre:scores` is too broad, search one exact genre such as `genre:"video game"`.
 - Catalog queries are limited to 256 characters, 32 search words, and 32 alternatives. Aurora reports malformed quotes, operators, fields without values, and invalid year ranges instead of silently changing the query.
+
+Album Love filters (`love:1`, `love:0`, and ranges; `=` remains compatible) use verified surviving tracks and pending Love edits while Music Library sync is pending. Deleting an album's only loved track immediately excludes it from `love=1 AND cr=99 NOT genre:scores OR soundtrack`, including filtered counts and pagination. Unavailable folders are not treated as deleted tracks.

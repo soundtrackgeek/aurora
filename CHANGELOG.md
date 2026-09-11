@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.25.16] - 2026-09-11
+
+### Fixed
+- Make album Love search filters follow verified deletions and pending edits immediately, matching displayed album metrics before catalog synchronization.
+- Synchronize explicitly verified track deletions from Aurora into Music Library, including album metrics, search records, and deletion history. Retain pending work when file or catalog validation fails.
+
 ## [0.25.15] - 2026-09-10
 
 ### Fixed

@@ -125,6 +125,55 @@ pub(crate) fn record_deleted(
     Ok(())
 }
 
+/// Only send saved, still-missing identities; unavailable directories remain unknown.
+pub(crate) fn pending_deletion_paths(
+    catalog: &Connection,
+    store: &StateStore,
+    directories: &[String],
+) -> Result<Vec<String>, String> {
+    let cache = open(store)?;
+    let mut query = cache
+        .prepare("SELECT filename FROM observations WHERE directory=?1 AND missing=1")
+        .map_err(|e| e.to_string())?;
+    let mut paths = Vec::new();
+    for directory in directories {
+        let Some(entries) = directory_entries(Path::new(directory)) else {
+            continue;
+        };
+        let filenames = query
+            .query_map([directory], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for filename in filenames {
+            let filename = filename.map_err(|e| e.to_string())?;
+            let file = Path::new(&filename);
+            if file.components().count() == 1
+                && file
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
+                && !entries.contains(&filename.to_lowercase())
+            {
+                let still_cataloged: bool = catalog
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM tracks WHERE file_path=?1 AND filename=?2)",
+                        params![directory, filename],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if !still_cataloged {
+                    continue;
+                }
+                paths.push(
+                    Path::new(directory)
+                        .join(file)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    Ok(paths)
+}
+
 pub(crate) fn load(connection: &Connection, store: &StateStore) -> Result<(), String> {
     open(store)?;
     connection
@@ -193,6 +242,39 @@ pub(crate) fn apply_genres(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deletion_payload_uses_saved_absence_and_skips_restored_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = StateStore::new(temp.path().join("state.sqlite3")).unwrap();
+        let directory = temp.path().to_string_lossy().into_owned();
+        let catalog = Connection::open_in_memory().unwrap();
+        catalog
+            .execute_batch("CREATE TABLE tracks(file_path TEXT, filename TEXT)")
+            .unwrap();
+        catalog
+            .execute("INSERT INTO tracks VALUES (?1,'bonus.mp3')", [&directory])
+            .unwrap();
+        open(&store)
+            .unwrap()
+            .execute(
+                "INSERT INTO observations VALUES (?1,'bonus.mp3',1,1,0,NULL)",
+                [&directory],
+            )
+            .unwrap();
+        assert_eq!(
+            pending_deletion_paths(&catalog, &store, std::slice::from_ref(&directory))
+                .unwrap()
+                .len(),
+            1
+        );
+        fs::write(temp.path().join("bonus.mp3"), []).unwrap();
+        assert!(
+            pending_deletion_paths(&catalog, &store, &[directory])
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn unavailable_directory_is_unknown_and_case_differences_are_not_deletions() {

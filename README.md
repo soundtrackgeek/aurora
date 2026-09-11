@@ -431,3 +431,7 @@ The macOS release gate verifies both architectures with `xcrun lipo "$executable
 Release-note comparisons normalize Windows and Unix line endings; version, note content, artifact and signature checks remain required.
 
 Windows settings/snapshot replacement retries temporary sharing conflicts for up to one second. Release verification runs Rust tests serially to reduce disk contention; playback tests retain their content assertions with a longer test-only storage deadline.
+
+### Verified Aurora track deletions
+
+Aurora sends saved, still-missing MP3 identities to Music Library. Music Library verifies the complete surviving album and commits catalog removals, album metrics, search cleanup, and Updates history atomically. Restored files, unavailable folders, unknown tracks, and changed catalog data prevent deletion sync. Older identity-set failures receive a fresh guarded retry after upgrading Aurora; Music Library must also support verified deletion sync. Empty albums still require the reviewed album-removal workflow.

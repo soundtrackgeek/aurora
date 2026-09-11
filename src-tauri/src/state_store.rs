@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -482,6 +482,10 @@ impl StateStore {
                 "UPDATE pending_library_folder_sync SET attempt_count = 0, next_attempt_at_ms = 0",
                 [],
             ).map_err(|error| format!("Could not reopen pending metadata sync after the recovery upgrade: {error}"))?;
+        }
+        if current < 15 {
+            transaction.execute("UPDATE pending_library_folder_sync SET attempt_count=0, next_attempt_at_ms=0 WHERE last_error LIKE '%exact MP3 identity set%'", [])
+                .map_err(|error| format!("Could not reopen verified deletion sync: {error}"))?;
         }
         let synchronized_tables = [
             "playback_queue",
@@ -2136,6 +2140,28 @@ mod tests {
         assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
         drop(store);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn deletion_upgrade_reopens_only_identity_set_failures_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        let store = StateStore::new(path.clone()).unwrap();
+        let conn = store.open().unwrap();
+        conn.execute("INSERT INTO pending_library_folder_sync(directory,updated_at_ms,attempt_count,last_error) VALUES ('deleted',1,3,'does not have the exact MP3 identity set'),('other',1,3,'unsupported metadata')", []).unwrap();
+        conn.pragma_update(None, "user_version", 14).unwrap();
+        drop(conn);
+        drop(store);
+        let store = StateStore::new(path.clone()).unwrap();
+        let targets = store.pending_library_folder_sync(10).unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].directory, "deleted");
+        store
+            .block_library_folder_sync(&targets[0], "does not have the exact MP3 identity set")
+            .unwrap();
+        drop(store);
+        let store = StateStore::new(path).unwrap();
+        assert!(store.pending_library_folder_sync(10).unwrap().is_empty());
     }
 
     #[test]

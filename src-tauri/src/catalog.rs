@@ -1710,13 +1710,16 @@ fn album_level_predicate(
         }
         CatalogSearchMatch::LovedTracksRange { from, to } => {
             let mut predicates = Vec::new();
+            let loved = format!(
+                "COALESCE((SELECT live.loved_tracks FROM temp.aurora_live_album_metrics live WHERE live.album_id = {alias}.id), {alias}.loved_tracks)"
+            );
             if let Some(from) = from {
                 params.push(Value::Integer(i64::from(*from)));
-                predicates.push(format!("{alias}.loved_tracks >= ?"));
+                predicates.push(format!("{loved} >= ?"));
             }
             if let Some(to) = to {
                 params.push(Value::Integer(i64::from(*to)));
-                predicates.push(format!("{alias}.loved_tracks <= ?"));
+                predicates.push(format!("{loved} <= ?"));
             }
             Some(format!("({})", predicates.join(" AND ")))
         }

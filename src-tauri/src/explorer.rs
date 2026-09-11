@@ -2443,6 +2443,13 @@ mod tests {
             page.items.len(),
             page.total_count
         );
+        for album in &page.items {
+            eprintln!(
+                "Saved search match: {} / {} / loved={}",
+                album.artist, album.title, album.loved_tracks
+            );
+            assert!(album.loved_tracks > 0);
+        }
     }
 
     #[test]
@@ -2914,6 +2921,15 @@ mod tests {
             assert_eq!(album.duration_seconds, 268);
             assert_eq!(album.rating, None);
             assert_eq!(album.album_score, None);
+            let filtered = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some("love=1 AND cr=99 NOT genre:scores OR soundtrack".into()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .unwrap();
+            assert!(!filtered.items.iter().any(|item| item.id == "a1"));
         }
 
         // The correction also survives a fresh local connection and a drained

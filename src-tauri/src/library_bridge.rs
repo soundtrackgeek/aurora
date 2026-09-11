@@ -82,6 +82,8 @@ pub struct LibraryBridgeSupports {
     pub default_popm_rating_fallback: bool,
     #[serde(default)]
     pub bounded_existing_folder_sync: bool,
+    #[serde(default)]
+    pub verified_track_deletion_sync: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -272,6 +274,8 @@ struct SyncExistingFoldersPayload<'a> {
     folder_paths: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     changed_file_paths: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_file_paths: Option<&'a [String]>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -580,6 +584,11 @@ pub(crate) fn sync_existing_library_folders(
 ) -> Result<LibraryExistingFoldersSyncResult, String> {
     let folder_paths = validate_sync_folder_paths(folder_paths)?;
     let changed_file_paths = validate_sync_file_paths(changed_file_paths)?;
+    let deleted_file_paths = crate::file_observations::pending_deletion_paths(
+        &open_catalog(&default_catalog_path()?)?,
+        &app.state::<StateStore>(),
+        &folder_paths,
+    )?;
     let capabilities = invoke_bridge::<_, LibraryBridgeCapabilities>(
         app,
         "capabilities",
@@ -588,11 +597,16 @@ pub(crate) fn sync_existing_library_folders(
     )?;
     validate_capabilities(&capabilities)?;
     validate_tag_sync_capabilities(&capabilities)?;
+    if !deleted_file_paths.is_empty() && !capabilities.supports.verified_track_deletion_sync {
+        return Err("Music Library must be updated (or installed if missing) to synchronize verified track deletions.".to_owned());
+    }
     let result = invoke_bridge::<_, LibraryExistingFoldersSyncResult>(
         app,
         "syncExistingFolders",
         SyncExistingFoldersPayload {
             folder_paths: &folder_paths,
+            deleted_file_paths: (!deleted_file_paths.is_empty())
+                .then_some(deleted_file_paths.as_slice()),
             changed_file_paths: (!changed_file_paths.is_empty())
                 .then_some(changed_file_paths.as_slice()),
         },
@@ -1583,6 +1597,7 @@ mod tests {
                 sync_existing_folders: true,
                 default_popm_rating_fallback: true,
                 bounded_existing_folder_sync: true,
+                verified_track_deletion_sync: true,
             },
         };
 
@@ -1605,6 +1620,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             operation: "syncExistingFolders",
             payload: SyncExistingFoldersPayload {
+                deleted_file_paths: None,
                 folder_paths: &folder_paths,
                 changed_file_paths: Some(&changed_file_paths),
             },
@@ -1630,6 +1646,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             operation: "syncExistingFolders",
             payload: SyncExistingFoldersPayload {
+                deleted_file_paths: None,
                 folder_paths: &folder_paths,
                 changed_file_paths: None,
             },
