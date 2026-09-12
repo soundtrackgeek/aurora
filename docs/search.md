@@ -8,6 +8,7 @@ Aurora has one persistent search box at the top of the window, but the search be
 - Start typing. In Songs, Albums, and Artists, Aurora waits for a two-second pause before running the query so a complete expression runs once. Clearing the box is immediate.
 - The number beside the box is the exact total for the filtered Songs, Albums, or Artists result set, even though Aurora loads only one bounded page at a time.
 - Search is case-insensitive.
+- Initial catalog results use local SQLite metadata and saved corrections without waiting for MP3 or folder inspection. Pending file changes reconcile in the background. Album and artist track filters collect matching album IDs once, including combined queries such as `genre:soundtrack AND year:1997`.
 - Use **Reset** in Songs, Albums, or Artists to clear both the query and filters inherited from another Aurora view.
 - Aurora restores the last catalog query and filters after a restart.
 

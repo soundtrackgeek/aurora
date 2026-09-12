@@ -1158,7 +1158,7 @@ fn local_album_detail_from_connection(
     album_id: &str,
     store: &StateStore,
 ) -> Result<AlbumDetail, String> {
-    crate::file_observations::load(connection, store)?;
+    crate::file_observations::load_album(connection, store, album_id)?;
     crate::live_genres::prepare_cached(connection)?;
     album_detail_with_file_refresh(connection, album_id, Some(store), false)
 }
@@ -1505,6 +1505,163 @@ mod tests {
         .unwrap();
         assert_eq!(page.total_count, 1);
         assert_eq!(page.items[0].genre.as_deref(), Some("Progressive Rock"));
+    }
+
+    #[test]
+    #[ignore = "opt-in live album timing with disposable SQLite snapshots of saved state"]
+    fn benchmark_local_album_click() {
+        let temporary = tempfile::tempdir().unwrap();
+        let installed = std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("com.soundtrackgeek.aurora");
+        for filename in [
+            "aurora-state.sqlite3",
+            "aurora-file-observations.sqlite3",
+            "aurora-lastfm-cache.sqlite3",
+        ] {
+            let source = Connection::open_with_flags(
+                installed.join(filename),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            // SQLite creates a consistent snapshot, including committed WAL data.
+            source
+                .execute(
+                    "VACUUM INTO ?1",
+                    [temporary.path().join(filename).to_string_lossy().as_ref()],
+                )
+                .unwrap();
+        }
+        let store = StateStore::new(temporary.path().join("aurora-state.sqlite3")).unwrap();
+        let album_id = "mb:8294243265032224761";
+        let started = std::time::Instant::now();
+        let connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+        connection
+            .execute(
+                "ATTACH DATABASE ?1 AS file_observations",
+                [crate::file_observations::cache_path(&store)
+                    .to_string_lossy()
+                    .as_ref()],
+            )
+            .unwrap();
+        connection.pragma_update(None, "query_only", false).unwrap();
+        connection
+            .execute_batch(crate::file_observations::TEMP_SCHEMA)
+            .unwrap();
+        connection
+            .execute_batch(&crate::file_observations::LOAD_SQL.replace("CROSS JOIN", "JOIN"))
+            .unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        crate::live_genres::prepare_cached(&connection).unwrap();
+        let mut before =
+            album_detail_with_file_refresh(&connection, album_id, Some(&store), false).unwrap();
+        before.popularity =
+            crate::lastfm::cached_album_popularity(&before.album.artist, &before.tracks, &store);
+        eprintln!(
+            "Previous album-click path: {:?}; {} tracks",
+            started.elapsed(),
+            before.tracks.len()
+        );
+        for _ in 0..3 {
+            let started = std::time::Instant::now();
+            let mut after = load_local_album_detail(album_id.into(), &store).unwrap();
+            after.popularity =
+                crate::lastfm::cached_album_popularity(&after.album.artist, &after.tracks, &store);
+            eprintln!(
+                "Optimized album-click path: {:?}; {} tracks",
+                started.elapsed(),
+                after.tracks.len()
+            );
+            assert_eq!(
+                serde_json::to_value(&before).unwrap(),
+                serde_json::to_value(&after).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in read-only timing of the installed local catalog and saved corrections"]
+    fn benchmark_local_soundtrack_year_search() {
+        let started = std::time::Instant::now();
+        let connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+        let directory = std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("com.soundtrackgeek.aurora");
+        for (name, file) in [
+            ("aurora_state", "aurora-state.sqlite3"),
+            ("file_observations", "aurora-file-observations.sqlite3"),
+        ] {
+            let uri = format!(
+                "file:{}?mode=ro",
+                directory.join(file).to_string_lossy().replace('\\', "/")
+            );
+            connection
+                .execute(&format!("ATTACH DATABASE ?1 AS {name}"), [uri])
+                .unwrap();
+        }
+        connection.pragma_update(None, "query_only", false).unwrap();
+        connection
+            .execute_batch(crate::file_observations::TEMP_SCHEMA)
+            .unwrap();
+        connection
+            .execute_batch(crate::file_observations::LOAD_SQL)
+            .unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        crate::catalog::project_live_album_ratings(&connection, false).unwrap();
+        crate::live_genres::prepare_cached(&connection).unwrap();
+        eprintln!(
+            "Local saved-correction preparation: {:?}",
+            started.elapsed()
+        );
+        for _ in 0..3 {
+            let query_started = std::time::Instant::now();
+            let page = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some("genre:soundtrack AND year:1997".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            eprintln!(
+                "Count + page: {:?}; total={}; page={}",
+                query_started.elapsed(),
+                page.total_count,
+                page.items.len()
+            );
+            assert!(page.total_count >= page.items.len() as u64);
+        }
+    }
+
+    #[test]
+    fn soundtrack_year_search_counts_and_pages_matching_tracks() {
+        let connection = fixture();
+        connection
+            .execute_batch(
+                "UPDATE tracks SET canonical_genre='Soundtrack', year=1997 WHERE id IN (7, 9);
+            DELETE FROM track_search_fts;
+            INSERT INTO track_search_fts SELECT id, album_id, title, display_artist, album,
+                album_artist_display, canonical_genre, publisher, file_path, filename FROM tracks;",
+            )
+            .unwrap();
+        let request = AlbumPageRequest {
+            search: Some("genre:soundtrack AND year:1997".into()),
+            page_size: Some(1),
+            sort: Some(AlbumSort::TitleAsc),
+            ..Default::default()
+        };
+        let first = album_page_from_connection(&connection, request.clone()).unwrap();
+        assert_eq!(first.total_count, 2);
+        assert_eq!(first.items[0].id, "a1");
+        let second = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                cursor: first.next_cursor,
+                ..request
+            },
+        )
+        .unwrap();
+        assert_eq!(second.total_count, 2);
+        assert_eq!(second.items[0].id, "a2");
+        assert!(second.next_cursor.is_none());
     }
 
     #[test]

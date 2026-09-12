@@ -1,5 +1,9 @@
 # Aurora
 
+Aurora 0.25.17 speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
+
+Opening an album loads saved file corrections only for that album through indexed identities, avoiding whole-library scans before displaying its tracks.
+
 Album-detail track rows reserve the full width of chart rankings before displaying the popularity flame and artist name, preventing overlapping TI ranks.
 
 Pending tag recovery restores orphaned retry entries and gives previously blocked folders one fresh attempt. Guarded per-file metadata sync can import ratings even when missing bonus tracks prevent whole-album reconciliation; unresolved folder differences remain queued for review. Use Aurora 0.25.12 with Music Library 0.145.23 or newer for this recovery.

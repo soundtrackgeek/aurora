@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.17] - 2026-09-12
+
+### Fixed
+
+- Avoid repeated per-album track scans in album and artist search predicates, including `genre:soundtrack AND year:1997`. Preserve exact counts, pagination, and negated filters when orphan tracks exist.
+- Load saved file corrections through indexed track identities instead of scanning the full catalog before showing local search results.
+- Scope saved genre/deletion corrections to the selected album when opening its tracks, including background detail refreshes.
+
 ## [0.25.16] - 2026-09-11
 
 ### Fixed

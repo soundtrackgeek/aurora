@@ -10,11 +10,23 @@ use std::{
 
 pub(crate) const TEMP_SCHEMA: &str = "CREATE TEMP TABLE IF NOT EXISTS aurora_verified_files (track_id INTEGER PRIMARY KEY, missing INTEGER NOT NULL, genre_known INTEGER NOT NULL, genre TEXT);";
 
+// Drive the lookup from the small correction cache. Reordering this join can
+// scan the entire million-track catalog even when there are no corrections.
+pub(crate) const LOAD_SQL: &str = "INSERT INTO temp.aurora_verified_files
+      SELECT t.id, o.missing, o.genre_known, o.genre FROM file_observations.observations o
+      CROSS JOIN tracks t ON t.file_path = o.directory AND t.filename = o.filename AND t.import_run_id = o.import_run_id;";
+
 pub(crate) fn cache_path(store: &StateStore) -> PathBuf {
     store
         .path()
         .with_file_name("aurora-file-observations.sqlite3")
 }
+
+const LOAD_ALBUM_SQL: &str = "INSERT INTO temp.aurora_verified_files
+      SELECT t.id, o.missing, o.genre_known, o.genre FROM tracks t
+      CROSS JOIN file_observations.observations o
+        ON t.file_path = o.directory AND t.filename = o.filename AND t.import_run_id = o.import_run_id
+      WHERE t.album_id = ?1;";
 
 fn open(store: &StateStore) -> Result<Connection, String> {
     let connection = Connection::open(cache_path(store)).map_err(|e| e.to_string())?;
@@ -53,7 +65,7 @@ pub(crate) fn refresh(
     store: &StateStore,
     album_id: Option<&str>,
 ) -> Result<(), String> {
-    load(connection, store)?;
+    load_scope(connection, store, album_id)?;
     let mut statement = connection
         .prepare(
             "WITH candidates(id) AS (
@@ -112,7 +124,7 @@ pub(crate) fn refresh(
           params![directory, filename, revision, missing, genre.is_some(), genre.flatten()]).map_err(|e| e.to_string())?;
     }
     transaction.commit().map_err(|e| e.to_string())?;
-    load(connection, store)
+    load_scope(connection, store, album_id)
 }
 
 pub(crate) fn record_deleted(
@@ -175,6 +187,22 @@ pub(crate) fn pending_deletion_paths(
 }
 
 pub(crate) fn load(connection: &Connection, store: &StateStore) -> Result<(), String> {
+    load_scope(connection, store, None)
+}
+
+pub(crate) fn load_album(
+    connection: &Connection,
+    store: &StateStore,
+    album_id: &str,
+) -> Result<(), String> {
+    load_scope(connection, store, Some(album_id))
+}
+
+fn load_scope(
+    connection: &Connection,
+    store: &StateStore,
+    album_id: Option<&str>,
+) -> Result<(), String> {
     open(store)?;
     connection
         .execute(
@@ -188,11 +216,18 @@ pub(crate) fn load(connection: &Connection, store: &StateStore) -> Result<(), St
     connection
         .pragma_update(None, "query_only", false)
         .map_err(|e| e.to_string())?;
-    let result = connection.execute_batch(&format!("{TEMP_SCHEMA}
-      DELETE FROM temp.aurora_verified_files;
-      INSERT INTO temp.aurora_verified_files
-      SELECT t.id, o.missing, o.genre_known, o.genre FROM file_observations.observations o
-      JOIN tracks t ON t.file_path = o.directory AND t.filename = o.filename AND t.import_run_id = o.import_run_id;"));
+    let result = connection
+        .execute_batch(&format!(
+            "{TEMP_SCHEMA}
+      DELETE FROM temp.aurora_verified_files;"
+        ))
+        .and_then(|()| {
+            if let Some(album_id) = album_id {
+                connection.execute(LOAD_ALBUM_SQL, [album_id]).map(|_| ())
+            } else {
+                connection.execute_batch(LOAD_SQL)
+            }
+        });
     connection
         .pragma_update(None, "query_only", query_only)
         .map_err(|e| e.to_string())?;
@@ -274,6 +309,66 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn album_corrections_are_bounded_to_selected_tracks() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE tracks(id INTEGER PRIMARY KEY, album_id TEXT, file_path TEXT, filename TEXT, import_run_id INTEGER);
+            CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO tracks SELECT x, CAST((x-1)/10 AS TEXT), 'folder', CAST(x AS TEXT), 2 FROM n;
+            ATTACH DATABASE ':memory:' AS file_observations;
+            CREATE TABLE file_observations.observations(directory TEXT, filename TEXT, import_run_id INTEGER,
+                missing INTEGER, genre_known INTEGER, genre TEXT, PRIMARY KEY(directory, filename));
+            INSERT INTO file_observations.observations SELECT file_path, filename, import_run_id, 0, 1, 'Soundtrack' FROM tracks;").unwrap();
+        db.execute_batch(TEMP_SCHEMA).unwrap();
+        let mut statement = db.prepare(LOAD_ALBUM_SQL).unwrap();
+        assert_eq!(statement.execute(["5"]).unwrap(), 10);
+        let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+        assert!(steps < 1_000, "album corrections used {steps} VM steps");
+        let bounds: (i64, i64) = db
+            .query_row(
+                "SELECT MIN(track_id), MAX(track_id) FROM temp.aurora_verified_files",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(bounds, (51, 60));
+    }
+
+    #[test]
+    fn saved_corrections_use_indexed_identities_and_reject_stale_revisions() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE tracks(id INTEGER PRIMARY KEY, file_path TEXT, filename TEXT, import_run_id INTEGER);
+            CREATE INDEX idx_tracks_file ON tracks(file_path, filename);
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO tracks SELECT x, 'album', CAST(x AS TEXT), 2 FROM n;
+            ATTACH DATABASE ':memory:' AS file_observations;
+            CREATE TABLE file_observations.observations(directory TEXT, filename TEXT, import_run_id INTEGER,
+                missing INTEGER, genre_known INTEGER, genre TEXT, PRIMARY KEY(directory, filename));
+            INSERT INTO file_observations.observations VALUES
+                ('album', '10', 2, 0, 1, 'Soundtrack'),
+                ('album', '20', 1, 1, 0, NULL),
+                ('other', '30', 2, 1, 0, NULL);").unwrap();
+        db.execute_batch(TEMP_SCHEMA).unwrap();
+        for expected in [1, 0] {
+            let mut statement = db.prepare(LOAD_SQL).unwrap();
+            assert_eq!(statement.execute([]).unwrap(), expected);
+            let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+            assert!(steps < 1_000, "sparse corrections used {steps} VM steps");
+            if expected == 1 {
+                let correction: (i64, String) = db
+                    .query_row(
+                        "SELECT track_id, genre FROM temp.aurora_verified_files",
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(correction, (10, "Soundtrack".into()));
+            }
+            db.execute_batch("DELETE FROM temp.aurora_verified_files; DELETE FROM file_observations.observations;").unwrap();
+        }
     }
 
     #[test]

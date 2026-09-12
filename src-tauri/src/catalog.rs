@@ -239,7 +239,10 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
     project_live_album_ratings(connection, true)
 }
 
-fn project_live_album_ratings(connection: &Connection, refresh_files: bool) -> Result<(), String> {
+pub(crate) fn project_live_album_ratings(
+    connection: &Connection,
+    refresh_files: bool,
+) -> Result<(), String> {
     let missing_file = if refresh_files {
         "aurora_file_missing(track.file_path, track.filename) = 1"
     } else {
@@ -1873,8 +1876,11 @@ pub(crate) fn push_album_search_predicates(
             .filter_map(|alternative| non_prefix_predicate("search_track", alternative, params))
             .collect::<Vec<_>>();
         if !track_predicates.is_empty() {
+            // Build the matching album set once. A correlated EXISTS can make
+            // SQLite repeat a year-index scan for every candidate album.
+            // Exclude orphan tracks so NOT keeps EXISTS' two-valued semantics.
             alternatives.push(format!(
-                "EXISTS (SELECT 1 FROM tracks AS search_track WHERE search_track.album_id = a.id AND ({}))",
+                "a.id IN (SELECT search_track.album_id FROM tracks AS search_track WHERE search_track.album_id IS NOT NULL AND ({}))",
                 track_predicates.join(" OR ")
             ));
         }
@@ -3075,6 +3081,42 @@ mod tests {
             lookup_track_by_stable_key(&connection, r"h:\music\artist\track.mp3"),
             Err(StableTrackLookupError::Failure(_))
         ));
+    }
+
+    #[test]
+    fn album_year_search_builds_one_matching_set_and_preserves_negation() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE albums (id TEXT PRIMARY KEY);
+             CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id TEXT, year INTEGER);
+             CREATE INDEX idx_tracks_year ON tracks(year);
+             CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+             INSERT INTO albums SELECT CAST(x AS TEXT) FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+             INSERT INTO tracks SELECT x, CAST((x-1)/10+1 AS TEXT), 1997 FROM n;
+             INSERT INTO albums VALUES ('empty'), ('other');
+             INSERT INTO tracks VALUES (10001, 'other', 2000), (10002, NULL, 1997);",
+        )
+        .unwrap();
+        for (query, expected) in [("year:1997", 1000), ("NOT year:1997", 2)] {
+            let mut sql = "SELECT COUNT(*) FROM albums a WHERE 1=1".to_owned();
+            let mut params = Vec::new();
+            push_album_search_predicates(
+                &mut sql,
+                &mut params,
+                &parse_catalog_search(query).unwrap(),
+            );
+            let mut statement = db.prepare(&sql).unwrap();
+            let count: i64 = statement
+                .query_row(params_from_iter(params.iter()), |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, expected, "{query}");
+            // Work, rather than wall-clock time, catches repeated per-album scans
+            // deterministically even on slow CI machines.
+            let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+            assert!(steps < 250_000, "{query} used {steps} VM steps");
+        }
     }
 
     #[test]
