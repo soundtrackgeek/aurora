@@ -1,3 +1,4 @@
+import { useAlbumCoverUrl } from "../../albumArtwork";
 import {
   Album,
   AudioLines,
@@ -28,7 +29,7 @@ import {
   type GenreSummary,
   sortGenres,
 } from "../../genres";
-import { albumCoverUrl, formatCount, formatDuration, type Track } from "../../library";
+import { formatCount, formatDuration, type Track } from "../../library";
 import { Artwork } from "../Artwork";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
 import "./GenreAtlas.css";
@@ -111,7 +112,7 @@ function albumAsTrack(album: GenreAlbum): Track {
 }
 
 function GenreCover({ genre }: { genre: GenreSummary }) {
-  const source = albumCoverUrl(genre.representativeAlbumId, 128);
+  const source = useAlbumCoverUrl(genre.representativeAlbumId, 128);
   const [failed, setFailed] = useState<string | null>(null);
   return (
     <span className="genre-cover" aria-hidden="true">

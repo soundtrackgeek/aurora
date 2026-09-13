@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.25.17 speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
+Aurora 0.25.18 displays embedded MP3 artwork when an album has no indexed archive cover, and refreshes all cover views after Replace Cover saves. The fallback checks up to 32 catalog tracks and leaves Music Library’s catalog unchanged.
+
+Aurora speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
 
 Opening an album loads saved file corrections only for that album through indexed identities, avoiding whole-library scans before displaying its tracks.
 

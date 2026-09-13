@@ -310,6 +310,7 @@ fn source_fingerprint(
         .as_nanos();
     let mut hasher = DefaultHasher::new();
     album_id.hash(&mut hasher);
+    path.hash(&mut hasher);
     metadata.len().hash(&mut hasher);
     modified.hash(&mut hasher);
     size.hash(&mut hasher);
@@ -389,7 +390,20 @@ fn load_thumbnail<R: Runtime>(
     album_id: &str,
     size: u32,
 ) -> Result<Vec<u8>, String> {
-    let source = catalog::resolve_cover_path(album_id)?;
+    let Some(entry) = catalog::resolve_cover_archive_entry(album_id)? else {
+        let cache_root = app
+            .path()
+            .app_cache_dir()
+            .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
+            .join("embedded-album-covers");
+        return load_embedded_album_thumbnail(
+            album_id,
+            &catalog::embedded_cover_candidates(album_id)?,
+            size,
+            &cache_root,
+        );
+    };
+    let source = entry.path;
     let filename = source_fingerprint(album_id, &source, size, Some(MAX_COVER_BYTES))?;
     let cache_path = app
         .path()
@@ -403,6 +417,28 @@ fn load_thumbnail<R: Runtime>(
     let bytes = encode_thumbnail(&source, size)?;
     cache_thumbnail(&cache_path, &bytes)?;
     Ok(bytes)
+}
+
+fn load_embedded_album_thumbnail(
+    album_id: &str,
+    candidates: &[PathBuf],
+    size: u32,
+    cache_root: &Path,
+) -> Result<Vec<u8>, String> {
+    for source in candidates {
+        let Ok(filename) = source_fingerprint(album_id, source, size, None) else {
+            continue;
+        };
+        let cache_path = cache_root.join(filename);
+        if let Ok(bytes) = fs::read(&cache_path) {
+            return Ok(bytes);
+        }
+        if let Ok(bytes) = encode_embedded_thumbnail(source, size) {
+            cache_thumbnail(&cache_path, &bytes)?;
+            return Ok(bytes);
+        }
+    }
+    Err("No usable embedded album cover is available.".to_owned())
 }
 
 fn load_inbox_thumbnail<R: Runtime>(
@@ -539,6 +575,34 @@ mod tests {
         let decoded = image::load_from_memory(&webp).expect("decode thumbnail");
         assert!(decoded.width() <= 64);
         assert!(decoded.height() <= 64);
+        let cache_root = path.with_extension("cache");
+        let missing = path.with_extension("missing.mp3");
+        let candidates = vec![missing, path.clone()];
+        let fallback = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root)
+            .expect("unindexed album uses embedded artwork after an unavailable track");
+        assert_eq!(fallback, webp);
+        let cached = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root)
+            .expect("cached embedded cover");
+        assert_eq!(cached, webp);
+        assert!(load_embedded_album_thumbnail("empty", &[], 64, &cache_root).is_err());
+        // Replacing the embedded image changes the source fingerprint and thumbnail.
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(100, 200)
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        tag.remove_all_pictures();
+        tag.add_frame(Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: png.into_inner(),
+        });
+        tag.write_to_path(&path, Version::Id3v24).unwrap();
+        let replaced =
+            load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root).unwrap();
+        let decoded = image::load_from_memory(&replaced).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (32, 64));
+        fs::remove_dir_all(cache_root).unwrap();
         fs::remove_file(path).expect("remove fixture");
     }
 }

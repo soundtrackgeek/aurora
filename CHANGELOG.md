@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.18] - 2026-09-13
+
+### Fixed
+
+- Display embedded MP3 covers for albums without an archive index entry, including previously saved artwork such as Cool As Ice. Keep indexed archive validation and replacement intact.
+- Refresh album cards, details, track/player artwork, and the Tags preview after saving a replacement cover, including images that previously failed to load.
+- Avoid claiming that an archive was replaced when only embedded artwork was saved.
+
 ## [0.25.17] - 2026-09-12
 
 ### Fixed

@@ -1,3 +1,4 @@
+import { useAlbumCoverUrl } from "../../albumArtwork";
 import {
   Album,
   AlertTriangle,
@@ -29,7 +30,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { albumCoverUrl, displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
+import { displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -312,7 +313,7 @@ function SortControl({ view, current, onChange }: SortControlProps) {
 }
 
 function AlbumArtwork({ album, detail = false }: { album: ExplorerAlbum; detail?: boolean }) {
-  const source = albumCoverUrl(album.id, detail ? 512 : 256);
+  const source = useAlbumCoverUrl(album.id, detail ? 512 : 256);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const { initials, seed } = useMemo(() => {
     const nextSeed = [...album.artist].reduce(

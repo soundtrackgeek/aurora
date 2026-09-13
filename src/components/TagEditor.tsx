@@ -1,7 +1,8 @@
+import { useAlbumCoverUrl, refreshAlbumArtwork } from "../albumArtwork";
 import { ImagePlus, Music2, RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { albumCoverUrl, type Track } from "../library";
+import { type Track } from "../library";
 import { selectAlbumCoverImage, type SelectedArtwork } from "../artworkSelection";
 import { loadGenreNames } from "../genres";
 import {
@@ -559,10 +560,11 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
       });
     }
   }, [onTracksChange, onCatalogSync]);
+  const currentArtworkUrl = useAlbumCoverUrl(targetAlbumId, 256);
   const artwork = useMemo<AlbumArtworkEditor | undefined>(() => targetKind === "album" ? {
-    currentUrl: albumCoverUrl(targetAlbumId!, 256),
+    currentUrl: currentArtworkUrl,
     choose: () => selectAlbumCoverImage({ source: "library", target: requestTarget }),
-  } : undefined, [requestTarget, targetAlbumId, targetKind]);
+  } : undefined, [requestTarget, currentArtworkUrl, targetKind]);
   const saveSnapshot = useCallback(async (
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
@@ -570,6 +572,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     artworkToken: string | null,
   ): Promise<ManualTagEditorSaveResult> => {
     const result = await updateTagEditor(requestTarget, expected, fields, values, artworkToken);
+    if (artworkToken && requestTarget.kind === "album") refreshAlbumArtwork(requestTarget.albumId);
     const projectionAccepted = result.catalogSync
       ? onTracksChange(result.tracks, result.catalogSync)
       : onTracksChange(result.tracks);
@@ -582,8 +585,8 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     }
     const savedFiles = artworkToken
       ? fields.length
-        ? `Saved ${countLabel(fields.length, "field")}, embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}, and replaced its archived cover.`
-        : `Embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")} and replaced its archived cover.`
+        ? `Saved ${countLabel(fields.length, "field")}, embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
+        : `Embedded the replacement cover in ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`
       : `Saved ${countLabel(fields.length, "field")} directly to ${countLabel(expected.tracks.length, "MP3", "MP3s")}.`;
     let message = savedFiles;
     if (result.catalogSync?.status === "synced") {

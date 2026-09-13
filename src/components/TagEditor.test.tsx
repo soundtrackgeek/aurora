@@ -158,7 +158,7 @@ describe("TagEditor", () => {
       "preview-selected-cover",
     );
     expect(await screen.findByText(
-      "Embedded the replacement cover in 2 MP3s and replaced its archived cover.",
+      "Embedded the replacement cover in 2 MP3s.",
     )).toBeInTheDocument();
   });
 

@@ -2567,10 +2567,31 @@ fn catalog_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String
     Ok(audio_path)
 }
 
-pub(crate) fn resolve_cover_path(album_id: &str) -> Result<PathBuf, String> {
-    resolve_cover_archive_entry(album_id)?
-        .map(|entry| entry.path)
-        .ok_or_else(|| "No album cover is available.".to_owned())
+pub(crate) fn embedded_cover_candidates(album_id: &str) -> Result<Vec<PathBuf>, String> {
+    let connection = open_catalog(&default_catalog_path()?)?;
+    embedded_cover_candidates_from_connection(&connection, album_id)
+}
+
+fn embedded_cover_candidates_from_connection(
+    connection: &Connection,
+    album_id: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let mut statement = connection
+        .prepare("SELECT file_path, filename FROM tracks WHERE album_id = ?1 ORDER BY id LIMIT 32")
+        .map_err(|error| format!("Could not find embedded album artwork: {error}"))?;
+    let rows = statement
+        .query_map([album_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| format!("Could not find embedded album artwork: {error}"))?;
+    let mut paths = Vec::new();
+    for row in rows {
+        let (directory, filename) = row.map_err(|error| error.to_string())?;
+        if let Ok(path) = validated_audio_path(&directory, &filename) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
 }
 
 pub(crate) fn resolve_cover_archive_entry(
@@ -2623,6 +2644,43 @@ fn cover_archive_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_cover_candidates_stay_within_the_selected_album() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE tracks (id INTEGER, album_id TEXT, file_path TEXT, filename TEXT);",
+            )
+            .unwrap();
+        let root =
+            std::env::temp_dir().join(format!("aurora-cover-candidates-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("cover.mp3"), b"fixture").unwrap();
+        for (id, album, filename) in [
+            (1, "selected", "missing.mp3"),
+            (2, "selected", "../cover.mp3"),
+            (3, "selected", "cover.mp3"),
+            (4, "other", "cover.mp3"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO tracks VALUES (?1, ?2, ?3, ?4)",
+                    params![id, album, root.to_str().unwrap(), filename],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            embedded_cover_candidates_from_connection(&connection, "selected").unwrap(),
+            vec![root.join("cover.mp3")]
+        );
+        assert!(
+            embedded_cover_candidates_from_connection(&connection, "absent")
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn first_cover_does_not_require_an_existing_archive_entry() {

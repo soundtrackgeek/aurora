@@ -1,6 +1,7 @@
+import { useAlbumCoverUrl } from "../albumArtwork";
 import { AudioLines } from "lucide-react";
 import { type CSSProperties, useMemo, useState } from "react";
-import { albumCoverUrl, type Track } from "../library";
+import { type Track } from "../library";
 
 export function Artwork({
   track,
@@ -11,7 +12,7 @@ export function Artwork({
   size?: "small" | "player" | "large";
   decorative?: boolean;
 }) {
-  const source = albumCoverUrl(track.albumId, size === "large" ? 512 : size === "player" ? 128 : 64);
+  const source = useAlbumCoverUrl(track.albumId, size === "large" ? 512 : size === "player" ? 128 : 64);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const { initials, seed } = useMemo(() => {
     const nextSeed = [...track.artist].reduce(

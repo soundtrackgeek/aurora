@@ -63,7 +63,7 @@ describe("UniverseListeningMemory", () => {
     expect(screen.queryByText("Various Artists · Rocky IV")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Rocky IV cover" })).toHaveAttribute(
       "src",
-      "/__aurora-preview-cover/preview-score-rocky?size=64",
+      expect.stringMatching(/^\/__aurora-preview-cover\/preview-score-rocky\?size=64&revision=[a-z0-9]+-0$/),
     );
   });
 
