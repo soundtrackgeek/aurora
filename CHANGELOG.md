@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.20] - 2026-09-16
+
+### Fixed
+
+- Save ratings and full tag edits on MP3s with maximum-length filenames using short, deterministic working and backup names instead of appending to the original filename.
+- Use Windows extended-length paths for atomic saves and recovery moves when full paths exceed the legacy path limit.
+- Keep undo paths bounded and recover interrupted undo operations using their journaled naming scheme, including earlier releases.
+
 ## [0.25.19] - 2026-09-16
 
 ### Changed

@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.25.19 uses React 19.3 View Transitions for Listening Report and Charts. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
+Aurora 0.25.20 safely saves ratings and tag edits for tracks with maximum-length filenames using bounded same-folder working and backup names. Audio verification, rollback copies, and interrupted-undo recovery remain in place, including recovery journals from earlier versions.
+
+Aurora uses React 19.3 View Transitions for Listening Report and Charts. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
 
 Aurora speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
 

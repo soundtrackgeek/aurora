@@ -1465,8 +1465,7 @@ impl TagService {
 
         let undo_backup =
             sibling_operation_path(&resolved.audio_path, operation.id, "undo-current.backup")?;
-        let undo_replacement =
-            sibling_operation_path(&resolved.audio_path, operation.id, "undo-original.tmp")?;
+        let undo_replacement = undo_replacement_path(&undo_backup)?;
         if undo_backup.exists() || undo_replacement.exists() {
             return Err("Aurora's undo safety path already exists.".to_owned());
         }
@@ -1687,8 +1686,8 @@ impl TagService {
             )?;
             return Ok(());
         };
-        let undo_replacement =
-            sibling_operation_path(&operation.target_path, operation.id, "undo-original.tmp")?;
+        // The journal may come from an older release using the full MP3 filename.
+        let undo_replacement = undo_replacement_path(current_backup)?;
         let Some(original_backup) = operation.backup_path.as_ref().filter(|path| path.is_file())
         else {
             self.store.mark_operation(
@@ -2959,7 +2958,19 @@ fn sibling_operation_path(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "The MP3 filename cannot be represented safely.".to_owned())?;
-    Ok(parent.join(format!(".{filename}.aurora-{operation_id}.{suffix}")))
+    // Never append to the source basename: it can already fill the filesystem's
+    // component limit. A stable digest also separates tracks with the same prefix.
+    let digest = format!("{:x}", Sha256::digest(filename.as_bytes()));
+    Ok(parent.join(format!(".aurora-{digest}-{operation_id}.{suffix}")))
+}
+
+fn undo_replacement_path(current_backup: &Path) -> Result<PathBuf, String> {
+    let filename = current_backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".undo-current.backup"))
+        .ok_or_else(|| "Aurora's undo journal has an invalid safety filename.".to_owned())?;
+    Ok(current_backup.with_file_name(format!("{filename}.undo-original.tmp")))
 }
 
 fn cleanup_owned_working_file(path: &Path) {
@@ -3005,13 +3016,35 @@ fn open_write_exclusion(path: &Path) -> Result<File, String> {
 }
 
 #[cfg(windows)]
+fn windows_operation_path(path: &Path) -> Result<Vec<u16>, String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    // Canonicalize only the existing parent: recovery destinations and backups
+    // need not exist yet. This supplies Windows' extended-length local/UNC prefix.
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let filename = path
+        .file_name()
+        .ok_or_else(|| "Aurora's file operation has no filename.".to_owned())?;
+    let absolute = fs::canonicalize(parent)
+        .map_err(|error| format!("Could not resolve Aurora's file operation directory: {error}"))?
+        .join(filename);
+    let mut wide: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err("Aurora's file operation path contains a NUL character.".to_owned());
+    }
+    wide.push(0);
+    Ok(wide)
+}
+
+#[cfg(windows)]
 fn replace_file_atomic(
     target: &Path,
     replacement: &Path,
     backup: Option<&Path>,
 ) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-
     #[link(name = "Kernel32")]
     unsafe extern "system" {
         fn ReplaceFileW(
@@ -3024,13 +3057,9 @@ fn replace_file_atomic(
         ) -> i32;
     }
 
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
-    }
-
-    let target = wide(target);
-    let replacement = wide(replacement);
-    let backup = backup.map(wide);
+    let target = windows_operation_path(target)?;
+    let replacement = windows_operation_path(replacement)?;
+    let backup = backup.map(windows_operation_path).transpose()?;
     let backup_pointer = backup
         .as_ref()
         .map_or(std::ptr::null(), |value| value.as_ptr());
@@ -3057,19 +3086,13 @@ fn replace_file_atomic(
 
 #[cfg(windows)]
 fn move_file_without_replacing(source: &Path, target: &Path) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-
     #[link(name = "Kernel32")]
     unsafe extern "system" {
         fn MoveFileW(existing_file_name: *const u16, new_file_name: *const u16) -> i32;
     }
 
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
-    }
-
-    let source = wide(source);
-    let target = wide(target);
+    let source = windows_operation_path(source)?;
+    let target = windows_operation_path(target)?;
     // SAFETY: Both strings are owned, NUL-terminated UTF-16 buffers that outlive the call.
     let result = unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) };
     if result == 0 {
@@ -3253,6 +3276,103 @@ mod tests {
             audio_path: PathBuf::from(r"D:\Music\Fixture\01.mp3"),
             catalog_values: values,
         }
+    }
+
+    #[test]
+    fn long_filename_editor_save_preserves_audio_and_supports_undo_recovery() {
+        for version in [Version::Id3v23, Version::Id3v24] {
+            let directory = fixture_path("long-name");
+            fs::create_dir(&directory).unwrap();
+            let target = directory.join(format!("{}.mp3", "x".repeat(251)));
+            write_fixture(&target, version);
+            let original = fs::read(&target).unwrap();
+            let state_path = directory.join("state.sqlite3");
+            let store = StateStore::new(state_path.clone()).unwrap();
+            let service = TagService::new(store.clone()).unwrap();
+            let (tag, version) = read_tag_for_write(&target).unwrap();
+            let before = read_editable_tag_values(&tag).unwrap();
+            let before_legacy = read_tag_values(&tag).unwrap();
+            let fields = [EditableTagField::Title, EditableTagField::Rating];
+            let mut after = before.clone();
+            after.title = Some("Corrected long filename title".to_owned());
+            after.rating = Some(4.0);
+            let mut after_legacy = before_legacy.clone();
+            after_legacy.rating = Some(4.0);
+            let mut resolved = resolved_track_fixture("1", "long-name", "album");
+            resolved.audio_path = target.clone();
+            resolved.summary.directory = directory.to_string_lossy().into_owned();
+            resolved.summary.filename = target.file_name().unwrap().to_str().unwrap().to_owned();
+            let payload_hash = audio_payload_hash(&target).unwrap();
+            let item = PreparedEditorWrite {
+                resolved,
+                fingerprint: FileFingerprint::read(&target).unwrap(),
+                preserved_frames: editor_non_target_frames(&tag, &fields, false),
+                tag,
+                version,
+                payload_hash,
+                before,
+                after: after.clone(),
+                before_legacy,
+                after_legacy,
+                before_artwork_fingerprint: None,
+                artwork_changed: false,
+            };
+            service
+                .write_prepared_editor(item, &fields, None)
+                .unwrap_or_else(|error| panic!("save failed: {}", error.message));
+            assert_eq!(
+                read_editable_tag_values(&read_tag_for_write(&target).unwrap().0).unwrap(),
+                after
+            );
+            assert_eq!(audio_payload_hash(&target).unwrap(), payload_hash);
+            let operation = store.latest_undo_operation("long-name").unwrap().unwrap();
+            let backup = operation.backup_path.as_ref().unwrap();
+            assert_eq!(fs::read(backup).unwrap(), original);
+            let undo_current =
+                sibling_operation_path(&target, operation.id, "undo-current.backup").unwrap();
+            let undo_replacement = undo_replacement_path(&undo_current).unwrap();
+            fs::copy(backup, &undo_replacement).unwrap();
+            store
+                .begin_undo(
+                    operation.id,
+                    &undo_current.to_string_lossy(),
+                    &FileFingerprint::read(&target).unwrap().to_string(),
+                )
+                .unwrap();
+            // Crash after Windows moves the target aside, before installing the undo.
+            fs::rename(&target, &undo_current).unwrap();
+            service
+                .recover_interrupted_undo(&store.interrupted_operations().unwrap().remove(0))
+                .unwrap();
+            assert_eq!(fs::read(&target).unwrap(), original);
+            assert!(store.interrupted_operations().unwrap().is_empty());
+            drop(service);
+            drop(store);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn safe_paths_are_bounded_distinct_and_recover_legacy_undo_names() {
+        let directory = std::env::temp_dir();
+        let first = directory.join(format!("{}.mp3", "x".repeat(251)));
+        let second = directory.join(format!("{}y.mp3", "x".repeat(250)));
+        let (working, backup) = operation_paths(&first, i64::MAX).unwrap();
+        assert_ne!(working, operation_paths(&second, i64::MAX).unwrap().0);
+        assert_ne!(working, operation_paths(&first, 1).unwrap().0);
+        for path in [
+            working,
+            backup,
+            sibling_operation_path(&first, i64::MAX, "undo-current.backup").unwrap(),
+        ] {
+            assert_eq!(path.parent(), Some(directory.as_path()));
+            assert!(path.file_name().unwrap().len() < 128);
+        }
+        let legacy = directory.join(".Track.mp3.aurora-42.undo-current.backup");
+        assert_eq!(
+            undo_replacement_path(&legacy).unwrap(),
+            directory.join(".Track.mp3.aurora-42.undo-original.tmp")
+        );
     }
 
     #[test]
@@ -4380,10 +4500,14 @@ mod tests {
             )
             .expect("finish edit journal");
 
-        let undo_current = sibling_operation_path(&target, operation_id, "undo-current.backup")
-            .expect("undo safety path");
-        let undo_replacement = sibling_operation_path(&target, operation_id, "undo-original.tmp")
-            .expect("undo replacement path");
+        // Simulate an undo journal written by a release before bounded filenames.
+        let basename = target.file_name().unwrap().to_str().unwrap();
+        let undo_current = target.with_file_name(format!(
+            ".{basename}.aurora-{operation_id}.undo-current.backup"
+        ));
+        let undo_replacement = target.with_file_name(format!(
+            ".{basename}.aurora-{operation_id}.undo-original.tmp"
+        ));
         fs::copy(&backup, &undo_replacement).expect("copy undo replacement");
         store
             .begin_undo(
