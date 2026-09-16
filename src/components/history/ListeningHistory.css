@@ -1,4 +1,5 @@
 .history-shell { display: grid; gap: 11px; padding-bottom: 8px; }
+.history-page-content { min-width: 0; container: aurora-history / inline-size; }
 .history-page-tabs { display: flex; align-items: center; min-height: 40px; border-bottom: 1px solid var(--border); }
 .history-page-tabs button { position: relative; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 15px; border: 0; color: #7f8c9b; background: transparent; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); cursor: pointer; }
 .history-page-tabs button::after { content: ""; position: absolute; right: 14px; bottom: -1px; left: 14px; height: 2px; border-radius: 2px; background: transparent; }

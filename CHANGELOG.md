@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.19] - 2026-09-16
+
+### Changed
+
+- Upgrade React, React DOM, and their TypeScript definitions to 19.3 and add 160 ms content transitions to Listening Report results, Report/History tabs, chart results, and chart source comparisons.
+- Keep previous reports and charts visible during refresh, with immediate controls, retryable errors, reduced-motion support, and an immediate-update fallback for older WebViews. Retain the existing Suspense loading boundary for Listening Report.
+
+### Fixed
+
+- Keep Listening Report chart axes aligned with the displayed data until a replacement report is ready.
+- Fit the report controls and charts to the available content width when sidebars leave a narrow report panel.
+- Ignore pending chart-detail responses after leaving Charts or replacing the chart, including empty results.
+
 ## [0.25.18] - 2026-09-13
 
 ### Fixed

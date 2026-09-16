@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.25.18 displays embedded MP3 artwork when an album has no indexed archive cover, and refreshes all cover views after Replace Cover saves. The fallback checks up to 32 catalog tracks and leaves Music Library’s catalog unchanged.
+Aurora 0.25.19 uses React 19.3 View Transitions for Listening Report and Charts. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
 
 Aurora speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
 
@@ -211,6 +211,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Listening Rhythm uses a compact 24-hour activity ribbon, and Music by Decade always uses Aurora's **Year** field rather than **Release Year**.
 - CI enforces warning-free Rust with Clippy; the Listening Report history ordering uses the preferred keyed descending sort.
 - History now opens with a dedicated **Listening report** page for 7, 30, or 90 days and all time. It aggregates every matching session across all available device-history databases—not the 50 visible timeline rows—and reports period comparisons, daily activity, top artists/albums/tracks, listening hour, a personal listening fingerprint, release decades, discovery, and quick facts. The original searchable timeline remains available as the adjacent **History** page.
+- Listening report keeps each displayed report's data and chart axes together while a new period or device loads. Completed results and Report/History tab changes use short content transitions. The report module continues to load through Suspense; database requests retain cancellation guards and explicit loading/error states. Failed refreshes keep the previous report visible and offer retry.
 - A dedicated [search guide](docs/search.md) covers every search surface, field, operator, range, exclusion, exact match, shortcut, limitation, and practical query recipe.
 - Library search waits for a two-second pause after typing before filtering, so complete expressions such as `aartist:dolly parton` run once instead of repeatedly filtering partial input. Clearing search remains immediate.
 - Music Library folder retries run in their own single-flight loop, continue while Aurora is unfocused, and select the most recently edited folder first. Pending-tag reconciliation remains focus-aware but can no longer starve a newly rated album's companion import.
@@ -301,6 +302,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - Music Library-compatible effective album ratings: explicit MusicBee Album Rating wins; otherwise a rounded normalized track mean becomes valid only after every track is rated. Partial means are labelled provisional and never enter album-rating counts.
 - Music Library's exact unbounded Album Score formula, kept numeric rather than converted to stars. Fully track-rated albums show the current score in Ratings and ordinary Album detail; future Charts can rank by the same value without changing its meaning.
 - A dedicated Charts page above History with Singles and Albums modes, direct weekly drill-down, named period presets, editable custom week ranges, and one-click full-year charts.
+- Charts keeps the previous titled result visible while a new period, source, or filter loads, then transitions to the completed chart. Source comparisons update independently; rapid navigation ignores superseded responses, and catalog refreshes preserve selection and inspector mode. Existing rows continue to refer to their displayed chart while an update is pending.
 - Historical Official UK, VG Lista, Ti i Skuddet, and Norsktoppen weekly charts plus the catalog's annual Billboard singles and album charts. Unsupported source/type combinations are never presented as data.
 - Calculated period charts rank by number of #1 finishes, then #2 finishes, then each lower position in order; chart points and appearances provide deterministic final tie-breaks.
 - A first-class Aurora Album Score chart and year shelf reuse Music Library's exact numeric formula without converting it to stars, use `Year` by default, and can switch explicitly to `Release Year`.

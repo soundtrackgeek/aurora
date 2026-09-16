@@ -24,6 +24,8 @@ import type {
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
+import { ContentTransition } from "../ContentTransition";
+import { transitionContent } from "../../contentTransition";
 import "./ListeningHistory.css";
 
 const ListeningReport = lazy(() => import("./ListeningReport").then((module) => ({ default: module.ListeningReport })));
@@ -199,9 +201,11 @@ export function ListeningHistory({
   return (
     <div className="history-shell">
       <nav className="history-page-tabs" aria-label="Listening memory pages">
-        <button type="button" className={activePage === "report" ? "is-active" : ""} aria-current={activePage === "report" ? "page" : undefined} onClick={() => setActivePage("report")}><BarChart3 aria-hidden="true" /> Listening report</button>
-        <button type="button" className={activePage === "history" ? "is-active" : ""} aria-current={activePage === "history" ? "page" : undefined} onClick={() => setActivePage("history")}><History aria-hidden="true" /> History</button>
+        <button type="button" className={activePage === "report" ? "is-active" : ""} aria-current={activePage === "report" ? "page" : undefined} onClick={() => transitionContent(() => setActivePage("report"), "history-page")}><BarChart3 aria-hidden="true" /> Listening report</button>
+        <button type="button" className={activePage === "history" ? "is-active" : ""} aria-current={activePage === "history" ? "page" : undefined} onClick={() => transitionContent(() => setActivePage("history"), "history-page")}><History aria-hidden="true" /> History</button>
       </nav>
+      <ContentTransition type="history-page">
+      <div className="history-page-content">
       {activePage === "report" ? (
         <Suspense fallback={<section className="history-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Opening listening report…</p></section>}>
           <ListeningReport devices={page?.devices ?? []} deviceId={deviceId} onDeviceChange={onDeviceChange} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
@@ -250,7 +254,6 @@ export function ListeningHistory({
           </div>
         </section>
       )}
-
       <section className="history-timeline" aria-labelledby="history-timeline-title">
         <div className="history-section-heading history-section-heading--timeline">
           <div><p className="eyebrow">Across your devices</p><h2 id="history-timeline-title">Listening timeline</h2></div>
@@ -272,6 +275,8 @@ export function ListeningHistory({
       </section>
     </section>
       )}
+      </div>
+      </ContentTransition>
     </div>
   );
 }

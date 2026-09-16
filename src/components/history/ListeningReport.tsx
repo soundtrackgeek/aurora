@@ -26,6 +26,8 @@ import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistPortrait } from "../ArtistPortrait";
 import { ArtistSmartLink } from "../ArtistSmartLink";
+import { ContentTransition } from "../ContentTransition";
+import { transitionContent } from "../../contentTransition";
 import "./ListeningReport.css";
 
 type ReportPeriod = "7" | "30" | "90" | "all";
@@ -369,7 +371,13 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
   const [reloadToken, setReloadToken] = useState(0);
   const range = useMemo(() => reportRange(period, offset), [offset, period]);
   const requestKey = `${range.startedAfterMs ?? "all"}:${range.startedBeforeMs ?? "now"}:${deviceId ?? "all"}:${reloadToken}`;
-  const [result, setResult] = useState<{ key: string; report: HistoryReport | null; error: string | null }>({ key: "", report: null, error: null });
+  const [result, setResult] = useState<{
+    key: string;
+    report: HistoryReport | null;
+    period: ReportPeriod;
+    range: ReportRange;
+    error: string | null;
+  }>({ key: "", report: null, period, range, error: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -379,13 +387,15 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
       timezoneOffsetMinutes: new Date().getTimezoneOffset(),
     }).then((next) => {
       if (cancelled) return;
-      setResult({ key: requestKey, report: next, error: null });
+      transitionContent(() => {
+        setResult((current) => cancelled ? current : { key: requestKey, report: next, period, range, error: null });
+      });
     }).catch((reason: unknown) => {
       if (cancelled) return;
-      setResult({ key: requestKey, report: null, error: reason instanceof Error ? reason.message : String(reason) });
+      setResult((current) => ({ ...current, key: requestKey, error: reason instanceof Error ? reason.message : String(reason) }));
     });
     return () => { cancelled = true; };
-  }, [deviceId, range, requestKey]);
+  }, [deviceId, period, range, requestKey]);
 
   const report = result.report;
   const isLoading = result.key !== requestKey;
@@ -393,8 +403,6 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
   const delta = comparison(report?.summary.plays ?? 0, report?.previousSummary?.plays);
   const maxDecade = Math.max(1, ...(report?.decades.map((item) => item.plays) ?? []));
   const completionRate = percent(report?.summary.completed ?? 0, report?.summary.sessions ?? 0);
-
-  if (error) return <section className="report-state" role="alert"><Music2 aria-hidden="true" /><h2>Listening report unavailable</h2><p>{error}</p><button type="button" onClick={() => setReloadToken((value) => value + 1)}><RefreshCw aria-hidden="true" /> Try again</button></section>;
 
   return (
     <section className="listening-report" aria-labelledby="listening-report-title" aria-busy={isLoading}>
@@ -404,15 +412,19 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
         <label className="report-device"><Monitor aria-hidden="true" /><span className="sr-only">Report device</span><select value={deviceId ?? "all"} onChange={(event) => onDeviceChange(event.target.value === "all" ? null : event.target.value)}><option value="all">All devices</option>{devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.deviceName}{device.isThisDevice ? " · this device" : ""}</option>)}</select></label>
       </div>
 
+      {error ? <section className="report-state" role="alert"><Music2 aria-hidden="true" /><h2>Listening report unavailable</h2><p>{error}</p>{report ? <p>The previous report is still shown below.</p> : null}<button type="button" onClick={() => setReloadToken((value) => value + 1)}><RefreshCw aria-hidden="true" /> Try again</button></section> : null}
+      <p className="report-update-status" role="status">{isLoading && report ? "Updating listening report… Previous results remain visible." : ""}</p>
+      <ContentTransition>
+      <div className="report-content" aria-label={report ? `Report for ${dateRangeLabel(result.period, result.range)}` : "Listening report results"}>
       {isLoading && !report ? <div className="report-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Reading your complete listening history…</p></div> : report && <>
         <section className="report-hero">
           <div className="report-hero__copy"><h1 id="listening-report-title">Your listening,<br />in focus.</h1><p><strong>{formatCount(report.summary.plays)}</strong> registered plays</p><span className={`report-delta report-delta--${delta.direction}`}>{delta.direction === "up" ? "↑" : delta.direction === "down" ? "↓" : "—"} {delta.label}</span></div>
-          <div className="report-hero__chart"><div className="report-legend"><span><i />This period</span>{report.previousSummary && <span><i />Previous period</span>}</div><ActivityChart report={report} period={period} range={range} /></div>
+          <div className="report-hero__chart"><div className="report-legend"><span><i />This period</span>{report.previousSummary && <span><i />Previous period</span>}</div><ActivityChart report={report} period={result.period} range={result.range} /></div>
         </section>
 
         {report.summary.sessions === 0 ? <section className="report-empty"><Headphones aria-hidden="true" /><h2>No listening in this period</h2><p>Move to another period or start listening to build your next report.</p></section> : <>
           <TopMusic report={report} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
-          <GenreTrends report={report} period={period} range={range} />
+          <GenreTrends report={report} period={result.period} range={result.range} />
           <section className="report-analysis">
             <article><div className="report-heading"><div><h2>Listening rhythm</h2><p>When your registered plays happen across 24 hours.</p></div></div><ListeningClock hourly={report.hourly} /></article>
             <article><div className="report-heading"><div><h2>Listening fingerprint</h2><p>Five signals derived from this period—no global score.</p></div></div><RadarChart report={report} /></article>
@@ -424,6 +436,8 @@ export function ListeningReport({ devices, deviceId, onDeviceChange, onPlayTrack
           <section className="report-section report-facts"><div className="report-heading"><div><h2>Quick facts</h2><p>The shape of this listening period at a glance.</p></div></div><div className="report-facts__grid"><article><Clock3 aria-hidden="true" /><span>Listening time</span><strong>{durationLabel(report.summary.listenedSeconds)}</strong><small>Total session time</small></article><article><Music2 aria-hidden="true" /><span>Average per active day</span><strong>{Math.round(report.summary.plays / Math.max(1, report.summary.activeDays))}</strong><small>Registered plays</small></article><article><CalendarDays aria-hidden="true" /><span>Most active day</span><strong>{report.summary.mostActiveDayStartMs ? new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(report.summary.mostActiveDayStartMs) : "—"}</strong><small>{report.summary.mostActiveDayPlays} plays</small></article><article><Headphones aria-hidden="true" /><span>Longest session</span><strong>{durationLabel(report.summary.longestSessionSeconds)}</strong><small>{report.summary.longestSessionStartedAtMs ? new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(report.summary.longestSessionStartedAtMs) : "No sessions"}</small></article><article><Disc3 aria-hidden="true" /><span>Completion rate</span><strong>{completionRate}%</strong><small>{report.summary.completed} completed sessions</small></article></div></section>
         </>}
       </>}
+      </div>
+      </ContentTransition>
     </section>
   );
 }

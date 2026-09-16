@@ -1,0 +1,16 @@
+/* Keep the live player, navigation, and controls outside the snapshots. */
+::view-transition { pointer-events: none; }
+::view-transition-group(root) { display: none; }
+
+::view-transition-group(.aurora-content),
+::view-transition-old(.aurora-content),
+::view-transition-new(.aurora-content) {
+  animation-duration: 160ms;
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(.aurora-content),
+  ::view-transition-old(.aurora-content),
+  ::view-transition-new(.aurora-content) { animation: none; }
+}

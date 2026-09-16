@@ -37,6 +37,8 @@ import type { LoveState } from "../../tags";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { InlineLoveControl, InlineRatingControl } from "../InlineTagControls";
+import { ContentTransition } from "../ContentTransition";
+import { transitionContent } from "../../contentTransition";
 import "./ChartStudio.css";
 import { ChartPeriodControls } from "./ChartPeriodControls";
 
@@ -158,6 +160,7 @@ function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: str
 export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue, onOpenArtistAlbums }: ChartStudioProps) {
   const [request, setRequest] = useState(initialRequest);
   const [page, setPage] = useState<ChartPage | null>(null);
+  const [loadedRequest, setLoadedRequest] = useState<ChartPageRequest | null>(null);
   const [loadState, setLoadState] = useState<ChartLoadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<ChartEntry | null>(null);
@@ -170,6 +173,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const catalogRevisionRef = useRef(catalogRevision);
   const callbacksRef = useRef({ onSelectionChange, onSelectTrack, onPlayQueue });
   const [reloadToken, setReloadToken] = useState(0);
+  const annualSource = request.source === "billboard" || request.source === "auroraScore";
 
   useEffect(() => {
     callbacksRef.current = { onSelectionChange, onSelectTrack, onPlayQueue };
@@ -197,11 +201,13 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     void Promise.allSettled([detailRequest, trackRequest]).then(([nextDetail, nextTrack]) => {
       if (selectionId !== selectionIdRef.current) return;
       const value = nextDetail.status === "fulfilled" ? nextDetail.value : null;
-      setDetail(value);
-      callbacksRef.current.onSelectionChange({ ...context, detail: value }, options);
-      if (nextTrack.status === "fulfilled" && nextTrack.value) {
-        callbacksRef.current.onSelectTrack(nextTrack.value, options);
-      }
+      transitionContent(() => {
+        setDetail((current) => selectionId === selectionIdRef.current ? value : current);
+        callbacksRef.current.onSelectionChange({ ...context, detail: value }, options);
+        if (nextTrack.status === "fulfilled" && nextTrack.value) {
+          callbacksRef.current.onSelectTrack(nextTrack.value, options);
+        }
+      });
     });
   }, []);
 
@@ -217,8 +223,6 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       void loadChartPage(request)
         .then((nextPage) => {
           if (cancelled || loadId !== requestIdRef.current) return;
-          setPage(nextPage);
-          setLoadState("ready");
           const previousSelection = selectedEntryRef.current;
           const nextSelection = previousSelection
             ? nextPage.entries.find((entry) => (
@@ -230,21 +234,27 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             ?? nextPage.entries.find((entry) => entry.loved)
             ?? nextPage.entries[0]
             ?? null;
-          if (selected) {
-            selectEntry(
-              selected,
-              nextPage,
-              preserveInspector ? { preserveInspector: true } : undefined,
-            );
-          }
-          else {
-            setSelectedEntry(null);
-            setDetail(null);
-            callbacksRef.current.onSelectionChange(
-              null,
-              preserveInspector ? { preserveInspector: true } : undefined,
-            );
-          }
+          transitionContent(() => {
+            setPage((current) => cancelled ? current : nextPage);
+            setLoadedRequest(request);
+            setLoadState("ready");
+            if (selected) {
+              selectEntry(
+                selected,
+                nextPage,
+                preserveInspector ? { preserveInspector: true } : undefined,
+              );
+            } else {
+              selectionIdRef.current += 1;
+              selectedEntryRef.current = null;
+              setSelectedEntry(null);
+              setDetail(null);
+              callbacksRef.current.onSelectionChange(
+                null,
+                preserveInspector ? { preserveInspector: true } : undefined,
+              );
+            }
+          }, "chart-page");
         })
         .catch((cause: unknown) => {
           if (cancelled || loadId !== requestIdRef.current) return;
@@ -254,12 +264,13 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     }, 0);
     return () => {
       cancelled = true;
+      selectionIdRef.current += 1;
       window.clearTimeout(timer);
     };
   }, [catalogRevision, reloadToken, request, selectEntry]);
 
   const visibleWeeks = (() => {
-    if (!page?.weeks.length) return [];
+    if (annualSource || !page?.weeks.length) return [];
     const activeIndex = page.weeks.findIndex((week) => week.year === request.selectedYear && week.week === request.selectedWeek);
     const start = Math.max(0, Math.min(page.weeks.length - 13, activeIndex - 6));
     return page.weeks.slice(start, start + 13);
@@ -279,7 +290,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }
 
   function changeScope(scope: ChartScope) {
-    if (page?.annualOnly) return;
+    if (annualSource) return;
     setRequest((current) => ({ ...current, scope }));
   }
 
@@ -305,7 +316,9 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     }
   }
 
-  return <section className="chart-studio">
+  const isLoading = loadState === "loading" || (loadState !== "error" && loadedRequest !== request);
+
+  return <section className="chart-studio" aria-busy={isLoading}>
     <header className="chart-studio__header">
       <div><h1>Charts <span>The music record</span></h1></div>
       <div className="chart-kind" role="tablist" aria-label="Chart type">
@@ -342,12 +355,16 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
         {sourceOptions[request.kind].map(({ source, label, annual }) => <button type="button" role="tab" aria-selected={request.source === source} className={annual ? "is-annual" : undefined} onClick={() => changeSource(source)} key={source}><ChartColumn aria-hidden="true" /> {label}{annual ? <small>annual</small> : null}</button>)}
       </div>
       <div className="chart-scope" role="tablist" aria-label="Chart calculation">
-        <button type="button" role="tab" aria-selected={page?.request.scope === "week"} disabled={page?.annualOnly} onClick={() => changeScope("week")}>Selected week</button>
-        <button type="button" role="tab" aria-selected={page?.request.scope === "period"} onClick={() => changeScope("period")}>Period chart</button>
+        <button type="button" role="tab" aria-selected={request.scope === "week"} disabled={annualSource} onClick={() => changeScope("week")}>Selected week</button>
+        <button type="button" role="tab" aria-selected={request.scope === "period"} onClick={() => changeScope("period")}>Period chart</button>
       </div>
     </div>
 
-    {loadState !== "ready" || !page ? <Feedback state={loadState} error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : <>
+    {loadState === "error" ? <Feedback state="error" error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : null}
+    <p className="chart-update-status" role="status">{isLoading && page ? "Updating chart… Previous results remain visible." : loadState === "error" && page ? "The previous chart is still shown below." : ""}</p>
+    <ContentTransition type="chart-page">
+    <div className="chart-results">
+    {!page ? (isLoading ? <Feedback state="loading" error={null} onRetry={() => setReloadToken((value) => value + 1)} /> : null) : <>
       <section className="chart-ranking" aria-labelledby="chart-ranking-heading">
         <header>
           <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `Week ${page.request.selectedWeek} · ${formatDate(page.chartDate)}` : `${page.request.period.label} · ranked by position finishes`}</p></div></div>
@@ -372,6 +389,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
         {queueMessage ? <p className="chart-queue-message" role="status">{queueMessage}</p> : null}
       </section>
 
+      <ContentTransition>
       {selectedEntry ? <section className="chart-comparison" aria-label={`Across the sources for ${selectedEntry.title}`}>
         <div><h3>Across the sources</h3><p>{selectedEntry.title} by <ArtistSmartLink artist={selectedEntry.artist} onOpen={onOpenArtistAlbums} /></p></div>
         <div className="chart-comparison__sources">
@@ -379,6 +397,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           {!detail ? <span className="chart-comparison__loading"><LoaderCircle className="is-spinning" aria-hidden="true" /> Comparing source archives…</span> : null}
         </div>
       </section> : null}
+      </ContentTransition>
 
       <section className="chart-score-shelf" aria-labelledby="chart-score-heading">
         <header>
@@ -394,6 +413,8 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
         <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
       </section>
     </>}
+    </div>
+    </ContentTransition>
   </section>;
 }
 

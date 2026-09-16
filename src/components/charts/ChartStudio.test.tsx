@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartStudio } from "./ChartStudio";
+import * as charts from "../../charts";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function renderStudio() {
   const onSelectionChange = vi.fn();
@@ -14,6 +15,76 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("retains the previous chart during rapid period changes and only displays the newest result", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    const original = await load.mock.results[0].value;
+    const pending: Array<{ request: charts.ChartPageRequest; resolve: (page: charts.ChartPage) => void }> = [];
+    load.mockImplementation((request) => new Promise((resolve) => pending.push({ request, resolve })));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Period chart" }));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(screen.getByRole("heading", { name: "Official UK Singles Chart" })).toBeInTheDocument();
+    expect(screen.getByText(/Updating chart/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Period chart" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Next period" }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => pending[1].resolve({ ...original, request: pending[1].request, chartTitle: "Newest chart" }));
+    expect(screen.getByRole("heading", { name: "Newest chart" })).toBeInTheDocument();
+    expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false");
+    await act(async () => pending[0].resolve({ ...original, request: pending[0].request, chartTitle: "Older chart" }));
+    expect(screen.queryByRole("heading", { name: "Older chart" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Newest chart" })).toBeInTheDocument();
+  });
+
+  it("keeps a failed refresh recoverable without discarding the previous chart", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    load.mockRejectedValueOnce(new Error("Chart temporarily unavailable"));
+    fireEvent.click(screen.getByRole("tab", { name: "Period chart" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Chart temporarily unavailable");
+    expect(screen.getByRole("heading", { name: "Official UK Singles Chart" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Official UK Singles · Summer 1985" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores a selected entry's detail response after leaving Charts", async () => {
+    let resolveDetail!: (detail: charts.ChartItemDetail) => void;
+    vi.spyOn(charts, "loadChartItemDetail").mockImplementation(() => new Promise((resolve) => { resolveDetail = resolve; }));
+    const callbacks = renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    cleanup();
+    callbacks.onSelectionChange.mockClear();
+    callbacks.onSelectTrack.mockClear();
+    await act(async () => resolveDetail({ sourceRanks: [] }));
+    expect(callbacks.onSelectionChange).not.toHaveBeenCalled();
+    expect(callbacks.onSelectTrack).not.toHaveBeenCalled();
+  });
+
+  it("drops pending source details when the new chart is empty and removes weekly controls for an annual source", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    let resolveDetail!: (detail: charts.ChartItemDetail) => void;
+    vi.spyOn(charts, "loadChartItemDetail").mockImplementation(() => new Promise((resolve) => { resolveDetail = resolve; }));
+    const callbacks = renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    const original = await load.mock.results[0].value;
+    load.mockImplementation(async (request) => ({ ...original, request, chartTitle: "Empty annual chart", entries: [], totalEntries: 0, annualOnly: true }));
+    fireEvent.click(screen.getByRole("tab", { name: /Billboard/ }));
+    expect(screen.getByRole("tab", { name: "Selected week" })).toBeDisabled();
+    expect(document.querySelectorAll(".chart-calendar__weeks button")).toHaveLength(0);
+    await screen.findByRole("heading", { name: "Empty annual chart" });
+    expect(screen.getByRole("button", { name: "Play this chart" })).toBeDisabled();
+    callbacks.onSelectionChange.mockClear();
+    callbacks.onSelectTrack.mockClear();
+    await act(async () => resolveDetail({ sourceRanks: [] }));
+    expect(screen.queryByRole("region", { name: /Across the sources for/ })).not.toBeInTheDocument();
+    expect(callbacks.onSelectionChange).not.toHaveBeenCalled();
+    expect(callbacks.onSelectTrack).not.toHaveBeenCalled();
+  });
+
   it("opens the selected historical week and matches its leading library track", async () => {
     const callbacks = renderStudio();
 
