@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.22] - 2026-09-18
+
+### Fixed
+
+- Prevent black flash across the entire window during album selection and content transitions by assigning `view-transition-name: none` to `:root` and removing `display: none` from `::view-transition-group(root)`.
+- Keep the application chrome, player, sidebars, and album grid continuously rendered in the DOM while scoped content transitions animate.
+
 ## [0.25.21] - 2026-09-18
 
 ### Changed

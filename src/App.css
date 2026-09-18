@@ -5,6 +5,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  view-transition-name: none;
   --bg: #05080d;
   --surface: #091019;
   --surface-raised: #0d1621;

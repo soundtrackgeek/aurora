@@ -2707,21 +2707,19 @@ function App() {
   function selectAlbum(album: ExplorerAlbum | null) {
     const requestId = ++albumRequestRef.current;
     artistRequestRef.current += 1;
-    transitionContent(() => {
-      setSelectedAlbumId(album?.id ?? null);
-      setAlbumTracks([]);
-      setAlbumTracksTruncated(false);
-      if (!album) {
-        setAlbumDetailState("ready");
-        setInspectorView("track");
-        setTagSelectionKind("track");
-        return;
-      }
-      setSelectedTrack(null);
-      setTagSelectionKind("album");
-      if (inspectorViewRef.current !== "tags") setInspectorView("album");
-      setAlbumDetailState("loading");
-    }, "album-detail");
+    setSelectedAlbumId(album?.id ?? null);
+    setAlbumTracks([]);
+    setAlbumTracksTruncated(false);
+    if (!album) {
+      setAlbumDetailState("ready");
+      setInspectorView("track");
+      setTagSelectionKind("track");
+      return;
+    }
+    setSelectedTrack(null);
+    setTagSelectionKind("album");
+    if (inspectorViewRef.current !== "tags") setInspectorView("album");
+    setAlbumDetailState("loading");
     if (!album) return;
     void loadAlbumDetail(album.id, { localOnly: true })
       .then((detail) => {
@@ -3147,7 +3145,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.21</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.22</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

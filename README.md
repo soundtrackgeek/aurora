@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.25.21 brings React 19.3 View Transitions and independent Suspense boundaries to Albums detail in Deep Explorer. Opening, changing, or closing the selected album drawer transitions smoothly, and the four album detail sections—Tracks, Reviews & Rating, Global Popularity, and Related Albums—reveal independently without blocking each other or causing layout flashes.
+Aurora 0.25.22 eliminates window-level black flashes during album selection and content changes by scoping View Transitions strictly to content components, keeping application chrome, player, sidebars, and grid elements continuously rendered.
+
+Aurora brings React 19.3 View Transitions and independent Suspense boundaries to Albums detail in Deep Explorer. Opening, changing, or closing the selected album drawer transitions smoothly, and the four album detail sections—Tracks, Reviews & Rating, Global Popularity, and Related Albums—reveal independently without blocking each other or causing layout flashes.
 
 Aurora uses React 19.3 View Transitions for Listening Report, Charts, and Album details. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
 
