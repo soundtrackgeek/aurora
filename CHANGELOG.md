@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.25] - 2026-09-18
+
+### Changed
+
+- Streamline the Albums detail drawer in Deep Explorer by focusing directly on the album header and track list, removing the secondary Reviews & Rating Analysis, Global Popularity, and Related Albums sections.
+- Remove detail tab navigation from the album drawer, simplifying album inspection and track playback.
+
 ## [0.25.24] - 2026-09-18
 
 ### Fixed
