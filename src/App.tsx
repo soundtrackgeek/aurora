@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { Activity as ReactActivity, lazy, Suspense, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./App.css";
-import { transitionContent } from "./contentTransition";
 import { albumArtistSearchQuery } from "./artistSearch";
 import { Artwork } from "./components/Artwork";
 import { ArtistSmartLink } from "./components/ArtistSmartLink";
@@ -2725,21 +2724,17 @@ function App() {
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
         const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-        transitionContent(() => {
-          setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
-          setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-          setAlbumTracksTruncated(detail.tracksTruncated);
-          setSelectedTrack(detail.tracks[0] ?? null);
-          setAlbumDetailState("ready");
-        }, "album-detail");
+        setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
+        setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
+        setAlbumTracksTruncated(detail.tracksTruncated);
+        setSelectedTrack(detail.tracks[0] ?? null);
+        setAlbumDetailState("ready");
         refreshSelectedAlbumFiles(album.id, requestId);
       })
       .catch((error: unknown) => {
         if (requestId !== albumRequestRef.current) return;
         console.warn("Aurora could not open album details", error);
-        transitionContent(() => {
-          setAlbumDetailState("error");
-        }, "album-detail");
+        setAlbumDetailState("error");
       });
   }
 
@@ -3145,7 +3140,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.22</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.23</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

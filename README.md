@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.25.22 eliminates window-level black flashes during album selection and content changes by scoping View Transitions strictly to content components, keeping application chrome, player, sidebars, and grid elements continuously rendered.
+Aurora 0.25.23 eliminates track row duplication and overlapping Reviews cards during album selection by scoping View Transitions to tab navigation within the open album and avoiding crossfade snapshots between distinct albums or during asynchronous track loading. Window-level black flashes remain prevented by scoping View Transitions strictly to content components.
 
 Aurora brings React 19.3 View Transitions and independent Suspense boundaries to Albums detail in Deep Explorer. Opening, changing, or closing the selected album drawer transitions smoothly, and the four album detail sections—Tracks, Reviews & Rating, Global Popularity, and Related Albums—reveal independently without blocking each other or causing layout flashes.
 

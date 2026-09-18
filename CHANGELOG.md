@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.23] - 2026-09-18
+
+### Fixed
+
+- Prevent track multiplication and overlapping Reviews cards when clicking between albums in Deep Explorer by removing drawer-level View Transition crossfades across distinct albums.
+- Scope album detail View Transitions strictly to tab switches within an open album, preserving native CSS open/close drawer animations.
+- Prevent layout crossfades during asynchronous track data loading when selecting an album.
+
 ## [0.25.22] - 2026-09-18
 
 ### Fixed
