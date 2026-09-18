@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.21] - 2026-09-18
+
+### Changed
+
+- Add React 19.3 `<ViewTransition>` and independent `<Suspense>` boundaries to album detail in Deep Explorer, smoothing selected album drawer transitions and tab switching without layout flashes.
+- Reveal album detail sections independently: Tracks, Reviews & Rating, Global Popularity, and Related Albums reveal without blocking each other, and can be viewed together in Overview or filtered individually via tab navigation.
+- Add quick track activation from the Global Popularity section and direct album switching from Related Albums cards.
+
 ## [0.25.20] - 2026-09-16
 
 ### Fixed

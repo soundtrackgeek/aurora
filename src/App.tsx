@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Activity as ReactActivity, lazy, Suspense, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./App.css";
+import { transitionContent } from "./contentTransition";
 import { albumArtistSearchQuery } from "./artistSearch";
 import { Artwork } from "./components/Artwork";
 import { ArtistSmartLink } from "./components/ArtistSmartLink";
@@ -2706,34 +2707,41 @@ function App() {
   function selectAlbum(album: ExplorerAlbum | null) {
     const requestId = ++albumRequestRef.current;
     artistRequestRef.current += 1;
-    setSelectedAlbumId(album?.id ?? null);
-    setAlbumTracks([]);
-    setAlbumTracksTruncated(false);
-    if (!album) {
-      setAlbumDetailState("ready");
-      setInspectorView("track");
-      setTagSelectionKind("track");
-      return;
-    }
-    setSelectedTrack(null);
-    setTagSelectionKind("album");
-    if (inspectorViewRef.current !== "tags") setInspectorView("album");
-    setAlbumDetailState("loading");
+    transitionContent(() => {
+      setSelectedAlbumId(album?.id ?? null);
+      setAlbumTracks([]);
+      setAlbumTracksTruncated(false);
+      if (!album) {
+        setAlbumDetailState("ready");
+        setInspectorView("track");
+        setTagSelectionKind("track");
+        return;
+      }
+      setSelectedTrack(null);
+      setTagSelectionKind("album");
+      if (inspectorViewRef.current !== "tags") setInspectorView("album");
+      setAlbumDetailState("loading");
+    }, "album-detail");
+    if (!album) return;
     void loadAlbumDetail(album.id, { localOnly: true })
       .then((detail) => {
         if (requestId !== albumRequestRef.current) return;
         const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-        setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
-        setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-        setAlbumTracksTruncated(detail.tracksTruncated);
-        setSelectedTrack(detail.tracks[0] ?? null);
-        setAlbumDetailState("ready");
+        transitionContent(() => {
+          setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
+          setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
+          setAlbumTracksTruncated(detail.tracksTruncated);
+          setSelectedTrack(detail.tracks[0] ?? null);
+          setAlbumDetailState("ready");
+        }, "album-detail");
         refreshSelectedAlbumFiles(album.id, requestId);
       })
       .catch((error: unknown) => {
         if (requestId !== albumRequestRef.current) return;
         console.warn("Aurora could not open album details", error);
-        setAlbumDetailState("error");
+        transitionContent(() => {
+          setAlbumDetailState("error");
+        }, "album-detail");
       });
   }
 
@@ -3139,7 +3147,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.20</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.21</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

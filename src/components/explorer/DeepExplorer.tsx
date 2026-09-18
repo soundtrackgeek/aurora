@@ -6,11 +6,13 @@ import {
   ChevronDown,
   ChevronRight,
   Disc3,
+  Flame,
   Gauge,
   FolderOutput,
   Heart,
   LoaderCircle,
   Music2,
+  Play,
   RefreshCw,
   SlidersHorizontal,
   Star,
@@ -23,6 +25,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -39,6 +42,8 @@ import type { CatalogChartRank } from "../../charts";
 import { CatalogChartRanks } from "../charts/CatalogChartRanks";
 import { CountryFlag } from "../CountryFlag";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
+import { ContentTransition } from "../ContentTransition";
+import { transitionContent } from "../../contentTransition";
 import "./DeepExplorer.css";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
@@ -723,11 +728,303 @@ function AlbumGrid({
   );
 }
 
+export type AlbumDetailTab = "all" | "tracks" | "reviews" | "popularity" | "related";
+
+function AlbumReviewsContent({ album }: { album: ExplorerAlbum }) {
+  const completionRate = Math.round((album.ratedTracks / Math.max(1, album.totalTracks)) * 100);
+  const lovedRate = Math.round((album.lovedTracks / Math.max(1, album.totalTracks)) * 100);
+
+  return (
+    <div className="deep-explorer-reviews" aria-label={`${album.title} reviews and rating summary`}>
+      <div className="deep-explorer-section-heading">
+        <div>
+          <h4>Reviews & Rating Analysis</h4>
+          <p>Local catalog evaluation, rating completeness, and release overview</p>
+        </div>
+      </div>
+      <div className="deep-explorer-reviews__grid">
+        <article className="deep-explorer-card">
+          <div className="deep-explorer-card__icon"><Star aria-hidden="true" /></div>
+          <div>
+            <small>Album Rating</small>
+            <strong>{album.rating !== null ? `${album.rating.toFixed(2)} / 5.0` : "Unrated"}</strong>
+            <span>{album.ratedTracks} of {album.totalTracks} tracks rated ({completionRate}%)</span>
+          </div>
+        </article>
+        <article className="deep-explorer-card">
+          <div className="deep-explorer-card__icon"><Heart aria-hidden="true" /></div>
+          <div>
+            <small>Loved Collection</small>
+            <strong>{album.lovedTracks > 0 ? `${formatCount(album.lovedTracks)} loved` : "None loved"}</strong>
+            <span>{lovedRate}% of tracks marked with Love</span>
+          </div>
+        </article>
+        <article className="deep-explorer-card">
+          <div className="deep-explorer-card__icon"><Gauge aria-hidden="true" /></div>
+          <div>
+            <small>Aurora Album Score</small>
+            <strong>{album.albumScore !== null ? album.albumScore.toFixed(2) : "—"}</strong>
+            <span>Composite metric from ratings and plays</span>
+          </div>
+        </article>
+        <article className="deep-explorer-card">
+          <div className="deep-explorer-card__icon"><Disc3 aria-hidden="true" /></div>
+          <div>
+            <small>Catalog Evidence</small>
+            <strong>{album.publisher ?? "Publisher unknown"}</strong>
+            <span>{album.genre ?? "Genre unknown"} · {album.originalYear ?? "Year unknown"}{album.releaseYear && album.releaseYear !== album.originalYear ? ` · re-issue ${album.releaseYear}` : ""}</span>
+          </div>
+        </article>
+      </div>
+    </div>
+  );
+}
+
+function AlbumPopularityContent({
+  album,
+  tracks,
+  onActivateTrack,
+}: {
+  album: ExplorerAlbum;
+  tracks: readonly Track[];
+  onActivateTrack?: (track: Track) => void;
+}) {
+  const topTracks = useMemo(() => {
+    return [...tracks]
+      .filter((track) => track.lastFmAlbumRank !== null || (track.playCount !== null && track.playCount > 0))
+      .sort((a, b) => (a.lastFmAlbumRank ?? 99) - (b.lastFmAlbumRank ?? 99) || (b.playCount ?? 0) - (a.playCount ?? 0))
+      .slice(0, 3);
+  }, [tracks]);
+
+  const totalLastFmPlays = useMemo(() => {
+    return tracks.reduce((acc, t) => acc + (t.playCount ?? 0), 0);
+  }, [tracks]);
+
+  return (
+    <div className="deep-explorer-popularity" aria-label={`${album.title} Last.fm popularity`}>
+      <div className="deep-explorer-section-heading">
+        <div>
+          <h4>Global Popularity</h4>
+          <p>Top tracks ranked by imported Last.fm stream counts</p>
+        </div>
+        {totalLastFmPlays > 0 ? (
+          <span className="deep-explorer-popularity__stat">
+            <Flame aria-hidden="true" />
+            <strong>{formatCount(totalLastFmPlays)}</strong> total streams recorded
+          </span>
+        ) : null}
+      </div>
+      {topTracks.length > 0 ? (
+        <div className="deep-explorer-popularity__grid">
+          {topTracks.map((track, index) => (
+            <article className="deep-explorer-popularity__card" key={track.trackKey}>
+              <span className="deep-explorer-popularity__rank">{String(track.lastFmAlbumRank ?? (index + 1)).padStart(2, "0")}</span>
+              <span className="deep-explorer-popularity__flame" aria-hidden="true">🔥</span>
+              <div className="deep-explorer-popularity__meta">
+                <strong>{track.title}</strong>
+                <small>{track.playCount !== null ? `${formatCount(track.playCount)} Last.fm plays` : "Top ranked track"}</small>
+              </div>
+              {onActivateTrack ? (
+                <button
+                  type="button"
+                  className="deep-explorer-popularity__play"
+                  onClick={() => onActivateTrack(track)}
+                  aria-label={`Play ${track.title}`}
+                >
+                  <Play aria-hidden="true" />
+                </button>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="deep-explorer-section-quiet">
+          <Flame aria-hidden="true" />
+          <p>No Last.fm popularity data imported for this album yet.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlbumRelatedContent({
+  album,
+  allAlbums = [],
+  onSelectAlbum,
+}: {
+  album: ExplorerAlbum;
+  allAlbums?: readonly ExplorerAlbum[];
+  onSelectAlbum?: (album: ExplorerAlbum | null) => void;
+}) {
+  const { sameArtist, sameGenre } = useMemo(() => {
+    const artistMatches = allAlbums.filter(
+      (candidate) => candidate.artist.trim().toLowerCase() === album.artist.trim().toLowerCase() && candidate.id !== album.id,
+    );
+    const genreMatches = allAlbums.filter(
+      (candidate) => candidate.genre && candidate.genre === album.genre && candidate.artist !== album.artist && candidate.id !== album.id,
+    );
+    return {
+      sameArtist: artistMatches.slice(0, 6),
+      sameGenre: genreMatches.slice(0, 6),
+    };
+  }, [album, allAlbums]);
+
+  const hasRelated = sameArtist.length > 0 || sameGenre.length > 0;
+
+  return (
+    <div className="deep-explorer-related" aria-label={`${album.title} related albums`}>
+      <div className="deep-explorer-section-heading">
+        <div>
+          <h4>Related Albums</h4>
+          <p>Explore more releases by {album.artist} or within {album.genre ?? "the catalog"}</p>
+        </div>
+      </div>
+      {!hasRelated ? (
+        <div className="deep-explorer-section-quiet">
+          <Disc3 aria-hidden="true" />
+          <p>No other albums by {album.artist} found in the loaded collection.</p>
+        </div>
+      ) : (
+        <div className="deep-explorer-related__columns">
+          {sameArtist.length > 0 && (
+            <div className="deep-explorer-related__group">
+              <h5>More by {album.artist}</h5>
+              <div className="deep-explorer-related__grid">
+                {sameArtist.map((item) => (
+                  <button
+                    type="button"
+                    className="deep-explorer-related__card"
+                    key={item.id}
+                    onClick={() => onSelectAlbum?.(item)}
+                    aria-label={`Open album ${item.title}`}
+                  >
+                    <AlbumArtwork album={item} />
+                    <span className="deep-explorer-related__copy">
+                      <strong>{item.title}</strong>
+                      <small>{item.originalYear ?? "Year unknown"}</small>
+                      {item.albumScore !== null && <small>Score {item.albumScore.toFixed(1)}</small>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {sameGenre.length > 0 && (
+            <div className="deep-explorer-related__group">
+              <h5>More in {album.genre}</h5>
+              <div className="deep-explorer-related__grid">
+                {sameGenre.map((item) => (
+                  <button
+                    type="button"
+                    className="deep-explorer-related__card"
+                    key={item.id}
+                    onClick={() => onSelectAlbum?.(item)}
+                    aria-label={`Open album ${item.title}`}
+                  >
+                    <AlbumArtwork album={item} />
+                    <span className="deep-explorer-related__copy">
+                      <strong>{item.title}</strong>
+                      <small>{item.artist}</small>
+                      {item.albumScore !== null && <small>Score {item.albumScore.toFixed(1)}</small>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlbumTracksContent({
+  tracks,
+  state,
+  selectedTrackId,
+  currentTrackKey,
+  playbackActive,
+  busyTrackKeys,
+  onSelectTrack,
+  onActivateTrack,
+  onRetry,
+  onRatingChange,
+  onLoveChange,
+  onDeleteTracks,
+  trackChartRanks,
+  visibleSelectedTrackKeys,
+  selectWithModifiers,
+  requestDelete,
+  setSelectedTrackKeys,
+}: {
+  tracks: readonly Track[];
+  state: ExplorerLoadState;
+  selectedTrackId: string | null;
+  currentTrackKey?: string | null;
+  playbackActive?: boolean;
+  busyTrackKeys: ReadonlySet<string>;
+  onSelectTrack: (track: Track) => void;
+  onActivateTrack?: (track: Track) => void;
+  onRetry?: () => void;
+  onRatingChange?: (track: Track, rating: number) => void;
+  onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
+  onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
+  trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  visibleSelectedTrackKeys: ReadonlySet<string>;
+  selectWithModifiers: (track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) => void;
+  requestDelete: (track?: Track) => void;
+  setSelectedTrackKeys: (keys: ReadonlySet<string>) => void;
+}) {
+  if (state === "loading" && tracks.length === 0) {
+    return (
+      <div className="deep-explorer-section-fallback" role="status" aria-live="polite">
+        <LoaderCircle className="is-spinning" aria-hidden="true" />
+        <span>Revealing album tracks…</span>
+      </div>
+    );
+  }
+  if (state === "error") {
+    return <ExplorerFeedback kind="error" onRetry={onRetry} />;
+  }
+  if (state === "ready" && tracks.length === 0) {
+    return <ExplorerFeedback kind="empty" />;
+  }
+  return (
+    <>
+      {visibleSelectedTrackKeys.size > 1 ? (
+        <div className="deep-explorer-selection-bar" role="status">
+          <strong>{formatCount(visibleSelectedTrackKeys.size)} tracks selected</strong>
+          <span>Use Ctrl to toggle or Shift to extend the range.</span>
+          <button type="button" onClick={() => requestDelete()}><Trash2 aria-hidden="true" />Delete selected</button>
+          <button type="button" onClick={() => setSelectedTrackKeys(new Set())}>Clear</button>
+        </div>
+      ) : null}
+      <TrackTable
+        tracks={tracks}
+        selectedTrackId={selectedTrackId}
+        currentTrackKey={currentTrackKey}
+        playbackActive={playbackActive}
+        busyTrackKeys={busyTrackKeys}
+        onSelectTrack={onSelectTrack}
+        onActivateTrack={onActivateTrack}
+        onRatingChange={onRatingChange}
+        onLoveChange={onLoveChange}
+        onDeleteTrack={onDeleteTracks ? requestDelete : undefined}
+        multiSelectedTrackKeys={visibleSelectedTrackKeys}
+        onSelectionGesture={selectWithModifiers}
+        chartRanks={trackChartRanks}
+        compact
+      />
+    </>
+  );
+}
+
 function AlbumDetail({
   album,
   tracks,
   tracksTruncated,
   state,
+  allAlbums,
   selectedTrackId,
   currentTrackKey,
   playbackActive,
@@ -746,11 +1043,13 @@ function AlbumDetail({
   trackChartRanks,
   onOpenArtistAlbums,
   albumChartRanks,
+  onSelectAlbum,
 }: {
   album: ExplorerAlbum;
   tracks: readonly Track[];
   tracksTruncated: boolean;
   state: ExplorerLoadState;
+  allAlbums?: readonly ExplorerAlbum[];
   selectedTrackId: string | null;
   currentTrackKey?: string | null;
   playbackActive?: boolean;
@@ -769,7 +1068,9 @@ function AlbumDetail({
   trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
   onOpenArtistAlbums: (artist: string) => void;
   albumChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  onSelectAlbum?: (album: ExplorerAlbum | null) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<AlbumDetailTab>("all");
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
     tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
   ));
@@ -784,6 +1085,15 @@ function AlbumDetail({
     const visibleKeys = new Set(tracks.map((track) => track.trackKey));
     return new Set([...selectedTrackKeys].filter((key) => visibleKeys.has(key)));
   }, [selectedTrackKeys, tracks]);
+
+  const hasPopularity = useMemo(() => {
+    return tracks.some((track) => track.lastFmAlbumRank !== null || (track.playCount !== null && track.playCount > 0));
+  }, [tracks]);
+
+  const relatedCount = useMemo(() => {
+    if (!allAlbums) return 0;
+    return allAlbums.filter((c) => (c.artist === album.artist || c.genre === album.genre) && c.id !== album.id).length;
+  }, [album, allAlbums]);
 
   function selectWithModifiers(track: Track, _index: number, modifiers: { ctrl: boolean; shift: boolean }) {
     const next = applyWindowsSelection(
@@ -857,40 +1167,119 @@ function AlbumDetail({
           <X aria-hidden="true" />
         </button>
       </header>
-      {state === "loading" ? (
-        <ExplorerFeedback kind="loading" />
-      ) : state === "error" ? (
-        <ExplorerFeedback kind="error" onRetry={onRetry} />
-      ) : tracks.length === 0 ? (
-        <ExplorerFeedback kind="empty" />
-      ) : (
-        <>
-          {visibleSelectedTrackKeys.size > 1 ? (
-            <div className="deep-explorer-selection-bar" role="status">
-              <strong>{formatCount(visibleSelectedTrackKeys.size)} tracks selected</strong>
-              <span>Use Ctrl to toggle or Shift to extend the range.</span>
-              <button type="button" onClick={() => requestDelete()}><Trash2 aria-hidden="true" />Delete selected</button>
-              <button type="button" onClick={() => setSelectedTrackKeys(new Set())}>Clear</button>
-            </div>
-          ) : null}
-          <TrackTable
-            tracks={tracks}
-            selectedTrackId={selectedTrackId}
-            currentTrackKey={currentTrackKey}
-            playbackActive={playbackActive}
-            busyTrackKeys={busyTrackKeys}
-            onSelectTrack={onSelectTrack}
-            onActivateTrack={onActivateTrack}
-            onRatingChange={onRatingChange}
-            onLoveChange={onLoveChange}
-            onDeleteTrack={onDeleteTracks ? requestDelete : undefined}
-            multiSelectedTrackKeys={visibleSelectedTrackKeys}
-            onSelectionGesture={selectWithModifiers}
-            chartRanks={trackChartRanks}
-            compact
-          />
-        </>
-      )}
+
+      <nav className="deep-explorer-detail-tabs" role="tablist" aria-label="Album detail sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "all"}
+          className={activeTab === "all" ? "is-active" : ""}
+          onClick={() => transitionContent(() => setActiveTab("all"), "album-detail")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "tracks"}
+          className={activeTab === "tracks" ? "is-active" : ""}
+          onClick={() => transitionContent(() => setActiveTab("tracks"), "album-detail")}
+        >
+          Tracks {tracks.length > 0 ? <span className="deep-explorer-detail-badge">{tracks.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "reviews"}
+          className={activeTab === "reviews" ? "is-active" : ""}
+          onClick={() => transitionContent(() => setActiveTab("reviews"), "album-detail")}
+        >
+          Reviews & Rating
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "popularity"}
+          className={activeTab === "popularity" ? "is-active" : ""}
+          onClick={() => transitionContent(() => setActiveTab("popularity"), "album-detail")}
+        >
+          Popularity {hasPopularity ? <span className="deep-explorer-detail-badge">🔥</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "related"}
+          className={activeTab === "related" ? "is-active" : ""}
+          onClick={() => transitionContent(() => setActiveTab("related"), "album-detail")}
+        >
+          Related Albums {relatedCount > 0 ? <span className="deep-explorer-detail-badge">{relatedCount}</span> : null}
+        </button>
+      </nav>
+
+      <div className="deep-explorer-detail-body" data-active-tab={activeTab}>
+        {(activeTab === "all" || activeTab === "tracks") && (
+          <section className="deep-explorer-section deep-explorer-section--tracks" aria-label="Tracks section">
+            <ContentTransition enter>
+              <Suspense fallback={<div className="deep-explorer-section-fallback" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><span>Revealing album tracks…</span></div>}>
+                <AlbumTracksContent
+                  tracks={tracks}
+                  state={state}
+                  selectedTrackId={selectedTrackId}
+                  currentTrackKey={currentTrackKey}
+                  playbackActive={playbackActive}
+                  busyTrackKeys={busyTrackKeys}
+                  onSelectTrack={onSelectTrack}
+                  onActivateTrack={onActivateTrack}
+                  onRetry={onRetry}
+                  onRatingChange={onRatingChange}
+                  onLoveChange={onLoveChange}
+                  onDeleteTracks={onDeleteTracks}
+                  trackChartRanks={trackChartRanks}
+                  visibleSelectedTrackKeys={visibleSelectedTrackKeys}
+                  selectWithModifiers={selectWithModifiers}
+                  requestDelete={requestDelete}
+                  setSelectedTrackKeys={setSelectedTrackKeys}
+                />
+              </Suspense>
+            </ContentTransition>
+          </section>
+        )}
+
+        {(activeTab === "all" || activeTab === "reviews") && (
+          <section className="deep-explorer-section deep-explorer-section--reviews" aria-label="Reviews section">
+            <ContentTransition enter>
+              <Suspense fallback={<div className="deep-explorer-section-fallback" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><span>Revealing album reviews…</span></div>}>
+                <AlbumReviewsContent album={album} />
+              </Suspense>
+            </ContentTransition>
+          </section>
+        )}
+
+        {(activeTab === "all" || activeTab === "popularity") && (
+          <section className="deep-explorer-section deep-explorer-section--popularity" aria-label="Popularity section">
+            <ContentTransition enter>
+              <Suspense fallback={<div className="deep-explorer-section-fallback" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><span>Revealing album popularity…</span></div>}>
+                <AlbumPopularityContent album={album} tracks={tracks} onActivateTrack={onActivateTrack} />
+              </Suspense>
+            </ContentTransition>
+          </section>
+        )}
+
+        {(activeTab === "all" || activeTab === "related") && (
+          <section className="deep-explorer-section deep-explorer-section--related" aria-label="Related albums section">
+            <ContentTransition enter>
+              <Suspense fallback={<div className="deep-explorer-section-fallback" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><span>Revealing related albums…</span></div>}>
+                <AlbumRelatedContent
+                  album={album}
+                  allAlbums={allAlbums}
+                  onSelectAlbum={onSelectAlbum}
+                />
+              </Suspense>
+            </ContentTransition>
+          </section>
+        )}
+      </div>
+
       {deleteTargets.length > 0 ? (
         <dialog
           className="deep-explorer-delete-dialog"
@@ -922,7 +1311,6 @@ function AlbumDetail({
           </div>
         </dialog>
       ) : null}
-
     </aside>
   );
 }
@@ -1100,22 +1488,26 @@ export function DeepExplorer(props: DeepExplorerProps) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
-    if (!album) {
-      if (selectedAlbum) {
-        setClosingDetail({ album: selectedAlbum, tracks: [...albumTracks], tracksTruncated: albumTracksTruncated });
-        onSelectAlbum(null);
-        closeTimerRef.current = window.setTimeout(() => {
+    transitionContent(() => {
+      if (!album) {
+        if (selectedAlbum) {
+          setClosingDetail({ album: selectedAlbum, tracks: [...albumTracks], tracksTruncated: albumTracksTruncated });
+          onSelectAlbum(null);
+          closeTimerRef.current = window.setTimeout(() => {
+            transitionContent(() => {
+              setClosingDetail(null);
+              closeTimerRef.current = null;
+            }, "album-detail");
+          }, 180);
+        } else {
           setClosingDetail(null);
-          closeTimerRef.current = null;
-        }, 180);
-      } else {
-        setClosingDetail(null);
-        onSelectAlbum(null);
+          onSelectAlbum(null);
+        }
+        return;
       }
-      return;
-    }
-    setClosingDetail(null);
-    onSelectAlbum(album);
+      setClosingDetail(null);
+      onSelectAlbum(album);
+    }, "album-detail");
   }
 
   function selectTracks(track: Track, _index: number, modifiers: SelectionModifiers) {
@@ -1246,31 +1638,35 @@ export function DeepExplorer(props: DeepExplorerProps) {
             chartRanks={albumChartRanks}
             onOpenArtistAlbums={onOpenArtistAlbums}
             detail={detailAlbum ? (
-              <AlbumDetail
-                key={detailAlbum.id}
-                album={detailAlbum}
-                tracks={selectedAlbum ? albumTracks : closingDetail?.tracks ?? []}
-                tracksTruncated={selectedAlbum ? albumTracksTruncated : closingDetail?.tracksTruncated ?? false}
-                state={selectedAlbum ? albumDetailState : "ready"}
-                selectedTrackId={selectedTrackId}
-                currentTrackKey={currentTrackKey}
-                playbackActive={playbackActive}
-                closing={!selectedAlbum}
-                busyTrackKeys={busyTrackKeys}
-                onClose={() => selectOrToggleAlbum(null)}
-                onSelectTrack={onSelectTrack}
-                onActivateTrack={onActivateTrack}
-                onRetry={onRetry}
-                onRatingChange={onRatingChange}
-                onLoveChange={onLoveChange}
-                onDeleteTracks={onDeleteTracks}
-                onRequestMoveToInbox={onRequestMoveToInbox}
-                albumMoveBusy={albumMoveBusy}
-                onSelectionChange={onSelectionChange}
-                trackChartRanks={trackChartRanks}
-                onOpenArtistAlbums={onOpenArtistAlbums}
-                albumChartRanks={albumChartRanks}
-              />
+              <ContentTransition type="album-detail">
+                <AlbumDetail
+                  key={detailAlbum.id}
+                  album={detailAlbum}
+                  allAlbums={albums}
+                  onSelectAlbum={selectOrToggleAlbum}
+                  tracks={selectedAlbum ? albumTracks : closingDetail?.tracks ?? []}
+                  tracksTruncated={selectedAlbum ? albumTracksTruncated : closingDetail?.tracksTruncated ?? false}
+                  state={selectedAlbum ? albumDetailState : "ready"}
+                  selectedTrackId={selectedTrackId}
+                  currentTrackKey={currentTrackKey}
+                  playbackActive={playbackActive}
+                  closing={!selectedAlbum}
+                  busyTrackKeys={busyTrackKeys}
+                  onClose={() => selectOrToggleAlbum(null)}
+                  onSelectTrack={onSelectTrack}
+                  onActivateTrack={onActivateTrack}
+                  onRetry={onRetry}
+                  onRatingChange={onRatingChange}
+                  onLoveChange={onLoveChange}
+                  onDeleteTracks={onDeleteTracks}
+                  onRequestMoveToInbox={onRequestMoveToInbox}
+                  albumMoveBusy={albumMoveBusy}
+                  onSelectionChange={onSelectionChange}
+                  trackChartRanks={trackChartRanks}
+                  onOpenArtistAlbums={onOpenArtistAlbums}
+                  albumChartRanks={albumChartRanks}
+                />
+              </ContentTransition>
             ) : null}
           />
         ) : (

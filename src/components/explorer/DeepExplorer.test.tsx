@@ -564,4 +564,93 @@ describe("DeepExplorer", () => {
     expect(screen.getByText("No matches in this orbit")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
+
+  it("reveals album detail sections independently and supports tab switching and interactions", () => {
+    const onActivateTrack = vi.fn();
+    const onSelectAlbum = vi.fn();
+    const multiAlbums: ExplorerAlbum[] = [
+      albums[0],
+      {
+        id: "album-2",
+        title: "Daylight Echoes",
+        artist: "Aurora Lines",
+        originalYear: 1987,
+        releaseYear: 2024,
+        publisher: "EMI Records",
+        originCountryCode: "NO",
+        originCountryName: "Norway",
+        rating: 4.5,
+        totalTracks: 10,
+        durationSeconds: 2400,
+        genre: "Synthwave",
+        lovedTracks: 2,
+        ratedTracks: 8,
+        albumScore: 390.1,
+      },
+    ];
+
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          albums: multiAlbums,
+          selectedAlbumId: multiAlbums[0].id,
+          albumTracks: tracks,
+          onActivateTrack,
+          onSelectAlbum,
+          pageInfo: { loaded: 2, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const detailTabs = screen.getByRole("tablist", { name: "Album detail sections" });
+    expect(within(detailTabs).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(within(detailTabs).getByRole("tab", { name: /Tracks/ })).toHaveAttribute("aria-selected", "false");
+    expect(within(detailTabs).getByRole("tab", { name: "Reviews & Rating" })).toHaveAttribute("aria-selected", "false");
+    expect(within(detailTabs).getByRole("tab", { name: /Popularity/ })).toHaveAttribute("aria-selected", "false");
+    expect(within(detailTabs).getByRole("tab", { name: /Related Albums/ })).toHaveAttribute("aria-selected", "false");
+
+    // In Overview mode, all 4 sections are revealed independently
+    expect(screen.getByRole("region", { name: "Tracks section" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Reviews section" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Popularity section" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Related albums section" })).toBeInTheDocument();
+
+    // Verify Reviews section content
+    const reviewsSection = screen.getByRole("region", { name: "Reviews section" });
+    expect(within(reviewsSection).getByText("Album Rating")).toBeInTheDocument();
+    expect(within(reviewsSection).getByText("4.33 / 5.0")).toBeInTheDocument();
+    expect(within(reviewsSection).getByText(/tracks rated/)).toBeInTheDocument();
+    expect(within(reviewsSection).getByText("Loved Collection")).toBeInTheDocument();
+    expect(within(reviewsSection).getByText("4 loved")).toBeInTheDocument();
+    expect(within(reviewsSection).getByText("Aurora Album Score")).toBeInTheDocument();
+    expect(within(reviewsSection).getByText("Catalog Evidence")).toBeInTheDocument();
+
+    // Switch to Reviews tab
+    fireEvent.click(within(detailTabs).getByRole("tab", { name: "Reviews & Rating" }));
+    expect(screen.queryByRole("region", { name: "Tracks section" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Reviews section" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Popularity section" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Related albums section" })).not.toBeInTheDocument();
+
+    // Switch to Popularity tab and activate a track
+    fireEvent.click(within(detailTabs).getByRole("tab", { name: /Popularity/ }));
+    const popSection = screen.getByRole("region", { name: "Popularity section" });
+    expect(within(popSection).getByText("Global Popularity")).toBeInTheDocument();
+    const playTrackBtn = within(popSection).getByRole("button", { name: `Play ${tracks[0].title}` });
+    fireEvent.click(playTrackBtn);
+    expect(onActivateTrack).toHaveBeenCalledWith(tracks[0]);
+
+    // Switch to Related Albums tab and select a related album
+    fireEvent.click(within(detailTabs).getByRole("tab", { name: /Related Albums/ }));
+    const relatedSection = screen.getByRole("region", { name: "Related albums section" });
+    const relatedAlbumBtn = within(relatedSection).getByRole("button", { name: "Open album Daylight Echoes" });
+    fireEvent.click(relatedAlbumBtn);
+    expect(onSelectAlbum).toHaveBeenCalledWith(multiAlbums[1]);
+
+    // Switch to Tracks tab
+    fireEvent.click(within(detailTabs).getByRole("tab", { name: /Tracks/ }));
+    expect(screen.getByRole("region", { name: "Tracks section" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Reviews section" })).not.toBeInTheDocument();
+  });
 });

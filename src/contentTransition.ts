@@ -1,6 +1,6 @@
 import { addTransitionType, startTransition } from "react";
 
-export type ContentTransitionType = "history-page" | "chart-page";
+export type ContentTransitionType = "history-page" | "chart-page" | "album-detail";
 
 /** Keep updates immediate on older WebViews and when motion is unwanted. */
 export function transitionContent(update: () => void, type?: ContentTransitionType) {

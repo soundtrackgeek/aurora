@@ -1,8 +1,8 @@
 # Aurora
 
-Aurora 0.25.20 safely saves ratings and tag edits for tracks with maximum-length filenames using bounded same-folder working and backup names. Audio verification, rollback copies, and interrupted-undo recovery remain in place, including recovery journals from earlier versions.
+Aurora 0.25.21 brings React 19.3 View Transitions and independent Suspense boundaries to Albums detail in Deep Explorer. Opening, changing, or closing the selected album drawer transitions smoothly, and the four album detail sections—Tracks, Reviews & Rating, Global Popularity, and Related Albums—reveal independently without blocking each other or causing layout flashes.
 
-Aurora uses React 19.3 View Transitions for Listening Report and Charts. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
+Aurora uses React 19.3 View Transitions for Listening Report, Charts, and Album details. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
 
 Aurora speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
 
