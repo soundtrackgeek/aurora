@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.24] - 2026-09-18
+
+### Fixed
+
+- Preserve scroll position and album selection when editing tags and saving in Deep Explorer, preventing unexpected jumps back to the beginning of the albums list.
+- Prevent unpreserved view resets and detail closures in `applyTrackChanges` by preserving current explorer view and active album when query fields update.
+- Ensure in-place explorer reloads request the full currently loaded album window instead of truncating to page 1.
+- Guard the main scroll container against spurious zero-scroll overwrites while catalog reloads and tag edits complete, and reapply the saved scroll position once content is ready.
+- Prevent unintended View Transitions on track updates within the album detail drawer by defaulting `update` transitions to `none` when section reveal `enter` is configured.
+
 ## [0.25.23] - 2026-09-18
 
 ### Fixed

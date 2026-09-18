@@ -16,7 +16,7 @@ export function ContentTransition({
     <ViewTransition
       default="none"
       enter={enter ? (type ? { [type]: "aurora-content", default: "aurora-content" } : "aurora-content") : undefined}
-      update={type ? { [type]: "aurora-content", default: "none" } : "aurora-content"}
+      update={type ? { [type]: "aurora-content", default: "none" } : (enter ? "none" : "aurora-content")}
     >
       {children}
     </ViewTransition>

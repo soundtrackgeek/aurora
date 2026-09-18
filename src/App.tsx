@@ -682,6 +682,7 @@ function App() {
   const explorerRestorationPendingRef = useRef(true);
   const preserveExplorerOnReloadRef = useRef(false);
   const pendingExplorerAlbumIdRef = useRef<string | null>(null);
+  const activeNavRef = useRef(activeNav);
   const inspectorViewRef = useRef(inspectorView);
   const inspectorArtistNameRef = useRef(inspectorArtistName);
   const openArtistInspectorRef = useRef<(artistName: string) => void>(() => undefined);
@@ -693,6 +694,7 @@ function App() {
   const rebindPlaybackCatalog = playback.rebindCatalog;
   const selectedGenreRef = useRef(selectedGenre);
   selectedGenreRef.current = selectedGenre;
+  activeNavRef.current = activeNav;
   selectedTrackRef.current = selectedTrack;
   selectedAlbumIdRef.current = selectedAlbumId;
   explorerCursorRef.current = explorerCursor;
@@ -980,7 +982,13 @@ function App() {
         }
         catalogRevisionRef.current = revision;
 
+        const currentScroll = mainScrollRef.current?.scrollTop;
+        if (typeof currentScroll === "number" && currentScroll > 0) {
+          scrollPositionByDestinationRef.current[activeNavRef.current] = currentScroll;
+        }
+        restoringScrollRef.current = true;
         preserveExplorerOnReloadRef.current = true;
+        if (selectedAlbumIdRef.current) pendingExplorerAlbumIdRef.current = selectedAlbumIdRef.current;
         setExplorerReloadToken((value) => value + 1);
         setReviewReloadToken((value) => value + 1);
         setHistoryReloadToken((value) => value + 1);
@@ -1234,6 +1242,12 @@ function App() {
     const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : restoringStoredView ? initialWorkspace.trackKey : null;
     const preservedLoaded = explorerLoadedRef.current;
     const preservedCursor = explorerCursorRef.current;
+    const preservedScroll = preservingCurrentView
+      ? (mainScrollRef.current?.scrollTop ?? scrollPositionByDestinationRef.current[activeNav] ?? 0)
+      : null;
+    if (preservedScroll !== null && preservedScroll > 0) {
+      restoringScrollRef.current = true;
+    }
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     albumRequestRef.current += 1;
@@ -1253,7 +1267,9 @@ function App() {
       explorerLocalOnlyRef.current = localOnly;
       void loadWorkspacePages<ExplorerResult>(
         (cursor) => loadExplorerPage(explorerView, explorerFilters, cursor, localOnly),
-        restoringStoredView && initialWorkspace.explorerKey === explorerRequestKey(explorerView, explorerFilters, 0) ? initialWorkspace.loaded : 0,
+        restoringStoredView && initialWorkspace.explorerKey === explorerRequestKey(explorerView, explorerFilters, 0)
+          ? initialWorkspace.loaded
+          : (preservingCurrentView ? preservedLoaded : 0),
         () => cancelled,
       )
         .then((page) => {
@@ -1268,6 +1284,21 @@ function App() {
           setExplorerLoadState("ready");
           loadedExplorerRequestKeyRef.current = requestKey;
           loadedExplorerViewKeyRef.current = explorerRequestKey(explorerView, explorerFilters, 0);
+          const restoreScrollIfPreserved = () => {
+            if (preservedScroll !== null && preservedScroll > 0) {
+              const scrollContainer = mainScrollRef.current;
+              if (scrollContainer) {
+                restoreWorkspaceScroll(
+                  scrollContainer,
+                  preservedScroll,
+                  () => scrollReadyRef.current,
+                  () => { restoringScrollRef.current = false; },
+                );
+                return;
+              }
+            }
+            restoringScrollRef.current = false;
+          };
           if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
             const albumDetailRequestId = ++albumRequestRef.current;
             setSelectedAlbumId(restoredAlbumId);
@@ -1286,14 +1317,19 @@ function App() {
                 setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
                 setAlbumDetailState("ready");
                 refreshSelectedAlbumFiles(restoredAlbumId, albumDetailRequestId);
+                restoreScrollIfPreserved();
               })
               .catch((error: unknown) => {
                 if (albumDetailRequestId !== albumRequestRef.current) return;
                 console.warn("Aurora could not restore album details", error);
                 setAlbumDetailState("error");
+                restoreScrollIfPreserved();
               });
-          } else if (restoringStoredView) {
-            setSelectedAlbumId(null);
+          } else {
+            if (restoringStoredView) {
+              setSelectedAlbumId(null);
+            }
+            restoreScrollIfPreserved();
           }
           if (handoffAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
           explorerRestorationPendingRef.current = false;
@@ -1304,6 +1340,7 @@ function App() {
         .catch((error: unknown) => {
           if (cancelled || requestId !== exploreRequestRef.current) return;
           explorerRestorationPendingRef.current = false;
+          restoringScrollRef.current = false;
           setExplorerError(error instanceof Error ? error.message : String(error));
           if (preservingCurrentView) {
             console.warn("Aurora kept the current Library view after its background refresh failed", error);
@@ -1311,7 +1348,7 @@ function App() {
             setExplorerLoadState("error");
           }
         });
-    }, explorerFilters.query.trim() ? explorerSearchDebounceMs : 0);
+    }, preservingCurrentView ? 0 : (explorerFilters.query.trim() ? explorerSearchDebounceMs : 0));
     return () => {
       cancelled = true;
       window.clearTimeout(clearDetailTimer);
@@ -2247,6 +2284,13 @@ function App() {
       const baseline = baselines.get(track.trackKey);
       return baseline && baseline.genre !== track.genre;
     })) {
+      const currentScroll = mainScrollRef.current?.scrollTop;
+      if (typeof currentScroll === "number" && currentScroll > 0) {
+        scrollPositionByDestinationRef.current[activeNav] = currentScroll;
+      }
+      restoringScrollRef.current = true;
+      preserveExplorerOnReloadRef.current = true;
+      if (selectedAlbumId) pendingExplorerAlbumIdRef.current = selectedAlbumId;
       setExplorerReloadToken((value) => value + 1);
     }
 
@@ -2297,6 +2341,10 @@ function App() {
   async function refreshTagEditorCatalogViews(sync: CatalogSync) {
     const albumId = selectedAlbumId;
     if (albumId) pendingExplorerAlbumIdRef.current = albumId;
+    const currentScroll = mainScrollRef.current?.scrollTop;
+    if (typeof currentScroll === "number" && currentScroll > 0) {
+      scrollPositionByDestinationRef.current[activeNav] = currentScroll;
+    }
     const catalogRefreshed = await handleCatalogSync(sync, true);
     if (catalogRefreshed || !albumId) return;
     if (pendingExplorerAlbumIdRef.current === albumId) pendingExplorerAlbumIdRef.current = null;
@@ -3140,7 +3188,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.23</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.25.24</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3244,7 +3292,11 @@ function App() {
           ref={mainScrollRef}
           onScroll={(event) => {
             if (restoringScrollRef.current) return;
-            scrollPositionByDestinationRef.current[activeNav] = event.currentTarget.scrollTop;
+            const nextScroll = event.currentTarget.scrollTop;
+            if (nextScroll === 0 && (scrollPositionByDestinationRef.current[activeNav] ?? 0) > 0 && !scrollReadyRef.current) {
+              return;
+            }
+            scrollPositionByDestinationRef.current[activeNav] = nextScroll;
             workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
             saveWorkspaceCheckpoint(workspaceRef.current);
           }}
