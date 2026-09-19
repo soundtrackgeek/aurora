@@ -535,8 +535,11 @@ describe("Inbox", () => {
     expect(screen.getByRole("dialog", { name: "Add selected albums to library" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /Library destination for .*Unselected album/ })).not.toBeInTheDocument();
     expect(screen.queryByText("1 album is not ready.")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: `Library destination for ${first.artist} — Freak` }), { target: { value: "general" } });
+    const bulkDestination = screen.getByRole("combobox", { name: "Destination for all albums" });
+    fireEvent.change(bulkDestination, { target: { value: "general" } });
     fireEvent.change(screen.getByRole("combobox", { name: `Library destination for ${first.artist} — Neon Nights` }), { target: { value: "synthwave" } });
+    expect(bulkDestination).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Mixed destinations" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
 
     const add = await screen.findByRole("button", { name: "Add 2 albums" });
@@ -555,6 +558,48 @@ describe("Inbox", () => {
     expect(screen.getByRole("row", { name: /Unselected album by/ })).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /Freak by/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /Neon Nights by/ })).not.toBeInTheDocument();
+  });
+
+  it("sets one destination for 24 selected albums and requires a new preview after changing it", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const albums = Array.from({ length: 25 }, (_, index) => ({
+      ...first, id: `bulk-${index}`, album: `Album ${index + 1}`, path: `C:\\Music\\Inbox\\Album ${index + 1}`,
+      readiness: { ready: index < 24, issues: index === 24 ? ["Missing genre"] : [] },
+    }));
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => ({
+      ...libraryPreview(`${category}-${sourcePath}`, 100, sourcePath, category, 1),
+      albums: [{ sourcePath, destinationPath: `${category}/${sourcePath}`, artist: "Baltimoore", album: sourcePath, year: "1990", trackCount: 10, action: "add", existingTrackCount: 0, matchedTrackCount: 0, existingRatedTrackCount: 0, existingLovedTrackCount: 0 }],
+    }));
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockImplementation(async ({ planId, sessionId }) => ({
+      planId, sessionId, status: "completed", albumCount: 1, trackCount: 10, movedAlbumCount: 1,
+      importRunId: sessionId, backupPath: null, cleanupWarnings: [], albums: [],
+    }));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    await screen.findByRole("row", { name: "Album 1 by Baltimoore" });
+    fireEvent.click(screen.getByRole("row", { name: "Album 24 by Baltimoore" }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Move selected (24)" }));
+    const bulkDestination = screen.getByRole("combobox", { name: "Destination for all albums" });
+    fireEvent.change(bulkDestination, { target: { value: "general" } });
+    for (const select of screen.getAllByRole("combobox", { name: /^Library destination for/ })) {
+      expect(select).toHaveValue("general");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+    await screen.findByRole("button", { name: "Add 24 albums" });
+    expect(preview.mock.calls.map(([request]) => request)).toEqual(albums.slice(0, 24).map((album) => ({ sourcePath: album.path, category: "general" })));
+
+    fireEvent.change(bulkDestination, { target: { value: "scores" } });
+    expect(screen.queryByRole("button", { name: "Add 24 albums" })).not.toBeInTheDocument();
+    expect(apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+    const add = await screen.findByRole("button", { name: "Add 24 albums" });
+    expect(preview.mock.calls.slice(24).map(([request]) => request)).toEqual(albums.slice(0, 24).map((album) => ({ sourcePath: album.path, category: "scores" })));
+    load.mockResolvedValue({ ...snapshot, albums: [albums[24]] });
+    fireEvent.click(add);
+    expect(await screen.findByText("24 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(apply.mock.calls.map(([request]) => request)).toEqual(albums.slice(0, 24).map((album) => ({ planId: `scores-${album.path}`, sessionId: 100 })));
+    expect(screen.getByRole("row", { name: "Album 25 by Baltimoore" })).toBeInTheDocument();
   });
 
   it("disables moving an empty selection and blocks a selected album that is not ready", async () => {

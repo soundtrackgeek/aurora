@@ -37,6 +37,9 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
   const albumCount = useMemo(() => targets.reduce((total, target) => total + target.albumCount, 0), [targets]);
   const unreadyAlbumCount = useMemo(() => targets.reduce((total, target) => total + target.unreadyAlbumCount, 0), [targets]);
   const destinationsSelected = targets.every((target) => destinations[target.sourcePath]);
+  const firstDestination = destinations[targets[0]?.sourcePath] ?? "";
+  const mixedDestinations = targets.some((target) => destinations[target.sourcePath] !== firstDestination);
+  const sharedDestination = mixedDestinations ? "" : firstDestination;
   const canApply = previews?.length === targets.length && previews.every((preview) => preview.canApply);
   const replacements = previews?.flatMap((preview) => preview.albums.filter((album) => album.action === "replace")) ?? [];
 
@@ -106,6 +109,19 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
         <span className="inbox-intake-dialog__mark"><FolderInput /></span>
         <div><h2 id="inbox-intake-title">Add {scopeLabel} to library</h2><p>{albumCount} {albumCount === 1 ? "album" : "albums"} will use Music Library's reviewed mover and cover workflow.</p></div>
         <button type="button" aria-label="Close Add to Library" disabled={Boolean(busy)} onClick={onClose}><X /></button>
+        {targets.length > 1 ? <label className="inbox-intake-dialog__bulk">
+          <span><strong>Destination for all albums</strong><small>Set all {albumCount} albums at once. Adjust individual destinations below if needed.</small></span>
+          <select aria-label="Destination for all albums" value={sharedDestination} disabled={Boolean(busy)} onChange={(event) => {
+            const category = event.target.value as LibraryIntakeCategoryId | "";
+            setDestinations(Object.fromEntries(targets.map((target) => [target.sourcePath, category])));
+            setPreviews(null);
+            setError(null);
+            setReplacementConfirmed(false);
+          }}>
+            <option value="">{mixedDestinations ? "Mixed destinations" : "Select music root for all…"}</option>
+            {libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+          </select>
+        </label> : null}
       </header>
 
       <div className="inbox-intake-dialog__body">
@@ -115,7 +131,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
             const preview = previews?.[index];
             return <section key={target.sourcePath}>
               <div><strong>{target.label}</strong><small title={target.sourcePath}>{target.sourcePath}</small></div>
-              <select aria-label={`Library destination for ${target.label}`} value={destinations[target.sourcePath] ?? ""} disabled={Boolean(busy)} onChange={(event) => { setDestinations((current) => ({ ...current, [target.sourcePath]: event.target.value as LibraryIntakeCategoryId | "" })); setPreviews(null); setError(null); }}>
+              <select aria-label={`Library destination for ${target.label}`} value={destinations[target.sourcePath] ?? ""} disabled={Boolean(busy)} onChange={(event) => { setDestinations((current) => ({ ...current, [target.sourcePath]: event.target.value as LibraryIntakeCategoryId | "" })); setPreviews(null); setError(null); setReplacementConfirmed(false); }}>
                 <option value="">Select music root…</option>
                 {libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
               </select>

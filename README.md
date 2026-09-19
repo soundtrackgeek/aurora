@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.25.27 adds **Move selected** to Inbox. Ctrl-click individual albums or Shift-click a range, then choose **Move selected (N)** to review destinations and move only those albums. Each selected album can use General, Scores, or Synthwave; unselected albums stay in Inbox. Readiness checks apply to the selection, and existing folder-wide actions remain available.
+Aurora 0.25.28 lets you choose one **Destination for all albums** at the top of Inbox's move dialog. Select General, Scores, or Synthwave once to apply it to the entire selection; individual album destinations can still be adjusted below. The shared selector stays visible while you scroll, shows mixed destinations when individual choices differ, and requires a new preview after any destination change.
+
+Ctrl-click individual Inbox albums or Shift-click a range, then choose **Move selected (N)** to review destinations and move only those albums. Unselected albums stay in Inbox. Readiness checks apply to the selection, and existing folder-wide actions remain available.
 
 Aurora adds subtle React 19.3 View Transitions to artist selection and independently loaded inspector sections, Genres, Years, Publishers, Universe, Observatory, and Ratings collections. Album details animate opening, closing, and replacement across cover rows without keeping a stale closing panel alive. Rating and love edits remain immediate; reduced-motion preferences and older WebViews bypass animated updates.
 

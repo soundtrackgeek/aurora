@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.28] - 2026-09-19
+
+### Added
+
+- Add a **Destination for all albums** selector above the scrolling Inbox move list so one choice sets the destination for the entire selection.
+- Keep individual destination overrides, display mixed destinations accurately, and clear reviewed previews and replacement confirmation whenever destinations change.
+
 ## [0.25.27] - 2026-09-19
 
 ### Added
