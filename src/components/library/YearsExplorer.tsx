@@ -1,3 +1,4 @@
+import { transitionContent } from "../../contentTransition";
 import {
   CalendarRange,
   ChevronLeft,
@@ -303,7 +304,7 @@ export function YearsExplorer(props: YearsExplorerProps) {
   const detail = props.detail;
 
   function changeMode(nextMode: YearsMode) {
-    setMode(nextMode);
+    transitionContent(() => setMode(nextMode), "collection");
     if (!overview || !detail || nextMode === "twoClocks") return;
     const basis: YearBasis = nextMode;
     if (detail.selection.basis === basis) return;

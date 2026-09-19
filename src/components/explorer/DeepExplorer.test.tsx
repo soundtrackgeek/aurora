@@ -113,6 +113,17 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it("removes closed details immediately and never retains a stale closing copy", () => {
+    const props = explorerProps({ view: "albums", selectedAlbumId: "album-1", albumTracks: tracks });
+    const { rerender } = render(<DeepExplorer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
+    expect(props.onSelectAlbum).toHaveBeenCalledWith(null);
+    rerender(<DeepExplorer {...props} selectedAlbumId={null} albumTracks={[]} />);
+    expect(screen.queryByRole("complementary", { name: "Night Geometry album details" })).not.toBeInTheDocument();
+    rerender(<DeepExplorer {...props} />);
+    expect(screen.getAllByRole("complementary", { name: "Night Geometry album details" })).toHaveLength(1);
+  });
+
   it("shows total plays and the latest play timestamp for artists with history", () => {
     const noHistoryArtist: Artist = {
       id: "artist-2",

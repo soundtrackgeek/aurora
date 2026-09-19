@@ -1,3 +1,4 @@
+import { transitionContent } from "../../contentTransition";
 import {
   ChevronRight,
   Disc3,
@@ -302,7 +303,7 @@ export function RatingsStudio(props: RatingsStudioProps) {
     return <section className="ratings-studio"><Feedback detail={false} error={props.errorMessage} onRetry={props.onRetry} /></section>;
   }
   return <section className="ratings-studio">
-    <Constellation overview={props.overview} mode={mode} selectedRating={selectedRating} onModeChange={(next) => { setMode(next); setSelectedRating(5); }} onSelect={setSelectedRating} />
+    <Constellation overview={props.overview} mode={mode} selectedRating={selectedRating} onModeChange={(next) => transitionContent(() => { setMode(next); setSelectedRating(5); }, "collection")} onSelect={(rating) => transitionContent(() => setSelectedRating(rating), "collection")} />
     <div className="rating-actions">
       <div><Star aria-hidden="true" /><span><strong>{bandLabel(selectedRating)}</strong><small>{formatCount(selectedBand?.count ?? 0)} {mode === "tracks" ? "tracks" : "albums"}</small></span></div>
       {mode === "tracks" && selectedRating === 5 ? <button type="button" className="five-star-collection" onClick={() => props.onPlayCollection(mode, selectedRating)}><Star aria-hidden="true" /> 5 Star Collection <ChevronRight aria-hidden="true" /></button> : null}

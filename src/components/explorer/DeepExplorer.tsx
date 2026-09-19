@@ -732,7 +732,6 @@ function AlbumDetail({
   selectedTrackId,
   currentTrackKey,
   playbackActive,
-  closing = false,
   busyTrackKeys,
   onClose,
   onSelectTrack,
@@ -755,7 +754,6 @@ function AlbumDetail({
   selectedTrackId: string | null;
   currentTrackKey?: string | null;
   playbackActive?: boolean;
-  closing?: boolean;
   busyTrackKeys: ReadonlySet<string>;
   onClose: () => void;
   onSelectTrack: (track: Track) => void;
@@ -829,7 +827,7 @@ function AlbumDetail({
   }
 
   return (
-    <aside className={`deep-explorer-album-detail${closing ? " is-closing" : ""}`} aria-label={`${album.title} album details`}>
+    <aside className="deep-explorer-album-detail" aria-label={`${album.title} album details`}>
       <header>
         <AlbumArtwork album={album} detail />
         <div>
@@ -859,7 +857,6 @@ function AlbumDetail({
         </button>
       </header>
 
-      <ContentTransition type="album-detail">
         {state === "loading" ? (
           <ExplorerFeedback kind="loading" />
         ) : state === "error" ? (
@@ -894,7 +891,6 @@ function AlbumDetail({
             />
           </>
         )}
-      </ContentTransition>
 
       {deleteTargets.length > 0 ? (
         <dialog
@@ -1030,13 +1026,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onSelectionChange,
   } = props;
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId) ?? null;
-  const [closingDetail, setClosingDetail] = useState<{
-    album: ExplorerAlbum;
-    tracks: readonly Track[];
-    tracksTruncated: boolean;
-  } | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
-  const detailAlbum = selectedAlbum ?? closingDetail?.album ?? null;
+  const detailAlbum = selectedAlbum;
   const resultCount = resultCountForView(view, props);
   const [selectedTrackKeys, setSelectedTrackKeys] = useState<ReadonlySet<string>>(() => new Set(
     tracks.filter((track) => track.id === selectedTrackId).map((track) => track.trackKey),
@@ -1076,10 +1066,6 @@ export function DeepExplorer(props: DeepExplorerProps) {
     setAlbumSelectionAnchorId(null);
   }, [filters, view]);
 
-  useEffect(() => () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-  }, []);
-
   useEffect(() => {
     const sentinel = loadMoreSentinelRef.current;
     if (
@@ -1100,25 +1086,6 @@ export function DeepExplorer(props: DeepExplorerProps) {
   }, [loadState, pageInfo.hasMore, pageInfo.isLoadingMore, pageInfo.loaded]);
 
   function selectOrToggleAlbum(album: ExplorerAlbum | null) {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-    if (!album) {
-      if (selectedAlbum) {
-        setClosingDetail({ album: selectedAlbum, tracks: [...albumTracks], tracksTruncated: albumTracksTruncated });
-        onSelectAlbum(null);
-        closeTimerRef.current = window.setTimeout(() => {
-          setClosingDetail(null);
-          closeTimerRef.current = null;
-        }, 180);
-      } else {
-        setClosingDetail(null);
-        onSelectAlbum(null);
-      }
-      return;
-    }
-    setClosingDetail(null);
     onSelectAlbum(album);
   }
 
@@ -1250,31 +1217,32 @@ export function DeepExplorer(props: DeepExplorerProps) {
             chartRanks={albumChartRanks}
             onOpenArtistAlbums={onOpenArtistAlbums}
             detail={detailAlbum ? (
-              <AlbumDetail
-                key={detailAlbum.id}
-                album={detailAlbum}
-                tracks={selectedAlbum ? albumTracks : closingDetail?.tracks ?? []}
-                tracksTruncated={selectedAlbum ? albumTracksTruncated : closingDetail?.tracksTruncated ?? false}
-                state={selectedAlbum ? albumDetailState : "ready"}
-                selectedTrackId={selectedTrackId}
-                currentTrackKey={currentTrackKey}
-                playbackActive={playbackActive}
-                closing={!selectedAlbum}
-                busyTrackKeys={busyTrackKeys}
-                onClose={() => selectOrToggleAlbum(null)}
-                onSelectTrack={onSelectTrack}
-                onActivateTrack={onActivateTrack}
-                onRetry={onRetry}
-                onRatingChange={onRatingChange}
-                onLoveChange={onLoveChange}
-                onDeleteTracks={onDeleteTracks}
-                onRequestMoveToInbox={onRequestMoveToInbox}
-                albumMoveBusy={albumMoveBusy}
-                onSelectionChange={onSelectionChange}
-                trackChartRanks={trackChartRanks}
-                onOpenArtistAlbums={onOpenArtistAlbums}
-                albumChartRanks={albumChartRanks}
-              />
+              <ContentTransition type="album-detail" name="expanded-album-detail" enter exit>
+                <AlbumDetail
+                  key={detailAlbum.id}
+                  album={detailAlbum}
+                  tracks={albumTracks}
+                  tracksTruncated={albumTracksTruncated}
+                  state={albumDetailState}
+                  selectedTrackId={selectedTrackId}
+                  currentTrackKey={currentTrackKey}
+                  playbackActive={playbackActive}
+                  busyTrackKeys={busyTrackKeys}
+                  onClose={() => selectOrToggleAlbum(null)}
+                  onSelectTrack={onSelectTrack}
+                  onActivateTrack={onActivateTrack}
+                  onRetry={onRetry}
+                  onRatingChange={onRatingChange}
+                  onLoveChange={onLoveChange}
+                  onDeleteTracks={onDeleteTracks}
+                  onRequestMoveToInbox={onRequestMoveToInbox}
+                  albumMoveBusy={albumMoveBusy}
+                  onSelectionChange={onSelectionChange}
+                  trackChartRanks={trackChartRanks}
+                  onOpenArtistAlbums={onOpenArtistAlbums}
+                  albumChartRanks={albumChartRanks}
+                />
+              </ContentTransition>
             ) : null}
           />
         ) : (

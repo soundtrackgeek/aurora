@@ -1,8 +1,8 @@
 # Aurora
 
-Aurora 0.25.25 streamlines the Albums detail view in Deep Explorer by presenting a clean, responsive album drawer focused on the album header and track list, removing the secondary review analysis, popularity, and related albums sections. View transitions and scroll preservation remain smooth when opening, changing, and navigating albums.
+Aurora 0.25.26 adds subtle React 19.3 View Transitions to artist selection and independently loaded inspector sections, Genres, Years, Publishers, Universe, Observatory, and Ratings collections. Album details animate opening, closing, and replacement across cover rows without keeping a stale closing panel alive. Rating and love edits remain immediate; reduced-motion preferences and older WebViews bypass animated updates.
 
-Aurora uses React 19.3 View Transitions for Listening Report, Charts, and Album details. Completed results fade in over 160 ms while previous results remain visible during loading; navigation and playback controls stay responsive. Reduced-motion preferences and older WebViews use immediate updates.
+Listening Report and Charts retain their existing transitions. Async catalog results activate transitions when they arrive, with request guards retained. Artist catalog and MusicBrainz requests reveal independently without introducing a Suspense data cache.
 
 Aurora speeds up album and artist searches such as `genre:soundtrack AND year:1997` by collecting matching album IDs once instead of repeating a year lookup for every album. Initial results use the local catalog and saved corrections; pending file reconciliation runs separately.
 

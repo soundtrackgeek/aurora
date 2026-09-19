@@ -68,6 +68,15 @@ const handlers = {
 afterEach(cleanup);
 
 describe("ArtistWorld", () => {
+  it("reveals MusicBrainz sections while the catalog request is still pending", () => {
+    const { rerender } = render(<ArtistWorld artistName="M83" catalogDetail={null} intelligence={intelligence} state="loading" {...handlers} />);
+    expect(screen.getByText("Curated identity")).toBeInTheDocument();
+    expect(screen.getByLabelText("MusicBrainz artist profile")).toHaveTextContent("Antibes");
+    expect(screen.queryByLabelText("Local catalog summary")).not.toBeInTheDocument();
+    rerender(<ArtistWorld artistName="M83" catalogDetail={detail} intelligence={intelligence} state="ready" {...handlers} />);
+    expect(screen.getByLabelText("Local catalog summary")).toHaveTextContent("94");
+  });
+
   it("renders provenance, catalog counts, releases, and decisions", () => {
     render(<ArtistWorld artistName="M83" catalogDetail={detail} intelligence={intelligence} state="ready" {...handlers} />);
     expect(screen.getByRole("heading", { name: "M83" })).toBeInTheDocument();

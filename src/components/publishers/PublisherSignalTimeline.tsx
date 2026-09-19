@@ -1,3 +1,4 @@
+import { transitionContent } from "../../contentTransition";
 import {
   BadgeCheck,
   CalendarRange,
@@ -365,7 +366,7 @@ export function PublisherSignalTimeline(props: PublisherSignalTimelineProps) {
   const domain = timelineDomain(props.overview);
   return (
     <section className="publisher-timeline" aria-label="Publishers">
-      <TimelineHeader mode={mode} onChange={setMode} />
+      <TimelineHeader mode={mode} onChange={(value) => transitionContent(() => setMode(value), "collection")} />
       <div className="publisher-signals">
         <TimelineTicks first={domain.first} last={domain.last} />
         {props.overview.publishers.map((publisher) => (

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.26] - 2026-09-19
+
+### Changed
+
+- Animate artist selection, independently arriving catalog and MusicBrainz inspector sections, collection changes in Genres, Years, Publishers and Ratings, and subtle Universe/Observatory page changes.
+- Keep rating/love edits and background album reconciliation immediate, with reduced-motion and unsupported-WebView fallbacks.
+
+### Fixed
+
+- Start album file reconciliation after the selected detail commits, preventing an urgent readback from interrupting ViewTransition snapshot capture.
+- Activate album detail transitions on selection and completed loads, including cross-row replacement; remove the delayed duplicate closing panel and competing CSS animation.
+
 ## [0.25.25] - 2026-09-18
 
 ### Changed

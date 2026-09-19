@@ -1,3 +1,4 @@
+import { ContentTransition } from "../ContentTransition";
 import {
   AlertTriangle,
   Ban,
@@ -143,6 +144,7 @@ export function ArtistWorld({
         <LibraryBig aria-hidden="true" /> Explore this artist in Aurora
       </button>
 
+      <ContentTransition type="artist-detail" enter>
       {catalogDetail ? (
         <dl className="artist-world__stats" aria-label="Local catalog summary">
           <div><dt>Tracks</dt><dd>{formatCount(catalogDetail.artist.trackCount)}</dd></div>
@@ -151,13 +153,15 @@ export function ArtistWorld({
         </dl>
       ) : null}
 
+      </ContentTransition>
+
       {state === "ready" && errorMessage ? (
         <div className="artist-world__degraded" role="status">
           <AlertTriangle aria-hidden="true" /><span><strong>Partial local context</strong>{errorMessage}</span>
         </div>
       ) : null}
 
-      {state === "loading" ? (
+      {state === "loading" && !intelligence ? (
         <div className="artist-world__feedback" role="status">
           <LoaderCircle className="is-spinning" aria-hidden="true" />
           <span><strong>Tracing local connections…</strong>No online request is being made.</span>
@@ -170,7 +174,7 @@ export function ArtistWorld({
         </div>
       ) : intelligence && match ? (
         <>
-          <section className={`artist-world__identity is-${match.tone}`} aria-label="MusicBrainz identity status">
+          <ContentTransition type="artist-detail" enter><section className={`artist-world__identity is-${match.tone}`} aria-label="MusicBrainz identity status">
             {intelligence.matchState === "verified" ? <BadgeCheck aria-hidden="true" /> : intelligence.matchState === "unmatched" || intelligence.matchState === "ignored" ? <Orbit aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
             <div>
               <strong>{match.label}</strong>
@@ -180,9 +184,9 @@ export function ArtistWorld({
               {intelligence.identity && intelligence.identity.cacheNameCount && intelligence.identity.cacheNameCount > 1 ? <p className="artist-world__ambiguity">This cache MBID is shared by {formatCount(intelligence.identity.cacheNameCount)} artist names.</p> : null}
               {intelligence.hasExternalConflict && intelligence.decision ? <p className="artist-world__ambiguity">Aurora keeps your decision, while an imported source still disagrees.</p> : null}
             </div>
-          </section>
+          </section></ContentTransition>
 
-          <section className="artist-world__curation" aria-labelledby="artist-curation-title">
+          <ContentTransition type="artist-detail" enter><section className="artist-world__curation" aria-labelledby="artist-curation-title">
             <div className="artist-world__section-heading">
               <div><p className="eyebrow">Your authority</p><h3 id="artist-curation-title">Identity decision</h3></div>
               {intelligence.decision ? <span>Saved locally</span> : null}
@@ -232,7 +236,7 @@ export function ArtistWorld({
                 </div>
               </>
             )}
-          </section>
+          </section></ContentTransition>
 
           {intelligence.profile ? (
             <dl className="artist-world__profile" aria-label="MusicBrainz artist profile">
@@ -245,7 +249,7 @@ export function ArtistWorld({
             </dl>
           ) : null}
 
-          <section className="artist-world__sources" aria-labelledby="artist-world-sources">
+          <ContentTransition type="artist-detail" enter><section className="artist-world__sources" aria-labelledby="artist-world-sources">
             <h3 id="artist-world-sources">Local sources</h3>
             {intelligence.sources.map((source) => (
               <div key={source.id}>
@@ -254,9 +258,9 @@ export function ArtistWorld({
                 <i className={`source-light is-${source.status}`} aria-label={source.status} />
               </div>
             ))}
-          </section>
+          </section></ContentTransition>
 
-          <section className="artist-world__releases" aria-labelledby="artist-world-releases">
+          <ContentTransition type="artist-detail" enter><section className="artist-world__releases" aria-labelledby="artist-world-releases">
             <div className="artist-world__section-heading">
               <div><p className="eyebrow">Release groups</p><h3 id="artist-world-releases">Connected worlds</h3></div>
               <span>{formatCount(intelligence.releases.length)}{intelligence.releasesTruncated ? "+" : ""}</span>
@@ -331,7 +335,7 @@ export function ArtistWorld({
               <p className="artist-world__empty">No release groups are stored for this local identity.</p>
             )}
             {intelligence.releasesTruncated ? <p className="artist-world__bounded">Showing the newest 100 release groups.</p> : null}
-          </section>
+          </section></ContentTransition>
         </>
       ) : null}
     </div>
