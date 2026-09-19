@@ -23,8 +23,8 @@ export function ArtistSmartLink({ artist, onOpen, nested = false, className }: A
         className={classes}
         role="link"
         tabIndex={0}
-        title={`Show albums by ${trimmedArtist}`}
-        aria-label={`Show albums by ${trimmedArtist}`}
+        title={`Open artist page for ${trimmedArtist}`}
+        aria-label={`Open artist page for ${trimmedArtist}`}
         onClick={activate}
         onDoubleClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
@@ -42,8 +42,8 @@ export function ArtistSmartLink({ artist, onOpen, nested = false, className }: A
     <button
       type="button"
       className={classes}
-      title={`Show albums by ${trimmedArtist}`}
-      aria-label={`Show albums by ${trimmedArtist}`}
+      title={`Open artist page for ${trimmedArtist}`}
+      aria-label={`Open artist page for ${trimmedArtist}`}
       onClick={activate}
     >
       {artist}

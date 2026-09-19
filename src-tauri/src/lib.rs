@@ -1,3 +1,4 @@
+mod artist_discovery;
 mod artwork;
 mod audio_settings;
 mod catalog;
@@ -7,6 +8,7 @@ mod curation;
 mod curation_store;
 mod device_mode;
 mod explorer;
+mod fanart;
 mod file_observations;
 mod genres;
 mod history;
@@ -640,6 +642,61 @@ async fn artist_detail(app: AppHandle, artist: String) -> Result<ArtistDetail, S
     })
     .await
     .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn artist_discovery(
+    app: AppHandle,
+    artist: String,
+    refresh: bool,
+) -> Result<artist_discovery::ArtistDiscovery, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        artist_discovery::load(&artist, refresh, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|_| "The artist discovery worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn artist_artwork(
+    app: AppHandle,
+    artist: String,
+    refresh: bool,
+) -> Result<fanart::ArtistArtwork, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fanart::load(&artist, refresh, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|_| "The artist artwork worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn artist_listening(
+    app: AppHandle,
+    artist: String,
+) -> Result<history::ArtistListening, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<HistoryStore>().artist_listening(&artist)
+    })
+    .await
+    .map_err(|_| "The artist history worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+fn fanart_settings() -> fanart::Status {
+    fanart::status()
+}
+
+#[tauri::command]
+fn open_artist_link(url: String) -> Result<(), String> {
+    artist_discovery::open_link(&url)
+}
+
+#[tauri::command]
+fn update_fanart_credentials(
+    request: fanart::CredentialsRequest,
+) -> Result<fanart::Status, String> {
+    fanart::save(request)
 }
 
 #[tauri::command]
@@ -1642,6 +1699,12 @@ pub fn run() {
             album_popularity,
             delete_album_track,
             artist_detail,
+            artist_discovery,
+            artist_artwork,
+            artist_listening,
+            fanart_settings,
+            open_artist_link,
+            update_fanart_credentials,
             genre_index,
             genre_names,
             genre_detail,

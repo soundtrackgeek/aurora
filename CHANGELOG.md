@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.26.0] - 2026-09-19
+
+### Added
+
+- Dedicated artist pages inspired by the library's dark visual style, with fanart.tv backgrounds and portraits, MusicBrainz origin/formation/birth/death facts, Last.fm biography, top ten global tracks, and similar artists. No Follow action is shown.
+- Local albums and paginated tracks, playback/shuffle of loaded tracks, a release timeline, and twelve months of registered listening history with personal top tracks. Global Last.fm counts stay separate from personal plays.
+- fanart.tv project and optional personal/VIP credentials in Settings → Metadata, stored in the operating system vault; bounded provider requests and a device-local cache retain successful responses during outages.
+- Lazy artist-page loading through Suspense and scoped React View Transitions, independent source loading, retries, reduced-motion support, and guards against stale artist responses.
+
+### Changed
+
+- Artist links in Albums and other library surfaces open the artist page instead of replacing the album search with an `aartist:` filter. Back restores library results, selection, and scroll.
+
 ## [0.25.28] - 2026-09-19
 
 ### Added

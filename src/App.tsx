@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import { Activity as ReactActivity, lazy, Suspense, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./App.css";
-import { albumArtistSearchQuery } from "./artistSearch";
 import { Artwork } from "./components/Artwork";
 import { ArtistSmartLink } from "./components/ArtistSmartLink";
 import {
@@ -255,6 +254,7 @@ const Inbox = lazy(async () => {
   const module = await import("./components/inbox/Inbox");
   return { default: module.Inbox };
 });
+const ArtistPage = lazy(async () => ({ default: (await import("./components/artist/ArtistPage")).ArtistPage }));
 
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
@@ -505,6 +505,8 @@ function App() {
   const [tagSelectionKind, setTagSelectionKind] = useState(initialViewPreferences.tagSelectionKind);
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
+  const [artistPageName, setArtistPageName] = useState<string | null>(null);
+  const artistPageReturnScroll = useRef<number | null>(null);
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
   const [artistWorldState, setArtistWorldState] = useState<ArtistWorldState>("loading");
   const [artistWorldError, setArtistWorldError] = useState<string | null>(null);
@@ -2618,7 +2620,7 @@ function App() {
 
   function navigate(label: SidebarDestination) {
     transitionContent(() => {
-
+      setArtistPageName(null);
       setActiveNav(label);
       if (label !== "Universe" && label !== "Observatory" && label !== "History") {
         expandLibraryNavigation();
@@ -2652,22 +2654,25 @@ function App() {
 
   function openArtistAlbums(artistName: string) {
     transitionContent(() => {
-
       const artist = artistName.trim();
       if (!artist) return;
-      setActiveNav("Albums");
-      expandLibraryNavigation();
-      setExplorerSelection(null);
-      setSelectedAlbumId(null);
-      setSelectedArtistId(null);
-      setExplorerView("albums");
-      setExplorerFilters({
-        ...defaultExplorerFilters,
-        query: albumArtistSearchQuery(artist),
-        sort: defaultExplorerSort.albums,
-      });
+      if (!artistPageName) artistPageReturnScroll.current = mainScrollRef.current?.scrollTop ?? 0;
+      setArtistPageName(artist);
+      if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
     }, "page");
   }
+
+  function closeArtistPage() {
+    transitionContent(() => setArtistPageName(null), "page");
+  }
+
+  useLayoutEffect(() => {
+    if (artistPageName && mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+    else if (artistPageReturnScroll.current !== null && mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = artistPageReturnScroll.current;
+      artistPageReturnScroll.current = null;
+    }
+  }, [artistPageName]);
 
   function exploreGenreInLibrary(genre: string) {
     transitionContent(() => {
@@ -3169,6 +3174,7 @@ function App() {
       ? ["album", "albums"] as const
       : ["artist", "artists"] as const;
   const showExplorerCount = snapshot !== null
+    && artistPageName === null
     && !["Inbox", "Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
   const topbarSearchValue = activeNav === "Inbox"
     ? ""
@@ -3213,6 +3219,7 @@ function App() {
         : "Search your music universe";
 
   function updateTopbarSearch(value: string) {
+    setArtistPageName(null);
     if (activeNav === "Inbox") return;
     if (activeNav === "Observatory") setReviewSearch(value);
     else if (activeNav === "History") setHistorySearch(value);
@@ -3253,7 +3260,7 @@ function App() {
     <div
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
-      data-right-sidebar={layoutPreferences.rightSidebar}
+      data-right-sidebar={artistPageName ? "collapsed" : layoutPreferences.rightSidebar}
       data-inbox={activeNav === "Inbox" ? "true" : undefined}
       data-text-size={displayPreferences.global.textSize}
       data-cover-size={displayPreferences.global.coverSize}
@@ -3284,7 +3291,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.25.28</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3387,7 +3394,7 @@ function App() {
           className="main-scroll"
           ref={mainScrollRef}
           onScroll={(event) => {
-            if (restoringScrollRef.current) return;
+            if (restoringScrollRef.current || artistPageName) return;
             const nextScroll = event.currentTarget.scrollTop;
             if (nextScroll === 0 && (scrollPositionByDestinationRef.current[activeNav] ?? 0) > 0 && !scrollReadyRef.current) {
               return;
@@ -3401,7 +3408,25 @@ function App() {
         >
           {snapshot ? (
             <ContentTransition type="page">
-            {activeNav === "Inbox" ? (
+            {artistPageName ? (
+              <Suspense fallback={<section className="inbox-load" role="status">Opening artist…</section>}>
+                <ArtistPage key={artistPageName} artist={artistPageName} onBack={closeArtistPage} onOpenArtist={openArtistAlbums}
+                  onOpenAlbum={(album) => {
+                    transitionContent(() => {
+                      pendingExplorerAlbumIdRef.current = album.id;
+                      setSelectedAlbumId(album.id);
+                      setInspectorView("album");
+                      setTagSelectionKind("album");
+                      setArtistPageName(null);
+                      setActiveNav("Albums");
+                      setExplorerView("albums");
+                      setExplorerFilters({ ...defaultExplorerFilters, artist: album.artist, sort: "yearDesc" });
+                      setExplorerReloadToken((value) => value + 1);
+                    }, "page");
+                  }}
+                  onPlay={playChartQueue} onSettings={() => openSettings("metadata")} />
+              </Suspense>
+            ) : activeNav === "Inbox" ? (
               <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
                 <Inbox
                   onOpenMetadataSettings={() => openSettings("metadata")}
@@ -3627,7 +3652,7 @@ function App() {
                   onSelectTrack={selectTrack}
                   onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                   onSelectAlbum={selectAlbum}
-                  onSelectArtist={(artist) => { if (artist) focusArtist(artist, "albums"); else setSelectedArtistId(null); }}
+                  onSelectArtist={(artist) => { if (artist) openArtistAlbums(artist.name); else setSelectedArtistId(null); }}
                   onOpenArtistAlbums={openArtistAlbums}
                   onLoadMore={() => void loadMoreExplorerResults()}
                   onRetry={() => {
@@ -3666,7 +3691,7 @@ function App() {
         </div>
       </main>
 
-      {activeNav !== "Inbox" && layoutPreferences.rightSidebar === "expanded" && <aside
+      {!artistPageName && activeNav !== "Inbox" && layoutPreferences.rightSidebar === "expanded" && <aside
         className="inspector"
         data-text-size={activeDisplayPreferences.textSize}
         data-cover-size={activeDisplayPreferences.coverSize}

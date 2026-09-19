@@ -40,6 +40,7 @@ import {
 import { loadInboxSettings, updateDiscogsCredentials, updateLastFmCredentials, type InboxSettingsStatus } from "../inbox";
 
 import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
+import { FanartSettingsPanel } from "./FanartSettingsPanel";
 
 export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata" | "connections";
 
@@ -328,7 +329,7 @@ function MetadataSettingsPanel({
       </section>
       <section className="display-settings__section" aria-labelledby="last-fm-settings-heading">
         <header>
-          <span><UserRound aria-hidden="true" /><span><strong id="last-fm-settings-heading">Last.fm</strong><small>Provides artist portraits now and supports future Last.fm metadata features.</small></span></span>
+          <span><UserRound aria-hidden="true" /><span><strong id="last-fm-settings-heading">Last.fm</strong><small>Artist biographies, similar artists, popular tracks, and portraits.</small></span></span>
           <span className={`metadata-connection${status?.lastFmConfigured ? " is-connected" : ""}`}>{status ? status.lastFmConfigured ? <><ShieldCheck aria-hidden="true" /> {status.lastFmSecretConfigured ? "Connected" : "Images ready · secret needed"}</> : "Not connected" : "Checking…"}</span>
         </header>
         <div className="metadata-consumer-fields">
@@ -344,6 +345,7 @@ function MetadataSettingsPanel({
         <p className="metadata-vault-note">Artist lookups use only the API key. Aurora stores both values in your operating system credential vault so signed Last.fm features can be added without another setup step.</p>
         {status?.lastFmConfigured ? <label className="metadata-remove"><input type="checkbox" checked={removeLastFmCredentials} onChange={(event) => onRemoveLastFmCredentialsChange(event.target.checked)} /> Remove the saved Last.fm credentials</label> : null}
       </section>
+      <FanartSettingsPanel />
       <div className="metadata-settings__note"><ShieldCheck aria-hidden="true" /><span><strong>MusicBrainz needs no key.</strong><small>Aurora identifies itself and observes MusicBrainz's one-request-per-second limit.</small></span></div>
     </div>
   );

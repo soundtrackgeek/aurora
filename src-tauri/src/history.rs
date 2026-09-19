@@ -15,6 +15,24 @@ use std::{
 };
 
 const HISTORY_SCHEMA_VERSION: i64 = 1;
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArtistListening {
+    plays: i64,
+    listened_seconds: f64,
+    months: BTreeMap<String, i64>,
+    top_tracks: Vec<ArtistListeningTrack>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistListeningTrack {
+    track_key: String,
+    title: String,
+    album: String,
+    plays: i64,
+}
 const DEFAULT_PLAY_THRESHOLD_SECONDS: u32 = 30;
 const HISTORY_CHECKPOINT_SECONDS: f64 = 30.0;
 const MIN_PLAY_THRESHOLD_SECONDS: u32 = 1;
@@ -1414,6 +1432,64 @@ impl HistoryStore {
         Ok(insights)
     }
 
+    /// Aggregate the same device sources as listening history, without a library-wide scan.
+    pub(crate) fn artist_listening(&self, artist: &str) -> Result<ArtistListening, String> {
+        let artist = crate::artist_discovery::validate_artist(artist)?;
+        let mut result = ArtistListening::default();
+        let mut tracks: HashMap<String, ArtistListeningTrack> = HashMap::new();
+        let now = state_sync::now_ms();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection.prepare(
+                "SELECT track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch'), COUNT(*), SUM(listened_seconds) FROM listening_sessions WHERE registered_play = 1 AND TRIM(artist) = TRIM(?1) COLLATE NOCASE AND started_at_ms >= CAST(strftime('%s', ?2 / 1000, 'unixepoch', 'start of month', '-11 months') AS INTEGER) * 1000 AND started_at_ms <= ?2 GROUP BY track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch')"
+            ).map_err(|e| e.to_string())?;
+            let rows = statement
+                .query_map(params![artist, now], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, f64>(5)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                let (key, title, album, month, plays, seconds) = row.map_err(|e| e.to_string())?;
+                result.plays += plays;
+                result.listened_seconds += seconds;
+                *result.months.entry(month).or_default() += plays;
+                tracks
+                    .entry(key.clone())
+                    .or_insert(ArtistListeningTrack {
+                        track_key: key,
+                        title,
+                        album,
+                        plays: 0,
+                    })
+                    .plays += plays;
+            }
+        }
+        result.top_tracks = tracks.into_values().collect();
+        result.top_tracks.sort_by(|a, b| {
+            b.plays
+                .cmp(&a.plays)
+                .then(a.title.cmp(&b.title))
+                .then(a.track_key.cmp(&b.track_key))
+        });
+        result.top_tracks.truncate(5);
+        Ok(result)
+    }
+
     pub(crate) fn played_track_keys_for_genre(
         &self,
         genre: &str,
@@ -2565,6 +2641,21 @@ mod tests {
         let artist = insights.get("artist").expect("normalized artist");
         assert_eq!(artist.plays, 2);
         assert!(artist.last_played_at_ms.is_some());
+        let listening = store
+            .artist_listening("  ARTIST  ")
+            .expect("artist page history");
+        assert_eq!(listening.plays, 2);
+        assert_eq!(listening.listened_seconds, 2.0);
+        assert_eq!(listening.months.values().sum::<i64>(), 2);
+        assert_eq!(listening.top_tracks.len(), 1);
+        assert_eq!(listening.top_tracks[0].plays, 2);
+        assert_eq!(store.artist_listening("Someone else").unwrap().plays, 0);
+        store
+            .open()
+            .unwrap()
+            .execute("UPDATE listening_sessions SET started_at_ms = 1", [])
+            .unwrap();
+        assert_eq!(store.artist_listening("Artist").unwrap().plays, 0);
         let _ = fs::remove_dir_all(root);
     }
 

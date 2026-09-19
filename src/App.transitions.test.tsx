@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as library from "./library";
@@ -39,4 +39,20 @@ it("reveals artist intelligence without waiting for the catalog summary", async 
   expect(screen.queryByLabelText("Local catalog summary")).not.toBeInTheDocument();
   finishCatalog(detail);
   expect(await screen.findByLabelText("Local catalog summary")).toHaveTextContent("94");
+});
+
+it("opens an album artist page and returns to the same Albums results", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Albums" }));
+  const cover = await screen.findByRole("button", { name: /^Viva la Vida cover/ });
+  fireEvent.click(cover);
+  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+  fireEvent.click(within(details).getByRole("button", { name: "Open artist page for Coldplay" }));
+  expect(await screen.findByRole("article", { name: "Coldplay artist page" }, { timeout: 5000 })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "Back to library" }));
+  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeInTheDocument();
+  fireEvent.click(within(screen.getByRole("complementary", { name: "Viva la Vida album details" })).getByRole("button", { name: "Open artist page for Coldplay" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open Viva la Vida" }));
+  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeInTheDocument();
 });

@@ -14,7 +14,7 @@ describe("ArtistSmartLink", () => {
     const onParent = vi.fn();
     render(<div onClick={onParent}><ArtistSmartLink artist="M83" onOpen={onOpen} /></div>);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show albums by M83" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open artist page for M83" }));
     expect(onOpen).toHaveBeenCalledWith("M83");
     expect(onParent).not.toHaveBeenCalled();
   });

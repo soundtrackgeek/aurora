@@ -91,8 +91,8 @@ describe("PlayerBar", () => {
     };
     render(<PlayerBar {...props()} playback={snapshot(60, soundtrackTrack)} />);
 
-    expect(screen.getByRole("button", { name: "Show albums by Coldplay" }).parentElement).toHaveTextContent("Coldplay · Unbroken");
-    expect(screen.queryByRole("button", { name: "Show albums by Alexandre Desplat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open artist page for Coldplay" }).parentElement).toHaveTextContent("Coldplay · Unbroken");
+    expect(screen.queryByRole("button", { name: "Open artist page for Alexandre Desplat" })).not.toBeInTheDocument();
   });
 
   it("toggles total time to a live remaining-time readout", () => {

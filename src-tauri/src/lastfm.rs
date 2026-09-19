@@ -407,7 +407,7 @@ fn saved_credential(user: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn api_key() -> Option<String> {
+pub(crate) fn api_key() -> Option<String> {
     saved_credential(API_KEY_USER).or_else(|| {
         cfg!(debug_assertions)
             .then(|| std::env::var("LAST_FM").ok())
@@ -480,7 +480,7 @@ pub(crate) fn save_credentials(request: LastFmCredentialsRequest) -> Result<(), 
     Ok(())
 }
 
-fn client() -> Result<&'static Client, String> {
+pub(crate) fn client() -> Result<&'static Client, String> {
     CLIENT
         .get_or_init(|| {
             Client::builder()

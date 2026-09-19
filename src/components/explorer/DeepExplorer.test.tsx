@@ -614,7 +614,7 @@ describe("DeepExplorer", () => {
 
     const detailAside = screen.getByRole("complementary", { name: `${multiAlbums[0].title} album details` });
     expect(within(detailAside).getByRole("heading", { level: 3, name: multiAlbums[0].title })).toBeInTheDocument();
-    expect(within(detailAside).getByRole("button", { name: `Show albums by ${multiAlbums[0].artist}` })).toBeInTheDocument();
+    expect(within(detailAside).getByRole("button", { name: `Open artist page for ${multiAlbums[0].artist}` })).toBeInTheDocument();
     expect(within(detailAside).getByText(tracks[0].title)).toBeInTheDocument();
 
     const trackRow = within(detailAside).getByRole("row", { name: new RegExp(tracks[0].title) });

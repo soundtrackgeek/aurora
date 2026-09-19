@@ -111,7 +111,7 @@ describe("ListeningHistory", () => {
 
   it("opens an artist's albums from the listening timeline", () => {
     const { onOpenArtistAlbums } = renderHistory();
-    const artistLinks = screen.getAllByRole("link", { name: `Show albums by ${track.artist}` });
+    const artistLinks = screen.getAllByRole("link", { name: `Open artist page for ${track.artist}` });
     fireEvent.click(artistLinks[artistLinks.length - 1]);
     expect(onOpenArtistAlbums).toHaveBeenCalledWith(track.artist);
   });
