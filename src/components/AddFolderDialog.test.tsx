@@ -102,6 +102,7 @@ function createAdapter(overrides: Partial<LibraryIntakeAdapter> = {}): LibraryIn
     capabilities: vi.fn().mockResolvedValue(capabilities),
     selectFolder: vi.fn().mockResolvedValue("C:\\Intake"),
     preview: vi.fn().mockResolvedValue(preview),
+    previewSelection: vi.fn().mockRejectedValue(new Error("not used")),
     previewMoveToInbox: vi.fn().mockRejectedValue(new Error("not used")),
     apply: vi.fn().mockResolvedValue(applyResult),
     ...overrides,

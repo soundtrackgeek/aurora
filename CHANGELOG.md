@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.1] - 2026-09-19
+
+### Fixed
+
+- Aurora 0.26.1 imports an Inbox selection or multiple monitored folders as one reviewed batch, including albums assigned to different music roots. Music Library creates one database recovery backup and applies the complete catalog change in one transaction. Individual destinations, replacement confirmation, verified file copies, source retention on failure, and safe stale-preview retries are preserved. This requires Music Library 0.150.1 or newer; older helpers display an update message.
+
 ## [0.26.0] - 2026-09-19
 
 ### Added

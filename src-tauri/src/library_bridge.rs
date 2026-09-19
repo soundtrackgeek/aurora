@@ -46,6 +46,7 @@ pub enum LibraryCategoryId {
     Scores,
     Synthwave,
     Inbox,
+    Mixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,8 @@ pub struct LibraryCategoryCapability {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryBridgeSupports {
+    #[serde(default)]
+    pub selected_album_batch: bool,
     pub single_album: bool,
     pub batch_folders: bool,
     pub cross_volume_copy: bool,
@@ -99,6 +102,20 @@ pub struct LibraryBridgeCapabilities {
 pub struct LibraryIntakePreviewRequest {
     pub source_path: String,
     pub category: LibraryCategoryId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryIntakeSelectionTarget {
+    pub source_path: String,
+    pub category: LibraryCategoryId,
+    #[serde(default)]
+    pub album_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryIntakeSelectionRequest {
+    pub targets: Vec<LibraryIntakeSelectionTarget>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -428,6 +445,43 @@ pub async fn preview_library_intake_batch(
     })
     .await
     .map_err(|error| format!("The album preview worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+pub async fn preview_library_intake_selection(
+    app: AppHandle,
+    mut request: LibraryIntakeSelectionRequest,
+) -> Result<LibraryIntakePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| {
+            if request.targets.is_empty() || request.targets.len() > 1000 {
+                return Err("Choose between 1 and 1000 album or parent folders.".to_owned());
+            }
+            let capabilities = invoke_bridge::<_, LibraryBridgeCapabilities>(
+                &app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT,
+            )?;
+            if !capabilities.supports.selected_album_batch {
+                return Err(update_music_library_message(
+                    "This batch requires Music Library 0.150.1 or newer for one backup and one catalog update.".to_owned(),
+                ));
+            }
+            let category = request.targets[0].category;
+            let mixed = request.targets.iter().any(|target| target.category != category);
+            for target in &mut request.targets {
+                if matches!(target.category, LibraryCategoryId::Inbox | LibraryCategoryId::Mixed) {
+                    return Err("Choose a library destination for every selected folder.".to_owned());
+                }
+                target.source_path = validate_source_path(&target.source_path)?;
+                cleanup_abandoned_inbox_temporary_files(Path::new(&target.source_path), current_time_ms())?;
+            }
+            let result = invoke_bridge::<_, LibraryIntakePreview>(
+                &app, "previewSelection", request, PREVIEW_TIMEOUT,
+            )?;
+            validate_preview(&result, if mixed { LibraryCategoryId::Mixed } else { category })?;
+            Ok(result)
+        })
+    }).await.map_err(|error| format!("The album preview worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1588,6 +1642,7 @@ mod tests {
             bridge_version: PROTOCOL_VERSION,
             categories: Vec::new(),
             supports: LibraryBridgeSupports {
+                selected_album_batch: true,
                 single_album: true,
                 batch_folders: true,
                 cross_volume_copy: true,

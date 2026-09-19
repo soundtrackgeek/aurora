@@ -31,7 +31,6 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
-  const [activeTargetIndex, setActiveTargetIndex] = useState(0);
   const { progress, reset: resetProgress } = useLibraryIntakeProgress();
 
   const albumCount = useMemo(() => targets.reduce((total, target) => total + target.albumCount, 0), [targets]);
@@ -49,18 +48,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     setError(null);
     resetProgress();
     try {
-      const next: LibraryIntakePreview[] = [];
-      for (const [index, target] of targets.entries()) {
-        setActiveTargetIndex(index);
-        const preview = await libraryIntakeAdapter.preview({
-          sourcePath: target.sourcePath,
-          category: destinations[target.sourcePath] as LibraryIntakeCategoryId,
-        });
-        if (target.albumOnly && (preview.albumCount !== 1 || preview.albums.length !== 1 || intakePathKey(preview.albums[0].sourcePath) !== intakePathKey(target.sourcePath))) {
-          throw new Error(`${target.label} did not preview as only the selected album. Check for nested album folders, rescan Inbox, and select the albums again.`);
-        }
-        next.push(preview);
-      }
+      const next = await previewIntakeTargets(targets, destinations);
       setPreviews(next);
       setReplacementConfirmed(false);
     } catch (nextError) {
@@ -76,28 +64,17 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     setBusy("apply");
     setError(null);
     resetProgress();
-    let completedAlbums = 0;
     try {
-      for (const [index, reviewedPreview] of previews.entries()) {
-        setActiveTargetIndex(index);
-        const target = targets[index];
-        const result = await applyReviewedTarget(
-          target,
-          destinations[target.sourcePath] as LibraryIntakeCategoryId,
-          reviewedPreview,
-        );
-        completedAlbums += result.albumCount;
-      }
+      const result = await applyReviewedTargets(targets, destinations, previews);
+      const completedAlbums = result.albumCount;
       await onApplied();
-      onCompleted(`${completedAlbums} ${completedAlbums === 1 ? "album" : "albums"} moved, covers archived, and library catalog updated.`);
+      const summary = `${completedAlbums} ${completedAlbums === 1 ? "album" : "albums"} moved, covers archived, and library catalog updated.`;
+      onCompleted(result.cleanupWarnings.length ? `${summary} ${result.cleanupWarnings.join(" ")}` : summary);
       onClose();
     } catch (nextError) {
-      if (completedAlbums > 0) {
-        try { await onApplied(); } catch { /* The intake error remains the actionable result. */ }
-      }
       setPreviews(null);
       const detail = nextError instanceof Error ? nextError.message : String(nextError);
-      setError(completedAlbums > 0 ? `${completedAlbums} albums were added before the remaining intake stopped. ${detail}` : detail);
+      setError(detail);
     } finally {
       setBusy(null);
     }
@@ -142,7 +119,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
         {busy ? <LibraryIntakeActivity
           mode={busy}
           progress={progress}
-          targetLabel={targets.length > 1 ? `${activeTargetIndex + 1} of ${targets.length} · ${targets[activeTargetIndex]?.label ?? "Folder"}` : targets[0]?.label}
+          targetLabel={targets.length > 1 ? `${albumCount} albums` : targets[0]?.label}
         /> : null}
         {error ? <p className="inbox-intake-dialog__error" role="alert"><AlertTriangle />{error}</p> : null}
         {replacements.length ? <section className="inbox-intake-dialog__replacements" role="alert">
@@ -173,15 +150,57 @@ function intakePathKey(path: string): string {
   return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//") ? normalized.toLowerCase() : normalized;
 }
 
-async function applyReviewedTarget(
-  target: InboxLibraryIntakeTarget,
-  category: LibraryIntakeCategoryId,
-  reviewedPreview: LibraryIntakePreview,
+async function previewIntakeTargets(
+  targets: InboxLibraryIntakeTarget[],
+  destinations: Record<string, LibraryIntakeCategoryId | "">,
+): Promise<LibraryIntakePreview[]> {
+  if (targets.length === 1) {
+    const target = targets[0];
+    const preview = await libraryIntakeAdapter.preview({ sourcePath: target.sourcePath, category: destinations[target.sourcePath] as LibraryIntakeCategoryId });
+    validateTargetPreview(target, preview);
+    return [preview];
+  }
+  const batch = await libraryIntakeAdapter.previewSelection({
+    targets: targets.map((target) => ({ sourcePath: target.sourcePath, category: destinations[target.sourcePath] as LibraryIntakeCategoryId, albumOnly: Boolean(target.albumOnly) })),
+  });
+  const previews = targets.map((target) => {
+    const sourceKey = intakePathKey(target.sourcePath);
+    const albums = batch.albums.filter((album) => {
+      const key = intakePathKey(album.sourcePath);
+      return key === sourceKey || (!target.albumOnly && key.startsWith(`${sourceKey}/`));
+    });
+    const preview = {
+      ...batch, sourcePath: target.sourcePath,
+      category: { id: destinations[target.sourcePath] as LibraryIntakeCategoryId, label: target.label, destinationRoot: albums[0]?.destinationPath.replace(/[\\/][^\\/]+$/, "") ?? "" },
+      albums, albumCount: albums.length, trackCount: albums.reduce((sum, album) => sum + album.trackCount, 0),
+    };
+    validateTargetPreview(target, preview);
+    return preview;
+  });
+  if (batch.albumCount !== batch.albums.length
+    || previews.reduce((sum, preview) => sum + preview.albumCount, 0) !== batch.albumCount
+    || new Set(batch.albums.map((album) => intakePathKey(album.sourcePath))).size !== batch.albumCount) {
+    throw new Error("The batch preview did not match the selected folders. Rescan Inbox and preview destinations again.");
+  }
+  return previews;
+}
+
+function validateTargetPreview(target: InboxLibraryIntakeTarget, preview: LibraryIntakePreview) {
+  if (target.albumOnly && (preview.albumCount !== 1 || preview.albums.length !== 1 || intakePathKey(preview.albums[0].sourcePath) !== intakePathKey(target.sourcePath))) {
+    throw new Error(`${target.label} did not preview as only the selected album. Check for nested album folders, rescan Inbox, and select the albums again.`);
+  }
+  if (preview.albumCount < 1) throw new Error(`${target.label} no longer contains an album to import. Rescan Inbox and preview destinations again.`);
+}
+
+async function applyReviewedTargets(
+  targets: InboxLibraryIntakeTarget[],
+  destinations: Record<string, LibraryIntakeCategoryId | "">,
+  reviewed: LibraryIntakePreview[],
 ) {
-  let applicablePreview = reviewedPreview;
+  let applicable = reviewed;
   for (let stalePlanRetries = 0; ; stalePlanRetries += 1) {
     try {
-      return await libraryIntakeAdapter.apply({ planId: applicablePreview.planId, sessionId: applicablePreview.sessionId });
+      return await libraryIntakeAdapter.apply({ planId: applicable[0].planId, sessionId: applicable[0].sessionId });
     } catch (error) {
       if (!isStalePlanError(error)) throw error;
       if (stalePlanRetries >= MAX_STALE_PLAN_RETRIES) {
@@ -189,16 +208,14 @@ async function applyReviewedTarget(
         (retryError as Error & { cause: unknown }).cause = error;
         throw retryError;
       }
-      const freshPreview = await libraryIntakeAdapter.preview({
-        sourcePath: target.sourcePath,
-        category,
-      });
-      if (!sameReviewedIntake(reviewedPreview, freshPreview)) {
-        const changedError = new Error(`${target.label} changed after review. Preview destinations again before adding it to the library.`);
+      const fresh = await previewIntakeTargets(targets, destinations);
+      const changed = reviewed.findIndex((preview, index) => !sameReviewedIntake(preview, fresh[index]));
+      if (changed >= 0) {
+        const changedError = new Error(`${targets[changed].label} changed after review. Preview destinations again before adding it to the library.`);
         (changedError as Error & { cause: unknown }).cause = error;
         throw changedError;
       }
-      applicablePreview = freshPreview;
+      applicable = fresh;
     }
   }
 }

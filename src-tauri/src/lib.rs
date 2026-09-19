@@ -66,7 +66,7 @@ use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use lastfm::{AlbumPopularity, LastFmCredentialsRequest};
 use library_bridge::{
     apply_library_intake_batch, library_bridge_capabilities, preview_library_intake_batch,
-    preview_library_move_to_inbox, select_library_intake_folder,
+    preview_library_intake_selection, preview_library_move_to_inbox, select_library_intake_folder,
 };
 use library_sync::{CatalogSync, LibrarySyncCoordinator};
 use musicbrainz::{ArtistIntelligence, ArtistReviewPage, ArtistReviewPageRequest};
@@ -1769,6 +1769,7 @@ pub fn run() {
             library_bridge_capabilities,
             select_library_intake_folder,
             preview_library_intake_batch,
+            preview_library_intake_selection,
             preview_library_move_to_inbox,
             library_bridge::preview_library_remove_album,
             apply_library_intake_batch,

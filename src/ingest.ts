@@ -53,7 +53,7 @@ export interface LibraryIntakePreview {
   sessionId: number;
   sourcePath: string;
   category: Omit<LibraryIntakeCategory, "available"> | {
-    id: "inbox";
+    id: "inbox" | "mixed";
     label: string;
     destinationRoot: string;
   };
@@ -107,6 +107,10 @@ export interface LibraryIntakePreviewRequest {
   category: LibraryIntakeCategoryId;
 }
 
+export interface LibraryIntakeSelectionRequest {
+  targets: (LibraryIntakePreviewRequest & { albumOnly: boolean })[];
+}
+
 export interface LibraryIntakeApplyRequest {
   planId: string;
   sessionId: number;
@@ -121,6 +125,7 @@ export interface LibraryIntakeAdapter {
   capabilities: () => Promise<LibraryBridgeCapabilities>;
   selectFolder: () => Promise<string | null>;
   preview: (request: LibraryIntakePreviewRequest) => Promise<LibraryIntakePreview>;
+  previewSelection: (request: LibraryIntakeSelectionRequest) => Promise<LibraryIntakePreview>;
   previewMoveToInbox: (request: LibraryMoveToInboxPreviewRequest) => Promise<LibraryIntakePreview>;
   apply: (request: LibraryIntakeApplyRequest) => Promise<LibraryIntakeApplyResult>;
 }
@@ -184,6 +189,13 @@ export async function previewLibraryIntakeBatch(
   return invoke<LibraryIntakePreview>("preview_library_intake_batch", { request });
 }
 
+export async function previewLibraryIntakeSelection(
+  request: LibraryIntakeSelectionRequest,
+): Promise<LibraryIntakePreview> {
+  if (!isTauriRuntime()) throw new Error("Adding music is available in the native Aurora app.");
+  return invoke<LibraryIntakePreview>("preview_library_intake_selection", { request });
+}
+
 export async function applyLibraryIntakeBatch(
   request: LibraryIntakeApplyRequest,
 ): Promise<LibraryIntakeApplyResult> {
@@ -215,6 +227,7 @@ export const libraryIntakeAdapter: LibraryIntakeAdapter = {
   capabilities: loadLibraryBridgeCapabilities,
   selectFolder: selectLibraryIntakeFolder,
   preview: previewLibraryIntakeBatch,
+  previewSelection: previewLibraryIntakeSelection,
   previewMoveToInbox: previewLibraryMoveToInbox,
   apply: applyLibraryIntakeBatch,
 };
