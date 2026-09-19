@@ -1,9 +1,9 @@
 .inbox-page { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; height: 100%; min-height: 0; padding: 16px 18px 18px; }
-.inbox-page__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.inbox-page__header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 .inbox-page__header h1 { margin: 0; font-size: max(var(--aurora-font-min), calc(20px + var(--aurora-font-offset))); font-weight: 500; }
 .inbox-page__header p { margin: 3px 0 0; color: var(--muted); font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
-.inbox-page__header > div:last-child { display: flex; gap: 7px; }
-.inbox-page__header button { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: rgba(12,20,30,.84); color: #dce3ed; cursor: pointer; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
+.inbox-page__header > div:last-child { display: flex; flex-wrap: wrap; gap: 7px; }
+.inbox-page__header button { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: rgba(12,20,30,.84); color: #dce3ed; cursor: pointer; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); white-space: nowrap; }
 .inbox-page__header button:hover:not(:disabled) { border-color: var(--border-bright); background: rgba(21,31,44,.9); }
 .inbox-page__header kbd { margin-left: 3px; padding: 2px 5px; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; background: rgba(0,0,0,.2); color: #d4b8ef; font-size: .88em; }
 .inbox-page__header svg { width: 14px; height: 14px; }

@@ -357,6 +357,17 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     if (targets.length) setIntakeScope({ label: "all folders", targets });
   }
 
+  function openSelectedAlbumsIntake() {
+    const targets = selectedAlbums.map((album): InboxLibraryIntakeTarget => ({
+      sourcePath: album.path,
+      label: `${album.artist ?? "Unknown artist"} — ${album.album ?? album.folderName}`,
+      albumCount: 1,
+      unreadyAlbumCount: album.readiness.ready ? 0 : 1,
+      albumOnly: true,
+    }));
+    if (targets.length) setIntakeScope({ label: targets.length === 1 ? "selected album" : "selected albums", targets });
+  }
+
   async function previewMove() {
     if (!selectedAlbum || !moveCategory) return;
     setMoveBusy(true);
@@ -401,6 +412,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         <div><h1>Inbox</h1><p>Review and tag new music before adding it to your library.</p></div>
         <div>
           <button type="button" onClick={() => void refresh()} disabled={loadState === "loading"}><RefreshCw className={loadState === "loading" ? "is-spinning" : ""} /> Rescan</button>
+          <button type="button" disabled={!selectedAlbums.length || renameBusy || convertBusy || coverBusy || moveBusy} title="Move only selected albums to the library. Ctrl-click to toggle albums; Shift-click to select a range." onClick={openSelectedAlbumsIntake}><FolderInput /> Move selected{selectedAlbums.length ? ` (${selectedAlbums.length})` : ""}</button>
           <button type="button" disabled={!selectedAlbums.length || selectedAlbumsHaveLossless || renameBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename{selectedAlbums.length > 1 ? ` ${selectedAlbums.length} albums` : ""} <kbd>Ctrl R</kbd></button>
           <button type="button" className="button button--primary" disabled={!selectedAlbum || selectedAlbumHasLossless || !selectedTracks.length || renameBusy} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag {selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl Shift T</kbd></button>
         </div>

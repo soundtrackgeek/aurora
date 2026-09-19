@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.27] - 2026-09-19
+
+### Added
+
+- Add an Inbox **Move selected (N)** toolbar action for single albums, Ctrl-click selections, and Shift-click ranges, including selections across monitored folders.
+- Preview and confirm destinations for only the selected album folders using the existing Music Library mover, cover archive, replacement review, and guarded stale-plan retry workflow. Unselected albums remain staged and do not block selection readiness.
+- Reject selected-album previews that include extra or different albums, and wrap Inbox toolbar actions to keep their labels readable in narrower windows.
+
 ## [0.25.26] - 2026-09-19
 
 ### Changed

@@ -499,6 +499,94 @@ describe("Inbox", () => {
     expect(screen.getByText("Uses the same reviewed, preview-first flow as Add Music.")).toBeInTheDocument();
   });
 
+  it.each(["same folder", "different folders", "extended Windows paths"])("moves only the selected albums using %s", async (scope) => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const albums = ["Freak", "Unselected album", "Neon Nights"].map((album, index) => {
+      const root = scope === "different folders" && index === 2 ? "D:\\Bandcamp" : "C:\\Music\\Inbox";
+      const prefix = scope === "extended Windows paths" ? "\\\\?\\" : "";
+      const path = `${prefix}${root}\\${album}`;
+      return {
+        ...first, id: `move-${index}`, album, folderName: album, path,
+        readiness: { ready: index !== 1, issues: index === 1 ? ["Missing genre"] : [] },
+        tracks: first.tracks.map((track) => ({ ...track, album, path: track.path.replace(first.path, path) })),
+      };
+    });
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview").mockImplementation(async ({ sourcePath, category }) => {
+      const index = albums.findIndex((album) => album.path === sourcePath);
+      const displayPath = sourcePath.startsWith("\\\\?\\") ? sourcePath.slice(4).toLowerCase() : sourcePath;
+      return {
+        ...libraryPreview(`selected-plan-${index}`, 80 + index, sourcePath, category, 1),
+        albums: [{ sourcePath: displayPath, destinationPath: `D:\\Music\\${albums[index].album}`, artist: first.artist!, album: albums[index].album, year: "1990", trackCount: 10, action: "add", existingTrackCount: 0, matchedTrackCount: 0, existingRatedTrackCount: 0, existingLovedTrackCount: 0 }],
+      };
+    });
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockImplementation(async ({ planId, sessionId }) => ({
+      planId, sessionId, status: "completed", albumCount: 1, trackCount: 10, movedAlbumCount: 1,
+      importRunId: sessionId, backupPath: null, cleanupWarnings: [], albums: [],
+    }));
+    const catalogChanged = vi.fn();
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={catalogChanged} />);
+
+    await screen.findByRole("row", { name: /Freak by/ });
+    fireEvent.click(screen.getByRole("row", { name: /Neon Nights by/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("row", { name: /Unselected album by/ }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Move selected (2)" }));
+    expect(screen.getByRole("dialog", { name: "Add selected albums to library" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Library destination for .*Unselected album/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("1 album is not ready.")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: `Library destination for ${first.artist} — Freak` }), { target: { value: "general" } });
+    fireEvent.change(screen.getByRole("combobox", { name: `Library destination for ${first.artist} — Neon Nights` }), { target: { value: "synthwave" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+
+    const add = await screen.findByRole("button", { name: "Add 2 albums" });
+    expect(preview.mock.calls.map(([request]) => request)).toEqual([
+      { sourcePath: albums[0].path, category: "general" },
+      { sourcePath: albums[2].path, category: "synthwave" },
+    ]);
+    load.mockResolvedValue({ ...snapshot, albums: [albums[1]] });
+    fireEvent.click(add);
+    expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(apply.mock.calls.map(([request]) => request)).toEqual([
+      { planId: "selected-plan-0", sessionId: 80 },
+      { planId: "selected-plan-2", sessionId: 82 },
+    ]);
+    expect(catalogChanged).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("row", { name: /Unselected album by/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Freak by/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Neon Nights by/ })).not.toBeInTheDocument();
+  });
+
+  it("disables moving an empty selection and blocks a selected album that is not ready", async () => {
+    const preview = vi.spyOn(libraryIntakeAdapter, "preview");
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    const row = await screen.findByRole("row", { name: /Freak by/ });
+    fireEvent.click(row, { ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Move selected" })).toBeDisabled();
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole("button", { name: "Move selected (1)" }));
+    expect(screen.getByRole("dialog", { name: "Add selected album to library" })).toBeInTheDocument();
+    expect(screen.getByText("1 album is not ready.")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Library destination for Baltimoore — Freak" }), { target: { value: "general" } });
+    expect(screen.getByRole("button", { name: "Preview destinations" })).toBeDisabled();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("rejects a selected-album preview that also includes a nested album", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const album = { ...snapshot.albums[0], readiness: { ready: true, issues: [] } };
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [album] });
+    vi.spyOn(libraryIntakeAdapter, "preview").mockResolvedValue(libraryPreview("nested-plan", 90, album.path, "general", 2));
+    const apply = vi.spyOn(libraryIntakeAdapter, "apply");
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Move selected (1)" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Library destination for Baltimoore — Freak" }), { target: { value: "general" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+    expect(await screen.findByText(/did not preview as only the selected album/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add 1 album" })).not.toBeInTheDocument();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("adds a monitored folder through the reviewed library, cover, and catalog workflow", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({

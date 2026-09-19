@@ -14,6 +14,7 @@ export interface InboxLibraryIntakeTarget {
   label: string;
   albumCount: number;
   unreadyAlbumCount: number;
+  albumOnly?: boolean;
 }
 
 interface InboxLibraryIntakeDialogProps {
@@ -48,10 +49,14 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       const next: LibraryIntakePreview[] = [];
       for (const [index, target] of targets.entries()) {
         setActiveTargetIndex(index);
-        next.push(await libraryIntakeAdapter.preview({
+        const preview = await libraryIntakeAdapter.preview({
           sourcePath: target.sourcePath,
           category: destinations[target.sourcePath] as LibraryIntakeCategoryId,
-        }));
+        });
+        if (target.albumOnly && (preview.albumCount !== 1 || preview.albums.length !== 1 || intakePathKey(preview.albums[0].sourcePath) !== intakePathKey(target.sourcePath))) {
+          throw new Error(`${target.label} did not preview as only the selected album. Check for nested album folders, rescan Inbox, and select the albums again.`);
+        }
+        next.push(preview);
       }
       setPreviews(next);
       setReplacementConfirmed(false);
@@ -145,6 +150,12 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
 }
 
 const MAX_STALE_PLAN_RETRIES = 2;
+
+function intakePathKey(path: string): string {
+  // Inbox uses canonical Windows paths; Music Library returns display paths.
+  const normalized = path.replace(/\\/g, "/").replace(/^\/\/\?\/UNC\//i, "//").replace(/^\/\/\?\//, "").replace(/\/+$/, "");
+  return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//") ? normalized.toLowerCase() : normalized;
+}
 
 async function applyReviewedTarget(
   target: InboxLibraryIntakeTarget,
