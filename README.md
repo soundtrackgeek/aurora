@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.3 remembers page views while you move around the app: Charts source and period, History tab and report period, timeline modes, library filters, loaded results, selections, expanded albums, and scroll position. A small **Back to…** button above every page retraces your navigation, including Artist pages and album drilldowns. Hidden pages pause their effects; explicit refreshes and catalog changes still update results. Navigation history and retained page controls last for the current app session; existing restart restoration remains available for the library workspace.
+
 Aurora 0.26.2 fixes artist pages opened with different capitalization: `MARILLION`, `Marillion`, and `marillion` find the same local albums and release timeline, including additional album pages. Matching remains by the full artist name, so similarly named artists are kept separate.
 
 Aurora 0.26.1 imports an Inbox selection or multiple monitored folders as one reviewed batch, including albums assigned to different music roots. Music Library creates one database recovery backup and applies the complete catalog change in one transaction. Individual destinations, replacement confirmation, verified file copies, source retention on failure, and safe stale-preview retries are preserved. This requires Music Library 0.150.1 or newer; older helpers display an update message.

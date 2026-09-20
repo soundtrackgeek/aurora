@@ -47,6 +47,8 @@ export async function loadWorkspacePages<Page extends { tracks: unknown[]; album
 // Explicit user scrolling takes precedence over restoration.
 export function restoreWorkspaceScroll(element: HTMLElement, target: number, ready: () => boolean, done: () => void) {
   let stopped = false;
+  let settledAt: number | null = null;
+  let previousHeight = -1;
   const finish = () => {
     if (stopped) return;
     stopped = true;
@@ -62,7 +64,19 @@ export function restoreWorkspaceScroll(element: HTMLElement, target: number, rea
   };
   const apply = () => {
     element.scrollTop = target;
-    if (ready()) finish();
+    if (!ready()) {
+      settledAt = null;
+      return;
+    }
+    // Activity/Suspense can reveal content after the parent's layout effect.
+    // Do not accept a clamped offset while the returning page is still expanding.
+    if (Math.abs(element.scrollTop - target) < 1) {
+      finish();
+      return;
+    }
+    if (previousHeight !== element.scrollHeight || settledAt === null) settledAt = Date.now();
+    previousHeight = element.scrollHeight;
+    if (Date.now() - settledAt >= 250) finish();
   };
   const timer = window.setInterval(apply, 50);
   element.addEventListener("wheel", finish, { passive: true });

@@ -1,3 +1,4 @@
+import { RememberedPage } from "../navigation/RememberedPage";
 import {
   BarChart3,
   CalendarDays,
@@ -206,11 +207,12 @@ export function ListeningHistory({
       </nav>
       <ContentTransition type="history-page">
       <div className="history-page-content">
-      {activePage === "report" ? (
+      <RememberedPage active={activePage === "report"}>
         <Suspense fallback={<section className="history-state" aria-live="polite"><RefreshCw className="is-spinning" aria-hidden="true" /><p>Opening listening report…</p></section>}>
           <ListeningReport devices={page?.devices ?? []} deviceId={deviceId} onDeviceChange={onDeviceChange} onPlayTrack={onPlayTrack} onOpenArtistAlbums={onOpenArtistAlbums} />
         </Suspense>
-      ) : (
+      </RememberedPage>
+      <RememberedPage active={activePage === "history"}>
     <section className="history-view" aria-labelledby="history-title">
       <header className="history-hero">
         <div>
@@ -274,7 +276,7 @@ export function ListeningHistory({
         {page?.nextCursor && <div className="history-load-more"><button type="button" disabled={isLoadingMore} onClick={onLoadMore}>{isLoadingMore ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Clock3 aria-hidden="true" />}{isLoadingMore ? "Loading…" : "Load earlier sessions"}</button></div>}
       </section>
     </section>
-      )}
+      </RememberedPage>
       </div>
       </ContentTransition>
     </div>

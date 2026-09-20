@@ -13,7 +13,8 @@ import "./ArtistPage.css";
 
 interface ArtistPageProps {
   artist: string;
-  onBack: () => void;
+  catalogRevision?: number;
+  onBack?: () => void;
   onOpenArtist: (artist: string) => void;
   onOpenAlbum: (album: AlbumSummary) => void;
   onPlay: (tracks: Track[]) => Promise<boolean>;
@@ -33,7 +34,7 @@ function AlbumTile({ album, onOpen }: { album: AlbumSummary; onOpen: () => void 
 
 function Loading({ children = "Loading…" }: { children?: ReactNode }) { return <p className="artist-empty" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" />{children}</p>; }
 
-export function ArtistPage({ artist, onBack, onOpenArtist, onOpenAlbum, onPlay, onSettings }: ArtistPageProps) {
+export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, onOpenAlbum, onPlay, onSettings }: ArtistPageProps) {
   const [tab, setTab] = useState<Tab>("Overview");
   const [detail, setDetail] = useState<ArtistDetail | null>(null);
   const [intelligence, setIntelligence] = useState<ArtistIntelligence | null>(null);
@@ -47,22 +48,25 @@ export function ArtistPage({ artist, onBack, onOpenArtist, onOpenAlbum, onPlay, 
   const [playMessage, setPlayMessage] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<string[]>([]);
   const alive = useRef(true);
+  const loadedResources = useRef(new Map<string, string>());
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   useEffect(() => {
     let active = true;
-    function settle<T>(key: string, promise: Promise<T>, commit: (value: T) => void) {
-      void promise.then((value) => { if (active) transitionContent(() => { commit(value); setErrors((current) => { const next = { ...current }; delete next[key]; return next; }); }, "artist-detail"); })
+    function settle<T>(key: string, load: () => Promise<T>, commit: (value: T) => void) {
+      const requestKey = JSON.stringify([artist, refresh, catalogRevision]);
+      if (loadedResources.current.get(key) === requestKey) return;
+      void load().then((value) => { if (active) transitionContent(() => { loadedResources.current.set(key, requestKey); commit(value); setErrors((current) => { const next = { ...current }; delete next[key]; return next; }); }, "artist-detail"); })
         .catch((error: unknown) => { if (active) setErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : String(error) })); });
     }
-    settle("Library", loadArtistDetail(artist), setDetail);
-    settle("MusicBrainz", loadArtistIntelligence(artist), setIntelligence);
-    settle("Last.fm", loadArtistDiscovery(artist, refresh > 0), setDiscovery);
-    settle("fanart.tv", loadArtistArtwork(artist, refresh > 0), setArtwork);
-    settle("Listening history", loadArtistListening(artist), setListening);
-    settle("Tracks", exploreTracks({ artist, pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setTracks);
+    settle("Library", () => loadArtistDetail(artist), setDetail);
+    settle("MusicBrainz", () => loadArtistIntelligence(artist), setIntelligence);
+    settle("Last.fm", () => loadArtistDiscovery(artist, refresh > 0), setDiscovery);
+    settle("fanart.tv", () => loadArtistArtwork(artist, refresh > 0), setArtwork);
+    settle("Listening history", () => loadArtistListening(artist), setListening);
+    settle("Tracks", () => exploreTracks({ artist, pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setTracks);
     return () => { active = false; };
-  }, [artist, refresh]);
+  }, [artist, refresh, catalogRevision]);
 
   function chooseTab(next: Tab) { transitionContent(() => setTab(next), "artist-detail"); }
   async function play(queue: Track[], shuffle = false) {
@@ -139,7 +143,7 @@ export function ArtistPage({ artist, onBack, onOpenArtist, onOpenAlbum, onPlay, 
     event.preventDefault();
     void openArtistLink(link.href).catch((error: unknown) => setPlayMessage(error instanceof Error ? error.message : String(error)));
   }}>
-    <div className="artist-page__toolbar"><button onClick={onBack}><ArrowLeft aria-hidden="true" /> Back to library</button><button onClick={() => { setRefresh((n) => n + 1); }} title="Refresh artist details"><RefreshCw aria-hidden="true" /> Refresh</button></div>
+    <div className="artist-page__toolbar">{onBack && <button onClick={onBack}><ArrowLeft aria-hidden="true" /> Back to library</button>}<button onClick={() => { setRefresh((n) => n + 1); }} title="Refresh artist details"><RefreshCw aria-hidden="true" /> Refresh</button></div>
     <header className="artist-hero">
       {background && <img className="artist-hero__background" src={background} alt="" onError={() => setFailedImages((current) => [...current, background])} />}
       <div className="artist-hero__identity">

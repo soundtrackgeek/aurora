@@ -8,6 +8,7 @@ import {
   type ExplorerFilters,
 } from "./DeepExplorer";
 import { resolveExplorerAlbumInspectorContext } from "./inspectorContext";
+import { RememberedPage } from "../navigation/RememberedPage";
 
 const tracks: Track[] = [
   {
@@ -113,6 +114,19 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it("retains multi-selection when a remembered page resumes its effects", () => {
+    const props = explorerProps();
+    const { rerender } = render(<RememberedPage active><DeepExplorer {...props} /></RememberedPage>);
+    fireEvent.click(screen.getByRole("row", { name: /Signal One/ }));
+    fireEvent.click(screen.getByRole("row", { name: /Second Light/ }), { shiftKey: true });
+    rerender(<RememberedPage active={false}><DeepExplorer {...props} view="albums" filters={{ ...props.filters, query: "another page" }} /></RememberedPage>);
+    rerender(<RememberedPage active><DeepExplorer {...props} /></RememberedPage>);
+    expect(screen.getByRole("row", { name: /Signal One/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("row", { name: /Second Light/ })).toHaveAttribute("aria-selected", "true");
+    rerender(<RememberedPage active><DeepExplorer {...props} filters={{ ...props.filters, query: "new search" }} /></RememberedPage>);
+    expect(screen.getByRole("row", { name: /Signal One/ })).toHaveAttribute("aria-selected", "false");
+  });
+
   it("removes closed details immediately and never retains a stale closing copy", () => {
     const props = explorerProps({ view: "albums", selectedAlbumId: "album-1", albumTracks: tracks });
     const { rerender } = render(<DeepExplorer {...props} />);

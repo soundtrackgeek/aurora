@@ -50,7 +50,7 @@ it("opens an album artist page and returns to the same Albums results", async ()
   fireEvent.click(within(details).getByRole("button", { name: "Open artist page for Coldplay" }));
   expect(await screen.findByRole("article", { name: "Coldplay artist page" }, { timeout: 5000 })).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue("");
-  fireEvent.click(screen.getByRole("button", { name: "Back to library" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Albums" }));
   expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByRole("complementary", { name: "Viva la Vida album details" })).getByRole("button", { name: "Open artist page for Coldplay" }));
   fireEvent.click(await screen.findByRole("button", { name: "Open Viva la Vida" }));

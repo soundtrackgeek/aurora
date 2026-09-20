@@ -1,3 +1,4 @@
+import { RememberedPage } from "./components/navigation/RememberedPage";
 import { ContentTransition } from "./components/ContentTransition";
 import { transitionContent } from "./contentTransition";
 import { AlbumMoveOperation, type AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
@@ -5,6 +6,7 @@ import { RemoveAlbumButton } from "./components/explorer/RemoveAlbumButton";
 import { loadWorkspaceCheckpoint, saveWorkspaceCheckpoint, restoreWorkspaceScroll, loadWorkspacePages } from "./workspaceRestoration";
 import {
   Activity,
+  ArrowLeft,
   Album,
   AudioLines,
   BadgeCheck,
@@ -506,7 +508,10 @@ function App() {
   const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [artistPageName, setArtistPageName] = useState<string | null>(null);
-  const artistPageReturnScroll = useRef<number | null>(null);
+  const [visitedArtists, setVisitedArtists] = useState<string[]>([]);
+  const [navigationRevision, setNavigationRevision] = useState(0);
+  const [navigationHistory, setNavigationHistory] = useState<ReturnType<typeof captureNavigationView>[]>([]);
+  const savedViewsRef = useRef(new Map<string, ReturnType<typeof captureNavigationView>>());
   const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
   const [artistWorldState, setArtistWorldState] = useState<ArtistWorldState>("loading");
   const [artistWorldError, setArtistWorldError] = useState<string | null>(null);
@@ -635,7 +640,7 @@ function App() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const mainScrollRef = useRef<HTMLDivElement>(null);
-  const scrollPositionByDestinationRef = useRef<Partial<Record<SidebarDestination, number>>>(initialWorkspace.scroll);
+  const scrollPositionByDestinationRef = useRef<Record<string, number>>(initialWorkspace.scroll);
   const exploreRequestRef = useRef(0);
   const loadedExplorerRequestKeyRef = useRef<string | null>(null);
   const loadedExplorerViewKeyRef = useRef<string | null>(null);
@@ -648,6 +653,8 @@ function App() {
   const artistRequestRef = useRef(0);
   const reviewRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
+  const loadedPageRequestsRef = useRef(new Map<string, string>());
+  const [universeHistoryPage, setUniverseHistoryPage] = useState<HistoryPage | null>(null);
   const genreIndexRequestRef = useRef(0);
   const genreDetailRequestRef = useRef(0);
   const genreQueueRequestRef = useRef(0);
@@ -756,11 +763,21 @@ function App() {
     });
   }, [activeNav, explorerFilters, explorerView, inspectorView, selectedAlbumId, tagSelectionKind]);
 
+  const pageKey = artistPageName ? `artist:${artistPageName}` : activeNav;
   const scrollExplorerView = explorerViewForDestination(activeNav);
-  scrollReadyRef.current = loadError !== null || (snapshot !== null && (scrollExplorerView === null
+  scrollReadyRef.current = loadError !== null || (snapshot !== null && (artistPageName !== null || scrollExplorerView === null
     || explorerLoadState === "error"
     || (explorerLoadState === "ready" && !explorerRestorationPendingRef.current && albumDetailState !== "loading"
-      && loadedExplorerRequestKeyRef.current === explorerRequestKey(scrollExplorerView, explorerFilters, explorerReloadToken))));
+      && loadedExplorerRequestKeyRef.current === explorerRequestKey(explorerView, explorerFilters, explorerReloadToken))));
+
+  scrollReadyRef.current = scrollReadyRef.current && (artistPageName !== null || ({
+    History: historyLoadState !== "loading",
+    Observatory: reviewLoadState !== "loading",
+    Genres: genreIndexState !== "loading" && genreDetailState !== "loading",
+    Publishers: publisherLoadState !== "loading" && publisherDetailState !== "loading",
+    Years: yearLoadState !== "loading" && yearDetailState !== "loading",
+    Ratings: ratingsLoadState !== "loading" && ratingsPageState !== "loading",
+  } as Partial<Record<SidebarDestination, boolean>>)[activeNav] !== false);
 
   useEffect(() => {
     if (explorerLoadState !== "ready" || explorerRestorationPendingRef.current
@@ -778,10 +795,12 @@ function App() {
     const scrollContainer = mainScrollRef.current;
     if (!scrollContainer) return undefined;
     restoringScrollRef.current = true;
-    return restoreWorkspaceScroll(scrollContainer, scrollPositionByDestinationRef.current[activeNav] ?? 0,
-      () => scrollReadyRef.current,
+    return restoreWorkspaceScroll(scrollContainer, scrollPositionByDestinationRef.current[pageKey] ?? 0,
+      () => scrollReadyRef.current
+        && !scrollContainer.querySelector('.chart-studio[aria-busy="true"]:not([style*="display: none"])')
+        && (artistPageName ? !!scrollContainer.querySelector('.artist-page:not([style*="display: none"])') : true),
       () => { restoringScrollRef.current = false; });
-  }, [activeNav]);
+  }, [pageKey, artistPageName, navigationRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1235,7 +1254,7 @@ function App() {
   ]);
 
   useEffect(() => {
-    const explorerActive = libraryReady && explorerViewForDestination(activeNav) !== null;
+    const explorerActive = libraryReady && !artistPageName && explorerViewForDestination(activeNav) !== null;
     const preservation = resolveExplorerRefreshPreservation(
       preserveExplorerOnReloadRef.current,
       explorerActive,
@@ -1371,7 +1390,7 @@ function App() {
       window.clearTimeout(clearDetailTimer);
       window.clearTimeout(timer);
     };
-  }, [activeNav, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles, refreshExplorerFiles]);
+  }, [activeNav, artistPageName, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles, refreshExplorerFiles]);
 
   useEffect(() => {
     if (
@@ -1382,6 +1401,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Genres") return;
+    const pageRequestKey = String(genreIndexReloadToken);
+    if (loadedPageRequestsRef.current.get("genre-index") === pageRequestKey) return;
     const requestId = ++genreIndexRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -1390,6 +1411,7 @@ function App() {
       void loadGenreIndex()
         .then((items) => {
           if (cancelled || requestId !== genreIndexRequestRef.current) return;
+          loadedPageRequestsRef.current.set("genre-index", pageRequestKey);
           setGenreAtlasGenres(items);
           setSelectedGenre((current) => current && items.some((item) => item.name === current)
             ? current
@@ -1410,6 +1432,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Genres" || !selectedGenre) return;
+    const pageRequestKey = JSON.stringify([selectedGenre, genreDetailReloadToken]);
+    if (loadedPageRequestsRef.current.get("genre-detail") === pageRequestKey) return;
     const requestId = ++genreDetailRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -1419,6 +1443,7 @@ function App() {
         .then((detail) => {
           transitionContent(() => {
             if (cancelled || requestId !== genreDetailRequestRef.current) return;
+            loadedPageRequestsRef.current.set("genre-detail", pageRequestKey);
             setGenreDetail(detail);
             setGenreDetailState("ready");
           }, "collection");
@@ -1437,6 +1462,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Publishers") return;
+    const pageRequestKey = JSON.stringify([publisherSearch, publisherReloadToken]);
+    if (loadedPageRequestsRef.current.get("publishers") === pageRequestKey) return;
     const requestId = ++publisherOverviewRequestRef.current;
     publisherDetailRequestRef.current += 1;
     publisherAlbumRequestRef.current += 1;
@@ -1463,6 +1490,7 @@ function App() {
             if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
             const detail = refreshedDetail ?? overview.initialDetail;
             publisherLoadedSearchRef.current = publisherSearch;
+            loadedPageRequestsRef.current.set("publishers", pageRequestKey);
             setPublisherOverview(overview);
             setPublisherDetail(detail);
             setPublisherLoadState("ready");
@@ -1562,6 +1590,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Ratings") return;
+    const pageRequestKey = String(ratingsReloadToken);
+    if (loadedPageRequestsRef.current.get("ratings-overview") === pageRequestKey) return;
     const requestId = ++ratingsRequestRef.current;
     ratingsPageRequestRef.current += 1;
     ratingsAlbumRequestRef.current += 1;
@@ -1580,6 +1610,7 @@ function App() {
         .then((overview) => {
           transitionContent(() => {
             if (cancelled || requestId !== ratingsRequestRef.current) return;
+            loadedPageRequestsRef.current.set("ratings-overview", pageRequestKey);
             setRatingsOverview(overview);
             ratingsPreserveInspectorTokenRef.current = preserveSelection
               ? ratingsReloadToken
@@ -1605,6 +1636,8 @@ function App() {
   useEffect(() => {
     if (!libraryReady || activeNav !== "Ratings" || !ratingsOverview) return;
     if (ratingsLoadedTokenRef.current !== ratingsReloadToken) return;
+    const pageRequestKey = JSON.stringify([ratingsCompletion, ratingsRemainingTracks, ratingsReloadToken]);
+    if (loadedPageRequestsRef.current.get("ratings-page") === pageRequestKey) return;
     const pageRequestId = ++ratingsPageRequestRef.current;
     ratingsAlbumRequestRef.current += 1;
     const preserveSelection = ratingsPreserveInspectorTokenRef.current === ratingsReloadToken;
@@ -1619,6 +1652,7 @@ function App() {
       .then((page) => {
         transitionContent(() => {
           if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
+          loadedPageRequestsRef.current.set("ratings-page", pageRequestKey);
           setRatingsPage(page);
           setRatingsPageState("ready");
           setRatingsRefreshing(false);
@@ -1690,6 +1724,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || activeNav !== "Observatory") return;
+    const pageRequestKey = JSON.stringify([reviewFilter, reviewSearch, reviewReloadToken]);
+    if (loadedPageRequestsRef.current.get("observatory") === pageRequestKey) return;
     const requestId = ++reviewRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -1700,6 +1736,7 @@ function App() {
         .then((page) => {
           transitionContent(() => {
             if (cancelled || requestId !== reviewRequestRef.current) return;
+            loadedPageRequestsRef.current.set("observatory", pageRequestKey);
             setReviewItems(page.items);
             setReviewCursor(page.nextCursor);
             setReviewLoadState("ready");
@@ -1719,6 +1756,8 @@ function App() {
 
   useEffect(() => {
     if (!libraryReady || (activeNav !== "History" && activeNav !== "Universe")) return;
+    const pageRequestKey = JSON.stringify(activeNav === "History" ? [historySearch, historyOutcome, historyDeviceId, historyDateRange, historyReloadToken] : [historyReloadToken]);
+    if (loadedPageRequestsRef.current.get(activeNav) === pageRequestKey) return;
     const requestId = ++historyRequestRef.current;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -1736,7 +1775,9 @@ function App() {
       })
         .then((page) => {
           if (cancelled || requestId !== historyRequestRef.current) return;
-          setHistoryPage(page);
+          loadedPageRequestsRef.current.set(activeNav, pageRequestKey);
+          if (activeNav === "Universe") setUniverseHistoryPage(page);
+          else setHistoryPage(page);
           setHistoryLoadState("ready");
         })
         .catch((error: unknown) => {
@@ -2604,12 +2645,96 @@ function App() {
     if (view !== "albums") setSelectedAlbumId(null);
   }
 
+  function captureNavigationView() {
+    return {
+      destination: activeNav, artist: artistPageName, key: pageKey,
+      scroll: restoringScrollRef.current ? scrollPositionByDestinationRef.current[pageKey] ?? 0 : mainScrollRef.current?.scrollTop ?? 0,
+      explorerView, explorerFilters, explorerTracks, explorerAlbums, explorerArtists,
+      explorerCursor, explorerCount, explorerLoadState, explorerError, explorerSelection,
+      selectedAlbumId, albumTracks, albumTracksTruncated, albumDetailState, selectedArtistId,
+      selectedTrack, inspectorView, tagSelectionKind, inspectorArtistName, artistDetail,
+      artistIntelligence, artistWorldState, artistWorldError,
+      loadedKey: loadedExplorerRequestKeyRef.current, viewKey: loadedExplorerViewKeyRef.current,
+      localOnly: explorerLocalOnlyRef.current, revision: explorerReloadToken,
+    };
+  }
+
+  function rememberCurrentView(push: boolean) {
+    const view = captureNavigationView();
+    exploreRequestRef.current += 1;
+    albumRequestRef.current += 1;
+    artistRequestRef.current += 1;
+    setIsLoadingMore(false);
+    explorerLoadingMoreRef.current = false;
+    setHistoryLoadingMore(false);
+    setReviewLoadingMore(false);
+    scrollPositionByDestinationRef.current[view.key] = view.scroll;
+    savedViewsRef.current.set(view.key, view);
+    workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
+    saveWorkspaceCheckpoint(workspaceRef.current);
+    restoringScrollRef.current = true;
+    if (push) setNavigationHistory((current) => [...current, view].slice(-50));
+  }
+
+  function restoreNavigationView(view: ReturnType<typeof captureNavigationView>) {
+    // Invalidate requests from the page being left before restoring its predecessor.
+    exploreRequestRef.current += 1;
+    albumRequestRef.current += 1;
+    artistRequestRef.current += 1;
+    setExplorerView(view.explorerView);
+    setExplorerFilters(view.explorerFilters);
+    setExplorerTracks(view.explorerTracks);
+    setExplorerAlbums(view.explorerAlbums);
+    setExplorerArtists(view.explorerArtists);
+    setExplorerCursor(view.explorerCursor);
+    setExplorerCount(view.explorerCount);
+    setExplorerLoadState(view.explorerLoadState);
+    setExplorerError(view.explorerError);
+    setExplorerSelection(view.explorerSelection);
+    setSelectedAlbumId(view.selectedAlbumId);
+    setAlbumTracks(view.albumTracks);
+    setAlbumTracksTruncated(view.albumTracksTruncated);
+    setAlbumDetailState(view.albumDetailState === "loading" ? "ready" : view.albumDetailState);
+    setSelectedArtistId(view.selectedArtistId);
+    setSelectedTrack(view.selectedTrack);
+    setInspectorView(view.inspectorView);
+    setTagSelectionKind(view.tagSelectionKind);
+    setInspectorArtistName(view.inspectorArtistName);
+    setArtistDetail(view.artistDetail);
+    setArtistIntelligence(view.artistIntelligence);
+    setArtistWorldState(view.artistWorldState);
+    setArtistWorldError(view.artistWorldError);
+    setIsLoadingMore(false);
+    explorerLoadingMoreRef.current = false;
+    loadedExplorerRequestKeyRef.current = view.explorerLoadState === "ready" && view.albumDetailState !== "loading" ? view.loadedKey : null;
+    loadedExplorerViewKeyRef.current = view.viewKey;
+    explorerLocalOnlyRef.current = view.localOnly;
+    preserveExplorerOnReloadRef.current = view.revision !== explorerReloadToken || view.albumDetailState === "loading";
+    scrollPositionByDestinationRef.current[view.key] = view.scroll;
+    setNavigationRevision((value) => value + 1);
+    setArtistPageName(view.artist);
+    setActiveNavState(view.destination);
+  }
+
+  function goBack() {
+    const previous = navigationHistory[navigationHistory.length - 1];
+    if (!previous) return;
+    transitionContent(() => {
+      rememberCurrentView(false);
+      setNavigationHistory((current) => current.slice(0, -1));
+      restoreNavigationView(previous);
+    }, "page");
+  }
+
+  // Used by explicit drilldowns as well as sidebar navigation, including same-page searches.
   function setActiveNav(destination: SidebarDestination) {
-    if (destination === activeNav) return;
-    if (mainScrollRef.current && !restoringScrollRef.current) {
-      scrollPositionByDestinationRef.current[activeNav] = mainScrollRef.current.scrollTop;
-    }
-    transitionContent(() => setActiveNavState(destination), "page");
+    transitionContent(() => {
+      rememberCurrentView(true);
+      scrollPositionByDestinationRef.current[destination] = 0;
+      setNavigationRevision((value) => value + 1);
+      setArtistPageName(null);
+      setActiveNavState(destination);
+    }, "page");
   }
 
   function expandLibraryNavigation() {
@@ -2619,14 +2744,24 @@ function App() {
   }
 
   function navigate(label: SidebarDestination) {
+    if (label === activeNav && !artistPageName) return;
     transitionContent(() => {
-      setArtistPageName(null);
-      setActiveNav(label);
-      if (label !== "Universe" && label !== "Observatory" && label !== "History") {
-        expandLibraryNavigation();
+      rememberCurrentView(true);
+      const saved = savedViewsRef.current.get(label);
+      if (saved) restoreNavigationView(saved);
+      else {
+        setNavigationRevision((value) => value + 1);
+        setArtistPageName(null);
+        setActiveNavState(label);
+        const view = explorerViewForDestination(label);
+        if (view) {
+          changeExplorerView(view);
+          setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[view] });
+          setSelectedAlbumId(null);
+          setExplorerSelection(null);
+        }
       }
-      const destinationExplorerView = explorerViewForDestination(label);
-      if (destinationExplorerView) changeExplorerView(destinationExplorerView);
+      if (label !== "Universe" && label !== "Observatory" && label !== "History") expandLibraryNavigation();
     }, "page");
   }
 
@@ -2653,26 +2788,15 @@ function App() {
   }
 
   function openArtistAlbums(artistName: string) {
+    const artist = artistName.trim();
+    if (!artist || artist === artistPageName) return;
     transitionContent(() => {
-      const artist = artistName.trim();
-      if (!artist) return;
-      if (!artistPageName) artistPageReturnScroll.current = mainScrollRef.current?.scrollTop ?? 0;
+      rememberCurrentView(true);
+      setVisitedArtists((current) => current.includes(artist) ? current : [...current, artist].slice(-50));
+      setNavigationRevision((value) => value + 1);
       setArtistPageName(artist);
-      if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
     }, "page");
   }
-
-  function closeArtistPage() {
-    transitionContent(() => setArtistPageName(null), "page");
-  }
-
-  useLayoutEffect(() => {
-    if (artistPageName && mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
-    else if (artistPageReturnScroll.current !== null && mainScrollRef.current) {
-      mainScrollRef.current.scrollTop = artistPageReturnScroll.current;
-      artistPageReturnScroll.current = null;
-    }
-  }, [artistPageName]);
 
   function exploreGenreInLibrary(genre: string) {
     transitionContent(() => {
@@ -3219,6 +3343,10 @@ function App() {
         : "Search your music universe";
 
   function updateTopbarSearch(value: string) {
+    if (artistPageName) {
+      rememberCurrentView(true);
+      setNavigationRevision((revision) => revision + 1);
+    }
     setArtistPageName(null);
     if (activeNav === "Inbox") return;
     if (activeNav === "Observatory") setReviewSearch(value);
@@ -3291,7 +3419,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.3</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3390,16 +3518,23 @@ function App() {
       </header>
 
       <main className="main-content">
+        <div className="page-navigation">
+          <button type="button" onClick={goBack} disabled={navigationHistory.length === 0}
+            className="page-back" title="Return to the previous page and view">
+            <ArrowLeft aria-hidden="true" />
+            {navigationHistory.length ? `Back to ${navigationHistory[navigationHistory.length - 1]!.artist ?? navigationHistory[navigationHistory.length - 1]!.destination}` : "Back"}
+          </button>
+        </div>
         <div
           className="main-scroll"
           ref={mainScrollRef}
           onScroll={(event) => {
-            if (restoringScrollRef.current || artistPageName) return;
+            if (restoringScrollRef.current) return;
             const nextScroll = event.currentTarget.scrollTop;
-            if (nextScroll === 0 && (scrollPositionByDestinationRef.current[activeNav] ?? 0) > 0 && !scrollReadyRef.current) {
+            if (nextScroll === 0 && (scrollPositionByDestinationRef.current[pageKey] ?? 0) > 0 && !scrollReadyRef.current) {
               return;
             }
-            scrollPositionByDestinationRef.current[activeNav] = nextScroll;
+            scrollPositionByDestinationRef.current[pageKey] = nextScroll;
             workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
             saveWorkspaceCheckpoint(workspaceRef.current);
           }}
@@ -3408,9 +3543,10 @@ function App() {
         >
           {snapshot ? (
             <ContentTransition type="page">
-            {artistPageName ? (
+            {visitedArtists.map((artist) => (
+              <RememberedPage key={artist} active={artistPageName === artist}>
               <Suspense fallback={<section className="inbox-load" role="status">Opening artist…</section>}>
-                <ArtistPage key={artistPageName} artist={artistPageName} onBack={closeArtistPage} onOpenArtist={openArtistAlbums}
+                <ArtistPage artist={artist} catalogRevision={chartReloadToken} onOpenArtist={openArtistAlbums}
                   onOpenAlbum={(album) => {
                     transitionContent(() => {
                       pendingExplorerAlbumIdRef.current = album.id;
@@ -3426,14 +3562,17 @@ function App() {
                   }}
                   onPlay={playChartQueue} onSettings={() => openSettings("metadata")} />
               </Suspense>
-            ) : activeNav === "Inbox" ? (
+              </RememberedPage>
+            ))}
+            <RememberedPage active={!artistPageName && activeNav === "Inbox"}>
               <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
                 <Inbox
                   onOpenMetadataSettings={() => openSettings("metadata")}
                   onCatalogChanged={refreshCatalogIfChanged}
                 />
               </Suspense>
-            ) : activeNav === "Observatory" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Observatory"}>
               <Observatory
                 items={reviewItems}
                 selectedArtistKey={artistIntelligence?.artistKey ?? null}
@@ -3451,7 +3590,8 @@ function App() {
                 onUndo={() => void undoCuration()}
                 onExport={() => void exportCuration()}
               />
-            ) : activeNav === "Charts" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Charts"}>
               <ChartStudio
                 catalogRevision={chartReloadToken}
                 onOpenArtistAlbums={openArtistAlbums}
@@ -3471,7 +3611,8 @@ function App() {
                 }}
                 onPlayQueue={playChartQueue}
               />
-            ) : activeNav === "History" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "History"}>
               <ListeningHistory
                 page={historyPage}
                 loadState={historyLoadState}
@@ -3494,7 +3635,8 @@ function App() {
                 onLoadMore={() => void loadMoreHistory()}
                 onRefresh={() => setHistoryReloadToken((value) => value + 1)}
               />
-            ) : activeNav === "Genres" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Genres"}>
               <ContentTransition type="collection">
                 <GenreAtlas
                   genres={genreAtlasGenres}
@@ -3525,7 +3667,8 @@ function App() {
                   onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                 />
               </ContentTransition>
-            ) : activeNav === "Publishers" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Publishers"}>
               <ContentTransition type="collection">
                 <PublisherSignalTimeline
                   overview={publisherOverview}
@@ -3545,7 +3688,8 @@ function App() {
                   onRetryDetail={() => publisherDetail && selectPublisher(publisherDetail.publisher)}
                 />
               </ContentTransition>
-            ) : activeNav === "Years" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Years"}>
               <ContentTransition type="collection">
                 <YearsExplorer
                   overview={yearOverview}
@@ -3566,7 +3710,8 @@ function App() {
                   onRetryDetail={() => yearDetail && selectYear(yearDetail.selection)}
                 />
               </ContentTransition>
-            ) : activeNav === "Ratings" ? (
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Ratings"}>
               <ContentTransition type="collection">
                 <RatingsStudio
                   overview={ratingsOverview}
@@ -3602,7 +3747,7 @@ function App() {
                   onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
                 />
               </ContentTransition>
-            ) : null}
+            </RememberedPage>
             <ReactActivity mode={showExplorerCount ? "visible" : "hidden"}>
               {activeNav === "Universe" ? <>
               <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
@@ -3620,9 +3765,11 @@ function App() {
                   {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
                 </article>
               </section>
-              {historyPage && <UniverseListeningMemory page={historyPage} onOpenHistory={() => navigate("History")} />}
+              {universeHistoryPage && <UniverseListeningMemory page={universeHistoryPage} onOpenHistory={() => navigate("History")} />}
               </> : null}
 
+              {(["Universe", "Songs", "Albums", "Artists", "Tags"] as const).map((destination) => (
+              <RememberedPage key={destination} active={showExplorerCount && activeNav === destination}>
               <ContentTransition type="artist-detail">
                 <DeepExplorer
                   view={explorerView}
@@ -3678,6 +3825,8 @@ function App() {
                   }}
                 />
               </ContentTransition>
+              </RememberedPage>
+              ))}
             </ReactActivity>
             </ContentTransition>
           ) : loadError ? (

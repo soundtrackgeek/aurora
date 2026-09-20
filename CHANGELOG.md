@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.3] - 2026-09-20
+
+### Fixed
+
+- Retain visited page views instead of resetting Charts, History/report tabs, publisher/year modes, genre sorting, Ratings, Inbox selections, and Artist tabs on return. Pause effects on hidden pages and preserve loaded result pages until filters, refreshes, or catalog updates require new data.
+- Give library destinations independent filters, results, selection, expanded album, and inspector snapshots. Keep the Universe history preview separate from the full History list.
+- Add a compact, always reachable **Back to…** control to every page, with navigation history for sidebar changes, Artist links, and album/library drilldowns; restore scroll after retained content becomes visible.
+
 ## [0.26.2] - 2026-09-20
 
 ### Fixed

@@ -1038,7 +1038,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     selectedAlbumId ? [selectedAlbumId] : [],
   ));
   const [albumSelectionAnchorId, setAlbumSelectionAnchorId] = useState<string | null>(selectedAlbumId);
-  const selectionResetReadyRef = useRef(false);
+  const selectionScopeRef = useRef<{ filters: ExplorerFilters; view: ExplorerView } | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const loadMoreCallbackRef = useRef(onLoadMore);
   const lastRequestedLoadedRef = useRef<number | null>(null);
@@ -1056,10 +1056,9 @@ export function DeepExplorer(props: DeepExplorerProps) {
   }, [loadState]);
 
   useEffect(() => {
-    if (!selectionResetReadyRef.current) {
-      selectionResetReadyRef.current = true;
-      return;
-    }
+    const previous = selectionScopeRef.current;
+    selectionScopeRef.current = { filters, view };
+    if (!previous || (previous.filters === filters && previous.view === view)) return;
     setSelectedTrackKeys(new Set());
     setTrackSelectionAnchorKey(null);
     setSelectedAlbumIds(new Set());

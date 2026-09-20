@@ -168,7 +168,10 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const [queueBusy, setQueueBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const loadedPageKeyRef = useRef<string | null>(null);
+  const currentPageRef = useRef(page);
   const selectionIdRef = useRef(0);
+  const selectionPendingRef = useRef(false);
   const selectedEntryRef = useRef<ChartEntry | null>(selectedEntry);
   const catalogRevisionRef = useRef(catalogRevision);
   const callbacksRef = useRef({ onSelectionChange, onSelectTrack, onPlayQueue });
@@ -189,6 +192,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     options?: ChartSelectionOptions,
   ) => {
     const selectionId = ++selectionIdRef.current;
+    selectionPendingRef.current = true;
     selectedEntryRef.current = entry;
     setSelectedEntry(entry);
     setDetail(null);
@@ -200,6 +204,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       : Promise.resolve(null);
     void Promise.allSettled([detailRequest, trackRequest]).then(([nextDetail, nextTrack]) => {
       if (selectionId !== selectionIdRef.current) return;
+      selectionPendingRef.current = false;
       const value = nextDetail.status === "fulfilled" ? nextDetail.value : null;
       transitionContent(() => {
         setDetail((current) => selectionId === selectionIdRef.current ? value : current);
@@ -212,6 +217,14 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }, []);
 
   useEffect(() => {
+    const pageKey = JSON.stringify([request, catalogRevision, reloadToken]);
+    if (loadedPageKeyRef.current === pageKey && currentPageRef.current) {
+      // Effects resume after a retained page becomes visible. Resume any interrupted detail load.
+      if (selectionPendingRef.current && selectedEntryRef.current) {
+        selectEntry(selectedEntryRef.current, currentPageRef.current, { preserveInspector: true });
+      }
+      return () => { selectionIdRef.current += 1; };
+    }
     const loadId = ++requestIdRef.current;
     const preserveInspector = catalogRevisionRef.current !== catalogRevision;
     catalogRevisionRef.current = catalogRevision;
@@ -236,6 +249,8 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             ?? null;
           transitionContent(() => {
             setPage((current) => cancelled ? current : nextPage);
+            loadedPageKeyRef.current = pageKey;
+            currentPageRef.current = nextPage;
             setLoadedRequest(request);
             setLoadState("ready");
             if (selected) {

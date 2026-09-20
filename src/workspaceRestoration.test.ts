@@ -66,4 +66,19 @@ describe("restart workspace", () => {
     expect(element.scrollTop).toBe(123);
     cleanup();
   });
+
+  it("waits for a retained page to reveal before accepting a clamped offset", () => {
+    vi.useFakeTimers();
+    const element = document.createElement("div");
+    let maximum = 0;
+    let position = 0;
+    Object.defineProperty(element, "scrollTop", { get: () => position, set: (value: number) => { position = Math.min(maximum, value); } });
+    const done = vi.fn();
+    restoreWorkspaceScroll(element, 600, () => true, done);
+    expect(done).not.toHaveBeenCalled();
+    maximum = 1200;
+    vi.advanceTimersByTime(50);
+    expect(position).toBe(600);
+    expect(done).toHaveBeenCalledOnce();
+  });
 });
