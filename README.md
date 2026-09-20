@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.4 makes Windows release verification more reliable by splitting Charts navigation coverage into focused source and period cases with scoped DOM queries. Tests still verify both Back and sidebar return paths, selected rows, exact scroll restoration, and reuse of loaded results under the normal five-second test limit.
+
 Aurora 0.26.3 remembers page views while you move around the app: Charts source and period, History tab and report period, timeline modes, library filters, loaded results, selections, expanded albums, and scroll position. A small **Back to…** button above every page retraces your navigation, including Artist pages and album drilldowns. Hidden pages pause their effects; explicit refreshes and catalog changes still update results. Navigation history and retained page controls last for the current app session; existing restart restoration remains available for the library workspace.
 
 Aurora 0.26.2 fixes artist pages opened with different capitalization: `MARILLION`, `Marillion`, and `marillion` find the same local albums and release timeline, including additional album pages. Matching remains by the full artist name, so similarly named artists are kept separate.

@@ -13,28 +13,38 @@ async function navigate(name: string) {
   fireEvent.click(within(primary).getByRole("button", { name }));
 }
 
-it.each(["back", "sidebar"])("retains Charts source, period, selected row and scroll through %s navigation", async (method) => {
+it.each([
+  { method: "back", setting: "source", tab: "VG Lista", title: "VG Lista Singles Chart" },
+  { method: "sidebar", setting: "source", tab: "VG Lista", title: "VG Lista Singles Chart" },
+  { method: "back", setting: "period", tab: "Period chart", title: "Official UK Singles · Summer 1985" },
+  { method: "sidebar", setting: "period", tab: "Period chart", title: "Official UK Singles · Summer 1985" },
+])("retains Charts $setting, selected row and scroll through $method navigation", async ({ method, tab, title }) => {
   const load = vi.spyOn(charts, "loadChartPage");
   const { container } = render(<App />);
-  await navigate("Charts");
-  await screen.findByRole("heading", { name: "Official UK Singles Chart" });
-  fireEvent.click(screen.getByRole("tab", { name: "VG Lista" }));
-  await screen.findByRole("heading", { name: "VG Lista Singles Chart" });
-  fireEvent.click(screen.getByRole("tab", { name: "Period chart" }));
-  await screen.findByRole("heading", { name: "VG Lista Singles · Summer 1985" });
-  const row = screen.getByRole("row", { name: /Obsession/ });
-  fireEvent.click(row);
+  const primary = within(await screen.findByRole("navigation", { name: "Primary" }));
+  const main = within(screen.getByRole("main"));
+  fireEvent.click(primary.getByRole("button", { name: "Charts" }));
+  const heading = await main.findByRole("heading", { name: "Official UK Singles Chart" });
+  const studio = within(heading.closest(".chart-studio") as HTMLElement);
+  fireEvent.click(studio.getByRole("tab", { name: tab }));
+  const table = within(await studio.findByRole("table", { name: title }));
+  fireEvent.click(table.getByRole("row", { name: /Obsession/ }));
   const scroll = container.querySelector<HTMLElement>(".main-scroll")!;
   scroll.scrollTop = 640;
   fireEvent.scroll(scroll);
   const requests = load.mock.calls.length;
-  await navigate("Years");
-  await screen.findByRole("tab", { name: "Two clocks" });
-  if (method === "back") fireEvent.click(screen.getByRole("button", { name: "Back to Charts" }));
-  else await navigate("Charts");
-  expect(await screen.findByRole("heading", { name: "VG Lista Singles · Summer 1985" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "VG Lista" })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByRole("row", { name: /Obsession/ })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(primary.getByRole("button", { name: "Years" }));
+  await main.findByRole("tab", { name: "Two clocks" });
+  expect(studio.queryByRole("table", { name: title })).not.toBeInTheDocument();
+  if (method === "back") fireEvent.click(main.getByRole("button", { name: "Back to Charts" }));
+  else fireEvent.click(primary.getByRole("button", { name: "Charts" }));
+  // Re-query the returned page so an obsolete, detached DOM node cannot pass the test.
+  const returnedHeading = await main.findByRole("heading", { name: title });
+  expect(returnedHeading).toBeVisible();
+  const returnedStudio = within(returnedHeading.closest(".chart-studio") as HTMLElement);
+  expect(returnedStudio.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+  const returnedTable = within(returnedStudio.getByRole("table", { name: title }));
+  expect(returnedTable.getByRole("row", { name: /Obsession/ })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => expect(scroll.scrollTop).toBe(640));
   expect(load).toHaveBeenCalledTimes(requests);
 });

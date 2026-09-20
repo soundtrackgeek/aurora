@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.4] - 2026-09-20
+
+### Fixed
+
+- Prevent the Windows release verification gate from timing out in the Charts navigation regression test. Test source and period retention independently for Back and sidebar navigation, and scope DOM queries to the relevant navigation, chart, and table. Retain checks for selected rows, exact scroll offsets, hidden and restored content, and no redundant chart reloads; keep the default five-second timeout.
+
 ## [0.26.3] - 2026-09-20
 
 ### Fixed
