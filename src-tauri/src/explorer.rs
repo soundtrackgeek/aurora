@@ -900,8 +900,7 @@ fn album_page_from_connection(
         push_exact_filter(&mut sql, &mut params, "a.canonical_genre", genre);
     }
     if let Some(artist) = artist {
-        sql.push_str(" AND a.album_artist_display = ?");
-        params.push(Value::Text(artist));
+        push_exact_filter(&mut sql, &mut params, "a.album_artist_display", artist);
     }
     let total_count = filtered_row_count(connection, &sql, &params, "album")?;
     push_keyset(
@@ -1243,7 +1242,7 @@ fn artist_detail_from_connection(
 ) -> Result<ArtistDetail, String> {
     let artist_summary = connection
         .query_row(
-            "SELECT ?1, CAST(SUM(total_tracks) AS INTEGER), COUNT(*) FROM albums WHERE album_artist_display = ?1 HAVING COUNT(*) > 0",
+            "SELECT ?1, CAST(SUM(total_tracks) AS INTEGER), COUNT(*) FROM albums WHERE album_artist_display = ?1 COLLATE NOCASE HAVING COUNT(*) > 0",
             [artist],
             |row| {
                 let name: String = row.get(0)?;
@@ -1357,6 +1356,73 @@ mod tests {
         refresh_live_album_rating_projection(&connection)
             .expect("initial live album rating projection");
         connection
+    }
+
+    #[test]
+    fn artist_details_and_album_pages_ignore_name_case() {
+        let connection = fixture();
+        connection.execute_batch(
+            "UPDATE albums SET album_artist_display = CASE id WHEN 'a1' THEN 'Marillion' ELSE 'MARILLION' END WHERE id IN ('a1', 'a2');
+             UPDATE tracks SET album_artist_display = CASE album_id WHEN 'a1' THEN 'Marillion' ELSE 'MARILLION' END WHERE album_id IN ('a1', 'a2');
+             UPDATE albums SET album_artist_display = 'Marillion Tribute' WHERE id = 'a3';
+             UPDATE tracks SET album_artist_display = 'Marillion Tribute' WHERE album_id = 'a3';"
+        ).unwrap();
+
+        for artist in ["Marillion", "MARILLION", "marillion", "mArIlLiOn"] {
+            let detail = artist_detail_from_connection(&connection, artist)
+                .expect("artist details must include every casing of the same name");
+            assert_eq!(detail.artist.album_count, 2);
+            assert_eq!(detail.artist.track_count, 3);
+            assert_eq!(detail.albums.len(), 2);
+            assert!(!detail.albums_truncated);
+            assert!(detail.albums.iter().all(|album| album.id != "a3"));
+
+            let first = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    artist: Some(artist.into()),
+                    page_size: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(first.total_count, 2);
+            assert_eq!(first.items.len(), 1);
+            assert!(first.next_cursor.is_some());
+            let second = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    artist: Some(artist.into()),
+                    page_size: Some(1),
+                    cursor: first.next_cursor,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(second.total_count, 2);
+            assert_eq!(second.items.len(), 1);
+            assert_ne!(first.items[0].id, second.items[0].id);
+            assert!(second.next_cursor.is_none());
+
+            let tracks = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    artist: Some(artist.into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+            assert_eq!(tracks.total_count, 3);
+            assert_eq!(tracks.items.len(), 3);
+            assert!(
+                tracks
+                    .items
+                    .iter()
+                    .all(|track| track.album_id.as_deref() != Some("a3"))
+            );
+        }
+        assert!(artist_detail_from_connection(&connection, "Marill").is_err());
     }
 
     #[test]

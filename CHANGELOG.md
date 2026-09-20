@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2] - 2026-09-20
+
+### Fixed
+
+- Match artist-page library summaries and albums without case sensitivity, so an uppercase artist link such as `MARILLION` finds releases cataloged under `Marillion`. Include every casing in album counts, release timelines, and paginated album results while keeping similarly named artists separate.
+- Keep browser-preview artist details, albums, and tracks consistent with case-insensitive catalog lookups; add coverage for artist-page album navigation, release years, playback selection, and album pagination.
+
 ## [0.26.1] - 2026-09-19
 
 ### Fixed

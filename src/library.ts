@@ -437,7 +437,7 @@ export function currentBrowserPreviewTrack(track: Track): Track {
 
 export async function loadArtistTracks(artist: string): Promise<Track[]> {
   if (!isTauriRuntime()) {
-    return browserPreview.tracks.filter((track) => track.artist === artist);
+    return browserPreview.tracks.filter((track) => matchesArtistName(track.artist, artist));
   }
   return invoke<Track[]>("artist_tracks", { artist });
 }
@@ -494,6 +494,10 @@ function includesExplorerText(values: Array<string | null>, search?: string): bo
   return !query || values.join("\u0000").toLocaleLowerCase().includes(query);
 }
 
+function matchesArtistName(name: string, artist: string): boolean {
+  return name.toLowerCase() === artist.trim().toLowerCase();
+}
+
 function usesAdvancedLibrarySearch(search?: string): boolean {
   return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
@@ -522,7 +526,7 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
     .filter((track) => request.yearTo === undefined || (yearFor(track) !== null && yearFor(track)! <= request.yearTo))
     .filter((track) => !request.missingYear || yearFor(track) === null)
     .filter((track) => !request.genre || track.genre === request.genre)
-    .filter((track) => !request.artist || track.artist === request.artist)
+    .filter((track) => !request.artist || matchesArtistName(track.artist, request.artist))
     .sort((left, right) => {
       switch (request.sort) {
         case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);
@@ -561,7 +565,7 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
     .filter((album) => request.yearTo === undefined || (yearFor(album) !== null && yearFor(album)! <= request.yearTo))
     .filter((album) => !request.missingYear || yearFor(album) === null)
     .filter((album) => !request.genre || album.genre === request.genre)
-    .filter((album) => !request.artist || album.artist === request.artist)
+    .filter((album) => !request.artist || matchesArtistName(album.artist, request.artist))
     .sort((left, right) => {
       const newestTrackId = (albumId: string) => browserPreview.tracks
         .filter((track) => track.albumId === albumId)
@@ -665,9 +669,9 @@ export async function deleteAlbumTracks(albumId: string, tracks: readonly Track[
 
 export async function loadArtistDetail(artist: string): Promise<ArtistDetail> {
   if (!isTauriRuntime()) {
-    const summary = browserPreview.artists.find((candidate) => candidate.name === artist);
+    const summary = browserPreview.artists.find((candidate) => matchesArtistName(candidate.name, artist));
     if (!summary) throw new Error("That artist is no longer available.");
-    return { artist: summary, albums: browserAlbumSummaries().filter((album) => album.artist === artist), albumsTruncated: false };
+    return { artist: summary, albums: browserAlbumSummaries().filter((album) => matchesArtistName(album.artist, artist)), albumsTruncated: false };
   }
   return invoke<ArtistDetail>("artist_detail", { artist });
 }

@@ -13,6 +13,21 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
+it("shows albums, release years, and playable tracks when the artist link uses different casing", async () => {
+  render(<ArtistPage {...props} artist="COLDPLAY" />);
+  expect(await screen.findByRole("button", { name: "Open Viva la Vida" })).toBeInTheDocument();
+  expect(screen.queryByText("No albums by this artist are available in your library.")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Release timeline" })).getByText("2008")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Albums" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Viva la Vida" }));
+  expect(props.onOpenAlbum).toHaveBeenCalledWith(expect.objectContaining({ title: "Viva la Vida", artist: "Coldplay" }));
+  fireEvent.click(screen.getByRole("button", { name: "Tracks" }));
+  const track = await screen.findByRole("button", { name: /Strawberry Swing/ });
+  expect(screen.getByText("1 of 1")).toBeInTheDocument();
+  fireEvent.click(track);
+  await waitFor(() => expect(props.onPlay).toHaveBeenCalledWith([expect.objectContaining({ title: "Strawberry Swing", artist: "Coldplay" })]));
+});
+
 it("renders independent MusicBrainz, personal history, and global Last.fm data without Follow", async () => {
   render(<ArtistPage {...props} />);
   expect(await screen.findByText("Antibes")).toBeInTheDocument();

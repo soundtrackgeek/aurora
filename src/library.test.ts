@@ -12,6 +12,8 @@ import {
   formatCount,
   formatDuration,
   loadAlbumDetail,
+  loadArtistDetail,
+  loadArtistTracks,
   type Track,
   type AlbumSummary,
 } from "./library";
@@ -45,6 +47,24 @@ const albumMetricTracks: Track[] = [
 ];
 
 describe("library presentation", () => {
+  it.each(["Coldplay", "COLDPLAY", "coldplay", "cOlDpLaY", " Coldplay "])("matches the full artist name without case sensitivity for %s", async (artist) => {
+    const detail = await loadArtistDetail(artist);
+    const albums = await exploreAlbums({ artist });
+    const tracks = await exploreTracks({ artist });
+    expect(detail.albums.map((album) => album.title)).toEqual(["Viva la Vida"]);
+    expect(albums.items).toEqual(detail.albums);
+    expect(albums.totalCount).toBe(1);
+    expect(tracks.totalCount).toBe(1);
+    expect(tracks.items.map((track) => track.title)).toEqual(["Strawberry Swing"]);
+    expect(await loadArtistTracks(artist)).toEqual(tracks.items);
+  });
+
+  it("does not include similarly named artists in an artist lookup", async () => {
+    expect((await exploreAlbums({ artist: "Cold" })).totalCount).toBe(0);
+    expect((await exploreTracks({ artist: "Cold" })).totalCount).toBe(0);
+    await expect(loadArtistDetail("Cold")).rejects.toThrow("no longer available");
+  });
+
   it("acknowledges a catalog refresh only when every read used one revision", () => {
     expect(catalogRefreshIsConsistent(
       "1:52:2026-08-24T10:01:00Z",
