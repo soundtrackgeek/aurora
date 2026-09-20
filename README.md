@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.5 fixes Inbox **Apply & rename** for albums containing MP3s without ID3 tags. Audio verification now includes the entire original audio stream before adding the first tag, preventing false verification failures while retaining byte-for-byte safety checks. If a staged edit fails verification, the message identifies the track and the failed check.
+
 Aurora 0.26.4 makes Windows release verification more reliable by splitting Charts navigation coverage into focused source and period cases with scoped DOM queries. Tests still verify both Back and sidebar return paths, selected rows, exact scroll restoration, and reuse of loaded results under the normal five-second test limit.
 
 Aurora 0.26.3 remembers page views while you move around the app: Charts source and period, History tab and report period, timeline modes, library filters, loaded results, selections, expanded albums, and scroll position. A small **Back to…** button above every page retraces your navigation, including Artist pages and album drilldowns. Hidden pages pause their effects; explicit refreshes and catalog changes still update results. Navigation history and retained page controls last for the current app session; existing restart restoration remains available for the library workspace.

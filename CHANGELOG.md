@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.5] - 2026-09-20
+
+### Fixed
+
+- Fixed Inbox **Apply & rename** rejecting MP3s that do not yet have ID3 tags. Rewind after an unsuccessful ID3 probe so audio checksums cover the complete original stream and match the newly tagged copy. The shared verifier also protects manual tag and cover edits.
+- Include the affected filename and verification reason in staged Inbox tag errors while preserving the guarantee that originals remain unchanged.
+- Added regression coverage for complete untagged audio checksums, first-tag writes in ID3v2.3/v2.4, and tagging plus renaming a mixed tagged/untagged album.
+
 ## [0.26.4] - 2026-09-20
 
 ### Fixed

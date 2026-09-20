@@ -2805,11 +2805,14 @@ fn same_frames(actual: &[Frame], expected: &[Frame]) -> bool {
 pub(crate) fn audio_payload_hash(path: &Path) -> Result<[u8; 32], String> {
     let mut file = File::open(path)
         .map_err(|error| format!("Could not open the MP3 for audio verification: {error}"))?;
-    Tag::skip(&mut file)
+    let has_tag = Tag::skip(&mut file)
         .map_err(|error| format!("Could not locate the MP3 audio payload: {error}"))?;
-    let _ = file
-        .stream_position()
-        .map_err(|error| format!("Could not locate the MP3 audio position: {error}"))?;
+    if !has_tag {
+        // The ID3 probe reads ahead even when no tag exists. Untagged audio starts
+        // at byte zero, so hash those bytes too before comparing a first-tag write.
+        file.rewind()
+            .map_err(|error| format!("Could not rewind the untagged MP3: {error}"))?;
+    }
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -3140,6 +3143,42 @@ mod tests {
     use super::*;
     use id3::frame::{Picture, PictureType, Popularimeter};
     use std::io::{Cursor, Write};
+
+    #[test]
+    fn untagged_audio_payload_hash_includes_every_byte() {
+        let root = tempfile::tempdir().expect("temporary audio fixture");
+        let path = root.path().join("untagged.mp3");
+        let mut audio = vec![0x55; 32 * 1024];
+        audio[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+        fs::write(&path, &audio).expect("write untagged audio");
+        let expected: [u8; 32] = Sha256::digest(&audio).into();
+        assert_eq!(audio_payload_hash(&path).expect("hash all audio"), expected);
+
+        audio[4] ^= 1;
+        fs::write(&path, &audio).expect("change first audio frame");
+        assert_ne!(
+            audio_payload_hash(&path).expect("hash changed audio"),
+            expected
+        );
+    }
+
+    #[test]
+    fn adding_first_id3_tag_preserves_audio_payload_hash() {
+        let root = tempfile::tempdir().expect("temporary audio fixture");
+        let audio = [0xff, 0xfb, 0x90, 0x64].repeat(8192);
+        for version in [Version::Id3v23, Version::Id3v24] {
+            let path = root.path().join(format!("{version:?}.mp3"));
+            fs::write(&path, &audio).expect("write untagged audio");
+            let before = audio_payload_hash(&path).expect("hash untagged audio");
+            let mut tag = Tag::with_version(version);
+            tag.set_title("First title");
+            tag.write_to_path(&path, version).expect("write first tag");
+            assert_eq!(
+                audio_payload_hash(&path).expect("hash tagged audio"),
+                before
+            );
+        }
+    }
 
     fn fixture_path(label: &str) -> PathBuf {
         let unique = SystemTime::now()

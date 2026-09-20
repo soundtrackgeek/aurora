@@ -776,7 +776,7 @@ pub(crate) fn apply_tags(
             cleanup_prepared(&prepared);
             return Err(format!("Could not write staged Inbox tags: {error}"));
         }
-        if verify_editor_written_file(
+        if let Err(error) = verify_editor_written_file(
             &temporary,
             &after,
             track_fields,
@@ -784,15 +784,13 @@ pub(crate) fn apply_tags(
             expected_artwork_fingerprint.as_ref(),
             &preserved_frames,
             &original_hash,
-        )
-        .is_err()
-        {
+        ) {
             let _ = fs::remove_file(&temporary);
             cleanup_prepared(&prepared);
-            return Err(
-                "Aurora could not verify a staged Inbox tag edit. No originals were changed."
-                    .to_owned(),
-            );
+            return Err(format!(
+                "Aurora could not verify staged Inbox tags for \"{}\": {error}. No originals were changed.",
+                target.file_name().unwrap_or_default().to_string_lossy(),
+            ));
         }
         prepared.push(PreparedWrite {
             target,
@@ -3480,6 +3478,90 @@ mod tests {
             Some("Heavy Metal".to_owned())
         );
         fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn tag_apply_and_rename_accepts_a_mix_of_untagged_and_tagged_tracks() {
+        let root = tempfile::tempdir().expect("temporary Inbox root");
+        let album = root.path().join("Unsorted");
+        fs::create_dir(&album).expect("create album");
+        let untagged = album.join("first.mp3");
+        let tagged = album.join("second.mp3");
+        let audio = [0xff, 0xfb, 0x90, 0x64].repeat(8192);
+        fs::write(&untagged, &audio).expect("write untagged track");
+        write_artwork_fixture(&tagged, 2, Some(7));
+        let tagged_audio = audio_payload_hash(&tagged).expect("original tagged audio");
+        let tagged_frames = editor_non_target_frames(
+            &Tag::read_from_path(&tagged).expect("original tags"),
+            &[EditableTagField::Title, EditableTagField::Year],
+            false,
+        );
+        let result = apply_tags(
+            InboxTagApplyRequest {
+                album_path: path_text(&album).unwrap(),
+                fields: vec![
+                    EditableTagField::AlbumArtist,
+                    EditableTagField::Artist,
+                    EditableTagField::Album,
+                    EditableTagField::Title,
+                    EditableTagField::Year,
+                    EditableTagField::TrackNumber,
+                    EditableTagField::TrackTotal,
+                ],
+                tracks: [&untagged, &tagged]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, path)| InboxTrackPatch {
+                        path: path_text(path).unwrap(),
+                        values: EditableTagValues {
+                            album_artist: Some("Test Artist".to_owned()),
+                            artist: Some("Test Artist".to_owned()),
+                            album: Some("Test Album".to_owned()),
+                            title: Some(format!("Corrected {}", index + 1)),
+                            year: Some(2007),
+                            track_number: Some(index as u32 + 1),
+                            track_total: Some(2),
+                            ..Default::default()
+                        },
+                    })
+                    .collect(),
+                rename_after_apply: true,
+                remove_track_paths: Vec::new(),
+                artwork_token: None,
+            },
+            None,
+            &root.path().join("recovery"),
+        )
+        .expect("apply tags and rename mixed album");
+        assert_eq!(result.changed_tracks, 2);
+        assert_eq!(result.renamed_tracks, 2);
+        let renamed = root.path().join("Test Artist - Test Album (2007)");
+        assert_eq!(
+            fs::canonicalize(result.album_path).unwrap(),
+            fs::canonicalize(&renamed).unwrap()
+        );
+        assert!(!album.exists());
+        let first = renamed.join("01 - Test Artist - Corrected 1.mp3");
+        let second = renamed.join("02 - Test Artist - Corrected 2.mp3");
+        let mut first_file = File::open(&first).expect("renamed first track");
+        assert!(Tag::skip(&mut first_file).expect("skip new tag"));
+        let mut written_audio = Vec::new();
+        std::io::Read::read_to_end(&mut first_file, &mut written_audio).unwrap();
+        assert_eq!(written_audio, audio);
+        assert_eq!(audio_payload_hash(&second).unwrap(), tagged_audio);
+        let second_tag = Tag::read_from_path(&second).unwrap();
+        for frame in tagged_frames {
+            assert!(second_tag.frames().any(|actual| actual == &frame));
+        }
+        for (index, path) in [&first, &second].into_iter().enumerate() {
+            let tag = Tag::read_from_path(path).unwrap();
+            assert_eq!(
+                tag.title(),
+                Some(format!("Corrected {}", index + 1).as_str())
+            );
+            assert_eq!(read_editable_tag_values(&tag).unwrap().year, Some(2007));
+        }
+        assert_eq!(fs::read_dir(&renamed).unwrap().count(), 2);
     }
 
     #[test]
