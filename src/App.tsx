@@ -3213,7 +3213,7 @@ function App() {
     event.preventDefault();
   }
 
-  const explorerAlbumInspectorContext = activeNav === "Albums" && explorerView === "albums"
+  const explorerAlbumInspectorContext = artistPageName === null && explorerViewForDestination(activeNav) !== null && explorerView === "albums"
     ? resolveExplorerAlbumInspectorContext(explorerAlbums, selectedAlbumId, albumTracks, selectedTrack)
     : null;
   const inspectorTrack = explorerAlbumInspectorContext
@@ -3420,7 +3420,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3819,6 +3819,7 @@ function App() {
                   onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                   onDeleteTracks={deleteExplorerAlbumTracks}
                   onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
+                  onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
                   albumMoveBusy={albumMoveRequest !== null}
                   onSelectionChange={(selection) => {
                     setExplorerSelection(selection);

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as charts from "./charts";
 import * as library from "./library";
+import * as ingest from "./ingest";
 import { defaultExplorerFilters, saveViewPreferences } from "./viewPreferences";
 
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
@@ -13,6 +14,26 @@ async function navigate(name: string) {
   const primary = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(within(primary).getByRole("button", { name }));
 }
+
+it.each(["Universe", "Songs", "Albums", "Artists", "Tags"])("keeps Album details and removal available in the %s Albums view", async (destination) => {
+  const preview = vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockRejectedValue(new Error("Native preview required"));
+  render(<App />);
+  await screen.findByRole("region", { name: "Library overview" });
+  if (destination !== "Universe") await navigate(destination);
+  fireEvent.click(within(screen.getByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
+  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+  const tabs = within(screen.getByRole("tablist", { name: "Library details" }));
+  expect(tabs.getByRole("tab", { name: "Album" })).toBeEnabled();
+  fireEvent.click(tabs.getByRole("tab", { name: "Track" }));
+  fireEvent.click(tabs.getByRole("tab", { name: "Album" }));
+  expect(tabs.getByRole("tab", { name: "Album" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getAllByRole("button", { name: "Remove Album" }).length).toBeGreaterThan(0);
+  fireEvent.click(tabs.getByRole("tab", { name: "Track" }));
+  fireEvent.click(within(details).getByRole("button", { name: "Remove Album" }));
+  await waitFor(() => expect(preview).toHaveBeenCalledWith("preview-viva"));
+  expect(await screen.findByRole("alert", { name: "Remove Album: Viva la Vida" })).toHaveTextContent("Native preview required");
+});
 
 it.each([
   { title: "Viva la Vida", matchedAlbumTitle: null },

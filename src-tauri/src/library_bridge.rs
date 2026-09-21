@@ -528,7 +528,7 @@ pub async fn preview_library_remove_album(
             if album_id.trim().is_empty() {
                 return Err("Choose a library album to remove.".to_owned());
             }
-            let inbox_path = r"D:\MUSIC\_NOT\_ALBUMS";
+            let inbox_path = r"D:\MUSIC_NOT_ALBUMS";
             let result = invoke_bridge::<_, LibraryIntakePreview>(
                 &app,
                 "previewRemoveAlbum",
@@ -544,11 +544,26 @@ pub async fn preview_library_remove_album(
                     "Music Library returned an invalid album removal preview.".to_owned(),
                 ));
             }
+            validate_removed_album_destination(&result.category.destination_root)?;
             Ok(result)
         })
     })
     .await
     .map_err(|error| format!("The album removal preview worker stopped unexpectedly: {error}"))?
+}
+
+fn validate_removed_album_destination(destination: &str) -> Result<(), String> {
+    let normalized = destination.replace('/', "\\");
+    let normalized = normalized.strip_prefix(r"\\?\").unwrap_or(&normalized);
+    if !normalized
+        .trim_end_matches('\\')
+        .eq_ignore_ascii_case(r"D:\MUSIC_NOT_ALBUMS")
+    {
+        return Err(update_music_library_message(
+            "Album removal requires the D:\\MUSIC_NOT_ALBUMS destination. Update Music Library before removing albums.".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1503,6 +1518,25 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn removal_destination_requires_the_folder_outside_music() {
+        for destination in [
+            r"D:\MUSIC_NOT_ALBUMS",
+            r"d:\music_not_albums\",
+            r"\\?\D:\MUSIC_NOT_ALBUMS",
+            "D:/MUSIC_NOT_ALBUMS/",
+        ] {
+            assert!(validate_removed_album_destination(destination).is_ok());
+        }
+        for destination in [
+            r"D:\MUSIC\_NOT\_ALBUMS",
+            r"D:\MUSIC_NOT_ALBUMS-other",
+            r"D:\MUSIC_NOT_ALBUMS\Album",
+        ] {
+            assert!(validate_removed_album_destination(destination).is_err());
+        }
     }
 
     #[test]

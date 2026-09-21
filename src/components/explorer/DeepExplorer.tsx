@@ -139,6 +139,7 @@ export interface DeepExplorerProps {
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
+  onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
 }
@@ -741,6 +742,7 @@ function AlbumDetail({
   onLoveChange,
   onDeleteTracks,
   onRequestMoveToInbox,
+  onRequestRemoveAlbum,
   albumMoveBusy,
   onSelectionChange,
   trackChartRanks,
@@ -763,6 +765,7 @@ function AlbumDetail({
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
+  onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
   trackChartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
@@ -851,7 +854,10 @@ function AlbumDetail({
             <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}</span>
           </span>
         </div>
-        {onRequestMoveToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestMoveToInbox(album)}><FolderOutput aria-hidden="true" />Move to Inbox</button> : null}
+        {onRequestRemoveAlbum || onRequestMoveToInbox ? <div className="deep-explorer-album-actions">
+          {onRequestRemoveAlbum ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestRemoveAlbum(album)}><FolderOutput aria-hidden="true" />Remove Album</button> : null}
+          {onRequestMoveToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestMoveToInbox(album)}><FolderOutput aria-hidden="true" />Move to Inbox</button> : null}
+        </div> : null}
         <button type="button" className="deep-explorer-icon-button" aria-label="Close album details" onClick={onClose}>
           <X aria-hidden="true" />
         </button>
@@ -1022,6 +1028,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onLoveChange,
     onDeleteTracks,
     onRequestMoveToInbox,
+    onRequestRemoveAlbum,
     albumMoveBusy,
     onSelectionChange,
   } = props;
@@ -1234,6 +1241,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                   onRatingChange={onRatingChange}
                   onLoveChange={onLoveChange}
                   onDeleteTracks={onDeleteTracks}
+                  onRequestRemoveAlbum={onRequestRemoveAlbum}
                   onRequestMoveToInbox={onRequestMoveToInbox}
                   albumMoveBusy={albumMoveBusy}
                   onSelectionChange={onSelectionChange}

@@ -50,10 +50,10 @@ describe("album moves across navigation", () => {
   function removalPreview(canApply = true): ingest.LibraryIntakePreview {
     return {
       planId: "remove-plan", sessionId: 7, sourcePath: "H:\\Synthwave\\Night Geometry",
-      category: { id: "inbox", label: "Removed albums", destinationRoot: "D:\\MUSIC\\_NOT\\_ALBUMS" },
+      category: { id: "inbox", label: "Removed albums", destinationRoot: "D:\\MUSIC_NOT_ALBUMS" },
       albumCount: 1, trackCount: 12, canApply,
       delta: { addedTracks: 0, changedTracks: 0, removedTracks: 12, addedAlbums: 0, changedAlbums: 0, removedAlbums: 1 },
-      albums: [{ sourcePath: "H:\\Synthwave\\Night Geometry", destinationPath: "D:\\MUSIC\\_NOT\\_ALBUMS\\Night Geometry", artist: "Aurora Lines", album: "Night Geometry", year: "1985", trackCount: 12, action: "remove", existingTrackCount: 12, matchedTrackCount: 0, existingRatedTrackCount: 0, existingLovedTrackCount: 0 }],
+      albums: [{ sourcePath: "H:\\Synthwave\\Night Geometry", destinationPath: "D:\\MUSIC_NOT_ALBUMS\\Night Geometry", artist: "Aurora Lines", album: "Night Geometry", year: "1985", trackCount: 12, action: "remove", existingTrackCount: 12, matchedTrackCount: 0, existingRatedTrackCount: 0, existingLovedTrackCount: 0 }],
     };
   }
 

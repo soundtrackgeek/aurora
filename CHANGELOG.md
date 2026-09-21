@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.7] - 2026-09-21
+
+### Fixed
+
+- Enable the Album inspector in every library Albums view, including Universe, Songs, Artists, and Tags. Keep album actions available when switching between Track and Album details.
+- Add **Remove Album** beside **Move to Inbox** in expanded album details so removal does not depend on the sidebar tab.
+- Move removed albums to `D:\MUSIC_NOT_ALBUMS\`, outside the music library. Require Music Library's updated destination before accepting a removal preview.
+
 ## [0.26.6] - 2026-09-21
 
 ### Fixed
