@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.6] - 2026-09-21
+
+### Fixed
+
+- Make Charts **Open in Library** use an exact `album:"…"` search instead of searching all metadata. Prefer the existing matched catalog album's title so chart spelling and edition differences still find the library release; fall back to the chart title if that catalog title is unavailable.
+- Keep matched album IDs and titles together when aggregating period charts, and escape embedded quotes in generated queries. Align browser-preview quote handling with the native catalog parser.
+- Cover exact-title results, different catalog titles, unavailable matches, quoted titles, historical chart sources, period aggregation, and Charts-to-Albums navigation with regression tests.
+
 ## [0.26.5] - 2026-09-20
 
 ### Fixed

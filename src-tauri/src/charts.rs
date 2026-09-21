@@ -181,6 +181,7 @@ pub(crate) struct ChartEntry {
     pub(crate) title_key: String,
     pub(crate) matched_track_id: Option<String>,
     pub(crate) matched_album_id: Option<String>,
+    pub(crate) matched_album_title: Option<String>,
     pub(crate) artwork_album_id: Option<String>,
     pub(crate) rating: Option<f64>,
     pub(crate) loved: bool,
@@ -275,6 +276,7 @@ struct RawChartRow {
     appearances: Option<u32>,
     matched_track_id: Option<String>,
     matched_album_id: Option<String>,
+    matched_album_title: Option<String>,
     artwork_album_id: Option<String>,
     rating: Option<f64>,
     loved: bool,
@@ -408,6 +410,7 @@ fn map_raw_row(row: &Row<'_>) -> rusqlite::Result<RawChartRow> {
         appearances: row.get(9)?,
         matched_track_id: row.get::<_, Option<i64>>(10)?.map(|id| id.to_string()),
         matched_album_id: row.get(11)?,
+        matched_album_title: row.get(17)?,
         artwork_album_id: row.get(12)?,
         rating: row.get(13)?,
         loved: row.get::<_, i64>(14)? > 0,
@@ -452,7 +455,7 @@ fn weekly_select(kind: ChartKind, source: ChartSource, table: &str) -> String {
                      WHEN '2.5' THEN 50 WHEN '3' THEN 60 WHEN '3.0' THEN 60
                      WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS REAL) / 20.0,
-                   CASE WHEN t.love = 'L' THEN 1 ELSE 0 END, a.album_score, {date_column}
+                   CASE WHEN t.love = 'L' THEN 1 ELSE 0 END, a.album_score, {date_column}, NULL
             FROM {table} AS e
             LEFT JOIN tracks AS t ON t.id = e.matched_track_id
             LEFT JOIN albums AS a ON a.id = t.album_id
@@ -471,7 +474,7 @@ fn weekly_select(kind: ChartKind, source: ChartSource, table: &str) -> String {
                    e.matched_album_id,
                    CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
                    CASE WHEN COALESCE(a.loved_tracks, 0) > 0 THEN 1 ELSE 0 END,
-                   a.album_score, {date_column}
+                   a.album_score, {date_column}, a.album
             FROM {table} AS e
             LEFT JOIN albums AS a ON a.id = e.matched_album_id
             WHERE e.rank BETWEEN 1 AND 100
@@ -499,7 +502,7 @@ fn annual_select(kind: ChartKind, table: &str) -> String {
                      WHEN '3.5' THEN 70 WHEN '4' THEN 80 WHEN '4.0' THEN 80
                      WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS REAL) / 20.0,
                    CASE WHEN t.love = 'L' THEN 1 ELSE 0 END, a.album_score,
-                   CAST(e.year AS TEXT)
+                   CAST(e.year AS TEXT), NULL
             FROM {table} AS e
             LEFT JOIN tracks AS t ON t.id = e.matched_track_id
             LEFT JOIN albums AS a ON a.id = t.album_id
@@ -513,7 +516,7 @@ fn annual_select(kind: ChartKind, table: &str) -> String {
                    NULL, NULL, NULL, NULL, e.matched_album_id, e.matched_album_id,
                    CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
                    CASE WHEN COALESCE(a.loved_tracks, 0) > 0 THEN 1 ELSE 0 END,
-                   a.album_score, CAST(e.year AS TEXT)
+                   a.album_score, CAST(e.year AS TEXT), a.album
             FROM {table} AS e
             LEFT JOIN albums AS a ON a.id = e.matched_album_id
             WHERE e.rank BETWEEN 1 AND 100 AND e.year BETWEEN :from_year AND :to_year
@@ -544,7 +547,7 @@ fn score_select(year_basis: ChartYearBasis) -> String {
            NULL, NULL, NULL, NULL, a.id, a.id,
            CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
            CASE WHEN a.loved_tracks > 0 THEN 1 ELSE 0 END, a.album_score,
-           CAST({year_column} AS TEXT)
+           CAST({year_column} AS TEXT), a.album
     FROM ranked AS a
     ORDER BY a.score_rank
     "#,
@@ -689,6 +692,7 @@ fn entries_from_rows(
                     title_key: row.title_key,
                     matched_track_id: row.matched_track_id,
                     matched_album_id: row.matched_album_id,
+                    matched_album_title: row.matched_album_title,
                     artwork_album_id: row.artwork_album_id,
                     rating: row.rating,
                     loved: row.loved,
@@ -719,12 +723,14 @@ fn entries_from_rows(
         if row.rank < aggregate.representative.rank {
             let existing_match = aggregate.representative.matched_track_id.clone();
             let existing_album = aggregate.representative.matched_album_id.clone();
+            let existing_album_title = aggregate.representative.matched_album_title.clone();
             aggregate.representative = row.clone();
             if aggregate.representative.matched_track_id.is_none() {
                 aggregate.representative.matched_track_id = existing_match;
             }
             if aggregate.representative.matched_album_id.is_none() {
                 aggregate.representative.matched_album_id = existing_album;
+                aggregate.representative.matched_album_title = existing_album_title;
             }
         } else {
             if aggregate.representative.matched_track_id.is_none() {
@@ -732,6 +738,7 @@ fn entries_from_rows(
             }
             if aggregate.representative.matched_album_id.is_none() {
                 aggregate.representative.matched_album_id = row.matched_album_id.clone();
+                aggregate.representative.matched_album_title = row.matched_album_title.clone();
             }
             if aggregate.representative.artwork_album_id.is_none() {
                 aggregate.representative.artwork_album_id = row.artwork_album_id.clone();
@@ -766,6 +773,7 @@ fn entries_from_rows(
                 title_key: row.title_key,
                 matched_track_id: row.matched_track_id,
                 matched_album_id: row.matched_album_id,
+                matched_album_title: row.matched_album_title,
                 artwork_album_id: row.artwork_album_id,
                 rating: row.rating,
                 loved: row.loved,
@@ -1343,6 +1351,7 @@ mod tests {
             appearances: None,
             matched_track_id: None,
             matched_album_id: None,
+            matched_album_title: None,
             artwork_album_id: None,
             rating: None,
             loved: false,
@@ -1364,6 +1373,78 @@ mod tests {
         assert_eq!(entries[0].title, "One week champion");
         assert_eq!(entries[0].weeks_at_number_one, 1);
         assert_eq!(entries[1].title, "Consistent runner-up");
+    }
+
+    #[test]
+    fn period_charts_keep_matched_album_title_with_its_identity() {
+        let mut matched = row("Sports", 12, 1);
+        matched.matched_album_id = Some("sports-expanded".into());
+        matched.matched_album_title = Some("Sports (Expanded Edition)".into());
+        let unmatched = row("Sports", 1, 2);
+        let mut other_match = row("Sports", 2, 3);
+        other_match.matched_album_id = Some("sports-original".into());
+        other_match.matched_album_title = Some("Sports".into());
+        for rows in [
+            vec![matched.clone(), unmatched.clone()],
+            vec![unmatched, matched.clone()],
+            vec![other_match.clone(), matched.clone()],
+            vec![matched, other_match],
+        ] {
+            let expected = if rows
+                .iter()
+                .any(|row| row.matched_album_id.as_deref() == Some("sports-original"))
+            {
+                ("sports-original", "Sports")
+            } else {
+                ("sports-expanded", "Sports (Expanded Edition)")
+            };
+            let (entries, total) = entries_from_rows(rows, ChartScope::Period, 10);
+            assert_eq!(total, 1);
+            assert_eq!(entries[0].matched_album_id.as_deref(), Some(expected.0));
+            assert_eq!(entries[0].matched_album_title.as_deref(), Some(expected.1));
+        }
+    }
+
+    #[test]
+    fn historical_album_charts_expose_catalog_titles_without_rewriting_chart_titles() {
+        let connection = score_connection();
+        connection.execute_batch(r#"
+            INSERT INTO albums VALUES ('sports', 'Sports (Expanded Edition)', 'Huey Lewis and the News', 1983, 1999, NULL, NULL, NULL, NULL, 0);
+            CREATE TABLE official_uk_album_chart_entries (
+                id INTEGER, year INTEGER, week INTEGER, rank INTEGER, artist TEXT, title TEXT,
+                artist_key TEXT, title_key TEXT, last_week INTEGER, peak INTEGER, weeks_on_chart INTEGER,
+                chart_date TEXT, week_date TEXT, matched_album_id TEXT
+            );
+            INSERT INTO official_uk_album_chart_entries VALUES
+                (1, 1985, 1, 12, 'Huey Lewis And The News', 'Sports', 'huey lewis and the news', 'sports', 11, 1, 5, '1985-01-01', '1985-01-01', 'sports'),
+                (2, 1985, 1, 13, 'Missing', 'Missing Album', 'missing', 'missing album', NULL, NULL, NULL, '1985-01-01', '1985-01-01', 'deleted-album');
+            CREATE TABLE vg_lista_album_chart_entries AS SELECT * FROM official_uk_album_chart_entries;
+            CREATE TABLE billboard_chart_entries AS SELECT id, year, rank, artist, title AS album, artist_key, title_key AS album_key, matched_album_id FROM official_uk_album_chart_entries;
+        "#).unwrap();
+        for source in [
+            ChartSource::OfficialUk,
+            ChartSource::VgLista,
+            ChartSource::Billboard,
+        ] {
+            for scope in [ChartScope::Week, ChartScope::Period] {
+                let mut request = score_request(ChartYearBasis::Year);
+                request.source = source;
+                request.scope = scope;
+                let page = query_page(&connection, request).unwrap();
+                assert_eq!(page.entries[0].title, "Sports");
+                assert_eq!(page.entries[0].matched_album_id.as_deref(), Some("sports"));
+                assert_eq!(
+                    page.entries[0].matched_album_title.as_deref(),
+                    Some("Sports (Expanded Edition)")
+                );
+                assert_eq!(page.entries[1].matched_album_title, None);
+            }
+        }
+        let score_page = query_page(&connection, score_request(ChartYearBasis::Year)).unwrap();
+        assert_eq!(
+            score_page.entries[0].matched_album_title.as_deref(),
+            Some("Year Match")
+        );
     }
 
     #[test]

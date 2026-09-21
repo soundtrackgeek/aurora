@@ -27,6 +27,8 @@ Each distinct normalized artist/title pair receives a histogram of chart finishe
 
 Chart history remains useful when an item is absent from the library. A matched single exposes one catalog track; a matched album exposes its catalog album. The row, inspector, and chart Play action pass only validated catalog identities to Rust. Playback queues are capped at 100 tracks, and unmatched chart items are skipped without exposing filesystem paths to the WebView.
 
+For albums, **Open in Library** resets the library filters and searches the exact album field. Chart entries carry the matched catalog title alongside the matched album ID, including weekly, period, annual, and Album Score entries. The generated query uses that library title (with escaped quotes), falling back to the chart title if unavailable. Period aggregation preserves the title belonging to its chosen matched ID. The original chart title remains unchanged, and no fuzzy matching or catalog writes are added.
+
 ## State and authority
 
 The chart tables and Album Score are read-only catalog data. Track ratings and Love shown beside matched entries use the existing MP3-authoritative tag workflow and Aurora overlay reconciliation. Changing them never mutates a historical chart row or the shared Music Library database.

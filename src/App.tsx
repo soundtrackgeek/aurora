@@ -218,6 +218,7 @@ import {
 } from "./audio";
 import {
   loadCatalogChartRankings,
+  chartAlbumSearchQuery,
   loadChartEntryTrack,
   type CatalogChartRankings,
 } from "./charts";
@@ -2233,7 +2234,7 @@ function App() {
       if (chartSelection.kind === "albums") {
         setActiveNav("Albums");
         setExplorerView("albums");
-        setExplorerFilters({ ...defaultExplorerFilters, query: chartSelection.entry.title, sort: "yearDesc" });
+        setExplorerFilters({ ...defaultExplorerFilters, query: chartAlbumSearchQuery(chartSelection.entry), sort: "yearDesc" });
         return;
       }
       setActiveNav("Songs");
@@ -3419,7 +3420,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.5</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.6</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

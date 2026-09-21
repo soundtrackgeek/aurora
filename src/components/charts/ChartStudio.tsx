@@ -449,6 +449,7 @@ function scoreEntriesToChart(album: AlbumScoreEntry, index: number): ChartEntry 
     titleKey: album.title.toLocaleLowerCase(),
     matchedTrackId: null,
     matchedAlbumId: album.id,
+    matchedAlbumTitle: album.title,
     artworkAlbumId: album.id,
     rating: null,
     loved: false,

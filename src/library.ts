@@ -775,7 +775,7 @@ function exactLibrarySearchValue(value: string): string | null {
   if (!starts) return null;
   const exact = trimmed.slice(1, -1).trim();
   if (!exact) throw new Error("Exact search quotes cannot be empty.");
-  return exact;
+  return exact.replace(/""/g, '"');
 }
 
 function parseLibrarySearchYearRange(

@@ -78,10 +78,16 @@ export interface ChartEntry {
   titleKey: string;
   matchedTrackId: string | null;
   matchedAlbumId: string | null;
+  matchedAlbumTitle: string | null;
   artworkAlbumId: string | null;
   rating: number | null;
   loved: boolean;
   albumScore: number | null;
+}
+
+export function chartAlbumSearchQuery(entry: Pick<ChartEntry, "title" | "matchedAlbumTitle">): string {
+  const title = entry.matchedAlbumTitle?.trim() || entry.title.trim();
+  return `album:"${title.replace(/"/g, '""')}"`;
 }
 
 export interface AlbumScoreEntry {
@@ -176,6 +182,7 @@ const previewEntries: ChartEntry[] = previewTracks.map((track, index) => ({
   titleKey: track.title.toLocaleLowerCase(),
   matchedTrackId: track.id,
   matchedAlbumId: track.albumId,
+  matchedAlbumTitle: track.album,
   artworkAlbumId: track.albumId,
   rating: track.rating,
   loved: track.loved,
@@ -237,6 +244,7 @@ function scoreEntries(scores: readonly AlbumScoreEntry[]): ChartEntry[] {
     titleKey: album.title.toLocaleLowerCase(),
     matchedTrackId: null,
     matchedAlbumId: album.id,
+    matchedAlbumTitle: album.title,
     artworkAlbumId: album.id,
     rating: null,
     loved: index < 2,

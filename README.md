@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.6 opens chart albums in the library with an exact album search such as `album:"Sports"`. It uses the already-matched library album's stored title when that differs from the chart title, and falls back to the chart title when unavailable. All albums with that exact title are included; artist names and longer album titles no longer create unrelated results.
+
 Aurora 0.26.5 fixes Inbox **Apply & rename** for albums containing MP3s without ID3 tags. Audio verification now includes the entire original audio stream before adding the first tag, preventing false verification failures while retaining byte-for-byte safety checks. If a staged edit fails verification, the message identifies the track and the failed check.
 
 Aurora 0.26.4 makes Windows release verification more reliable by splitting Charts navigation coverage into focused source and period cases with scoped DOM queries. Tests still verify both Back and sidebar return paths, selected rows, exact scroll restoration, and reuse of loaded results under the normal five-second test limit.

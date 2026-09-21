@@ -1,17 +1,58 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as charts from "./charts";
 import * as library from "./library";
+import { defaultExplorerFilters, saveViewPreferences } from "./viewPreferences";
 
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
 async function navigate(name: string) {
   const primary = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(within(primary).getByRole("button", { name }));
 }
+
+it.each([
+  { title: "Viva la Vida", matchedAlbumTitle: null },
+  { title: "Viva La Vida Or Death And All His Friends", matchedAlbumTitle: "Viva la Vida" },
+])("opens chart album $title with an exact library album search", async ({ title, matchedAlbumTitle }) => {
+  const loadPage = charts.loadChartPage;
+  vi.spyOn(charts, "loadChartPage").mockImplementation(async (request) => {
+    const page = await loadPage(request);
+    if (request.kind !== "albums") return page;
+    return { ...page, entries: [{ ...page.entries[0], title, matchedAlbumId: "preview-viva", matchedAlbumTitle }], totalEntries: 1 };
+  });
+  const loadAlbums = vi.spyOn(library, "exploreAlbums");
+  saveViewPreferences({
+    activeNav: "Charts", explorerView: "albums",
+    explorerFilters: { ...defaultExplorerFilters, query: "genre:metal", genre: "Metal", artist: "Metallica" },
+    inspectorView: "album", tagSelectionKind: "album", selectedAlbumId: null,
+  });
+  render(<App />);
+  const main = within(screen.getByRole("main"));
+  const heading = await main.findByRole("heading", { name: "Official UK Singles Chart" });
+  const studio = within(heading.closest(".chart-studio") as HTMLElement);
+  fireEvent.click(studio.getByRole("tab", { name: "Albums" }));
+  const table = await studio.findByRole("table", { name: "Aurora Album Score · Summer 1985" });
+  fireEvent.click(within(table).getByRole("row", { name: new RegExp(title) }));
+  const openLibrary = await screen.findByRole("button", { name: "Open in Library" });
+  vi.useFakeTimers();
+  fireEvent.click(openLibrary);
+  expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue('album:"Viva la Vida"');
+  // Exercise the real debounce with a controlled clock instead of waiting two seconds.
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  vi.useRealTimers();
+  expect(loadAlbums).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'album:"Viva la Vida"', genre: undefined, artist: undefined }), expect.anything());
+  expect(await main.findByRole("button", { name: /^Viva la Vida cover/ })).toBeVisible();
+  expect(document.querySelector(".search-result-count")).toHaveTextContent(/^1 album$/);
+  const page = await loadAlbums.mock.results[loadAlbums.mock.results.length - 1].value;
+  expect(page.totalCount).toBe(1);
+  expect(page.items.map((album: library.AlbumSummary) => album.id)).toEqual(["preview-viva"]);
+  fireEvent.click(main.getByRole("button", { name: "Back to Charts" }));
+  expect(await main.findByRole("table", { name: "Aurora Album Score · Summer 1985" })).toBeVisible();
+});
 
 it.each([
   { method: "back", setting: "source", tab: "VG Lista", title: "VG Lista Singles Chart" },
