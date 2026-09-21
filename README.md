@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.8 fixes genre and other tag saves on MP3s containing private ID3 frames with non-ASCII owner bytes. Tag and Inbox writes preserve those bytes, retaining strict checks for unrelated metadata and audio changes and the existing batch rollback protection.
+
 Aurora 0.26.6 opens chart albums in the library with an exact album search such as `album:"Sports"`. It uses the already-matched library album's stored title when that differs from the chart title, and falls back to the chart title when unavailable. All albums with that exact title are included; artist names and longer album titles no longer create unrelated results.
 
 Aurora 0.26.5 fixes Inbox **Apply & rename** for albums containing MP3s without ID3 tags. Audio verification now includes the entire original audio stream before adding the first tag, preventing false verification failures while retaining byte-for-byte safety checks. If a staged edit fails verification, the message identifies the track and the failed check.

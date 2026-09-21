@@ -771,7 +771,9 @@ pub(crate) fn apply_tags(
                     .clone(),
             );
         }
-        if let Err(error) = tag.write_to_path(&temporary, version) {
+        if let Err(error) =
+            crate::tagging::write_tag_preserving_private_frames(&tag, &temporary, version)
+        {
             let _ = fs::remove_file(&temporary);
             cleanup_prepared(&prepared);
             return Err(format!("Could not write staged Inbox tags: {error}"));
@@ -940,7 +942,9 @@ pub(crate) fn embed_album_cover(
                 .map_err(|error| format!("Could not prepare the embedded cover update: {error}"))?;
             tag.remove_picture_by_type(PictureType::CoverFront);
             tag.add_frame(cover.picture.clone());
-            if let Err(error) = tag.write_to_path(&temporary, version) {
+            if let Err(error) =
+                crate::tagging::write_tag_preserving_private_frames(&tag, &temporary, version)
+            {
                 let _ = fs::remove_file(&temporary);
                 return Err(format!(
                     "Could not write the staged embedded cover: {error}"

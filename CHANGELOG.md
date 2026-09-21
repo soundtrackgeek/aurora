@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.8] - 2026-09-21
+
+### Fixed
+
+- Preserve Latin-1 owner bytes in private ID3 frames when saving tags or Inbox edits. The ID3 library previously re-encoded those bytes as UTF-8, causing the preservation check to reject genre changes on albums such as Clay Aiken's *Merry Christmas With Love*.
+- Keep strict metadata/audio verification and rollback protection. Add ID3v2.3 and ID3v2.4 regression coverage for multiple private frames, non-ASCII owners, binary data, and rejection of unintended private-data changes.
+
 ## [0.26.7] - 2026-09-21
 
 ### Fixed
