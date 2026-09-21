@@ -957,7 +957,7 @@ impl TagService {
                         .clone(),
                 );
             }
-            write_tag_preserving_private_frames(&item.tag, &temp_path, item.version)
+            write_tag_preserving_frames(&item.tag, &temp_path, item.version)
                 .map_err(|error| format!("Could not write the MP3 working copy: {error}"))?;
             File::options()
                 .read(true)
@@ -1293,7 +1293,7 @@ impl TagService {
             })?;
             timing.stage("write_working_tags");
             apply_tag_changes(&mut tag, version, &current, &request.desired)?;
-            write_tag_preserving_private_frames(&tag, &temp_path, version)
+            write_tag_preserving_frames(&tag, &temp_path, version)
                 .map_err(|error| format!("Could not write the MP3 working copy: {error}"))?;
             timing.stage("flush_working_file");
             File::options()
@@ -2443,43 +2443,7 @@ fn validated_pending_overlay_path(
     Ok(audio_path)
 }
 
-pub(crate) fn write_tag_preserving_private_frames(
-    tag: &Tag,
-    path: &Path,
-    version: Version,
-) -> Result<(), String> {
-    // rust-id3 1.17 reads PRIV owners as Latin-1 but writes them as UTF-8.
-    // Encode that frame's payload explicitly; verification still compares the
-    // decoded original and written frames, including every private data byte.
-    let frames = tag
-        .frames()
-        .map(|frame| {
-            let Content::Private(private) = frame.content() else {
-                return Ok(frame.clone());
-            };
-            let mut data = private
-                .owner_identifier
-                .chars()
-                .map(|character| {
-                    u8::try_from(u32::from(character))
-                        .map_err(|_| "The private ID3 frame owner is not Latin-1.".to_owned())
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            data.push(0);
-            data.extend_from_slice(&private.private_data);
-            let mut encoded =
-                Frame::with_content(frame.id(), Content::Unknown(Unknown { data, version }));
-            encoded.set_tag_alter_preservation(frame.tag_alter_preservation());
-            encoded.set_file_alter_preservation(frame.file_alter_preservation());
-            Ok(encoded)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    // Collect directly rather than add_frame: multiple private owners must survive.
-    let encoded: Tag = frames.into_iter().collect();
-    encoded
-        .write_to_path(path, version)
-        .map_err(|error| error.to_string())
-}
+pub(crate) use crate::id3_write::write_tag_preserving_frames;
 
 pub(crate) fn read_tag_for_write(path: &Path) -> Result<(Tag, Version), String> {
     let tag = no_tag_ok(Tag::read_from_path(path))
@@ -3182,15 +3146,22 @@ mod tests {
     use std::io::{Cursor, Write};
 
     #[test]
-    fn genre_edit_preserves_latin1_private_owners_and_rejects_private_data_changes() {
+    fn genre_edit_preserves_latin1_frames_and_rejects_unselected_changes() {
         for version in [Version::Id3v23, Version::Id3v24] {
             let root = tempfile::tempdir().expect("temporary fixture");
             let path = root.path().join("private-owners.mp3");
             write_fixture(&path, version);
             let (mut tag, _) = read_tag_for_write(&path).unwrap();
-            // Raw PRIV bytes from the failing album: owner 01 FF FE, no data.
-            // Also cover another non-ASCII owner with binary data and an ASCII owner.
+            // Raw COMM payload from Air Supply's Silent Night, plus the PRIV
+            // owner from Clay Aiken and other private owners/binary data.
             tag.extend([
+                Frame::with_content(
+                    "COMM",
+                    Content::Unknown(Unknown {
+                        data: b"\x01\xff\xfe4\x002\x00\x00\x00\xff\xfe4\x002\x00TPE".to_vec(),
+                        version,
+                    }),
+                ),
                 Frame::with_content(
                     "PRIV",
                     Content::Unknown(Unknown {
@@ -3218,7 +3189,7 @@ mod tests {
             let mut expected = read_editable_tag_values(&tag).unwrap();
             expected.genre = Some("Christmas Music".into());
             apply_editor_tag_changes(&mut tag, version, &fields, &expected).unwrap();
-            write_tag_preserving_private_frames(&tag, &path, version).unwrap();
+            write_tag_preserving_frames(&tag, &path, version).unwrap();
             verify_editor_written_file(&path, &expected, &fields, false, None, &preserved, &hash)
                 .unwrap();
             let (mut written, _) = read_tag_for_write(&path).unwrap();
@@ -3227,7 +3198,20 @@ mod tests {
                 owner_identifier: "other-player".into(),
                 private_data: vec![43, 0, 255],
             });
-            write_tag_preserving_private_frames(&written, &path, version).unwrap();
+            write_tag_preserving_frames(&written, &path, version).unwrap();
+            assert_eq!(
+                verify_editor_written_file(
+                    &path, &expected, &fields, false, None, &preserved, &hash
+                )
+                .unwrap_err(),
+                "an unselected ID3 frame changed"
+            );
+            tag.add_frame(id3::frame::Comment {
+                lang: "ÿþ4".into(),
+                description: String::new(),
+                text: "changed".into(),
+            });
+            write_tag_preserving_frames(&tag, &path, version).unwrap();
             assert_eq!(
                 verify_editor_written_file(
                     &path, &expected, &fields, false, None, &preserved, &hash

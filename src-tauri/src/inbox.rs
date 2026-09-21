@@ -771,9 +771,7 @@ pub(crate) fn apply_tags(
                     .clone(),
             );
         }
-        if let Err(error) =
-            crate::tagging::write_tag_preserving_private_frames(&tag, &temporary, version)
-        {
+        if let Err(error) = crate::tagging::write_tag_preserving_frames(&tag, &temporary, version) {
             let _ = fs::remove_file(&temporary);
             cleanup_prepared(&prepared);
             return Err(format!("Could not write staged Inbox tags: {error}"));
@@ -943,7 +941,7 @@ pub(crate) fn embed_album_cover(
             tag.remove_picture_by_type(PictureType::CoverFront);
             tag.add_frame(cover.picture.clone());
             if let Err(error) =
-                crate::tagging::write_tag_preserving_private_frames(&tag, &temporary, version)
+                crate::tagging::write_tag_preserving_frames(&tag, &temporary, version)
             {
                 let _ = fs::remove_file(&temporary);
                 return Err(format!(

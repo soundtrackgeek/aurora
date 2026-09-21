@@ -12,6 +12,7 @@ mod fanart;
 mod file_observations;
 mod genres;
 mod history;
+mod id3_write;
 mod inbox;
 mod laptop_mode;
 mod lastfm;

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.9] - 2026-09-21
+
+### Fixed
+
+- Fix genre-save rollback on Air Supply's *The Christmas Album*: the legacy comment in "Silent Night" contains non-ASCII language bytes that the ID3 library incorrectly writes as UTF-8.
+- Generalize the existing private-frame workaround to affected Latin-1 fields in comments, unsynchronized/synchronized lyrics, identifiers, extended links, objects, and artwork, including chapter containers. Share the writer across tag-editor and Inbox saves without weakening metadata/audio verification or rollback.
+- Add raw-byte fixtures for ID3v2.2/v2.3/v2.4, repeated writes, nested comments, the exact failing comment payload, and rejection of unintended comment/private-data changes.
+
 ## [0.26.8] - 2026-09-21
 
 ### Fixed

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.9 extends safe ID3 writes to preserve non-ASCII Latin-1 fields in comments, lyrics, private frames, identifiers, links, and embedded objects/artwork, including nested chapter metadata. This fixes genre-save rollback on Air Supply's *The Christmas Album* and other MP3s with the same encoding problem. Unrelated metadata and audio verification remain strict.
+
 Aurora 0.26.8 fixes genre and other tag saves on MP3s containing private ID3 frames with non-ASCII owner bytes. Tag and Inbox writes preserve those bytes, retaining strict checks for unrelated metadata and audio changes and the existing batch rollback protection.
 
 Aurora 0.26.6 opens chart albums in the library with an exact album search such as `album:"Sports"`. It uses the already-matched library album's stored title when that differs from the chart title, and falls back to the chart title when unavailable. All albums with that exact title are included; artist names and longer album titles no longer create unrelated results.
