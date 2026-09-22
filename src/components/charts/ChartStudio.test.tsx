@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChartStudio } from "./ChartStudio";
+import { ChartInspector, ChartStudio, type ChartSelectionContext } from "./ChartStudio";
 import * as charts from "../../charts";
+import * as library from "../../library";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
 
@@ -15,6 +16,25 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("shows rated-track completeness from the selected library album", async () => {
+    const album = (await library.exploreAlbums({})).items[0];
+    const loadAlbum = vi.spyOn(library, "loadAlbumDetail").mockResolvedValue({
+      album: { ...album, ratedTracks: 3, totalTracks: 4 },
+      tracks: [], tracksTruncated: false, popularity: { tracks: [] },
+    });
+    const callbacks = renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    await waitFor(() => expect(callbacks.onSelectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ albumRatingProgress: expect.objectContaining({ ratedTracks: 3, totalTracks: 4 }) }), undefined,
+    ));
+    const selection = callbacks.onSelectionChange.mock.calls[callbacks.onSelectionChange.mock.calls.length - 1][0] as ChartSelectionContext;
+    expect(loadAlbum).toHaveBeenCalledWith(selection.entry.matchedAlbumId, { localOnly: true });
+    render(<ChartInspector selection={selection} track={null} busy={false} onPlay={vi.fn()} onOpenLibrary={vi.fn()} onOpenArtistAlbums={vi.fn()} onRatingChange={vi.fn()} onLoveChange={vi.fn()} />);
+    expect(screen.getByText("Rating Completeness")).toBeVisible();
+    expect(screen.getByText("75% (3/4)")).toBeVisible();
+  });
+
   it("restores the applied chart and selected entry after a fresh mount", async () => {
     const load = vi.spyOn(charts, "loadChartPage");
     renderStudio();

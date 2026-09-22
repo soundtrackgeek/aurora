@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.11] - 2026-09-22
+
+### Added
+
+- Show Rating Completeness in Charts album details as a percentage and rated/total track count from the matched local album.
+
 ## [0.26.10] - 2026-09-22
 
 ### Fixed

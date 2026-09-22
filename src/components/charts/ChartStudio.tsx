@@ -32,7 +32,7 @@ import {
   type ChartSource,
   type ChartYearBasis,
 } from "../../charts";
-import type { Track } from "../../library";
+import { loadAlbumDetail, type Track } from "../../library";
 import type { LoveState } from "../../tags";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
@@ -51,6 +51,7 @@ export interface ChartSelectionContext {
   detail: ChartItemDetail | null;
   pageRequest: ChartPageRequest;
   chartTitle: string;
+  albumRatingProgress?: { ratedTracks: number; totalTracks: number } | null;
 }
 
 export interface ChartSelectionOptions {
@@ -208,13 +209,16 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     const trackRequest = nextPage.request.kind === "singles" && entry.matchedTrackId
       ? loadChartEntryTrack(entry.matchedTrackId)
       : Promise.resolve(null);
-    void Promise.allSettled([detailRequest, trackRequest]).then(([nextDetail, nextTrack]) => {
+    const albumRequest = nextPage.request.kind === "albums" && entry.matchedAlbumId
+      ? loadAlbumDetail(entry.matchedAlbumId, { localOnly: true })
+      : Promise.resolve(null);
+    void Promise.allSettled([detailRequest, trackRequest, albumRequest]).then(([nextDetail, nextTrack, nextAlbum]) => {
       if (selectionId !== selectionIdRef.current) return;
       selectionPendingRef.current = false;
       const value = nextDetail.status === "fulfilled" ? nextDetail.value : null;
       transitionContent(() => {
         setDetail((current) => selectionId === selectionIdRef.current ? value : current);
-        callbacksRef.current.onSelectionChange({ ...context, detail: value }, options);
+        callbacksRef.current.onSelectionChange({ ...context, detail: value, albumRatingProgress: nextAlbum.status === "fulfilled" ? nextAlbum.value?.album ?? null : null }, options);
         if (nextTrack.status === "fulfilled" && nextTrack.value) {
           callbacksRef.current.onSelectTrack(nextTrack.value, options);
         }
@@ -482,7 +486,7 @@ export function ChartInspector({
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, state: LoveState) => void;
 }) {
-  const { entry, detail, pageRequest } = selection;
+  const { entry, detail, pageRequest, albumRatingProgress } = selection;
   return <div className="chart-inspector">
     <Artwork track={track ?? entryAsTrack(entry)} size="large" decorative={false} />
     <div className="chart-inspector__heading"><span>#{entry.position}</span><div><h2>{entry.title}</h2><p><ArtistSmartLink artist={entry.artist} onOpen={onOpenArtistAlbums} /></p></div>{track?.loved || entry.loved ? <Heart aria-label="Loved" /> : null}</div>
@@ -493,6 +497,7 @@ export function ChartInspector({
       <div><dt>{pageRequest.scope === "week" ? "Weeks on chart" : "Appearances"}</dt><dd>{entry.appearances}</dd></div>
       {pageRequest.scope === "period" ? <><div><dt>Weeks at #1</dt><dd>{entry.weeksAtNumberOne}</dd></div><div><dt>Total points</dt><dd>{formatCount(entry.totalPoints)}</dd></div></> : null}
       {entry.albumScore !== null ? <div><dt>Album Score</dt><dd>{entry.albumScore.toFixed(1)}</dd></div> : null}
+      {selection.kind === "albums" ? <div><dt>Rating Completeness</dt><dd>{albumRatingProgress ? `${albumRatingProgress.totalTracks > 0 ? Math.round(albumRatingProgress.ratedTracks / albumRatingProgress.totalTracks * 100) : 0}% (${formatCount(albumRatingProgress.ratedTracks)}/${formatCount(albumRatingProgress.totalTracks)})` : "—"}</dd></div> : null}
     </dl>
     <section className="chart-inspector__history"><header><h3>Source history</h3><span>{pageRequest.period.label}</span></header>{detail?.sourceRanks.map((rank) => <div key={rank.source}><span><i />{rank.label}{rank.annualOnly ? <small> annual</small> : null}</span><strong>{rank.bestRank === null ? "—" : `#${rank.bestRank}`}</strong></div>) ?? <p><LoaderCircle className="is-spinning" aria-hidden="true" /> Loading matches…</p>}</section>
     <div className="chart-inspector__library">{entry.matchedTrackId || entry.matchedAlbumId ? <><CheckCircle2 aria-hidden="true" /><span><strong>In your library</strong><small>Matched to local catalog</small></span></> : <><Library aria-hidden="true" /><span><strong>Not matched</strong><small>Chart history is still available</small></span></>}</div>
