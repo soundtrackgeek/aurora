@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.26.9 extends safe ID3 writes to preserve non-ASCII Latin-1 fields in comments, lyrics, private frames, identifiers, links, and embedded objects/artwork, including nested chapter metadata. This fixes genre-save rollback on Air Supply's *The Christmas Album* and other MP3s with the same encoding problem. Unrelated metadata and audio verification remain strict.
+Aurora 0.26.10 remembers the Charts type, source, period/week, applied artist filters, year basis, selected entry, and scroll position across app restarts. Charts controls and results adapt to the available panel width, including when the inspector is open.
+
+Aurora also extends safe ID3 writes to preserve non-ASCII Latin-1 fields in comments, lyrics, private frames, identifiers, links, and embedded objects/artwork, including nested chapter metadata. This fixes genre-save rollback on Air Supply's *The Christmas Album* and other MP3s with the same encoding problem. Unrelated metadata and audio verification remain strict.
 
 Aurora 0.26.8 fixes genre and other tag saves on MP3s containing private ID3 frames with non-ASCII owner bytes. Tag and Inbox writes preserve those bytes, retaining strict checks for unrelated metadata and audio changes and the existing batch rollback protection.
 

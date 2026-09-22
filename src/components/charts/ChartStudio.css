@@ -55,3 +55,37 @@
 .chart-inspector .metadata-list dt { flex: 0 0 85px; }
 .chart-inspector .metadata-list dd { display: block; min-width: 0; text-align: right; overflow-wrap: anywhere; }
 .chart-period-note button { margin-left: 6px; padding: 4px 8px; border: 1px solid #664479; border-radius: 5px; background: #251730; color: #dfb7f3; cursor: pointer; }
+
+/* Respond to the usable Charts panel, including both resizable sidebars. */
+.chart-studio { container: charts / inline-size; grid-template-columns: minmax(0, 1fr); }
+.chart-studio > *, .chart-ranking > header > div > div { min-width: 0; }
+.chart-custom-row { display: flex; flex-wrap: wrap; }
+.chart-custom-row label { flex: 1 1 90px; min-width: 80px; }
+.chart-custom-row > strong { flex-basis: 100%; }
+.chart-sources { flex-wrap: wrap; overflow: visible; }
+.chart-sources button { flex: 1 1 110px; white-space: normal; }
+.chart-ranking > header { flex-wrap: wrap; padding-block: 10px; }
+.chart-ranking > header > div { flex: 1 1 220px; }
+.chart-ranking header .button { flex-shrink: 0; }
+.chart-table { min-width: 0; }
+.chart-table__head, .chart-row { grid-template-columns: 32px minmax(0, 1fr) 46px 34px 34px 52px 74px; }
+.chart-score-shelf > div { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); }
+.chart-score-shelf > div > button:nth-child(n) { display: grid; }
+@container charts (max-width: 1000px) {
+  .chart-source-row { grid-template-columns: minmax(0, 1fr); }
+  .chart-scope { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chart-comparison { grid-template-columns: minmax(0, 1fr); }
+  .chart-comparison__sources { grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); }
+  .chart-score-shelf > header { flex-wrap: wrap; }
+}
+@container charts (max-width: 600px) {
+  .chart-studio__header { flex-direction: column; align-items: stretch; }
+  .chart-kind { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chart-calendar { grid-template-columns: 26px minmax(0, 1fr) 26px; }
+  .chart-calendar__year { grid-column: 2; grid-row: 1; display: grid; }
+  .chart-calendar__weeks { grid-column: 2; grid-row: 2; height: auto; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .chart-calendar__weeks button:nth-child(n) { display: flex; }
+  .chart-calendar > button:last-child { grid-column: 3; grid-row: 1; }
+  .chart-table__head, .chart-row { column-gap: 3px; padding-inline: 4px; grid-template-columns: 26px minmax(0, 1fr) 34px 28px 28px 45px 64px; }
+  .chart-row__actions { gap: 3px; }
+}

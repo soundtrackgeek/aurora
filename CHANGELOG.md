@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.10] - 2026-09-22
+
+### Fixed
+
+- Restore Charts type, source, applied period/week and artist filters, year basis, and selected entry after restarting Aurora, alongside the existing saved scroll position. Invalid or unavailable browser storage falls back safely.
+- Fit Charts controls, calendar, source tabs, ranking columns, and score cards to the actual panel width so the inspector no longer causes right-edge clipping.
+
 ## [0.26.9] - 2026-09-21
 
 ### Fixed

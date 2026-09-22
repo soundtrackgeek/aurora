@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartStudio } from "./ChartStudio";
 import * as charts from "../../charts";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
 
 function renderStudio() {
   const onSelectionChange = vi.fn();
@@ -15,6 +15,30 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("restores the applied chart and selected entry after a fresh mount", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    await screen.findByRole("heading", { name: "Aurora Album Score · Summer 1985" });
+    fireEvent.click(screen.getByRole("tab", { name: "VG Lista" }));
+    await screen.findByRole("heading", { name: "VG Lista Albums · Summer 1985" });
+    fireEvent.click(screen.getByRole("button", { name: "1985 full year" }));
+    await screen.findByRole("heading", { name: "VG Lista Albums · 1985 year chart" });
+    const rows = screen.getAllByRole("row");
+    fireEvent.click(rows[2]);
+    const title = rows[2].querySelector(".chart-row__identity strong")!.textContent!;
+    const savedRequest = load.mock.calls[load.mock.calls.length - 1][0];
+    cleanup();
+    load.mockClear();
+    const callbacks = renderStudio();
+    await screen.findByRole("heading", { name: "VG Lista Albums · 1985 year chart" });
+    expect(load).toHaveBeenCalledWith(savedRequest);
+    expect(screen.getByRole("tab", { name: "Albums" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("row", { name: new RegExp(title) })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(callbacks.onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ entry: expect.objectContaining({ title }) }), undefined));
+  });
+
   it("retains the previous chart during rapid period changes and only displays the newest result", async () => {
     const load = vi.spyOn(charts, "loadChartPage");
     renderStudio();

@@ -41,6 +41,7 @@ import { ContentTransition } from "../ContentTransition";
 import { transitionContent } from "../../contentTransition";
 import "./ChartStudio.css";
 import { ChartPeriodControls } from "./ChartPeriodControls";
+import { loadChartPreferences, saveChartPreferences } from "../../chartPreferences";
 
 export type ChartLoadState = "loading" | "ready" | "error";
 
@@ -158,7 +159,8 @@ function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: str
 }
 
 export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue, onOpenArtistAlbums }: ChartStudioProps) {
-  const [request, setRequest] = useState(initialRequest);
+  const [preferences] = useState(() => loadChartPreferences(initialRequest));
+  const [request, setRequest] = useState(preferences.request);
   const [page, setPage] = useState<ChartPage | null>(null);
   const [loadedRequest, setLoadedRequest] = useState<ChartPageRequest | null>(null);
   const [loadState, setLoadState] = useState<ChartLoadState>("loading");
@@ -177,6 +179,10 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const callbacksRef = useRef({ onSelectionChange, onSelectTrack, onPlayQueue });
   const [reloadToken, setReloadToken] = useState(0);
   const annualSource = request.source === "billboard" || request.source === "auroraScore";
+
+  useEffect(() => {
+    saveChartPreferences(request, selectedEntry ?? preferences.selection);
+  }, [request, selectedEntry, preferences.selection]);
 
   useEffect(() => {
     callbacksRef.current = { onSelectionChange, onSelectTrack, onPlayQueue };
@@ -236,7 +242,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       void loadChartPage(request)
         .then((nextPage) => {
           if (cancelled || loadId !== requestIdRef.current) return;
-          const previousSelection = selectedEntryRef.current;
+          const previousSelection = selectedEntryRef.current ?? preferences.selection;
           const nextSelection = previousSelection
             ? nextPage.entries.find((entry) => (
               entry.artistKey === previousSelection.artistKey
@@ -282,7 +288,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       selectionIdRef.current += 1;
       window.clearTimeout(timer);
     };
-  }, [catalogRevision, reloadToken, request, selectEntry]);
+  }, [catalogRevision, reloadToken, request, selectEntry, preferences.selection]);
 
   const visibleWeeks = (() => {
     if (annualSource || !page?.weeks.length) return [];
