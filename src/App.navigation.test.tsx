@@ -174,7 +174,7 @@ it("retraces Artist to album drilldowns with the Artist tab preserved", async ()
   expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
 
-it.each(["Inbox", "Observatory", "Songs", "Albums", "Artists", "Publishers", "Genres", "Years", "Ratings", "Tags", "Charts", "History"])("provides a working Back action on %s", async (page) => {
+it.each(["Inbox", "Observatory", "Songs", "Albums", "Artists", "Publishers", "Genres", "Years", "Ratings", "Tags", "Charts", "Playlists", "History"])("provides a working Back action on %s", async (page) => {
   render(<App />);
   await screen.findByRole("region", { name: "Library overview" });
   expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();

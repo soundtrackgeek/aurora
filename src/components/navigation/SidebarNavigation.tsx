@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LeftSidebarMode } from "../../layoutPreferences";
+import type { SavedPlaylistSummary } from "../../playlists";
 
 export type SidebarDestination =
   | "Universe"
@@ -34,16 +35,11 @@ export type SidebarDestination =
   | "Ratings"
   | "Tags"
   | "Charts"
+  | "Playlists"
   | "History";
 
 type NavigationItem = {
   label: SidebarDestination;
-  icon: LucideIcon;
-};
-
-type PreviewPlaylist = {
-  label: string;
-  description: string;
   icon: LucideIcon;
 };
 
@@ -52,9 +48,14 @@ type SidebarNavigationProps = {
   sidebarMode: LeftSidebarMode;
   libraryExpanded: boolean;
   playlistsExpanded: boolean;
+  playlists: SavedPlaylistSummary[];
+  selectedPlaylistId: number | null;
+  playlistsLoading: boolean;
+  playlistsError: string | null;
   onLibraryExpandedChange: (expanded: boolean) => void;
   onPlaylistsExpandedChange: (expanded: boolean) => void;
   onNavigate: (destination: SidebarDestination) => void;
+  onSelectPlaylist: (id: number) => void;
 };
 
 const primaryItems: readonly NavigationItem[] = [
@@ -74,12 +75,6 @@ const libraryItems: readonly NavigationItem[] = [
   { label: "Tags", icon: Tags },
 ];
 
-const previewPlaylists: readonly PreviewPlaylist[] = [
-  { label: "5 Star Collection", description: "rating view", icon: Star },
-  { label: "Night Drive", description: "smart playlist", icon: Music2 },
-  { label: "Unplayed", description: "listening queue", icon: Disc3 },
-];
-
 function destinationButtonClass(active: boolean, child = false) {
   return `${active ? "is-active" : ""}${child ? " nav-item--child" : ""}`.trim() || undefined;
 }
@@ -89,9 +84,14 @@ export function SidebarNavigation({
   sidebarMode,
   libraryExpanded,
   playlistsExpanded,
+  playlists,
+  selectedPlaylistId,
+  playlistsLoading,
+  playlistsError,
   onLibraryExpandedChange,
   onPlaylistsExpandedChange,
   onNavigate,
+  onSelectPlaylist,
 }: SidebarNavigationProps) {
   const [openFlyout, setOpenFlyout] = useState<"library" | "playlists" | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
@@ -137,6 +137,12 @@ export function SidebarNavigation({
       return;
     }
     onPlaylistsExpandedChange(!playlistsExpanded);
+    navigate("Playlists");
+  }
+
+  function selectPlaylist(id: number) {
+    setOpenFlyout(null);
+    onSelectPlaylist(id);
   }
 
   return (
@@ -212,7 +218,7 @@ export function SidebarNavigation({
       <div className="nav-group nav-group--playlists">
         <button
           type="button"
-          className="nav-group__trigger"
+          className={`nav-group__trigger${activeDestination === "Playlists" ? " is-current-group" : ""}`}
           onClick={togglePlaylists}
           aria-expanded={sidebarMode === "icons" ? openFlyout === "playlists" : playlistsExpanded}
           aria-controls={sidebarMode === "icons" ? "playlists-flyout" : "playlist-navigation"}
@@ -226,25 +232,31 @@ export function SidebarNavigation({
 
         {sidebarMode !== "icons" && playlistsExpanded && (
           <div id="playlist-navigation" className="playlists nav-group__children">
-            {previewPlaylists.map(({ label, description, icon: Icon }) => (
-              <button type="button" key={label} disabled>
-                <Icon aria-hidden="true" />
-                <span><strong>{label}</strong><small>{description}</small></span>
+            {playlists.map((playlist) => (
+              <button type="button" key={playlist.id} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} aria-current={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "page" : undefined} onClick={() => selectPlaylist(playlist.id)}>
+                <ListMusic aria-hidden="true" />
+                <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>
             ))}
+            {playlistsLoading && playlists.length === 0 && <small className="nav-flyout__note">Loading playlists…</small>}
+            {playlistsError && <small className="nav-flyout__note" role="alert">Could not load playlists.</small>}
+            {!playlistsLoading && !playlistsError && playlists.length === 0 && <small className="nav-flyout__note">No saved playlists</small>}
           </div>
         )}
 
         {sidebarMode === "icons" && openFlyout === "playlists" && (
-          <div id="playlists-flyout" className="nav-flyout nav-flyout--playlists" aria-label="Pinned playlists">
-            <p><ListMusic aria-hidden="true" /> Pinned playlists</p>
-            {previewPlaylists.map(({ label, description, icon: Icon }) => (
-              <button type="button" key={label} disabled>
-                <Icon aria-hidden="true" />
-                <span><strong>{label}</strong><small>{description}</small></span>
+          <div id="playlists-flyout" className="nav-flyout nav-flyout--playlists" aria-label="Music Library playlists">
+            <p><ListMusic aria-hidden="true" /> Music Library playlists</p>
+            <button type="button" onClick={() => navigate("Playlists")}>View all playlists</button>
+            {playlists.map((playlist) => (
+              <button type="button" key={playlist.id} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} onClick={() => selectPlaylist(playlist.id)}>
+                <ListMusic aria-hidden="true" />
+                <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>
             ))}
-            <small className="nav-flyout__note">Playlist management is coming in a focused release.</small>
+            {playlistsLoading && playlists.length === 0 && <small className="nav-flyout__note">Loading playlists…</small>}
+            {playlistsError && <small className="nav-flyout__note" role="alert">Could not load playlists.</small>}
+            {!playlistsLoading && !playlistsError && playlists.length === 0 && <small className="nav-flyout__note">No saved playlists</small>}
           </div>
         )}
       </div>

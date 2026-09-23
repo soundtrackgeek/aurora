@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.12] - 2026-09-23
+
+### Added
+
+- Replace the playlist sidebar previews with saved Music Library playlists from the read-only catalog. Open and refresh playlists in Aurora, see their songs in saved order, and play from any available song.
+- Resolve saved playlist files against current catalog records, report unavailable entries, and refill the bounded playback queue as long playlists advance.
+
 ## [0.26.11] - 2026-09-22
 
 ### Added

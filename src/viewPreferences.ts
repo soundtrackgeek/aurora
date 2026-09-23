@@ -96,6 +96,7 @@ const destinations = new Set<SidebarDestination>([
   "Ratings",
   "Tags",
   "Charts",
+  "Playlists",
   "History",
 ]);
 const explorerViews = new Set<ExplorerView>(["tracks", "albums", "artists"]);

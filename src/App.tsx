@@ -79,6 +79,8 @@ import {
   type SidebarDestination,
 } from "./components/navigation/SidebarNavigation";
 import { PlayerBar } from "./components/PlayerBar";
+import { PlaylistsPage } from "./components/playlists/PlaylistsPage";
+import { listMusicLibraryPlaylists, loadSelectedPlaylistId, saveSelectedPlaylistId, type SavedPlaylistSummary } from "./playlists";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
 import { TagEditor } from "./components/TagEditor";
@@ -272,6 +274,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Ratings: "ratings",
   Tags: "tags",
   Charts: "charts",
+  Playlists: "playlists",
   History: "history",
 };
 
@@ -528,6 +531,11 @@ function App() {
   const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
   const [reviewReloadToken, setReviewReloadToken] = useState(0);
   const [activeNav, setActiveNavState] = useState<SidebarDestination>(initialViewPreferences.activeNav);
+  const [savedPlaylists, setSavedPlaylists] = useState<SavedPlaylistSummary[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(loadSelectedPlaylistId);
+  const [playlistsLoading, setPlaylistsLoading] = useState(false);
+  const [playlistsError, setPlaylistsError] = useState<string | null>(null);
+  const [playlistsReloadToken, setPlaylistsReloadToken] = useState(0);
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const [reloadToken, setReloadToken] = useState(0);
@@ -678,6 +686,9 @@ function App() {
   const ratingsPreserveInspectorTokenRef = useRef<number | null>(null);
   const selectedRatingAlbumRef = useRef<RatingAlbum | null>(selectedRatingAlbum);
   const genreRefillRunningRef = useRef(false);
+  const playlistQueueSessionRef = useRef<{ tracks: Track[]; nextIndex: number; queueKeys: string[] } | null>(null);
+  const playlistRefillRunningRef = useRef(false);
+  const playlistRefillPromiseRef = useRef<Promise<unknown> | null>(null);
   const reconciliationRunningRef = useRef(false);
   const librarySyncRunningRef = useRef(false);
   const catalogSyncNoticeRef = useRef<CatalogSync | null>(null);
@@ -707,6 +718,31 @@ function App() {
   const rebindPlaybackCatalog = playback.rebindCatalog;
   const selectedGenreRef = useRef(selectedGenre);
   selectedGenreRef.current = selectedGenre;
+
+  useEffect(() => {
+    const session = playlistQueueSessionRef.current;
+    if (!session || playback.state.currentIndex === null || playlistRefillRunningRef.current) return;
+    if (playback.state.queue.length !== session.queueKeys.length
+      || playback.state.queue.some((track, index) => track.trackKey !== session.queueKeys[index])) {
+      playlistQueueSessionRef.current = null;
+      return;
+    }
+    if (session.nextIndex >= session.tracks.length) return;
+    if (playback.state.queue.length - playback.state.currentIndex - 1 >= 20) return;
+    const nextTracks = session.tracks.slice(session.nextIndex, session.nextIndex + 100);
+    playlistRefillRunningRef.current = true;
+    const refill = appendPlayback(nextTracks);
+    playlistRefillPromiseRef.current = refill;
+    void refill.then((next) => {
+      if (playlistQueueSessionRef.current !== session) return;
+      if (!next) { playlistQueueSessionRef.current = null; return; }
+      session.nextIndex += nextTracks.length;
+      session.queueKeys = next.queue.map((track) => track.trackKey);
+    }).finally(() => {
+      playlistRefillRunningRef.current = false;
+      if (playlistRefillPromiseRef.current === refill) playlistRefillPromiseRef.current = null;
+    });
+  }, [playback.state, appendPlayback]);
   activeNavRef.current = activeNav;
   selectedTrackRef.current = selectedTrack;
   selectedAlbumIdRef.current = selectedAlbumId;
@@ -953,6 +989,32 @@ function App() {
   }, [selectedTrack?.trackKey]);
 
   const libraryReady = snapshot !== null;
+
+  useEffect(() => {
+    if (!libraryReady) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setPlaylistsLoading(true);
+      setPlaylistsError(null);
+      void listMusicLibraryPlaylists().then((items) => {
+        if (cancelled) return;
+        setSavedPlaylists(items);
+        setSelectedPlaylistId((current) => items.some((item) => item.id === current) ? current : items[0]?.id ?? null);
+        setPlaylistsLoading(false);
+      }).catch((error: unknown) => {
+        if (cancelled) return;
+        setPlaylistsError(error instanceof Error ? error.message : String(error));
+        setPlaylistsLoading(false);
+      });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [libraryReady, playlistsReloadToken]);
+
+  useEffect(() => {
+    if (selectedPlaylistId !== null && savedPlaylists.some((item) => item.id === selectedPlaylistId)) {
+      saveSelectedPlaylistId(selectedPlaylistId);
+    }
+  }, [savedPlaylists, selectedPlaylistId]);
 
   const refreshCatalogIfChanged = useCallback((
     isCurrent: () => boolean = () => true,
@@ -1396,7 +1458,7 @@ function App() {
   useEffect(() => {
     if (
       libraryReady
-      && ["Inbox", "Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
+      && ["Inbox", "Observatory", "Charts", "Playlists", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
     ) explorerRestorationPendingRef.current = false;
   }, [activeNav, libraryReady]);
 
@@ -1936,6 +1998,24 @@ function App() {
     endGenreQueue();
     selectTrack(track);
     void playback.play(queue, track.id);
+  }
+
+  async function startPlaylistQueue(tracks: Track[], index: number): Promise<boolean> {
+    const remaining = tracks.slice(index);
+    const first = remaining.slice(0, 100);
+    if (first.length === 0) return false;
+    playlistQueueSessionRef.current = null;
+    if (playlistRefillPromiseRef.current) await playlistRefillPromiseRef.current;
+    endGenreQueue();
+    selectTrack(first[0]);
+    const next = await playback.play(first, first[0].id);
+    if (!next) return false;
+    playlistQueueSessionRef.current = {
+      tracks: remaining,
+      nextIndex: first.length,
+      queueKeys: next.queue.map((track) => track.trackKey),
+    };
+    return true;
   }
 
   function endGenreQueue() {
@@ -3300,8 +3380,8 @@ function App() {
       : ["artist", "artists"] as const;
   const showExplorerCount = snapshot !== null
     && artistPageName === null
-    && !["Inbox", "Observatory", "Charts", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
-  const topbarSearchValue = activeNav === "Inbox"
+    && !["Inbox", "Observatory", "Charts", "Playlists", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
+  const topbarSearchValue = activeNav === "Playlists" || activeNav === "Inbox"
     ? ""
     : activeNav === "Observatory"
     ? reviewSearch
@@ -3314,7 +3394,9 @@ function App() {
         : activeNav === "Years"
           ? ""
         : explorerFilters.query;
-  const topbarSearchPlaceholder = activeNav === "Inbox"
+  const topbarSearchPlaceholder = activeNav === "Playlists"
+    ? "Playlist search is coming soon…"
+    : activeNav === "Inbox"
     ? "Inbox search is coming after folder monitoring…"
     : activeNav === "Observatory"
     ? "Search artists to review…"
@@ -3329,7 +3411,9 @@ function App() {
         : explorerView === "tracks"
           ? "Search year:1985..1987, OR, NOT…"
           : "Search your universe…";
-  const topbarSearchLabel = activeNav === "Inbox"
+  const topbarSearchLabel = activeNav === "Playlists"
+    ? "Playlist search is not available yet"
+    : activeNav === "Inbox"
     ? "Inbox search is not available yet"
     : activeNav === "Observatory"
     ? "Search MusicBrainz review artists"
@@ -3389,7 +3473,7 @@ function App() {
     <div
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
-      data-right-sidebar={artistPageName ? "collapsed" : layoutPreferences.rightSidebar}
+      data-right-sidebar={artistPageName || activeNav === "Playlists" ? "collapsed" : layoutPreferences.rightSidebar}
       data-inbox={activeNav === "Inbox" ? "true" : undefined}
       data-text-size={displayPreferences.global.textSize}
       data-cover-size={displayPreferences.global.coverSize}
@@ -3407,6 +3491,10 @@ function App() {
           sidebarMode={layoutPreferences.leftSidebar}
           libraryExpanded={layoutPreferences.libraryExpanded}
           playlistsExpanded={layoutPreferences.playlistsExpanded}
+          playlists={savedPlaylists}
+          selectedPlaylistId={selectedPlaylistId}
+          playlistsLoading={playlistsLoading}
+          playlistsError={playlistsError}
           onLibraryExpandedChange={(libraryExpanded) => setLayoutPreferences((current) => ({
             ...current,
             libraryExpanded,
@@ -3416,11 +3504,12 @@ function App() {
             playlistsExpanded,
           }))}
           onNavigate={navigate}
+          onSelectPlaylist={(id) => { setSelectedPlaylistId(id); navigate("Playlists"); }}
         />
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.11</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.12</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3440,7 +3529,7 @@ function App() {
           >
             <LeftSidebarIcon aria-hidden="true" />
           </button>
-          <form className={`search${activeNav === "Years" || activeNav === "Inbox" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
+          <form className={`search${activeNav === "Years" || activeNav === "Inbox" || activeNav === "Playlists" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
             <Search aria-hidden="true" />
             <input
               ref={searchRef}
@@ -3453,12 +3542,12 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
-              title={explorerView === "tracks" && !["Inbox", "Observatory", "History", "Genres", "Publishers", "Years"].includes(activeNav) ? trackSearchHelp : undefined}
-              disabled={activeNav === "Years" || activeNav === "Inbox"}
+              title={explorerView === "tracks" && !["Inbox", "Observatory", "History", "Genres", "Publishers", "Years", "Playlists"].includes(activeNav) ? trackSearchHelp : undefined}
+              disabled={activeNav === "Years" || activeNav === "Inbox" || activeNav === "Playlists"}
             />
             {topbarSearchValue
               ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
-              : activeNav !== "Years" && activeNav !== "Inbox" ? <kbd>Ctrl K</kbd> : null}
+              : activeNav !== "Years" && activeNav !== "Inbox" && activeNav !== "Playlists" ? <kbd>Ctrl K</kbd> : null}
           </form>
           {showExplorerCount ? (
             <output className="search-result-count" aria-live="polite" aria-busy={currentExplorerCount === null}>
@@ -3501,7 +3590,7 @@ function App() {
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {!updater.state.version && <button type="button" aria-label="Check for updates" title="Check for updates" onClick={() => void updater.checkForUpdate(true)}><Download aria-hidden="true" /></button>}
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
-          <button
+          {activeNav !== "Playlists" && <button
             type="button"
             className="layout-toggle"
             data-mode={layoutPreferences.rightSidebar}
@@ -3513,7 +3602,7 @@ function App() {
             }))}
           >
             <RightSidebarIcon aria-hidden="true" />
-          </button>
+          </button>}
           <button type="button" aria-label="Settings" title="Settings" onClick={() => openSettings("display")}><Settings aria-hidden="true" /></button>
         </div>
       </header>
@@ -3611,6 +3700,18 @@ function App() {
                   setSelectedTrack((current) => current?.trackKey === track.trackKey ? track : current);
                 }}
                 onPlayQueue={playChartQueue}
+              />
+            </RememberedPage>
+            <RememberedPage active={!artistPageName && activeNav === "Playlists"}>
+              <PlaylistsPage
+                active={!artistPageName && activeNav === "Playlists"}
+                playlists={savedPlaylists}
+                selectedId={selectedPlaylistId}
+                listLoading={playlistsLoading}
+                listError={playlistsError}
+                onSelect={setSelectedPlaylistId}
+                onRefresh={() => setPlaylistsReloadToken((value) => value + 1)}
+                onPlay={startPlaylistQueue}
               />
             </RememberedPage>
             <RememberedPage active={!artistPageName && activeNav === "History"}>
@@ -3842,7 +3943,7 @@ function App() {
         </div>
       </main>
 
-      {!artistPageName && activeNav !== "Inbox" && layoutPreferences.rightSidebar === "expanded" && <aside
+      {!artistPageName && activeNav !== "Inbox" && activeNav !== "Playlists" && layoutPreferences.rightSidebar === "expanded" && <aside
         className="inspector"
         data-text-size={activeDisplayPreferences.textSize}
         data-cover-size={activeDisplayPreferences.coverSize}

@@ -12,9 +12,14 @@ function props(overrides: Partial<SidebarNavigationProps> = {}): SidebarNavigati
     sidebarMode: "expanded" as const,
     libraryExpanded: false,
     playlistsExpanded: false,
+    playlists: [],
+    selectedPlaylistId: null,
+    playlistsLoading: false,
+    playlistsError: null,
     onLibraryExpandedChange: vi.fn(),
     onPlaylistsExpandedChange: vi.fn(),
     onNavigate: vi.fn(),
+    onSelectPlaylist: vi.fn(),
     ...overrides,
   };
 }
@@ -51,7 +56,7 @@ describe("SidebarNavigation", () => {
     expect(screen.queryByLabelText("Library navigation")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Playlists" }));
-    expect(screen.getByLabelText("Pinned playlists")).toBeInTheDocument();
+    expect(screen.getByLabelText("Music Library playlists")).toBeInTheDocument();
   });
 
   it("dismisses an icon-only flyout with Escape", () => {
@@ -98,5 +103,17 @@ describe("SidebarNavigation", () => {
 
     expect(charts).toHaveAttribute("aria-current", "page");
     expect(charts.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows real playlist names in both sidebar modes and opens the selected playlist", () => {
+    const playlist = { id: 7, name: "All Loved", description: "Saved collection", trackCount: 1560, updatedAt: "2026-09-22" };
+    const value = props({ playlists: [playlist], playlistsExpanded: true });
+    const view = render(<SidebarNavigation {...value} />);
+    fireEvent.click(screen.getByRole("button", { name: /All Loved/ }));
+    expect(value.onSelectPlaylist).toHaveBeenCalledWith(7);
+    view.rerender(<SidebarNavigation {...value} sidebarMode="icons" />);
+    fireEvent.click(screen.getByRole("button", { name: "Playlists" }));
+    fireEvent.click(screen.getByRole("button", { name: /All Loved/ }));
+    expect(value.onSelectPlaylist).toHaveBeenCalledTimes(2);
   });
 });

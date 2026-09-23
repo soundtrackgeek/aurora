@@ -29,6 +29,7 @@ export const displayViews = [
   { id: "ratings", label: "Ratings", supportsCovers: true },
   { id: "tags", label: "Tags", supportsCovers: true },
   { id: "charts", label: "Charts", supportsCovers: true },
+  { id: "playlists", label: "Playlists", supportsCovers: false },
   { id: "history", label: "History", supportsCovers: true },
 ] as const;
 

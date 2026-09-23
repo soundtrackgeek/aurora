@@ -24,6 +24,7 @@ mod musicbrainz;
 mod pcm_buffer;
 mod playback;
 mod playback_persistence;
+mod playlists;
 mod publishers;
 mod ratings;
 mod remote_affinity;
@@ -414,6 +415,26 @@ async fn catalog_revision() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(catalog::completed_import_revision)
         .await
         .map_err(|error| format!("The catalog revision worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn list_music_library_playlists() -> Result<Vec<playlists::SavedPlaylistSummary>, String> {
+    tauri::async_runtime::spawn_blocking(playlists::list)
+        .await
+        .map_err(|error| format!("The playlist worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn music_library_playlist(
+    app: AppHandle,
+    id: i64,
+) -> Result<playlists::SavedPlaylistDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        playlists::detail(id, &store)
+    })
+    .await
+    .map_err(|error| format!("The playlist worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -1691,6 +1712,8 @@ pub fn run() {
             save_connection_settings,
             library_snapshot,
             catalog_revision,
+            list_music_library_playlists,
+            music_library_playlist,
             artist_tracks,
             search_tracks,
             explore_tracks,
