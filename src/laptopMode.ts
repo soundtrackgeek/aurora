@@ -23,6 +23,7 @@ export interface LaptopModeStatus {
   message: string;
   remotePath: string;
   lastSyncedAtMs: number | null;
+  albumOrderRevision: number;
   mappings: LaptopPathMapping[];
   settingWarning: string | null;
 }
@@ -42,6 +43,7 @@ function previewStatus(): LaptopModeStatus {
     message: "Browser preview: verified state snapshot is ready in OneDrive.",
     remotePath: "C:\\Users\\jtill\\OneDrive\\_musicbackup\\aurora-state.sqlite3",
     lastSyncedAtMs: Date.now(),
+    albumOrderRevision: 0,
     mappings: mappings.map(([desktopRoot, laptopRoot]) => ({
       desktopRoot,
       laptopRoot,

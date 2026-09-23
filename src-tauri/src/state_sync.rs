@@ -41,6 +41,7 @@ pub(crate) struct StateMirrorStatus {
     pub(crate) message: String,
     pub(crate) remote_path: String,
     pub(crate) last_synced_at_ms: Option<i64>,
+    pub(crate) album_order_revision: u64,
 }
 
 pub(crate) fn default_remote_state_path() -> Result<PathBuf, String> {
@@ -129,6 +130,8 @@ pub(crate) struct StateSyncService {
     startup_outcome: StartupSyncOutcome,
     last_publish_attempt_ms: Option<i64>,
     allow_legacy_replace: bool,
+    album_order_revision: u64,
+    last_album_merge_snapshot: Option<String>,
 }
 
 impl StateSyncService {
@@ -145,6 +148,8 @@ impl StateSyncService {
             startup_outcome,
             last_publish_attempt_ms: None,
             allow_legacy_replace,
+            album_order_revision: 0,
+            last_album_merge_snapshot: None,
         })
     }
 
@@ -230,11 +235,15 @@ impl StateSyncService {
             }
             if remote.generation > local.generation {
                 let dirty = local.content_revision != local.mirrored_revision;
+                let merged_additions = if dirty {
+                    self.merge_remote_album_additions(&remote.snapshot_id)?
+                } else {
+                    0
+                };
                 return Ok(self.status(
                     if dirty { "conflict" } else { "remoteUpdate" },
                     if dirty {
-                        "Aurora detected changes on both computers. Close Aurora on one machine and resolve which state to keep; neither file was overwritten."
-                            .to_owned()
+                        merge_conflict_message(merged_additions)
                     } else {
                         "OneDrive has a newer Aurora state snapshot. Restart Aurora to apply it safely."
                             .to_owned()
@@ -246,10 +255,15 @@ impl StateSyncService {
                 || (remote.generation == local.generation
                     && remote.snapshot_id != local.snapshot_id)
             {
+                let merged_additions = self.merge_remote_album_additions(&remote.snapshot_id)?;
                 return Ok(self.status(
                     "conflict",
-                    "OneDrive does not contain the snapshot this device last published. Aurora is waiting rather than overwriting it."
-                        .to_owned(),
+                    if merged_additions == 0 {
+                        "OneDrive does not contain the snapshot this device last published. Aurora is waiting rather than overwriting it."
+                            .to_owned()
+                    } else {
+                        merge_conflict_message(merged_additions)
+                    },
                     local.last_synced_at_ms,
                 ));
             }
@@ -314,8 +328,75 @@ impl StateSyncService {
             message,
             remote_path: self.remote_path.to_string_lossy().into_owned(),
             last_synced_at_ms,
+            album_order_revision: self.album_order_revision,
         }
     }
+
+    fn merge_remote_album_additions(&mut self, snapshot_id: &str) -> Result<usize, String> {
+        if self.last_album_merge_snapshot.as_deref() == Some(snapshot_id) {
+            return Ok(0);
+        }
+        let merged = merge_remote_album_additions(&self.store, &self.remote_path)?;
+        self.last_album_merge_snapshot = Some(snapshot_id.to_owned());
+        if merged > 0 {
+            self.album_order_revision = self.album_order_revision.saturating_add(1);
+        }
+        Ok(merged)
+    }
+}
+
+fn merge_conflict_message(merged_additions: usize) -> String {
+    if merged_additions == 0 {
+        return "Aurora detected changes on both computers. Close Aurora on one machine and resolve which state to keep; neither file was overwritten."
+            .to_owned();
+    }
+    format!(
+        "Aurora left unrelated conflicting state untouched and safely imported {merged_additions} newer album-added {} so Added sorting stays current.",
+        if merged_additions == 1 {
+            "record"
+        } else {
+            "records"
+        }
+    )
+}
+
+fn merge_remote_album_additions(store: &StateStore, remote_path: &Path) -> Result<usize, String> {
+    let remote_snapshot = crate::snapshot_io::LocalSnapshot::new(remote_path)?;
+    let mut connection = store.open()?;
+    connection
+        .execute(
+            "ATTACH DATABASE ?1 AS remote_state",
+            [remote_snapshot.path.to_string_lossy().as_ref()],
+        )
+        .map_err(|error| format!("Could not attach Aurora's remote album-added state: {error}"))?;
+    if table_columns(&connection, "remote_state", "album_additions")?.is_empty() {
+        return Ok(0);
+    }
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| format!("Could not prepare Aurora's album-added merge: {error}"))?;
+    let merged = transaction
+        .execute(
+            r#"
+            INSERT INTO album_additions(
+              album_id, destination_path, import_run_id, added_at_ms
+            )
+            SELECT album_id, destination_path, import_run_id, added_at_ms
+            FROM remote_state.album_additions
+            WHERE true
+            ON CONFLICT(album_id) DO UPDATE SET
+              destination_path = excluded.destination_path,
+              import_run_id = excluded.import_run_id,
+              added_at_ms = excluded.added_at_ms
+            WHERE excluded.added_at_ms > album_additions.added_at_ms
+            "#,
+            [],
+        )
+        .map_err(|error| format!("Could not merge Aurora's album-added state: {error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not commit Aurora's album-added merge: {error}"))?;
+    Ok(merged)
 }
 
 fn ensure_sync_identity(store: &StateStore) -> Result<(), String> {
@@ -1012,9 +1093,36 @@ mod tests {
                 .expect("laptop sync");
 
         desktop.save(&playback(0.25)).expect("desktop change");
+        desktop
+            .record_album_additions(
+                &[(
+                    "album-from-desktop".to_owned(),
+                    r"D:\MUSIC\Artist\Album".to_owned(),
+                )],
+                91,
+                2_000,
+            )
+            .expect("desktop album addition");
         laptop.save(&playback(0.75)).expect("laptop change");
         assert_eq!(desktop_sync.sync_now(true).sync_state, "synced");
-        assert_eq!(laptop_sync.sync_now(true).sync_state, "conflict");
+        let conflict = laptop_sync.sync_now(true);
+        assert_eq!(conflict.sync_state, "conflict");
+        assert_eq!(conflict.album_order_revision, 1);
+        assert!(conflict.message.contains("1 newer album-added record"));
+        let laptop_addition: (String, i64, i64) = laptop
+            .open()
+            .expect("laptop state connection")
+            .query_row(
+                "SELECT destination_path, import_run_id, added_at_ms FROM album_additions WHERE album_id = 'album-from-desktop'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("merged laptop album addition");
+        assert_eq!(
+            laptop_addition,
+            (r"D:\MUSIC\Artist\Album".to_owned(), 91, 2_000)
+        );
+        assert_eq!(laptop_sync.sync_now(true).album_order_revision, 1);
         let remote_store = StateStore::new(remote).expect("remote state");
         assert_eq!(remote_store.load().expect("remote playback").volume, 0.25);
 
@@ -1023,6 +1131,62 @@ mod tests {
         drop(desktop_sync);
         drop(laptop);
         drop(desktop);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn album_addition_merge_keeps_the_newest_record_from_either_device() {
+        let root = temporary_root("album-addition-merge");
+        fs::create_dir_all(&root).expect("temporary root");
+        let local_path = root.join("local.sqlite3");
+        let remote_path = root.join("remote.sqlite3");
+        let local = StateStore::new(local_path).expect("local state");
+        let remote = StateStore::new(remote_path.clone()).expect("remote state");
+        local
+            .record_album_additions(
+                &[("shared-album".to_owned(), "local-newer".to_owned())],
+                20,
+                2_000,
+            )
+            .expect("local addition");
+        remote
+            .record_album_additions(
+                &[
+                    ("shared-album".to_owned(), "remote-older".to_owned()),
+                    ("remote-only".to_owned(), "remote-only-path".to_owned()),
+                ],
+                10,
+                1_000,
+            )
+            .expect("remote additions");
+
+        assert_eq!(
+            merge_remote_album_additions(&local, &remote_path).expect("album addition merge"),
+            1
+        );
+        let connection = local.open().expect("local connection");
+        let shared: (String, i64, i64) = connection
+            .query_row(
+                "SELECT destination_path, import_run_id, added_at_ms FROM album_additions WHERE album_id = 'shared-album'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("shared addition");
+        assert_eq!(shared, ("local-newer".to_owned(), 20, 2_000));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT destination_path FROM album_additions WHERE album_id = 'remote-only'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("remote-only addition"),
+            "remote-only-path"
+        );
+
+        drop(connection);
+        drop(remote);
+        drop(local);
         let _ = fs::remove_dir_all(root);
     }
 

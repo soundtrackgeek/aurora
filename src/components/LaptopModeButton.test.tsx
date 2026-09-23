@@ -10,6 +10,7 @@ const status: LaptopModeStatus = {
   message: "Aurora state matches the verified OneDrive snapshot.",
   remotePath: "C:\\Users\\Jorn\\OneDrive\\_musicbackup\\aurora-state.sqlite3",
   lastSyncedAtMs: 1,
+  albumOrderRevision: 0,
   settingWarning: null,
   mappings: [
     { desktopRoot: "D:\\MUSIC", laptopRoot: "Y:\\MUSIC", activeRoot: "D:\\MUSIC", available: true },

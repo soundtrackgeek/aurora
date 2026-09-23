@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.26.13 wraps long playlist names inside the sidebar flyout and Playlists list. **Play playlist** follows the saved song order; **Shuffle playlist** randomizes all available songs once and plays through that order, including playlists longer than the initial playback queue. Either action turns off the player's ongoing shuffle mode so queue progression remains predictable.
+Aurora 0.26.14 keeps **Added · newest** album ordering consistent across computers even when unrelated Aurora state has diverged. Newer synchronized album-addition records are merged independently without overwriting playback, tag, journal, or curation state, and an open Albums view refreshes as soon as the ordering metadata arrives.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 
@@ -352,7 +352,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A bounded History timeline with outcome, device, date, and text filters; registered-play, listening-time, unique-track, skip, and most-played summaries; and direct replay/inspection actions.
 - Personal registered plays, listening time, and last-listened time in the selected-track inspector, kept distinct from imported Last.fm popularity.
 - First-run laptop recovery copies a valid OneDrive snapshot into Aurora app data before SQLite opens. Newer clean snapshots are also applied only before open, with a retained local safety copy.
-- Sync lineage, generations, and logical revisions detect two-computer divergence. Aurora reports a conflict and preserves both files instead of using unsafe newest-file-wins behavior.
+- Sync lineage, generations, and logical revisions detect two-computer divergence. Aurora reports a conflict and preserves both files instead of using unsafe newest-file-wins behavior. Album-addition records are the narrow exception: Aurora safely merges the newer per-album record from the shared snapshot so **Added · newest** remains consistent without resolving or overwriting unrelated conflicting state.
 - Equivalent OneDrive branches reconcile automatically when only transient catalog IDs, playback position, import-run markers, or retry timestamps differ. Stable queue identity and user-authored tag, journal, playback-setting, and curation differences still block automatic replacement.
 - Strictly read-only access to `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`.
 - A dedicated Genre Atlas over all canonical catalog genres, with search and sorts for scale, rating, Love, recent listening, unexplored worlds, and name.

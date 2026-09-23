@@ -574,6 +574,7 @@ function App() {
   const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
   const [laptopModeBusy, setLaptopModeBusy] = useState(false);
   const [laptopModeError, setLaptopModeError] = useState<string | null>(null);
+  const albumOrderRevisionRef = useRef(0);
   const [historyPage, setHistoryPage] = useState<HistoryPage | null>(null);
   const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("loading");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -846,6 +847,10 @@ function App() {
       void loadLaptopModeStatus()
         .then((status) => {
           if (cancelled) return;
+          if (status.albumOrderRevision > albumOrderRevisionRef.current) {
+            albumOrderRevisionRef.current = status.albumOrderRevision;
+            setExplorerReloadToken((value) => value + 1);
+          }
           setLaptopModeStatus(status);
           setLaptopModeError(null);
         })
@@ -3511,7 +3516,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.13</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.14</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
