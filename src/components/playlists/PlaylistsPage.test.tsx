@@ -30,4 +30,20 @@ it("shows Music Library order and starts playback at the chosen song", async () 
   expect(screen.getByText(/1 unavailable in the current catalog/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Play First from here" }));
   await waitFor(() => expect(play).toHaveBeenCalledWith(tracks, 1));
+  fireEvent.click(screen.getByRole("button", { name: "Shuffle playlist" }));
+  await waitFor(() => expect(play).toHaveBeenCalledWith(tracks, 0, true));
+});
+
+it("disables both playlist actions when no saved songs are available", async () => {
+  vi.mocked(loadMusicLibraryPlaylist).mockResolvedValue({
+    id: 4, name: "Unavailable", description: "", trackCount: 1,
+    missingCount: 1, tracks: [],
+  });
+  render(<PlaylistsPage
+    active playlists={[{ id: 4, name: "Unavailable", description: "", trackCount: 1, updatedAt: "today" }]}
+    selectedId={4} listLoading={false} listError={null}
+    onSelect={vi.fn()} onRefresh={vi.fn()} onPlay={vi.fn(async () => true)}
+  />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Shuffle playlist" })).toBeDisabled());
+  expect(screen.getByRole("button", { name: "Play playlist" })).toBeDisabled();
 });

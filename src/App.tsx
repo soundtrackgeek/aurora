@@ -80,6 +80,7 @@ import {
 } from "./components/navigation/SidebarNavigation";
 import { PlayerBar } from "./components/PlayerBar";
 import { PlaylistsPage } from "./components/playlists/PlaylistsPage";
+import { shufflePlaylistTracks } from "./playlistOrder";
 import { listMusicLibraryPlaylists, loadSelectedPlaylistId, saveSelectedPlaylistId, type SavedPlaylistSummary } from "./playlists";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
@@ -2000,13 +2001,14 @@ function App() {
     void playback.play(queue, track.id);
   }
 
-  async function startPlaylistQueue(tracks: Track[], index: number): Promise<boolean> {
-    const remaining = tracks.slice(index);
+  async function startPlaylistQueue(tracks: Track[], index: number, shuffle = false): Promise<boolean> {
+    const remaining = shuffle ? shufflePlaylistTracks(tracks) : tracks.slice(index);
     const first = remaining.slice(0, 100);
     if (first.length === 0) return false;
     playlistQueueSessionRef.current = null;
     if (playlistRefillPromiseRef.current) await playlistRefillPromiseRef.current;
     endGenreQueue();
+    if (playback.state.shuffle && !await playback.setShuffle(false)) return false;
     selectTrack(first[0]);
     const next = await playback.play(first, first[0].id);
     if (!next) return false;
@@ -3509,7 +3511,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.12</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.13</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

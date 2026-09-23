@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.26.13] - 2026-09-23
+
+### Added
+
+- Add **Shuffle playlist** beside **Play playlist**, playing every available song once in a shuffled order that continues through long playlists.
+
+### Fixed
+
+- Keep long playlist names within the sidebar flyout and Playlists list at larger font sizes.
+- Start regular playlist playback in saved order even if the player's shuffle mode was previously enabled.
+
 ## [0.26.12] - 2026-09-23
 
 ### Added

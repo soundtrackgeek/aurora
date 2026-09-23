@@ -233,7 +233,7 @@ export function SidebarNavigation({
         {sidebarMode !== "icons" && playlistsExpanded && (
           <div id="playlist-navigation" className="playlists nav-group__children">
             {playlists.map((playlist) => (
-              <button type="button" key={playlist.id} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} aria-current={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "page" : undefined} onClick={() => selectPlaylist(playlist.id)}>
+              <button type="button" key={playlist.id} title={playlist.name} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} aria-current={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "page" : undefined} onClick={() => selectPlaylist(playlist.id)}>
                 <ListMusic aria-hidden="true" />
                 <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>
@@ -249,7 +249,7 @@ export function SidebarNavigation({
             <p><ListMusic aria-hidden="true" /> Music Library playlists</p>
             <button type="button" onClick={() => navigate("Playlists")}>View all playlists</button>
             {playlists.map((playlist) => (
-              <button type="button" key={playlist.id} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} onClick={() => selectPlaylist(playlist.id)}>
+              <button type="button" key={playlist.id} title={playlist.name} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} onClick={() => selectPlaylist(playlist.id)}>
                 <ListMusic aria-hidden="true" />
                 <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>

@@ -1,4 +1,4 @@
-import { ListMusic, Play, RefreshCw } from "lucide-react";
+import { ListMusic, Play, RefreshCw, Shuffle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { displayTrackArtist, formatCount, formatDuration, type Track } from "../../library";
 import { loadMusicLibraryPlaylist, type SavedPlaylistDetail, type SavedPlaylistSummary } from "../../playlists";
@@ -11,7 +11,7 @@ type Props = {
   listError: string | null;
   onSelect: (id: number) => void;
   onRefresh: () => void;
-  onPlay: (tracks: Track[], index: number) => Promise<boolean>;
+  onPlay: (tracks: Track[], index: number, shuffle?: boolean) => Promise<boolean>;
 };
 
 export function PlaylistsPage({ active, playlists, selectedId, listLoading, listError, onSelect, onRefresh, onPlay }: Props) {
@@ -37,10 +37,12 @@ export function PlaylistsPage({ active, playlists, selectedId, listLoading, list
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [active, selectedId, detailRevision]);
 
-  async function startAt(index: number) {
+  async function startAt(index: number, shuffle = false) {
     if (!detail) return;
     setQueueMessage(null);
-    if (!await onPlay(detail.tracks, index)) setQueueMessage("Could not start playback. Check the player for details.");
+    if (!await (shuffle ? onPlay(detail.tracks, index, true) : onPlay(detail.tracks, index))) {
+      setQueueMessage("Could not start playback. Check the player for details.");
+    }
   }
 
   const selected = playlists.find((item) => item.id === selectedId);
@@ -54,7 +56,7 @@ export function PlaylistsPage({ active, playlists, selectedId, listLoading, list
     {!listLoading && !listError && playlists.length === 0 && <p className="saved-playlists__empty">No saved playlists are available in this Music Library catalog yet.</p>}
     <div className="saved-playlists__layout">
       <nav aria-label="Saved playlists" className="saved-playlists__list">
-        {playlists.map((item) => <button type="button" key={item.id} className={item.id === selectedId ? "is-active" : undefined} aria-current={item.id === selectedId ? "true" : undefined} onClick={() => { setVisibleCount(100); onSelect(item.id); }}>
+        {playlists.map((item) => <button type="button" key={item.id} title={item.name} className={item.id === selectedId ? "is-active" : undefined} aria-current={item.id === selectedId ? "true" : undefined} onClick={() => { setVisibleCount(100); onSelect(item.id); }}>
           <ListMusic aria-hidden="true" /><span><strong>{item.name}</strong><small>{formatCount(item.trackCount)} songs</small></span>
         </button>)}
       </nav>
@@ -65,7 +67,10 @@ export function PlaylistsPage({ active, playlists, selectedId, listLoading, list
         {queueMessage && <p role="status" className="error-message">{queueMessage}</p>}
         {!selected && playlists.length > 0 && <p>Choose a playlist to see its songs.</p>}
         {detail && detail.id === selectedId && !loading && <>
-          <button type="button" className="saved-playlists__play" onClick={() => void startAt(0)} disabled={detail.tracks.length === 0}><Play aria-hidden="true" /> Play playlist</button>
+          <div className="saved-playlists__actions">
+            <button type="button" className="saved-playlists__play" onClick={() => void startAt(0)} disabled={detail.tracks.length === 0}><Play aria-hidden="true" /> Play playlist</button>
+            <button type="button" className="saved-playlists__play" onClick={() => void startAt(0, true)} disabled={detail.tracks.length === 0}><Shuffle aria-hidden="true" /> Shuffle playlist</button>
+          </div>
           <ol className="saved-playlists__tracks">
             {detail.tracks.slice(0, visibleCount).map((track, index) => <li key={`${track.trackKey}-${index}`}>
               <button type="button" onClick={() => void startAt(index)} aria-label={`Play ${track.title} from here`}>

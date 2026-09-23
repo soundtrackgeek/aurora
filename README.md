@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.13 wraps long playlist names inside the sidebar flyout and Playlists list. **Play playlist** follows the saved song order; **Shuffle playlist** randomizes all available songs once and plays through that order, including playlists longer than the initial playback queue. Either action turns off the player's ongoing shuffle mode so queue progression remains predictable.
+
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 
 Aurora 0.26.11 adds Rating Completeness to Charts album details, showing the percentage and rated/total track count from the matched library album. Unavailable details show an em dash.
