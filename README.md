@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.26.20 gives the Track and Time columns enough room in expanded Albums tracklists for their headings and full song durations, including at larger text sizes.
+
 Aurora 0.26.19 lets Mac rating and Love global shortcuts save through Tonehavn in Network Mode. Aurora shows the confirmed result after the PC accepts the edit; Windows retains its immediate local shortcut behavior and bindings.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.

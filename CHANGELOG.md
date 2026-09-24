@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.20] - 2026-09-24
+
+### Fixed
+
+- Size the Track and Time columns in expanded Albums tracklists with the selected text size so their headings and full durations remain visible on Mac and Windows.
+
 ## [0.26.19] - 2026-09-24
 
 ### Fixed
