@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.17] - 2026-09-24
+
+### Fixed
+
+- Register Aurora with macOS Now Playing so physical media keys control the current Aurora track and playback state, and show its title, artist, album, duration, and progress.
+- Use Command–Option global shortcut defaults on macOS, keeping the numeric keypad rating keys for full-size keyboards. Migrate only unchanged legacy defaults and preserve custom bindings and all Windows defaults.
+- Show Mac modifier symbols and platform-specific shortcut guidance in Settings.
+
 ## [0.26.16] - 2026-09-24
 
 ### Fixed

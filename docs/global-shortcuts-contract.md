@@ -4,27 +4,31 @@ Aurora 0.9.0 registers configurable Windows-wide controls while the native proce
 
 Aurora 0.17.7 separately registers a Windows System Media Transport Controls session for physical Play/Pause, Stop, Previous, and Next keyboard buttons. Windows arbitrates those media-session commands between players and Aurora publishes its playback status plus current title, artist, and album. These buttons are not configurable global hotkeys and have no relationship to WASAPI shared or exclusive output mode.
 
+Aurora 0.26.17 joins macOS Now Playing when there is a current track. It publishes title, artist, album, duration, playback state, and progress; Play/Pause, Next, Previous, Stop, and position commands run against the native playback runtime. It detaches when no track is current and on exit. macOS chooses the active Now Playing app, so another player can take precedence if it is also active.
+
 ## Defaults and meaning
 
-| Action | Default | Behavior |
-| --- | --- | --- |
-| Play or pause | `Ctrl+Alt+P` | Toggles Aurora's playback runtime. |
-| Next track | `Ctrl+Alt+N` | Advances Aurora's current queue. |
-| Clear rating | `Ctrl+Alt+Numpad0` | Writes an unrated MusicBee POPM value. |
-| Rate 1–5 stars | `Ctrl+Alt+Numpad1` … `Ctrl+Alt+Numpad5` | Writes the corresponding whole-star MusicBee POPM value. |
-| Toggle Love | `Ctrl+Alt+L` | Changes Loved to Neutral, or Neutral/Banned to Loved. |
+| Action | Windows default | macOS default | Behavior |
+| --- | --- | --- | --- |
+| Play or pause | `Ctrl+Alt+P` | `Command+Option+P` | Toggles Aurora's playback runtime. |
+| Next track | `Ctrl+Alt+N` | `Command+Option+N` | Advances Aurora's current queue. |
+| Clear rating | `Ctrl+Alt+Numpad0` | `Command+Option+Numpad0` | Writes an unrated MusicBee POPM value. |
+| Rate 1–5 stars | `Ctrl+Alt+Numpad1` … `Ctrl+Alt+Numpad5` | `Command+Option+Numpad1` … `Command+Option+Numpad5` | Writes the corresponding whole-star MusicBee POPM value. |
+| Toggle Love | `Ctrl+Alt+L` | `Command+Option+L` | Changes Loved to Neutral, or Neutral/Banned to Loved. |
 
 Only the track in `PlaybackRuntime.current_track` can receive rating or Love. The selected Explore row and inspector state are presentation-only and never cross the native shortcut command boundary.
 
 ## Persistence and registration
 
 - Settings are device-local at `%APPDATA%\com.soundtrackgeek.aurora\aurora-shortcuts.json` and use a versioned JSON envelope.
+- On macOS the same file lives in Aurora's app data directory under `~/Library/Application Support`.
 - The file stores one binding for every supported action plus the global enabled flag. It is not part of `aurora-state.sqlite3`, Laptop Mode, or OneDrive snapshots.
 - A binding needs at least one modifier and exactly one non-modifier key. Action names, count, syntax, and accelerator uniqueness are validated natively.
 - Aurora unregisters and registers a requested set as one transaction. If any binding is unavailable, it releases the partial request and restores the previous registered set.
-- The settings file is replaced atomically only after Windows accepts the complete set. A persistence failure also rolls registration back.
+- The settings file is replaced atomically only after the OS accepts the complete set. A persistence failure also rolls registration back.
 - Missing settings use enabled defaults. Unsupported or malformed settings use enabled defaults and surface a warning rather than blocking launch.
 - Version 1 settings migrate only legacy `Ctrl+Alt+0` through `Ctrl+Alt+5` rating defaults to their numeric-keypad equivalents. Custom bindings are preserved.
+- Version 2 settings on macOS migrate only unchanged Windows defaults to Command–Option defaults. Custom bindings are preserved; Windows keeps its existing defaults. Version 3 stores the result.
 - Aurora explicitly unregisters its complete set when the main window closes and again on application exit, making shutdown cleanup idempotent across normal and programmatic exit paths.
 
 Windows permits only one process to own a global binding. A conflict commonly means MusicBee or another player already registered the same keys; Aurora reports the unavailable accelerator and leaves the previous working configuration intact.
@@ -47,7 +51,7 @@ The shared Music Library catalog remains read-only. A later tagged-album folder 
 - Rating or Love without a current playback track fails without selecting or mutating another track.
 - Registration conflicts do not produce a partially active set.
 - Tag conflicts, missing files, unsupported files, and verification failures follow the existing tag-editing recovery contract and are surfaced through Aurora's status message.
-- The browser preview can exercise the Settings workflow but explicitly reports that Windows registration is available only in the native app.
+- The browser preview can exercise the Settings workflow but explicitly reports that global registration is available only in the native app.
 
 ## Verification
 

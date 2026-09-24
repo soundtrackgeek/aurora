@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.26.16 restores the Windows release build by limiting Mac mounted-folder validation tests to macOS. The 0.26.15 music-share reconnect and stable SMB path resolution remain included.
+Aurora 0.26.17 adds macOS Now Playing media-key controls and Mac-specific global shortcut defaults while preserving the Windows bindings.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 
@@ -106,7 +106,9 @@ On Mac a blank sync folder disables sync, while playback/history remain local. M
 
 macOS SMB servers may reject full-disk flush with “Operation not supported.” Version 0.25.2 falls back to a normal `fsync` only for that specific error, retaining snapshot validation and atomic replacement. All other flush errors still stop publication. Conflicting changes on two devices remain protected; resolve which player state to retain before continuing sync. Mac validation covered playback, artwork, local catalog refresh, startup with an unavailable sync folder, PC-to-Mac state restoration, and matching state/history revisions after Mac publication to the Windows SMB share. The PC then restored the Mac-published track at its saved position without a reported conflict.
 
-Network Mode blocks direct music-file writes: supported rating/Love changes are delegated to Tonehavn; general tag edits, intake, conversion, deletion, local companion mutations and tag recovery are blocked. Listening history and player state still save locally and synchronize. Native macOS media-key/Now Playing integration and remote edit delegation are not included. The companion defaults to `/Applications/Music Library.app/Contents/MacOS/music-library`; `AURORA_MUSIC_LIBRARY_EXE` can override its path.
+Network Mode blocks direct music-file writes: supported rating/Love changes are delegated to Tonehavn; general tag edits, intake, conversion, deletion, local companion mutations and tag recovery are blocked. Listening history and player state still save locally and synchronize. macOS Now Playing handles physical media keys when Aurora has a current track, with title, artist, album, duration, and playback progress. Remote edit delegation is not included. The companion defaults to `/Applications/Music Library.app/Contents/MacOS/music-library`; `AURORA_MUSIC_LIBRARY_EXE` can override its path.
+
+On macOS, global shortcut defaults use `Command+Option+P` for play/pause, `Command+Option+N` for next, `Command+Option+L` for Love, and `Command+Option+Numpad0` through `Numpad5` for ratings. The numeric keypad defaults suit full-size keyboards; every binding can be recorded with number-row keys in Settings. Existing Mac settings migrate only untouched Windows defaults. Windows retains its `Ctrl+Alt` bindings.
 
 Aurora is a fast, local-first Windows 11 explorer and player for a personal music universe. Version 0.24.41 adds catalog search for artist lifespans, duration, decimal album ratings, and chart ranks. See [the search guide](docs/search.md) for syntax and examples.
 

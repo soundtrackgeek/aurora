@@ -19,7 +19,8 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-const SETTINGS_VERSION: u8 = 2;
+const SETTINGS_VERSION: u8 = 3;
+const PREVIOUS_SETTINGS_VERSION: u8 = 2;
 const LEGACY_SETTINGS_VERSION: u8 = 1;
 pub(crate) const RESULT_EVENT: &str = "aurora-global-shortcut-result";
 
@@ -137,6 +138,7 @@ pub(crate) struct ShortcutBinding {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GlobalShortcutStatus {
+    platform: &'static str,
     enabled: bool,
     registered: bool,
     platform_available: bool,
@@ -251,6 +253,20 @@ impl GlobalShortcutRuntime {
                         }
                     }
                 }
+                Ok(settings) if settings.version == PREVIOUS_SETTINGS_VERSION => {
+                    match validate_bindings(settings.bindings) {
+                        Ok(bindings) => {
+                            needs_persist = true;
+                            (settings.enabled, migrate_macos_defaults(bindings))
+                        }
+                        Err(error) => {
+                            warning = Some(format!(
+                                "Aurora found invalid shortcut settings and used the defaults: {error}"
+                            ));
+                            (true, defaults)
+                        }
+                    }
+                }
                 Ok(settings) if settings.version == LEGACY_SETTINGS_VERSION => {
                     match validate_bindings(settings.bindings) {
                         Ok(bindings) => {
@@ -263,7 +279,7 @@ impl GlobalShortcutRuntime {
                                         .to_owned(),
                                 );
                             }
-                            (settings.enabled, bindings)
+                            (settings.enabled, migrate_macos_defaults(bindings))
                         }
                         Err(error) => {
                             warning = Some(format!(
@@ -300,7 +316,7 @@ impl GlobalShortcutRuntime {
         };
         if needs_persist && let Err(error) = runtime.persist() {
             runtime.warning = Some(format!(
-                "Aurora moved the default rating shortcuts to the numeric keypad but could not persist the migration: {error}"
+                "Aurora updated shortcut defaults but could not persist the migration: {error}"
             ));
         }
         runtime
@@ -329,6 +345,13 @@ impl GlobalShortcutRuntime {
 
     pub(crate) fn status(&self) -> GlobalShortcutStatus {
         GlobalShortcutStatus {
+            platform: if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(target_os = "windows") {
+                "windows"
+            } else {
+                "other"
+            },
             enabled: self.enabled,
             registered: self.registered,
             platform_available: true,
@@ -344,8 +367,8 @@ impl GlobalShortcutRuntime {
                         .iter()
                         .find(|binding| binding.action == definition.action_key)
                         .map(|binding| binding.accelerator.clone())
-                        .unwrap_or_else(|| definition.default_accelerator.to_owned()),
-                    default_accelerator: definition.default_accelerator,
+                        .unwrap_or_else(|| default_accelerator(definition).to_owned()),
+                    default_accelerator: default_accelerator(definition),
                 })
                 .collect(),
         }
@@ -445,9 +468,43 @@ fn default_bindings() -> Vec<StoredBinding> {
         .iter()
         .map(|definition| StoredBinding {
             action: definition.action_key.to_owned(),
-            accelerator: definition.default_accelerator.to_owned(),
+            accelerator: default_accelerator(definition).to_owned(),
         })
         .collect()
+}
+
+fn default_accelerator(definition: &BindingDefinition) -> &'static str {
+    if cfg!(target_os = "macos") {
+        match definition.action {
+            ShortcutAction::PlayPause => "Super+Alt+P",
+            ShortcutAction::Next => "Super+Alt+N",
+            ShortcutAction::Rating(0) => "Super+Alt+Numpad0",
+            ShortcutAction::Rating(1) => "Super+Alt+Numpad1",
+            ShortcutAction::Rating(2) => "Super+Alt+Numpad2",
+            ShortcutAction::Rating(3) => "Super+Alt+Numpad3",
+            ShortcutAction::Rating(4) => "Super+Alt+Numpad4",
+            ShortcutAction::Rating(5) => "Super+Alt+Numpad5",
+            ShortcutAction::Rating(_) => unreachable!(),
+            ShortcutAction::Love => "Super+Alt+L",
+        }
+    } else {
+        definition.default_accelerator
+    }
+}
+
+fn migrate_macos_defaults(mut bindings: Vec<StoredBinding>) -> Vec<StoredBinding> {
+    if cfg!(target_os = "macos") {
+        for binding in &mut bindings {
+            if let Some(definition) = definition_for(&binding.action)
+                && binding
+                    .accelerator
+                    .eq_ignore_ascii_case(definition.default_accelerator)
+            {
+                binding.accelerator = default_accelerator(definition).to_owned();
+            }
+        }
+    }
+    bindings
 }
 
 fn migrate_legacy_rating_defaults(mut bindings: Vec<StoredBinding>) -> (Vec<StoredBinding>, bool) {
@@ -531,9 +588,14 @@ fn register_bindings(app: &AppHandle, bindings: &[StoredBinding]) -> Result<(), 
     for binding in bindings {
         if let Err(error) = app.global_shortcut().register(binding.accelerator.as_str()) {
             let _ = app.global_shortcut().unregister_all();
+            let owner = if cfg!(target_os = "macos") {
+                "another app"
+            } else {
+                "MusicBee or another app"
+            };
             return Err(format!(
-                "{} is unavailable, probably because MusicBee or another app already registered it: {error}",
-                binding.accelerator
+                "{} is unavailable, probably because {owner} already registered it: {error}",
+                binding.accelerator,
             ));
         }
     }
@@ -586,6 +648,26 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
         let emitted = app.emit(RESULT_EVENT, result);
         timing.finish(success && emitted.is_ok());
     });
+}
+
+pub(crate) fn emit_media_playback(app: &AppHandle, action: &str, snapshot: PlaybackSnapshot) {
+    let message = match snapshot.status {
+        crate::playback::PlaybackStatus::Playing => "Playback started",
+        crate::playback::PlaybackStatus::Paused => "Playback paused",
+        _ => "Playback stopped",
+    };
+    let _ = app.emit(
+        RESULT_EVENT,
+        GlobalShortcutResult {
+            action: action.to_owned(),
+            success: true,
+            message: message.to_owned(),
+            track: snapshot.current_track.clone(),
+            previous_track: None,
+            catalog_sync: None,
+            playback: Some(snapshot),
+        },
+    );
 }
 
 fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShortcutResult, String> {
@@ -900,20 +982,20 @@ mod tests {
             .into_iter()
             .map(|binding| binding.accelerator)
             .collect::<Vec<_>>();
-        assert_eq!(
-            accelerators,
-            [
-                "Ctrl+Alt+P",
-                "Ctrl+Alt+N",
-                "Ctrl+Alt+Numpad0",
-                "Ctrl+Alt+Numpad1",
-                "Ctrl+Alt+Numpad2",
-                "Ctrl+Alt+Numpad3",
-                "Ctrl+Alt+Numpad4",
-                "Ctrl+Alt+Numpad5",
-                "Ctrl+Alt+L",
-            ]
-        );
+        let modifiers = if cfg!(target_os = "macos") {
+            "Super+Alt"
+        } else {
+            "Ctrl+Alt"
+        };
+        assert_eq!(accelerators[0], format!("{modifiers}+P"));
+        assert_eq!(accelerators[1], format!("{modifiers}+N"));
+        for rating in 0..=5 {
+            assert_eq!(
+                accelerators[rating + 2],
+                format!("{modifiers}+Numpad{rating}")
+            );
+        }
+        assert_eq!(accelerators[8], format!("{modifiers}+L"));
     }
 
     #[test]
@@ -1024,7 +1106,10 @@ mod tests {
 
         let restored = GlobalShortcutRuntime::load(path.clone());
         assert_eq!(restored.bindings[0].accelerator, "Ctrl+Shift+P");
-        assert_eq!(restored.bindings[4].accelerator, "Ctrl+Alt+Numpad2");
+        assert_eq!(
+            restored.bindings[4].accelerator,
+            default_accelerator(&DEFINITIONS[4])
+        );
         let persisted: ShortcutSettingsFile =
             serde_json::from_slice(&fs::read(&path).expect("read migrated settings"))
                 .expect("decode migrated settings");
@@ -1033,7 +1118,44 @@ mod tests {
             "{:?}",
             restored.warning
         );
-        assert_eq!(persisted.bindings[4].accelerator, "Ctrl+Alt+Numpad2");
+        assert_eq!(
+            persisted.bindings[4].accelerator,
+            default_accelerator(&DEFINITIONS[4])
+        );
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn existing_mac_settings_move_only_windows_defaults_to_mac_bindings() {
+        let directory = tempfile::tempdir().expect("temp settings directory");
+        let path = directory.path().join("aurora-shortcuts.json");
+        let mut bindings = DEFINITIONS
+            .iter()
+            .map(|definition| StoredBinding {
+                action: definition.action_key.to_owned(),
+                accelerator: definition.default_accelerator.to_owned(),
+            })
+            .collect::<Vec<_>>();
+        bindings[0].accelerator = "Ctrl+Shift+P".to_owned();
+        fs::write(
+            &path,
+            serde_json::to_vec(&ShortcutSettingsFile {
+                version: PREVIOUS_SETTINGS_VERSION,
+                enabled: true,
+                bindings,
+            })
+            .expect("encode settings"),
+        )
+        .expect("write settings");
+
+        let runtime = GlobalShortcutRuntime::load(path.clone());
+        assert_eq!(runtime.bindings[0].accelerator, "Ctrl+Shift+P");
+        assert_eq!(runtime.bindings[1].accelerator, "Super+Alt+N");
+        assert_eq!(runtime.bindings[4].accelerator, "Super+Alt+Numpad2");
+        let persisted: ShortcutSettingsFile =
+            serde_json::from_slice(&fs::read(path).expect("read settings"))
+                .expect("decode settings");
+        assert_eq!(persisted.version, SETTINGS_VERSION);
     }
 }

@@ -8,6 +8,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import * as inbox from "../inbox";
 
 const shortcutStatus: GlobalShortcutStatus = {
+  platform: "windows",
   enabled: true,
   registered: true,
   platformAvailable: true,
@@ -98,6 +99,22 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
     expect(screen.getByRole("button", { name: /Change Play or pause shortcut.*Ctrl\+Alt\+P/ })).toBeInTheDocument();
+  });
+
+  it("shows Mac keys and restores Mac defaults without changing Windows bindings", () => {
+    const macBindings = defaultShortcutBindings.map((binding) => ({
+      ...binding,
+      accelerator: binding.action === "playPause" ? "Ctrl+Shift+K" : binding.accelerator.replace("Ctrl+Alt", "Super+Alt"),
+      defaultAccelerator: binding.defaultAccelerator.replace("Ctrl+Alt", "Super+Alt"),
+    }));
+    renderSettings({ shortcutStatus: { ...shortcutStatus, platform: "macos", bindings: macBindings } });
+
+    expect(screen.getByText("macOS is listening even when Aurora is behind another app.")).toBeInTheDocument();
+    expect(screen.getByText(/Mac defaults use Command–Option and the numeric keypad/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    expect(screen.getByRole("button", { name: /Change Play or pause shortcut.*Super\+Alt\+P/ })).toBeInTheDocument();
+    expect(screen.getAllByText("⌘").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("⌥").length).toBeGreaterThan(0);
   });
 
   it("selects an output and ReplayGain mode as one device-local audio change", () => {

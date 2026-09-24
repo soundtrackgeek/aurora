@@ -890,6 +890,7 @@ function App() {
       else {
         const message = shortcuts.reason instanceof Error ? shortcuts.reason.message : String(shortcuts.reason);
         setShortcutStatus({
+          platform: navigator.userAgent.includes("Mac") ? "macos" : "windows",
           enabled: true,
           registered: false,
           platformAvailable: true,
@@ -3516,7 +3517,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.16</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.26.17</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

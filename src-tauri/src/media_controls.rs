@@ -258,7 +258,186 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::*;
+    use crate::{PlaybackState, playback::PlaybackStatus};
+    use souvlaki::{
+        MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition,
+        PlatformConfig,
+    };
+    use std::{sync::Mutex, time::Duration};
+    use tauri::Manager;
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct MetadataProjection {
+        track_key: String,
+        title: String,
+        artist: String,
+        album: String,
+        duration_seconds: Option<i64>,
+    }
+
+    pub(crate) struct MediaControlState(Mutex<MacMediaControls>);
+
+    struct MacMediaControls {
+        controls: MediaControls,
+        attached: bool,
+        metadata: Option<MetadataProjection>,
+    }
+
+    impl MacMediaControls {
+        fn new() -> Result<Self, String> {
+            let controls = MediaControls::new(PlatformConfig {
+                dbus_name: "aurora",
+                display_name: "Aurora",
+                hwnd: None,
+            })
+            .map_err(|error| format!("Aurora could not open macOS media controls: {error}"))?;
+            Ok(Self {
+                controls,
+                attached: false,
+                metadata: None,
+            })
+        }
+
+        fn update(&mut self, app: &AppHandle, snapshot: &PlaybackSnapshot) -> Result<(), String> {
+            let Some(track) = snapshot.current_track.as_ref() else {
+                if self.attached {
+                    self.release();
+                }
+                return Ok(());
+            };
+            if !self.attached {
+                let handler_app = app.clone();
+                self.controls
+                    .attach(move |event| {
+                        let command_app = handler_app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            execute_command(&command_app, event)
+                        });
+                    })
+                    .map_err(|error| {
+                        format!("Aurora could not register macOS media keys: {error}")
+                    })?;
+                self.attached = true;
+            }
+
+            let metadata = MetadataProjection {
+                track_key: track.track_key.clone(),
+                title: track.title.clone(),
+                artist: track
+                    .display_artist
+                    .as_deref()
+                    .filter(|artist| !artist.trim().is_empty())
+                    .unwrap_or(&track.artist)
+                    .to_owned(),
+                album: track.album.clone(),
+                duration_seconds: track.duration_seconds,
+            };
+            if self.metadata.as_ref() != Some(&metadata) {
+                self.controls
+                    .set_metadata(MediaMetadata {
+                        title: Some(&metadata.title),
+                        artist: Some(&metadata.artist),
+                        album: Some(&metadata.album),
+                        duration: metadata
+                            .duration_seconds
+                            .filter(|duration| *duration >= 0)
+                            .map(|duration| Duration::from_secs(duration as u64)),
+                        ..Default::default()
+                    })
+                    .map_err(|error| {
+                        format!("Aurora could not update macOS Now Playing: {error}")
+                    })?;
+                self.metadata = Some(metadata);
+            }
+            let progress = snapshot.position_seconds.is_finite().then(|| {
+                MediaPosition(Duration::from_secs_f64(snapshot.position_seconds.max(0.0)))
+            });
+            let playback = match snapshot.status {
+                PlaybackStatus::Playing => MediaPlayback::Playing { progress },
+                PlaybackStatus::Paused => MediaPlayback::Paused { progress },
+                PlaybackStatus::Stopped | PlaybackStatus::Error => MediaPlayback::Stopped,
+            };
+            self.controls
+                .set_playback(playback)
+                .map_err(|error| format!("Aurora could not update macOS playback state: {error}"))
+        }
+
+        fn release(&mut self) {
+            let _ = self.controls.set_playback(MediaPlayback::Stopped);
+            let _ = self.controls.set_metadata(MediaMetadata::default());
+            if self.attached {
+                let _ = self.controls.detach();
+                self.attached = false;
+            }
+            self.metadata = None;
+        }
+    }
+
+    fn execute_command(app: &AppHandle, event: MediaControlEvent) {
+        let action = match event {
+            MediaControlEvent::Play => "play",
+            MediaControlEvent::Pause => "pause",
+            MediaControlEvent::Toggle => "playPause",
+            MediaControlEvent::Next => "next",
+            MediaControlEvent::Previous => "previous",
+            MediaControlEvent::Stop => "stop",
+            MediaControlEvent::SetPosition(_) => "seek",
+            _ => return,
+        };
+        let result = {
+            let playback = app.state::<PlaybackState>();
+            let Ok(mut runtime) = playback.lock() else {
+                return;
+            };
+            match event {
+                MediaControlEvent::Play => runtime.play(),
+                MediaControlEvent::Pause => runtime.pause(),
+                MediaControlEvent::Toggle => runtime.toggle(),
+                MediaControlEvent::Next => runtime.next(),
+                MediaControlEvent::Previous => runtime.previous(),
+                MediaControlEvent::Stop => runtime.stop(),
+                MediaControlEvent::SetPosition(position) => runtime.seek(position.0.as_secs_f64()),
+                _ => return,
+            }
+        };
+        if let Ok(snapshot) = result {
+            publish(app, &snapshot);
+            crate::shortcuts::emit_media_playback(app, action, snapshot);
+        }
+    }
+
+    pub(crate) fn initialize(app: &AppHandle, snapshot: &PlaybackSnapshot) -> Result<(), String> {
+        let mut controls = MacMediaControls::new()?;
+        controls.update(app, snapshot)?;
+        app.manage(MediaControlState(Mutex::new(controls)));
+        Ok(())
+    }
+
+    pub(crate) fn publish(app: &AppHandle, snapshot: &PlaybackSnapshot) {
+        let Some(state) = app.try_state::<MediaControlState>() else {
+            return;
+        };
+        if let Ok(mut controls) = state.0.lock()
+            && let Err(error) = controls.update(app, snapshot)
+        {
+            eprintln!("{error}");
+        }
+    }
+
+    pub(crate) fn release(app: &AppHandle) {
+        let Some(state) = app.try_state::<MediaControlState>() else {
+            return;
+        };
+        if let Ok(mut controls) = state.0.lock() {
+            controls.release();
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
     use super::*;
 

@@ -510,9 +510,9 @@ function ShortcutSettingsPanel({
   onRecordingActionChange: (action: string | null) => void;
 }) {
   const registration = !status.platformAvailable
-    ? { tone: "preview", title: "Native app only", copy: "The browser preview can edit this screen, but Windows registers shortcuts only in the installed Aurora app." }
+    ? { tone: "preview", title: "Native app only", copy: "The browser preview can edit this screen, but global shortcuts work only in the installed Aurora app." }
     : status.enabled && status.registered
-      ? { tone: "ready", title: "Global shortcuts active", copy: "Windows is listening even when Aurora is behind another app." }
+      ? { tone: "ready", title: "Global shortcuts active", copy: `${status.platform === "macos" ? "macOS" : status.platform === "windows" ? "Windows" : "This device"} is listening even when Aurora is behind another app.` }
       : status.enabled
         ? { tone: "error", title: "Shortcuts not registered", copy: status.error ?? "One or more shortcuts are unavailable." }
         : { tone: "off", title: "Global shortcuts off", copy: "Aurora will not respond to shortcuts outside the app." };
@@ -520,7 +520,7 @@ function ShortcutSettingsPanel({
   return (
     <>
       <label className="settings-switch">
-        <span><strong>Enable global shortcuts</strong><small>Use playback controls while Edge or another app has focus.</small></span>
+        <span><strong>Enable global shortcuts</strong><small>Use playback controls while another app has focus.</small></span>
         <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
         <i aria-hidden="true" />
       </label>
@@ -551,14 +551,16 @@ function ShortcutSettingsPanel({
             >
               {recordingAction === binding.action
                 ? <em>Press keys…</em>
-                : binding.accelerator.split("+").map((part) => <kbd key={part}>{displayKey(part)}</kbd>)}
+                : binding.accelerator.split("+").map((part) => <kbd key={part}>{displayKey(part, status.platform)}</kbd>)}
             </button>
           </div>
         ))}
       </div>
 
       <p className="shortcut-scope"><strong>Now playing is the only target.</strong> Rating and Love shortcuts write instantly to the MP3 and Aurora state for the track currently playing. Selecting another song in Explore never changes the shortcut target.</p>
-      <p className="shortcut-atomic">Aurora registers the entire set together. Rating defaults use the numeric keypad so AltGr characters stay available. If MusicBee or another app owns one binding, change that shortcut and save again.</p>
+      <p className="shortcut-atomic">Aurora registers the entire set together. {status.platform === "macos"
+        ? "Mac defaults use Command–Option and the numeric keypad. You can record number-row keys instead."
+        : "Rating defaults use the numeric keypad so AltGr characters stay available."} If another app owns a binding, change that shortcut and save again.</p>
     </>
   );
 }
@@ -573,9 +575,11 @@ function validateBindings(bindings: ShortcutBinding[]): string | null {
   return null;
 }
 
-function displayKey(key: string): string {
-  if (key === "Ctrl") return "CTRL";
-  if (key === "Super") return "WIN";
+function displayKey(key: string, platform: GlobalShortcutStatus["platform"]): string {
+  if (key === "Ctrl") return platform === "macos" ? "⌃" : "CTRL";
+  if (key === "Alt") return platform === "macos" ? "⌥" : "ALT";
+  if (key === "Super") return platform === "macos" ? "⌘" : "WIN";
+  if (key === "Shift") return platform === "macos" ? "⇧" : "SHIFT";
   if (key.startsWith("Numpad")) return `NUM ${key.slice(6)}`;
   return key.toLocaleUpperCase();
 }
