@@ -464,6 +464,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(legacy.smb_share, None);
+        assert_eq!(parse_smb_share("smb://home-pc/D"), Some(("home-pc", "D")));
+        assert_eq!(parse_smb_share("smb://user@home-pc/D"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_smb_roots_validate_and_infer_legacy_share() {
+        let legacy = RootMapping {
+            catalog_root: r"D:\MUSIC".into(),
+            mounted_root: "/Volumes/Old/MUSIC".into(),
+            smb_share: None,
+        };
         let valid = ConnectionSettings {
             music_roots: vec![RootMapping {
                 smb_share: Some("smb://home-pc/D".into()),

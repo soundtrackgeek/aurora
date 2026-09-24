@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.26.15 reconnects configured Mac music shares through Finder when Network Mode starts and locates them by SMB share identity, even when macOS changes their `/Volumes` suffix. Connections shows live root availability and offers a **Connect music shares** action.
+Aurora 0.26.16 restores the Windows release build by limiting Mac mounted-folder validation tests to macOS. The 0.26.15 music-share reconnect and stable SMB path resolution remain included.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 

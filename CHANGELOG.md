@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.16] - 2026-09-24
+
+### Fixed
+
+- Restore the Windows release build by running `/Volumes`-specific SMB mapping assertions only on macOS; keep share URL parsing covered on both platforms.
+
 ## [0.26.15] - 2026-09-24
 
 ### Fixed
