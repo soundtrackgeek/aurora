@@ -558,7 +558,12 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .connection-settings { display: grid; gap: 16px; }
 .connection-settings label { display: grid; gap: 6px; }
 .connection-settings input:not([type="checkbox"]) { width: 100%; min-width: 0; padding: 9px; background: #101820; color: inherit; border: 1px solid #43525c; border-radius: 6px; }
-.connection-settings__mapping { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+.connection-settings__mapping { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+.connection-settings__status { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.connection-settings__status.is-available { color: #8ed6ab; }
+.connection-settings__status.is-unavailable { color: #ee8ba5; }
+.connection-settings__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 700px) { .connection-settings__mapping { grid-template-columns: minmax(0, 1fr) auto; } .connection-settings__mapping label { grid-column: 1; } .connection-settings__mapping button { grid-column: 2; grid-row: 1; } }
 
 .tonehavn-settings { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
 .tonehavn-settings fieldset { border: 0; padding: 0; display: grid; gap: 12px; min-width: 0; }

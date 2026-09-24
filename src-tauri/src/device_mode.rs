@@ -265,14 +265,15 @@ pub(crate) fn catalog_path_for_device_path(path: &Path) -> PathBuf {
 
 pub(crate) fn path_mapping_statuses() -> Vec<PathMappingStatus> {
     if crate::connections::network_mode() {
-        return crate::connections::active()
-            .music_roots
-            .into_iter()
-            .map(|m| PathMappingStatus {
-                available: Path::new(&m.mounted_root).is_dir(),
-                desktop_root: m.catalog_root,
-                laptop_root: m.mounted_root.clone(),
-                active_root: m.mounted_root,
+        let mappings = crate::connections::active().music_roots;
+        return mappings
+            .iter()
+            .zip(crate::connections::root_statuses(&mappings))
+            .map(|(mapping, status)| PathMappingStatus {
+                available: status.available,
+                desktop_root: mapping.catalog_root.clone(),
+                laptop_root: mapping.mounted_root.clone(),
+                active_root: status.active_root,
             })
             .collect();
     }

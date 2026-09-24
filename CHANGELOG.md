@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.15] - 2026-09-24
+
+### Fixed
+
+- Open configured Mac music SMB shares through Finder when Network Mode starts, and offer a manual reconnect in Connections.
+- Resolve music and artwork by SMB server and share identity, so changing `/Volumes` suffixes cannot select the wrong drive. Show connection status for each root and a specific missing-share playback error.
+- Recognize existing IP-address mount mappings as drive-letter SMB shares without changing the settings file used by earlier Aurora versions.
+
 ## [0.26.14] - 2026-09-23
 
 ### Fixed

@@ -12,6 +12,18 @@ static ACTIVE: OnceLock<ConnectionSettings> = OnceLock::new();
 pub(crate) struct RootMapping {
     pub(crate) catalog_root: String,
     pub(crate) mounted_root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) smb_share: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RootStatus {
+    pub(crate) catalog_root: String,
+    pub(crate) mounted_root: String,
+    pub(crate) smb_share: Option<String>,
+    pub(crate) active_root: String,
+    pub(crate) available: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -50,9 +62,14 @@ pub(crate) fn read(directory: &Path) -> Result<ConnectionSettings, String> {
     if !path.exists() {
         return Ok(ConnectionSettings::default());
     }
-    let value: ConnectionSettings =
+    let mut value: ConnectionSettings =
         serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
             .map_err(|e| format!("Could not read connection settings: {e}"))?;
+    for mapping in &mut value.music_roots {
+        if mapping.smb_share.is_none() {
+            mapping.smb_share = infer_legacy_smb_share(mapping);
+        }
+    }
     validate(&value)?;
     Ok(value)
 }
@@ -95,11 +112,29 @@ fn validate(value: &ConnectionSettings) -> Result<(), String> {
             || !source.as_bytes()[0].is_ascii_alphabetic()
             || source.split('\\').any(|p| p == ".." || p == ".")
             || !Path::new(&mapping.mounted_root).is_absolute()
+            || Path::new(&mapping.mounted_root).components().any(|part| {
+                matches!(
+                    part,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
         {
             return Err(
                 "Each mapping needs a Windows drive root and an absolute mounted folder."
                     .to_owned(),
             );
+        }
+        if mapping
+            .smb_share
+            .as_deref()
+            .is_some_and(|share| parse_smb_share(share).is_none())
+        {
+            return Err(
+                "SMB shares must use smb://host/share without a user name or subfolder.".to_owned(),
+            );
+        }
+        if mapping.smb_share.is_some() && !mapping.mounted_root.starts_with("/Volumes/") {
+            return Err("An SMB mapping needs a mounted folder under /Volumes.".to_owned());
         }
         if value.music_roots[..i].iter().any(|other| {
             other
@@ -164,7 +199,10 @@ pub(crate) fn resolve(path: &Path, mappings: &[RootMapping], reverse: bool) -> O
     for mapping in ordered {
         let source = mapping.catalog_root.replace('/', "\\");
         let source = source.trim_end_matches('\\');
-        let mounted = mapping.mounted_root.trim_end_matches('/');
+        let Some(mounted_root) = active_mounted_root(mapping) else {
+            continue;
+        };
+        let mounted = mounted_root.to_str()?.trim_end_matches('/');
         let (raw, prefix, separator) = if reverse {
             (native.as_ref(), mounted, '/')
         } else {
@@ -198,6 +236,182 @@ pub(crate) fn resolve(path: &Path, mappings: &[RootMapping], reverse: bool) -> O
     None
 }
 
+fn parse_smb_share(value: &str) -> Option<(&str, &str)> {
+    let (host, share) = value.strip_prefix("smb://")?.split_once('/')?;
+    if host.is_empty()
+        || share.is_empty()
+        || host
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-'))
+        || share
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | '?' | '#' | '@'))
+        || matches!(share, "." | "..")
+    {
+        return None;
+    }
+    Some((host, share))
+}
+
+fn infer_legacy_smb_share(mapping: &RootMapping) -> Option<String> {
+    let volume = mapping
+        .mounted_root
+        .strip_prefix("/Volumes/")?
+        .split('/')
+        .next()?;
+    let host = volume
+        .rsplit_once('-')
+        .filter(|(_, suffix)| {
+            !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        .map_or(volume, |(host, _)| host);
+    host.parse::<std::net::Ipv4Addr>().ok()?;
+    let drive = mapping.catalog_root.as_bytes().first().copied()?;
+    if !drive.is_ascii_alphabetic() {
+        return None;
+    }
+    Some(format!(
+        "smb://{host}/{}",
+        (drive as char).to_ascii_uppercase()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug)]
+struct SmbMount {
+    host: String,
+    share: String,
+    path: PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+fn smb_mounts() -> Vec<SmbMount> {
+    use std::ffi::CStr;
+    let mut entries = std::ptr::null_mut();
+    // SAFETY: getmntinfo supplies an OS-owned array of `count` statfs entries.
+    let count = unsafe { libc::getmntinfo(&mut entries, libc::MNT_NOWAIT) };
+    if count <= 0 || entries.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: Each statfs string is NUL-terminated and the array stays valid until the next getmntinfo call.
+    unsafe { std::slice::from_raw_parts(entries, count as usize) }
+        .iter()
+        .filter_map(|entry| {
+            let fs_type = unsafe { CStr::from_ptr(entry.f_fstypename.as_ptr()) };
+            if fs_type.to_bytes() != b"smbfs" {
+                return None;
+            }
+            let source = unsafe { CStr::from_ptr(entry.f_mntfromname.as_ptr()) }
+                .to_str()
+                .ok()?;
+            let (server, share) = source.strip_prefix("//")?.split_once('/')?;
+            let host = server.rsplit_once('@').map_or(server, |(_, host)| host);
+            let path = unsafe { CStr::from_ptr(entry.f_mntonname.as_ptr()) }
+                .to_str()
+                .ok()?;
+            Some(SmbMount {
+                host: host.to_owned(),
+                share: share.to_owned(),
+                path: PathBuf::from(path),
+            })
+        })
+        .collect()
+}
+
+fn active_mounted_root(mapping: &RootMapping) -> Option<PathBuf> {
+    if mapping.smb_share.is_none() {
+        return Some(PathBuf::from(&mapping.mounted_root));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mounted_root_from_mounts(mapping, &smb_mounts())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(PathBuf::from(&mapping.mounted_root))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn mounted_root_from_mounts(mapping: &RootMapping, mounts: &[SmbMount]) -> Option<PathBuf> {
+    let (host, share) = parse_smb_share(mapping.smb_share.as_deref()?)?;
+    let saved = Path::new(&mapping.mounted_root);
+    let volume = saved.strip_prefix("/Volumes").ok()?.components().next()?;
+    let saved_mount = Path::new("/Volumes").join(volume.as_os_str());
+    let suffix = saved.strip_prefix(saved_mount).ok()?;
+    mounts
+        .iter()
+        .find(|mount| {
+            mount.host.eq_ignore_ascii_case(host) && mount.share.eq_ignore_ascii_case(share)
+        })
+        .map(|mount| mount.path.join(suffix))
+}
+
+pub(crate) fn root_statuses(mappings: &[RootMapping]) -> Vec<RootStatus> {
+    mappings
+        .iter()
+        .map(|mapping| {
+            let active = active_mounted_root(mapping);
+            RootStatus {
+                catalog_root: mapping.catalog_root.clone(),
+                mounted_root: mapping.mounted_root.clone(),
+                smb_share: mapping.smb_share.clone(),
+                available: active.as_deref().is_some_and(Path::is_dir),
+                active_root: active
+                    .unwrap_or_else(|| PathBuf::from(&mapping.mounted_root))
+                    .to_string_lossy()
+                    .into_owned(),
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn unavailable_share(path: &Path) -> Option<String> {
+    let settings = active();
+    let windows = path.to_string_lossy().replace('/', "\\");
+    settings.music_roots.iter().find_map(|mapping| {
+        let source = mapping.catalog_root.replace('/', "\\");
+        let source = source.trim_end_matches('\\');
+        let prefix = windows.get(..source.len())?;
+        if !prefix.eq_ignore_ascii_case(source)
+            || (windows.len() > source.len() && windows.as_bytes()[source.len()] != b'\\')
+            || active_mounted_root(mapping).is_some()
+        {
+            return None;
+        }
+        mapping.smb_share.clone()
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn connect_music_shares(settings: &ConnectionSettings) -> Result<usize, String> {
+    if !settings.network_mode {
+        return Ok(0);
+    }
+    let mounts = smb_mounts();
+    let mut opened = std::collections::HashSet::new();
+    for mapping in &settings.music_roots {
+        let Some(url) = mapping.smb_share.as_deref() else {
+            continue;
+        };
+        let (host, share) = parse_smb_share(url).ok_or("The SMB share URL is invalid.")?;
+        if mounts.iter().any(|mount| {
+            mount.host.eq_ignore_ascii_case(host) && mount.share.eq_ignore_ascii_case(share)
+        }) || !opened.insert(url.to_ascii_lowercase())
+        {
+            continue;
+        }
+        let result = std::process::Command::new("/usr/bin/open")
+            .arg(url)
+            .status()
+            .map_err(|error| format!("Could not ask Finder to connect {url}: {error}"))?;
+        if !result.success() {
+            return Err(format!("Finder could not open the music share {url}."));
+        }
+    }
+    Ok(opened.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +420,7 @@ mod tests {
         let mappings = vec![RootMapping {
             catalog_root: r"D:\MUSIC".into(),
             mounted_root: "/Volumes/PC/MUSIC".into(),
+            smb_share: None,
         }];
         let native = Path::new("/Volumes/PC/MUSIC/Björk/01 - Jóga.mp3");
         assert_eq!(
@@ -239,6 +454,93 @@ mod tests {
                 ..value
             })
             .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_roots_load_without_smb_share_and_invalid_urls_are_rejected() {
+        let legacy: RootMapping = serde_json::from_str(
+            r#"{"catalogRoot":"D:\\MUSIC","mountedRoot":"/Volumes/Old/MUSIC"}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.smb_share, None);
+        let valid = ConnectionSettings {
+            music_roots: vec![RootMapping {
+                smb_share: Some("smb://home-pc/D".into()),
+                ..legacy.clone()
+            }],
+            ..Default::default()
+        };
+        assert!(validate(&valid).is_ok());
+        assert!(
+            validate(&ConnectionSettings {
+                music_roots: vec![RootMapping {
+                    smb_share: Some("smb://user@home-pc/D".into()),
+                    ..legacy
+                }],
+                ..Default::default()
+            })
+            .is_err()
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = ConnectionSettings {
+            music_roots: vec![RootMapping {
+                catalog_root: r"D:\MUSIC".into(),
+                mounted_root: "/Volumes/192.0.2.10-2/MUSIC".into(),
+                smb_share: None,
+            }],
+            ..Default::default()
+        };
+        save(dir.path(), &settings).unwrap();
+        assert_eq!(
+            read(dir.path()).unwrap().music_roots[0]
+                .smb_share
+                .as_deref(),
+            Some("smb://192.0.2.10/D")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn smb_share_rebinds_to_current_mount_name_without_confusing_drives() {
+        let mapping = RootMapping {
+            catalog_root: r"D:\MUSIC".into(),
+            mounted_root: "/Volumes/musicbox-1/MUSIC".into(),
+            smb_share: Some("smb://musicbox.local/D".into()),
+        };
+        let mounts = vec![
+            SmbMount {
+                host: "musicbox.local".into(),
+                share: "C".into(),
+                path: "/Volumes/musicbox-1".into(),
+            },
+            SmbMount {
+                host: "musicbox.local".into(),
+                share: "D".into(),
+                path: "/Volumes/musicbox-2".into(),
+            },
+        ];
+        assert_eq!(
+            mounted_root_from_mounts(&mapping, &mounts),
+            Some(PathBuf::from("/Volumes/musicbox-2/MUSIC"))
+        );
+        assert_eq!(mounted_root_from_mounts(&mapping, &mounts[..1]), None);
+        assert_eq!(parse_smb_share("smb://host/D/other"), None);
+        let mappings = vec![
+            RootMapping {
+                smb_share: Some("smb://missing.invalid/D".into()),
+                ..mapping
+            },
+            RootMapping {
+                catalog_root: r"G:\".into(),
+                mounted_root: "/Volumes/G".into(),
+                smb_share: None,
+            },
+        ];
+        assert_eq!(
+            resolve(Path::new(r"G:\Album\song.mp3"), &mappings, false),
+            Some(PathBuf::from("/Volumes/G/Album/song.mp3"))
         );
     }
 }

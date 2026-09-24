@@ -2540,6 +2540,11 @@ pub(crate) fn catalog_tag_values_by_path(
 fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String> {
     let audio_path = catalog_audio_path(directory, filename)?;
     if !audio_path.is_file() {
+        if let Some(share) = crate::connections::unavailable_share(Path::new(directory)) {
+            return Err(format!(
+                "The music share {share} is not mounted. Use Connect music shares in Settings → Connections, sign in to Finder if prompted, then try playback again."
+            ));
+        }
         return Err("The MP3 file is unavailable at its catalog location.".to_owned());
     }
     Ok(audio_path)

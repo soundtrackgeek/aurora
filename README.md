@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.26.14 keeps **Added · newest** album ordering consistent across computers even when unrelated Aurora state has diverged. Newer synchronized album-addition records are merged independently without overwriting playback, tag, journal, or curation state, and an open Albums view refreshes as soon as the ordering metadata arrives.
+Aurora 0.26.15 reconnects configured Mac music shares through Finder when Network Mode starts and locates them by SMB share identity, even when macOS changes their `/Volumes` suffix. Connections shows live root availability and offers a **Connect music shares** action.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 
@@ -94,7 +94,7 @@ Skipping to a preloaded song now waits for the audio queue to retire the previou
 
 For local Mac builds, use the development build command in the macOS installation section above; production releases require the signing credentials described there.
 
-In **Settings → Connections**, choose Network Mode, enter an absolute **local catalog file** path, a mounted `_musicbackup` **sync folder**, and source-to-mounted music/artwork roots. Quit and reopen Aurora after saving. For example, `D:\MUSIC` can map to `/Volumes/HomePC/MUSIC`. Finder chooses mount names; use the actual mounted folder, not the example. Original Windows catalog identities remain unchanged. Add the `C:\_code\music_backup_v5\AlbumCovers` archive root if you use it.
+In **Settings → Connections**, choose Network Mode, enter an absolute **local catalog file** path, a mounted `_musicbackup` **sync folder**, and source-to-mounted music/artwork roots. For each SMB music root, also enter its stable share URL, such as `smb://HomePC/D` for `D:\MUSIC` mapped to `/Volumes/HomePC/MUSIC`. Existing mappings under `/Volumes/<IPv4 address>` (including numbered suffixes) infer the matching drive-letter share automatically. Save and restart Aurora after changing connections. Aurora asks Finder to connect configured music shares on launch and finds their current mount points by server and share name. **Connect music shares** retries without opening each drive manually; Finder may ask you to sign in. The sync folder still needs its own mount. Original Windows catalog identities remain unchanged. Add the `C:\_code\music_backup_v5\AlbumCovers` archive root if you use it.
 
 The default catalog on Mac is `~/Library/Application Support/com.local.musiclibrary/music-library.sqlite3`. Copy a consistent, closed SQLite snapshot locally before opening it. The catalog is separate from Aurora state synchronization and is not automatically refreshed from the PC in this version. Close both apps before replacing its local working copy.
 

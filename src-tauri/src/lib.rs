@@ -1554,6 +1554,26 @@ fn save_connection_settings(
 }
 
 #[tauri::command]
+fn connection_root_statuses(app: AppHandle) -> Result<Vec<connections::RootStatus>, String> {
+    let settings = connections::read(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    Ok(connections::root_statuses(&settings.music_roots))
+}
+
+#[tauri::command]
+fn connect_music_shares(app: AppHandle) -> Result<usize, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let settings = connections::read(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+        connections::connect_music_shares(&settings)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("SMB share connections are available on macOS.".to_owned())
+    }
+}
+
+#[tauri::command]
 async fn tonehavn_status(app: AppHandle) -> Result<tonehavn::Status, String> {
     let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || tonehavn::status(&root))
@@ -1621,6 +1641,10 @@ pub fn run() {
             }
             let state_directory = app.path().app_data_dir()?;
             connections::initialize(&state_directory).map_err(std::io::Error::other)?;
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(|| {
+                let _ = connections::connect_music_shares(&connections::active());
+            });
             timing::initialize(&state_directory);
             let state_path = state_directory.join("aurora-state.sqlite3");
             let remote_state_path =
@@ -1710,6 +1734,8 @@ pub fn run() {
             tonehavn_logout,
             connection_settings,
             save_connection_settings,
+            connection_root_statuses,
+            connect_music_shares,
             library_snapshot,
             catalog_revision,
             list_music_library_playlists,
