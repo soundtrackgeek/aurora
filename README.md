@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.26.17 adds macOS Now Playing media-key controls and Mac-specific global shortcut defaults while preserving the Windows bindings.
+Aurora 0.26.18 restores the Windows release build after the macOS Now Playing and global shortcut changes in 0.26.17. The Mac controls and Windows bindings remain as described below.
 
 Aurora 0.26.12 reads saved Music Library playlists from the current catalog. Open a playlist from the sidebar or Playlists page to see its songs in saved order and play from any track. Aurora remembers the selected playlist, resolves each saved file against current catalog metadata, shows how many songs are unavailable, and continues long playlists with bounded playback queue refills. Refresh the page after editing playlists in Music Library. The browser preview has no access to the desktop catalog.
 

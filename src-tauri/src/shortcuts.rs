@@ -650,6 +650,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
     });
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn emit_media_playback(app: &AppHandle, action: &str, snapshot: PlaybackSnapshot) {
     let message = match snapshot.status {
         crate::playback::PlaybackStatus::Playing => "Playback started",

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.18] - 2026-09-24
+
+### Fixed
+
+- Compile the macOS-only media playback event helper only on macOS, restoring the Windows Rust lint and release build.
+
 ## [0.26.17] - 2026-09-24
 
 ### Fixed
