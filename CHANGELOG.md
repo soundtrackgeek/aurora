@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.19] - 2026-09-24
+
+### Fixed
+
+- Let Mac global rating and Love shortcuts use the verified Tonehavn edit path in Network Mode instead of failing the direct-write guard. Queue those edits in order, keep the keypress's now-playing track as the target, and show the updated tags only after the PC confirms them; preserve Windows shortcut behavior.
+
 ## [0.26.18] - 2026-09-24
 
 ### Fixed

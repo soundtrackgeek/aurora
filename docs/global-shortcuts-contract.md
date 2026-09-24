@@ -37,7 +37,7 @@ Windows exposes AltGr combinations as `Ctrl+Alt`. Numeric-keypad rating defaults
 
 ## Tag workflow
 
-The rating and Love handler snapshots the native now-playing track, derives the expected and desired tag values, and calls the same `TagService` transaction used by visible controls. That transaction:
+On Windows, the rating and Love handler snapshots the native now-playing track, derives the expected and desired tag values, and calls the same `TagService` transaction used by visible controls. That transaction:
 
 1. Writes and verifies the MusicBee MP3 frames.
 2. Records the operation journal and optimistic overlay in `aurora-state.sqlite3`.
@@ -45,6 +45,8 @@ The rating and Love handler snapshots the native now-playing track, derives the 
 4. Leaves the durable exact-file/folder synchronization journal for the focused background Music Library retry, so a slow companion process cannot delay the shortcut result.
 
 The shared Music Library catalog remains read-only. A later tagged-album folder sync, or a legacy MusicBee TSV import, updates that catalog; Aurora reconciliation then clears an overlay that has caught up. External file-tag edits can still become visible through the existing bounded reconciliation path.
+
+On macOS in Network Mode, rating and Love shortcuts capture the now-playing track identity at keypress and enter the same ordered background queue. Each task resolves the latest local catalog and overlay values, then uses the same `TagService::update` route as inline edits. Tonehavn checks the expected values and verifies the PC MP3 and catalog edit. Aurora refreshes playback and visible track metadata only after the confirmed result; a rejected edit leaves the displayed values alone. No direct MP3 write or local Music Library import runs on the Mac. Rapid Love presses derive each toggle from the preceding confirmed result.
 
 ## Failure behavior
 
@@ -55,6 +57,6 @@ The shared Music Library catalog remains read-only. A later tagged-album folder 
 
 ## Verification
 
-- Rust tests cover defaults, invalid/duplicate bindings, rating clearing and mapping, Love toggling, tag-field preservation, and device-local persistence.
+- Rust tests cover defaults, invalid/duplicate bindings, rating clearing and mapping, Love toggling, remote shortcut request sequencing and tag-field preservation, and device-local persistence.
 - React tests cover capture, complete-set save, duplicate rejection, default restoration, and the now-playing-only explanation.
 - Native smoke testing confirms the full default set registers and `Ctrl+Alt+P` reaches Aurora while another Windows application has focus; playback is restored afterward and no real MP3 rating/Love value is changed during the smoke test.

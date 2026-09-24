@@ -439,6 +439,14 @@ impl TagService {
         self.snapshot_with_values(resolved, values, None)
     }
 
+    pub(crate) fn resolve_shortcut_track(
+        &self,
+        track_id: &str,
+        track_key: &str,
+    ) -> Result<TrackSummary, String> {
+        Ok(catalog::resolve_track(track_id, track_key, &self.store)?.summary)
+    }
+
     pub(crate) fn inspect_editor(
         &self,
         target: TagEditorTarget,
