@@ -69,6 +69,8 @@ import {
   RatingsStudio,
   type RatingsLoadState,
 } from "./components/ratings/RatingsStudio";
+import { TonightsAlbum } from "./components/ratings/TonightsAlbum";
+import { loadTonightQueue } from "./tonight";
 import {
   PublisherAlbumInspector,
   PublisherSignalTimeline,
@@ -2412,6 +2414,19 @@ function App() {
     }
   }
 
+  async function playTonightAlbum(album: RatingAlbum, minutes: number) {
+    if (ratingsQueueBusy) throw new Error("Album playback is already loading.");
+    setRatingsQueueBusy(true);
+    try {
+      const tracks = await loadTonightQueue(album, minutes);
+      if (!tracks.length) throw new Error("This album has no playable tracks. Request fresh suggestions.");
+      endGenreQueue();
+      const next = await playback.play(tracks, tracks[0].id);
+      if (!next) throw new Error("Album playback could not start. Check the player status.");
+      selectTrack(tracks[0]);
+    } finally { setRatingsQueueBusy(false); }
+  }
+
   function exploreRatingCollection(mode: RatingMode, rating: number | null) {
     transitionContent(() => {
 
@@ -3517,7 +3532,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.26.21</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.27.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3823,6 +3838,7 @@ function App() {
             </RememberedPage>
             <RememberedPage active={!artistPageName && activeNav === "Ratings"}>
               <ContentTransition type="collection">
+                <TonightsAlbum onPlay={playTonightAlbum} onOpen={goToRatingAlbum} onSettings={() => openSettings("connections")} playbackBusy={ratingsQueueBusy} />
                 <RatingsStudio
                   overview={ratingsOverview}
                   page={ratingsPage}

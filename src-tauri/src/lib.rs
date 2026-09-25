@@ -14,6 +14,7 @@ mod genres;
 mod history;
 mod id3_write;
 mod inbox;
+mod jev;
 mod laptop_mode;
 mod lastfm;
 mod library_bridge;
@@ -37,6 +38,7 @@ mod tag_model;
 mod tagging;
 mod timing;
 mod tonehavn;
+mod tonight;
 mod track_deletion;
 mod waveform;
 mod years;
@@ -848,6 +850,74 @@ async fn ratings_overview(app: AppHandle) -> Result<RatingsOverview, String> {
 }
 
 #[tauri::command]
+async fn jev_settings() -> Result<jev::Status, String> {
+    tauri::async_runtime::spawn_blocking(jev::status)
+        .await
+        .map_err(|_| "The Jev settings worker stopped.")?
+}
+
+#[tauri::command]
+async fn update_jev_credentials(request: jev::CredentialsRequest) -> Result<jev::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || jev::save(request))
+        .await
+        .map_err(|_| "The Jev credential worker stopped.")?
+}
+
+#[tauri::command]
+async fn test_jev_connection() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(jev::test_connection)
+        .await
+        .map_err(|_| "The Jev connection worker stopped.")?
+}
+
+#[tauri::command]
+async fn tonight_suggestions(
+    app: AppHandle,
+    request: tonight::Request,
+) -> Result<tonight::ResultSet, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tonight::suggest(
+            request,
+            &app.state::<StateStore>(),
+            &app.state::<HistoryStore>(),
+        )
+    })
+    .await
+    .map_err(|_| "The Tonight's Album worker stopped.")?
+}
+
+#[tauri::command]
+async fn tonight_feedback(app: AppHandle, request: tonight::FeedbackRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tonight::save_feedback(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|_| "The album feedback worker stopped.")?
+}
+
+#[tauri::command]
+async fn tonight_reset_feedback(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tonight::reset_feedback(&app.state::<StateStore>())
+    })
+    .await
+    .map_err(|_| "The album feedback worker stopped.")?
+}
+
+#[tauri::command]
+async fn tonight_album_queue(
+    app: AppHandle,
+    album_id: String,
+    minutes: u32,
+) -> Result<Vec<TrackSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tonight::queue(&album_id, minutes, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|_| "The album playback worker stopped.")?
+}
+
+#[tauri::command]
 async fn publisher_overview(search: Option<String>) -> Result<PublisherOverview, String> {
     tauri::async_runtime::spawn_blocking(move || publishers::load_publisher_overview(search))
         .await
@@ -1638,6 +1708,7 @@ pub fn run() {
             {
                 let _ = dotenvy::from_filename(".env.local")
                     .or_else(|_| dotenvy::from_filename("../.env.local"));
+                let _ = dotenvy::dotenv();
             }
             let state_directory = app.path().app_data_dir()?;
             connections::initialize(&state_directory).map_err(std::io::Error::other)?;
@@ -1768,6 +1839,13 @@ pub fn run() {
             chart_entry_track,
             chart_queue_tracks,
             ratings_overview,
+            jev_settings,
+            update_jev_credentials,
+            test_jev_connection,
+            tonight_suggestions,
+            tonight_feedback,
+            tonight_reset_feedback,
+            tonight_album_queue,
             rating_album_page,
             rating_collection_tracks,
             rating_album_queue_tracks,

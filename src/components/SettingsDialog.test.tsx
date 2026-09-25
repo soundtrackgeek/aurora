@@ -56,6 +56,13 @@ function renderSettings(overrides: Partial<Parameters<typeof SettingsDialog>[0]>
 }
 
 describe("SettingsDialog", () => {
+  it("opens Jev settings without desktop connection APIs in browser preview", async () => {
+    renderSettings({ initialTab: "connections" });
+    expect(screen.getByRole("dialog", { name: "Connections" })).toBeVisible();
+    expect(await screen.findByText(/This browser preview never stores API keys/)).toBeVisible();
+    expect(screen.getByLabelText("OpenRouter API key")).toBeDisabled();
+    expect(screen.queryByText(/reading 'invoke'/)).not.toBeInTheDocument();
+  });
   it("shows the requested shortcut defaults and guarantees the now-playing scope", () => {
     renderSettings();
 

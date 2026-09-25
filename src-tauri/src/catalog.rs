@@ -2537,7 +2537,7 @@ pub(crate) fn catalog_tag_values_by_path(
         .map_err(|error| format!("Could not read recovered track values: {error}"))
 }
 
-fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String> {
+pub(crate) fn validated_audio_path(directory: &str, filename: &str) -> Result<PathBuf, String> {
     let audio_path = catalog_audio_path(directory, filename)?;
     if !audio_path.is_file() {
         if let Some(share) = crate::connections::unavailable_share(Path::new(directory)) {

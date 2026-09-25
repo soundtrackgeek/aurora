@@ -953,7 +953,7 @@ pub(crate) fn load_rating_album_queue(
     load_rating_album_queue_from_connection(&connection, &request, store)
 }
 
-fn load_rating_album_queue_from_connection(
+pub(crate) fn load_rating_album_queue_from_connection(
     connection: &Connection,
     request: &RatingAlbumQueueRequest,
     store: &StateStore,

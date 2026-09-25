@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.27.0] - 2026-09-25
+
+### Added
+
+- Ratings → Tonight’s Album: three whole-album suggestions for Comfort, Discovery, or Finish something, with a listening-time budget, optional description, local factual reasons, album playback, and library navigation.
+- Jev through OpenRouter’s Decisions API, pinned to `typesafe/jev-1.13`, with secure credential settings, an explicit connection test, bounded metadata requests, response validation, and local ranking fallback.
+- Explicit per-intention Good fit, Not for this, and None of these feedback with reset; saved suggestions retain their original context across navigation and restart and refresh only on request. Catalog and music tags remain unchanged.
+- Local duration, file availability, banned-track, rating completeness, and available-history checks, with complete-album validation again before playback. Browser preview labels sample data and never accepts real keys.
+
 ## [0.26.21] - 2026-09-25
 
 ### Fixed

@@ -1327,6 +1327,42 @@ impl HistoryStore {
         Ok(insight)
     }
 
+    /// One indexed batch per available history source. No artist/title guessing.
+    pub(crate) fn last_listened_for_keys(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, i64>, String> {
+        let keys =
+            serde_json::to_string(keys).map_err(|_| "Could not prepare history identities.")?;
+        let mut latest = HashMap::<String, i64>::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection.prepare("SELECT track_key, MAX(started_at_ms) FROM listening_sessions WHERE track_key IN (SELECT value FROM json_each(?1)) AND listened_seconds > 0 GROUP BY track_key")
+                .map_err(|error| format!("Could not prepare recent listening: {error}"))?;
+            let rows = statement
+                .query_map([&keys], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| format!("Could not read recent listening: {error}"))?;
+            for row in rows {
+                let (key, time) = row.map_err(|error| error.to_string())?;
+                latest
+                    .entry(key)
+                    .and_modify(|value| *value = (*value).max(time))
+                    .or_insert(time);
+            }
+        }
+        Ok(latest)
+    }
+
     pub(crate) fn genre_insights(&self) -> Result<HashMap<String, GenreHistoryInsight>, String> {
         let mut insights: HashMap<String, GenreHistoryInsight> = HashMap::new();
         for source in self.available_sources() {
@@ -2597,6 +2633,37 @@ mod tests {
         assert_eq!(insight.listened_seconds, 12.0);
         assert!(insight.last_listened_at_ms.is_some());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tonight_recency_uses_exact_keys_and_positive_listening_in_one_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new_with_tonehavn_directory(
+            directory.path().join("history.sqlite3"),
+            directory.path().join("remote"),
+            "tonight-history-test".into(),
+            "Test".into(),
+            None,
+        )
+        .unwrap();
+        let known = track(240);
+        let mut session = store.capture_session(&known, 0.0, 30);
+        session.started_at_ms = 1_000;
+        store.persist_checkpoint(&session.checkpoint()).unwrap();
+        assert!(
+            store
+                .last_listened_for_keys(std::slice::from_ref(&known.track_key))
+                .unwrap()
+                .is_empty()
+        );
+        session.observe(10.0);
+        store.persist_checkpoint(&session.checkpoint()).unwrap();
+        let actual = store
+            .last_listened_for_keys(&[known.track_key.clone(), "different-path-same-title".into()])
+            .unwrap();
+        assert_eq!(actual.len(), 1);
+        assert_eq!(actual[&known.track_key], 1_000);
+        assert!(store.last_listened_for_keys(&[]).unwrap().is_empty());
     }
 
     #[test]

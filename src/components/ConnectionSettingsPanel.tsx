@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TonehavnSettingsPanel } from "./TonehavnSettingsPanel";
+import { isTauriRuntime } from "../library";
 
 interface Connections {
   networkMode: boolean;
@@ -24,6 +25,7 @@ export function ConnectionSettingsPanel() {
   const [error, setError] = useState("");
   const [rootStatuses, setRootStatuses] = useState<RootStatus[]>([]);
   useEffect(() => {
+    if (!isTauriRuntime()) return;
     let cancelled = false;
     void invoke<Connections>("connection_settings").then(value => {
       if (!cancelled) setDraft(value);
@@ -56,6 +58,7 @@ export function ConnectionSettingsPanel() {
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }
+  if (!isTauriRuntime()) return <p>Catalog, music share and sync connections are configured in the desktop app.</p>;
   if (!draft) return <p role="status">{error || "Loading connections…"}</p>;
   return <section className="connection-settings">
     <p>Keep your catalog on this computer. Aurora opens configured music shares in Finder on launch; mount the sync folder separately.</p>
