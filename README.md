@@ -130,7 +130,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 
 - Aurora remembers window size, screen position, and maximized state. Restarting reloads previously loaded explorer pages, reopens the album and selected track, and restores the saved scroll offset after content is ready. Update installation saves window geometry before exiting. These saved positions are local to this device.
 
-- Opening or reloading Tags projects the verified file metadata into the current library views. If the file genre differs from the catalog, Aurora queues those files for its existing Music Library synchronization without rewriting the MP3s. Complete album refreshes preserve the genre shared by their tracks.
+- Opening or reloading Tags projects the verified file metadata into the current library views. If the file genre or album title differs from the catalog, Aurora queues those files for Music Library synchronization without rewriting the MP3s, including an earlier blocked album rename. Music Library 0.151.2 or later applies a complete album title change to album cards and search; partial or ambiguous renames still require review. Complete album refreshes preserve the genre shared by their tracks.
 
 - Every catalog search field accepts either `:` or `=`. Aurora documents `:` as the convention, so `cr:50..80`, `love:1..3`, and `country:norway` are preferred, while their `=` forms remain valid. Completeness and loved-track counts support the same inclusive closed and open `..` ranges as years.
 

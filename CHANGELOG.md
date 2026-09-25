@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.26.21] - 2026-09-25
+
+### Fixed
+
+- Requeue an album title saved in its MP3 tags when Music Library still holds the old title, including a previously blocked rename. Opening Tags projects the file title and schedules catalog repair without changing the MP3s again. Use Music Library 0.151.2 or later for automatic catalog and search updates.
+
 ## [0.26.20] - 2026-09-24
 
 ### Fixed
