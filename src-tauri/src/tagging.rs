@@ -469,6 +469,12 @@ impl TagService {
             if track.summary.genre != state.values.genre
                 || state
                     .values
+                    .album_artist
+                    .as_ref()
+                    .or(state.values.artist.as_ref())
+                    .is_some_and(|artist| artist != &track.summary.artist)
+                || state
+                    .values
                     .album
                     .as_deref()
                     .is_some_and(|album| album != track.summary.album)
@@ -484,7 +490,7 @@ impl TagService {
             tracks.push(track.summary);
         }
         // Queue only after every file has been read consistently. Reading the editor
-        // must never rewrite the MP3s, but stale catalog genres and album titles
+        // must never rewrite the MP3s, but stale catalog genres, album titles, and album artists
         // need a fresh Music Library sync, including previously blocked renames.
         if !changed_files.is_empty() {
             self.store.queue_library_file_syncs(&changed_files)?;
@@ -3621,6 +3627,48 @@ mod tests {
             .unwrap();
         assert_eq!(result.state.tracks[0].values.album.as_deref(), Some("Lion"));
         assert_eq!(result.tracks[0].album, "Lion");
+        assert_eq!(
+            result.tracks[0].tag_sync_state,
+            Some(TagSyncState::PendingImport)
+        );
+        assert_eq!(store.pending_library_folder_sync(1).unwrap().len(), 1);
+        assert_eq!(fs::read(&target).unwrap(), before);
+    }
+
+    #[test]
+    fn editor_read_requeues_blocked_album_artist_edit_without_writing_audio() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("01.mp3");
+        write_fixture(&target, Version::Id3v24);
+        let mut tag = Tag::read_from_path(&target).unwrap();
+        tag.set_album_artist("Pat Travers");
+        tag.write_to_path(&target, Version::Id3v24).unwrap();
+        let before = fs::read(&target).unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let folder = directory.path().to_string_lossy().into_owned();
+        store
+            .queue_library_file_syncs(&[(folder.clone(), "01.mp3".into())])
+            .unwrap();
+        let blocked = store.pending_library_folder_sync(1).unwrap().remove(0);
+        store
+            .block_library_folder_sync(&blocked, "album-sized metadata sync")
+            .unwrap();
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+
+        let mut resolved = resolved_track_fixture("1", "lion-track", "lion-album");
+        resolved.audio_path = target.clone();
+        resolved.summary.directory = folder;
+        resolved.summary.filename = "01.mp3".into();
+        resolved.summary.artist = "Pat Travers Band".into();
+        let result = TagService::new(store.clone())
+            .unwrap()
+            .inspect_resolved_editor(vec![resolved])
+            .unwrap();
+        assert_eq!(
+            result.state.tracks[0].values.album_artist.as_deref(),
+            Some("Pat Travers")
+        );
+        assert_eq!(result.tracks[0].artist, "Pat Travers");
         assert_eq!(
             result.tracks[0].tag_sync_state,
             Some(TagSyncState::PendingImport)

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.1] - 2026-09-26
+
+### Fixed
+
+- Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.
+
 ## [0.28.0] - 2026-09-26
 
 ### Added

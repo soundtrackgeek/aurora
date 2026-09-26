@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.1: Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.
+
 Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. **Show more songs** reveals further results beyond the initial 20.
 
 Weekly charts read Music Library's `published_chart_books` and `published_chart_entries` tables in the configured catalog, without modifying the database. If the archive is missing, open **Published Charts** in Music Library, let preparation finish, then refresh the US picker in Aurora. The older Billboard annual Singles CSV import is separate. Available series, years, and dates reflect the imported archive. Browser preview uses sample songs and dates.
