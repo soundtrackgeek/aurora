@@ -1,3 +1,4 @@
+import { TrackChartInfo } from "./TrackChartInfo";
 import { PublishedChartPicker } from "./PublishedChartPicker";
 import {
   ArrowDown,
@@ -518,6 +519,7 @@ export function ChartInspector({
       {entry.albumScore !== null ? <div><dt>Album Score</dt><dd>{entry.albumScore.toFixed(1)}</dd></div> : null}
       {selection.kind === "albums" ? <div><dt>Rating Completeness</dt><dd>{albumRatingProgress ? `${albumRatingProgress.totalTracks > 0 ? Math.round(albumRatingProgress.ratedTracks / albumRatingProgress.totalTracks * 100) : 0}% (${formatCount(albumRatingProgress.ratedTracks)}/${formatCount(albumRatingProgress.totalTracks)})` : "—"}</dd></div> : null}
     </dl>
+    {selection.kind === "singles" ? <TrackChartInfo artist={entry.artist} title={entry.title} /> : null}
     <section className="chart-inspector__history"><header><h3>Source history</h3><span>{pageRequest.period.label}</span></header>{detail?.sourceRanks.map((rank) => <div key={rank.source}><span><i />{rank.label}{rank.annualOnly ? <small> annual</small> : null}</span><strong>{rank.bestRank === null ? "—" : `#${rank.bestRank}`}</strong></div>) ?? <p><LoaderCircle className="is-spinning" aria-hidden="true" /> Loading matches…</p>}</section>
     <div className="chart-inspector__library">{entry.matchedTrackId || entry.matchedAlbumId ? <><CheckCircle2 aria-hidden="true" /><span><strong>In your library</strong><small>Matched to local catalog</small></span></> : <><Library aria-hidden="true" /><span><strong>Not matched</strong><small>Chart history is still available</small></span></>}</div>
     {track ? <div className="chart-inspector__tags"><label>Your rating</label><InlineRatingControl title={track.title} rating={track.rating} busy={busy} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><label>Love</label><InlineLoveControl title={track.title} loveState={track.loveState} busy={busy} onLoveChange={(state) => onLoveChange(track, state)} /></div> : null}

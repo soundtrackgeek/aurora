@@ -1,4 +1,5 @@
 mod published;
+pub(crate) mod track_peaks;
 use crate::{
     catalog::{self, TrackSummary},
     state_store::StateStore,

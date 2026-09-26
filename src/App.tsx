@@ -1,3 +1,4 @@
+import { TrackChartInfo } from "./components/charts/TrackChartInfo";
 import { RememberedPage } from "./components/navigation/RememberedPage";
 import { ContentTransition } from "./components/ContentTransition";
 import { transitionContent } from "./contentTransition";
@@ -3554,7 +3555,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.2</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -4095,6 +4096,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
+            <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit this MP3 or the selected album without leaving Aurora.</span></div>
           </div>
         ) : <EmptyInspector />}

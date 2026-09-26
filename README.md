@@ -1,6 +1,8 @@
 # Aurora
 
-Aurora 0.28.1: Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.
+Aurora 0.28.2 adds Chart info below Last listened in the track inspector and on selected songs in Charts, with all-time peaks and ALL/US/UK/NO filters. US weekly series are listed separately; Billboard annual rankings are explicitly labeled.
+
+Previous update: Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.
 
 Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. **Show more songs** reveals further results beyond the initial 20.
 

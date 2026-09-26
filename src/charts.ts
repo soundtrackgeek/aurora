@@ -369,3 +369,15 @@ export async function loadPublishedChartWeeks(chart: string, year: number): Prom
   if (!isTauriRuntime()) return [`${year}-01-05`, `${year}-01-12`, `${year}-06-08`, `${year}-06-15`];
   return invoke("published_chart_weeks", { chart, year });
 }
+
+export interface TrackChartPeak { label: string; peak: number; country: "US" | "UK" | "NO" }
+
+export async function loadTrackChartPeaks(artist: string, title: string): Promise<TrackChartPeak[]> {
+  if (!isTauriRuntime()) return [
+    { label: "Official UK", peak: 3, country: "UK" },
+    { label: "Ti i Skuddet", peak: 14, country: "NO" },
+    { label: "Mainstream Rock Tracks", peak: 53, country: "US" },
+    { label: "Radio Songs", peak: 1, country: "US" },
+  ];
+  return invoke<TrackChartPeak[]>("track_chart_peaks", { artist, title });
+}

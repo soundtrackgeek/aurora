@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.2] - 2026-09-26
+
+- Added shared Chart info to selected tracks in Albums, Tracks, and Charts, with full chart names and all-time peak positions.
+- Added ALL, US, UK, and NO filters, including individual published US weekly series and clearly labeled Billboard annual ranks.
+- Kept chart peaks independent of the Charts page period and protected rapid selection changes from stale results.
+
 ## [0.28.1] - 2026-09-26
 
 ### Fixed

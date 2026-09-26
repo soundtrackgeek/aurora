@@ -1,0 +1,11 @@
+.track-chart-info { margin: 16px 0; padding-top: 14px; border-top: 1px solid rgba(132,157,178,.18); }
+.track-chart-info h3 { margin: 0; font-size: 1em; }
+.track-chart-info__caption { margin: 4px 0 10px; color: #8c99a5; font-size: .85em; }
+.track-chart-info__filters { display: flex; gap: 6px; margin-bottom: 8px; }
+.track-chart-info__filters button { border: 1px solid #384252; border-radius: 5px; padding: 4px 10px; background: transparent; color: #a8b3bc; cursor: pointer; font: inherit; font-size: .8em; }
+.track-chart-info__filters button[aria-pressed="true"] { background: #382047; border-color: #ae5ed0; color: #f0d7ff; }
+.track-chart-info__filters button:focus-visible { outline: 2px solid #ce86ef; outline-offset: 2px; }
+.track-chart-info dl { margin: 0; }
+.track-chart-info dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; }
+.track-chart-info dt { min-width: 0; overflow-wrap: anywhere; color: #a8b3bc; }
+.track-chart-info dd { margin: 0; flex-shrink: 0; font-variant-numeric: tabular-nums; }
