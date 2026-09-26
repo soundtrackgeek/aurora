@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.3 resolves unmatched songs and albums across all supported chart archives against current library metadata. Correcting artist/title tags can now restore the library checkmark, artwork, album details, and playback after catalog synchronization, without reimporting charts. Valid existing archive matches are preserved; links to removed catalog items are resolved again. Matching also applies to newly imported chart entries when the chart reloads.
+
 Aurora 0.28.2 adds Chart info below Last listened in the track inspector and on selected songs in Charts, with all-time peaks and ALL/US/UK/NO filters. US weekly series are listed separately; Billboard annual rankings are explicitly labeled.
 
 Previous update: Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.

@@ -161,14 +161,15 @@ struct Match {
     preference: (bool, bool, i64),
 }
 
-fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), String> {
-    if entries.is_empty() {
-        return Ok(());
-    }
+pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), String> {
     let wanted = entries
         .iter()
+        .filter(|e| e.matched_track_id.is_none())
         .map(|e| (key(&e.artist), title_key(&e.title)))
         .collect::<HashSet<_>>();
+    if wanted.is_empty() {
+        return Ok(());
+    }
     let titles = wanted
         .iter()
         .map(|(_, t)| t.as_str())
@@ -196,9 +197,24 @@ fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), St
         }
     }
     let mut matches = HashMap::<(String, String), Match>::new();
-    // Both candidate scans can use the companion's covering artist/title indexes.
-    // Fetch wide track/album metadata only for candidates, then check the actual
-    // display credit below (album artist is only a fallback for a blank credit).
+    // Normalize each distinct artist once, then seek their tracks through the
+    // covering artist/title indexes. Normalizing every title in a large catalog
+    // on every chart load is prohibitively expensive.
+    let candidate_artists = wanted
+        .iter()
+        .map(|(artist, _)| artist.clone())
+        .collect::<HashSet<_>>();
+    conn.create_scalar_function(
+        "aurora_chart_artist",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |context| {
+            let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
+            Ok(candidate_artists.contains(&key(&artist)))
+        },
+    )
+    .map_err(|e| e.to_string())?;
     let candidate_identities = wanted.clone();
     conn.create_scalar_function(
         "aurora_chart_identity",
@@ -212,16 +228,29 @@ fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), St
         },
     )
     .map_err(|e| e.to_string())?;
-    let mut statement = conn.prepare(
-        "SELECT t.id, t.title, COALESCE(NULLIF(t.display_artist,''), t.album_artist_display,''),
+    let mut statement = conn
+        .prepare(
+            "WITH display_artists AS MATERIALIZED (
+           SELECT DISTINCT display_artist COLLATE NOCASE AS artist FROM tracks
+         ), album_artists AS MATERIALIZED (
+           SELECT DISTINCT album_artist_display COLLATE NOCASE AS artist FROM tracks
+         )
+         SELECT t.id, t.title, COALESCE(NULLIF(t.display_artist,''), t.album_artist_display,''),
                 COALESCE(t.album_artist_display,''), t.album_id, a.album,
                 COALESCE(t.normalized_rating / 20.0, CAST(NULLIF(t.rating_raw,'') AS REAL)),
                 t.love = 'L', a.album_score
          FROM tracks t LEFT JOIN albums a ON a.id=t.album_id WHERE t.id IN (
-           SELECT id FROM tracks WHERE aurora_chart_identity(display_artist, title)
-           UNION SELECT id FROM tracks WHERE aurora_chart_identity(album_artist_display, title)
+           SELECT id FROM tracks WHERE display_artist COLLATE NOCASE IN (
+             SELECT artist FROM display_artists
+             WHERE aurora_chart_artist(artist)
+           ) AND aurora_chart_identity(display_artist, title)
+           UNION SELECT id FROM tracks WHERE album_artist_display COLLATE NOCASE IN (
+             SELECT artist FROM album_artists
+             WHERE aurora_chart_artist(artist)
+           ) AND aurora_chart_identity(album_artist_display, title)
          ) ORDER BY t.id",
-    ).map_err(|e| format!("Could not match chart songs to the catalog: {e}"))?;
+        )
+        .map_err(|e| format!("Could not match chart songs to the catalog: {e}"))?;
     let mut cursor = statement.query([]).map_err(|e| e.to_string())?;
     while let Some(row) = cursor.next().map_err(|e| e.to_string())? {
         let title = title_key(
@@ -264,7 +293,7 @@ fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), St
             matches.insert(identity, candidate);
         }
     }
-    for entry in entries {
+    for entry in entries.iter_mut().filter(|e| e.matched_track_id.is_none()) {
         if let Some(found) = matches.get(&(key(&entry.artist), title_key(&entry.title))) {
             entry.matched_track_id = Some(found.track_id.clone());
             entry.matched_album_id = found.album_id.clone();
@@ -273,6 +302,53 @@ fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), St
             entry.rating = found.rating;
             entry.loved = found.loved;
             entry.album_score = found.score;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn match_albums(conn: &Connection, entries: &mut [ChartEntry]) -> Result<(), String> {
+    let wanted = entries
+        .iter()
+        .filter(|e| e.matched_album_id.is_none())
+        .map(|e| (key(&e.artist), key(&e.title)))
+        .collect::<HashSet<_>>();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    conn.create_scalar_function(
+        "aurora_chart_album_identity",
+        2,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |context| {
+            let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
+            let title = context.get::<Option<String>>(1)?.unwrap_or_default();
+            Ok(wanted.contains(&(key(&artist), key(&title))))
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare("SELECT id, album, album_artist_display,
+        CAST(COALESCE(effective_album_rating, calculated_album_rating, album_rating) AS REAL) / 20.0,
+        COALESCE(loved_tracks, 0) > 0, album_score FROM albums
+        WHERE aurora_chart_album_identity(album_artist_display, album) ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let mut rows = statement.query([]).map_err(|e| e.to_string())?;
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let id: String = row.get(0).map_err(|e| e.to_string())?;
+        let title: String = row.get(1).map_err(|e| e.to_string())?;
+        let artist: String = row.get(2).map_err(|e| e.to_string())?;
+        for entry in entries.iter_mut().filter(|e| {
+            e.matched_album_id.is_none()
+                && key(&e.artist) == key(&artist)
+                && key(&e.title) == key(&title)
+        }) {
+            entry.matched_album_id = Some(id.clone());
+            entry.matched_album_title = Some(title.clone());
+            entry.artwork_album_id = Some(id.clone());
+            entry.rating = row.get(3).map_err(|e| e.to_string())?;
+            entry.loved = row.get(4).map_err(|e| e.to_string())?;
+            entry.album_score = row.get(5).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -473,6 +549,109 @@ mod tests {
         assert_eq!(annual.entries[0].appearances, 2); // duplicate source row counted once
         assert_eq!(annual.entries[0].weeks_at_number_one, 1);
         assert_eq!(annual.total_entries, 3); // two songs by same artist remain separate
+    }
+
+    #[test]
+    fn all_singles_sources_resolve_corrected_tags_without_reimporting_matches() {
+        let conn = fixture();
+        conn.execute_batch("ALTER TABLE albums ADD COLUMN year INTEGER;
+            ALTER TABLE albums ADD COLUMN release_year INTEGER;
+            ALTER TABLE albums ADD COLUMN album_artist_display TEXT;
+            CREATE TABLE vg_lista_single_chart_entries (id INTEGER, year INTEGER, week INTEGER, rank INTEGER, artist TEXT, title TEXT, artist_key TEXT, title_key TEXT, matched_track_id INTEGER, week_date TEXT);
+            INSERT INTO vg_lista_single_chart_entries VALUES
+              (1,1992,10,6,'Shakespears Sister','Stay','shakespears sister','stay',NULL,'1992-03-02'),
+              (2,1992,11,7,'Shakespears Sister','Stay','shakespears sister','stay',NULL,'1992-03-09');
+            INSERT INTO tracks VALUES (10,'Stay','Shakespear''s Sister','Shakespear''s Sister','artist-album',90,'','L');
+            CREATE TABLE official_uk_single_chart_entries AS SELECT *, week_date AS chart_date, NULL AS last_week, NULL AS peak, NULL AS weeks_on_chart FROM vg_lista_single_chart_entries;
+            CREATE TABLE ti_i_skuddet_chart_entries AS SELECT * FROM official_uk_single_chart_entries;
+            CREATE TABLE norsktoppen_chart_entries AS SELECT * FROM official_uk_single_chart_entries;
+            DROP TABLE billboard_single_chart_entries;
+            CREATE TABLE billboard_single_chart_entries AS SELECT *, artist AS display_artist FROM vg_lista_single_chart_entries;").unwrap();
+        let mut request = request();
+        request.source = ChartSource::VgLista;
+        request.limit = 100;
+        request.selected_year = 1992;
+        request.selected_week = 10;
+        request.period.from_year = 1992;
+        request.period.to_year = 1992;
+        request.scope = ChartScope::Period;
+        assert!(
+            query_page(&conn, request.clone()).unwrap().entries[0]
+                .matched_track_id
+                .is_none()
+        );
+        conn.execute("UPDATE tracks SET display_artist='Shakespears Sister', album_artist_display='Shakespears Sister' WHERE id=10", []).unwrap();
+        for source in [
+            ChartSource::VgLista,
+            ChartSource::OfficialUk,
+            ChartSource::TiISkuddet,
+            ChartSource::Norsktoppen,
+            ChartSource::Billboard,
+        ] {
+            request.source = source;
+            for scope in [ChartScope::Period, ChartScope::Week] {
+                request.scope = scope;
+                let page = query_page(&conn, request.clone()).unwrap();
+                assert_eq!(page.total_entries, 1);
+                let entry = &page.entries[0];
+                assert_eq!(entry.matched_track_id.as_deref(), Some("10"));
+                assert_eq!(entry.matched_album_title.as_deref(), Some("Artist Album"));
+                assert_eq!(entry.rating, Some(4.5));
+                assert!(entry.loved);
+            }
+        }
+        assert_eq!(conn.query_row("SELECT count(*) FROM vg_lista_single_chart_entries WHERE matched_track_id IS NOT NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        // An existing archive match remains authoritative, even when another
+        // catalog candidate would otherwise be preferred.
+        conn.execute(
+            "UPDATE vg_lista_single_chart_entries SET matched_track_id=1",
+            [],
+        )
+        .unwrap();
+        request.source = ChartSource::VgLista;
+        request.limit = 100;
+        assert_eq!(
+            query_page(&conn, request.clone()).unwrap().entries[0]
+                .matched_track_id
+                .as_deref(),
+            Some("1")
+        );
+        conn.execute("DELETE FROM tracks WHERE id=1", []).unwrap();
+        assert_eq!(
+            query_page(&conn, request).unwrap().entries[0]
+                .matched_track_id
+                .as_deref(),
+            Some("10")
+        );
+    }
+
+    #[test]
+    #[ignore = "read-only audit against an explicitly supplied local catalog"]
+    fn live_vg_lista_1992_stay_audit() {
+        let path = std::env::var("AURORA_CHART_AUDIT_CATALOG").unwrap();
+        let conn = catalog::open_catalog(std::path::Path::new(&path)).unwrap();
+        let mut request = request();
+        request.source = ChartSource::VgLista;
+        request.limit = 100;
+        request.scope = ChartScope::Period;
+        request.selected_year = 1992;
+        request.period.from_year = 1992;
+        request.period.to_year = 1992;
+        let started = std::time::Instant::now();
+        let page = query_page(&conn, request).unwrap();
+        let entry = page
+            .entries
+            .iter()
+            .find(|e| e.artist == "Shakespears Sister" && e.title == "Stay")
+            .unwrap();
+        eprintln!(
+            "VG Lista 1992: {} entries in {:?}; Stay track={:?}, album={:?}",
+            page.total_entries,
+            started.elapsed(),
+            entry.matched_track_id,
+            entry.matched_album_title
+        );
+        assert!(entry.matched_track_id.is_some());
     }
 
     #[test]

@@ -465,7 +465,7 @@ fn weekly_select(kind: ChartKind, source: ChartSource, table: &str) -> String {
         ChartKind::Singles => format!(
             r#"
             SELECT e.year, e.week, e.rank, e.artist, e.title, e.artist_key, e.title_key,
-                   {previous}, {peak}, {appearances}, e.matched_track_id, NULL,
+                   {previous}, {peak}, {appearances}, t.id, NULL,
                    t.album_id,
                    CAST(COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
                      WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -488,8 +488,8 @@ fn weekly_select(kind: ChartKind, source: ChartSource, table: &str) -> String {
         ChartKind::Albums => format!(
             r#"
             SELECT e.year, e.week, e.rank, e.artist, e.title, e.artist_key, e.title_key,
-                   {previous}, {peak}, {appearances}, NULL, e.matched_album_id,
-                   e.matched_album_id,
+                   {previous}, {peak}, {appearances}, NULL, a.id,
+                   a.id,
                    CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
                    CASE WHEN COALESCE(a.loved_tracks, 0) > 0 THEN 1 ELSE 0 END,
                    a.album_score, {date_column}, a.album
@@ -511,7 +511,7 @@ fn annual_select(kind: ChartKind, table: &str) -> String {
         ChartKind::Singles => format!(
             r#"
             SELECT e.year, NULL, e.rank, COALESCE(NULLIF(e.display_artist, ''), e.artist), e.title,
-                   e.artist_key, e.title_key, NULL, NULL, NULL, e.matched_track_id, NULL,
+                   e.artist_key, e.title_key, NULL, NULL, NULL, t.id, NULL,
                    t.album_id,
                    CAST(COALESCE(t.normalized_rating, CASE trim(t.rating_raw)
                      WHEN '0.5' THEN 10 WHEN '1' THEN 20 WHEN '1.0' THEN 20
@@ -531,7 +531,7 @@ fn annual_select(kind: ChartKind, table: &str) -> String {
         ChartKind::Albums => format!(
             r#"
             SELECT e.year, NULL, e.rank, e.artist, e.album, e.artist_key, e.album_key,
-                   NULL, NULL, NULL, NULL, e.matched_album_id, e.matched_album_id,
+                   NULL, NULL, NULL, NULL, a.id, a.id,
                    CAST(COALESCE(a.effective_album_rating, a.calculated_album_rating, a.album_rating) AS REAL) / 20.0,
                    CASE WHEN COALESCE(a.loved_tracks, 0) > 0 THEN 1 ELSE 0 END,
                    a.album_score, CAST(e.year AS TEXT), a.album
@@ -887,7 +887,14 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     } else {
         effective_scope
     };
-    let (entries, total_entries) = entries_from_rows(rows, calculation_scope, request.limit);
+    let (mut entries, total_entries) = entries_from_rows(rows, calculation_scope, request.limit);
+    // Imported matches can remain empty after a catalog tag correction. Resolve
+    // those against current tracks without rewriting the companion's archive.
+    if request.kind == ChartKind::Singles {
+        published::match_entries(connection, &mut entries)?;
+    } else {
+        published::match_albums(connection, &mut entries)?;
+    }
     let mut album_score_entries =
         query_album_scores(connection, &request.period, request.year_basis)?;
     if let Some(keys) = &artist_keys {
@@ -1438,6 +1445,75 @@ mod tests {
             assert_eq!(entries[0].matched_album_id.as_deref(), Some(expected.0));
             assert_eq!(entries[0].matched_album_title.as_deref(), Some(expected.1));
         }
+    }
+
+    #[test]
+    fn all_album_archives_resolve_future_tag_and_chart_updates() {
+        let connection = score_connection();
+        connection.execute_batch("CREATE TABLE official_uk_album_chart_entries (
+            id INTEGER, year INTEGER, week INTEGER, rank INTEGER, artist TEXT, title TEXT,
+            artist_key TEXT, title_key TEXT, last_week INTEGER, peak INTEGER, weeks_on_chart INTEGER,
+            chart_date TEXT, week_date TEXT, matched_album_id TEXT);
+            INSERT INTO official_uk_album_chart_entries VALUES
+              (1,1985,1,1,'Correct Artist','Correct Album','correct artist','correct album',NULL,NULL,NULL,'1985-01-01','1985-01-01',NULL);
+            CREATE TABLE vg_lista_album_chart_entries AS SELECT * FROM official_uk_album_chart_entries;
+            CREATE TABLE billboard_chart_entries AS SELECT id,year,rank,artist,title AS album,artist_key,title_key AS album_key,matched_album_id FROM official_uk_album_chart_entries;").unwrap();
+        for source in [
+            ChartSource::OfficialUk,
+            ChartSource::VgLista,
+            ChartSource::Billboard,
+        ] {
+            let mut request = score_request(ChartYearBasis::Year);
+            request.source = source;
+            assert!(
+                query_page(&connection, request).unwrap().entries[0]
+                    .matched_album_id
+                    .is_none()
+            );
+        }
+        connection.execute("UPDATE albums SET album='Correct Album', album_artist_display='Correct Artist' WHERE id='year-match'", []).unwrap();
+        for source in [
+            ChartSource::OfficialUk,
+            ChartSource::VgLista,
+            ChartSource::Billboard,
+        ] {
+            for scope in [ChartScope::Week, ChartScope::Period] {
+                let mut request = score_request(ChartYearBasis::Year);
+                request.source = source;
+                request.scope = scope;
+                let page = query_page(&connection, request).unwrap();
+                assert_eq!(
+                    page.entries[0].matched_album_id.as_deref(),
+                    Some("year-match")
+                );
+                assert_eq!(page.entries[0].rating, Some(5.0));
+                assert!(page.entries[0].loved);
+            }
+        }
+        // A later archive import gains matches without any stored match IDs.
+        connection.execute("INSERT INTO vg_lista_album_chart_entries SELECT 2,1985,2,1,artist,title,artist_key,title_key,last_week,peak,weeks_on_chart,chart_date,week_date,NULL FROM vg_lista_album_chart_entries", []).unwrap();
+        let mut request = score_request(ChartYearBasis::Year);
+        request.source = ChartSource::VgLista;
+        let page = query_page(&connection, request).unwrap();
+        assert_eq!(page.entries[0].appearances, 2);
+        assert_eq!(
+            page.entries[0].matched_album_id.as_deref(),
+            Some("year-match")
+        );
+        connection
+            .execute(
+                "UPDATE vg_lista_album_chart_entries SET matched_album_id='removed-album'",
+                [],
+            )
+            .unwrap();
+        let mut request = score_request(ChartYearBasis::Year);
+        request.source = ChartSource::VgLista;
+        assert_eq!(
+            query_page(&connection, request).unwrap().entries[0]
+                .matched_album_id
+                .as_deref(),
+            Some("year-match")
+        );
     }
 
     #[test]

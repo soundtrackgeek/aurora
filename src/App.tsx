@@ -1174,6 +1174,7 @@ function App() {
     announceSuccess = false,
   ): Promise<boolean> => {
     if (!sync) return false;
+    const previousSyncToken = latestCatalogSyncTokenRef.current;
     const syncDecision = advanceCatalogProjectionToken(
       latestCatalogSyncTokenRef.current,
       sync.projectionToken,
@@ -1190,7 +1191,14 @@ function App() {
       catalogSyncNoticeRef.current = sync;
     }
     try {
-      return await refreshCatalogIfChanged();
+      const refreshed = await refreshCatalogIfChanged();
+      // Successful tag synchronization need not create an import run. Refresh
+      // retained Charts even when the import-based catalog revision is unchanged.
+      if (!refreshed && sync.status === "synced"
+        && (announceSuccess || wasUnsettled || syncDecision.latestToken !== previousSyncToken)) {
+        setChartReloadToken((value) => value + 1);
+      }
+      return refreshed;
     } catch (error) {
       console.warn("Aurora could not check Music Library for partial sync updates yet", error);
       return false;
@@ -3555,7 +3563,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.3</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

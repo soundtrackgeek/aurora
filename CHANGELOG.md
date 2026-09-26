@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.28.3] - 2026-09-27
+
+### Fixed
+
+- Resolve missing song and album chart matches against current catalog tags, including Shakespears Sister - Stay in VG Lista 1992 after an artist correction. Preserve valid archive matches, recover links to removed catalog items, and keep matching read-only.
+- Refresh retained Charts after successful tag synchronization even when the import revision is unchanged.
+- Narrow song candidate lookup through distinct artist names and covering indexes instead of normalizing every catalog song.
+- Added cross-source week/period coverage for tag corrections, future chart entries, match metadata, and unchanged archive IDs.
+
 ## [0.28.2] - 2026-09-26
 
 - Added shared Chart info to selected tracks in Albums, Tracks, and Charts, with full chart names and all-time peak positions.

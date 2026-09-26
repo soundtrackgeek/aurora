@@ -16,6 +16,34 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("adds the library checkmark and playback after an unmatched song resolves on catalog refresh", async () => {
+    const loadPage = charts.loadChartPage;
+    let corrected = false;
+    vi.spyOn(charts, "loadChartPage").mockImplementation(async (request) => {
+      const page = await loadPage(request);
+      const entry = page.entries.find((entry) => entry.matchedTrackId)!;
+      return { ...page, entries: [{ ...entry, title: "Stay", artist: "Shakespears Sister",
+        artistKey: "shakespears sister", titleKey: "stay",
+        matchedTrackId: corrected ? entry.matchedTrackId : null,
+        matchedAlbumId: null,
+      }], totalEntries: 1 };
+    });
+    const onSelectionChange = vi.fn();
+    const props = { onSelectionChange, onSelectTrack: vi.fn(), onPlayQueue: vi.fn(async () => true), onOpenArtistAlbums: vi.fn() };
+    const { rerender } = render(<ChartStudio {...props} catalogRevision={0} />);
+    expect(await screen.findByLabelText("Not matched")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Play Stay" })).not.toBeInTheDocument();
+    corrected = true;
+    rerender(<ChartStudio {...props} catalogRevision={1} />);
+    expect(await screen.findByLabelText("In your library")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play Stay" })).toBeInTheDocument();
+    expect(screen.getByText("Stay").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(onSelectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: expect.objectContaining({ title: "Stay", matchedTrackId: expect.any(String) }) }),
+      { preserveInspector: true },
+    ));
+  });
+
   it("explains a missing weekly archive without leaving a loading spinner", async () => {
     vi.spyOn(charts, "loadPublishedChartSeries").mockRejectedValue(new Error("Open Published Charts in Music Library"));
     renderStudio();
