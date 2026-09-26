@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.27.2 fixes the macOS release verification gate's Charts scroll test. The test now models a user scroll after restoration and checks that the position is saved before navigating away; application navigation behavior is unchanged.
+
 Aurora 0.27.1 makes the selected track's album name clickable in the Tracks sideview and adds an Album (Year) link above Publisher. Both open the album in Albums view; **Back to Songs** returns to the previous track selection and search.
 
 Aurora 0.27.0 adds **Ratings → Tonight’s Album**. Choose Comfort, Discovery, or Finish something, a whole-album time budget, and an optional musical description. Request three album cards, play an album in order, or open it in the library. Suggestions and their original context survive navigation and restart; changing controls never silently refreshes them. **Good fit**, **Not for this**, and **None of these** remember explicit feedback per intention. **Reset album feedback** clears those preferences without changing ratings or music files.

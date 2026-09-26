@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.27.2] - 2026-09-26
+
+### Fixed
+
+- Make the Charts back-navigation scroll test begin with a wheel gesture and verify the saved offset before leaving. This removes a timing race with the earlier page's scroll restoration in the macOS release gate.
+
 ## [0.27.1] - 2026-09-26
 
 ### Added

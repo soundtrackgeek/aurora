@@ -92,8 +92,11 @@ it.each([
   const table = within(await studio.findByRole("table", { name: title }));
   fireEvent.click(table.getByRole("row", { name: /Obsession/ }));
   const scroll = container.querySelector<HTMLElement>(".main-scroll")!;
+  // A real wheel gesture cancels any in-flight scroll restoration before scrolling.
+  fireEvent.wheel(scroll, { deltaY: 640 });
   scroll.scrollTop = 640;
   fireEvent.scroll(scroll);
+  expect(JSON.parse(localStorage.getItem("aurora:workspace:v1") ?? "null").scroll.Charts).toBe(640);
   const requests = load.mock.calls.length;
   fireEvent.click(primary.getByRole("button", { name: "Years" }));
   await main.findByRole("tab", { name: "Two clocks" });
