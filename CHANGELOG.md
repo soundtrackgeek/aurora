@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.27.1] - 2026-09-26
+
+### Added
+
+- In the Tracks sideview, the album name beneath the artist and a new Album (Year) metadata row open that exact album in Albums view. Back returns to the previous track selection.
+
 ## [0.27.0] - 2026-09-25
 
 ### Added

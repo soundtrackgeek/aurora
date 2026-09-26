@@ -2368,6 +2368,24 @@ function App() {
     }, "page");
   }
 
+  function openTrackAlbum(track: Track) {
+    if (!track.albumId) return;
+    transitionContent(() => {
+      pendingExplorerAlbumIdRef.current = track.albumId;
+      setSelectedAlbumId(track.albumId);
+      setInspectorView("album");
+      setTagSelectionKind("album");
+      setActiveNav("Albums");
+      expandLibraryNavigation();
+      setExplorerView("albums");
+      setExplorerFilters({
+        ...defaultExplorerFilters,
+        query: chartAlbumSearchQuery({ title: track.album, matchedAlbumTitle: null }),
+        sort: "yearDesc",
+      });
+    }, "page");
+  }
+
   async function playRatingCollection(mode: RatingMode, rating: number | null) {
     if (ratingsQueueBusy) return;
     setRatingsQueueBusy(true);
@@ -3322,6 +3340,10 @@ function App() {
   const inspectorTrack = explorerAlbumInspectorContext
     ? explorerAlbumInspectorContext.track
     : selectedTrack;
+  const inspectorAlbumYear = inspectorTrack?.originalYear ?? inspectorTrack?.releaseYear;
+  const inspectorAlbumLabel = inspectorTrack
+    ? `${inspectorTrack.album}${inspectorAlbumYear ? ` (${inspectorAlbumYear})` : ""}`
+    : "";
   const inspectorAlbumAvailable = Boolean(
     explorerAlbumInspectorContext
     || (activeNav === "Publishers" && selectedPublisherAlbum)
@@ -3532,7 +3554,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.27.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.27.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -4058,11 +4080,12 @@ function App() {
           <div className="inspector-scroll">
             <Artwork track={inspectorTrack} size="large" />
             <div className="track-hero-copy">
-              <div><h2>{inspectorTrack.title}</h2><p><ArtistSmartLink artist={displayTrackArtist(inspectorTrack)} onOpen={openArtistAlbums} /></p><span>{inspectorTrack.album}</span></div>
+              <div><h2>{inspectorTrack.title}</h2><p><ArtistSmartLink artist={displayTrackArtist(inspectorTrack)} onOpen={openArtistAlbums} /></p>{inspectorTrack.albumId ? <button type="button" className="track-album-link" onClick={() => openTrackAlbum(inspectorTrack)} title={`Open ${inspectorTrack.album} in Albums`}>{inspectorTrack.album}</button> : <span>{inspectorTrack.album}</span>}</div>
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
               {catalogChartRanks.tracks[inspectorTrack.id]?.length ? <div><dt>Charts</dt><dd><CatalogChartRanks kind="track" ranks={catalogChartRanks.tracks[inspectorTrack.id]} /></dd></div> : null}
+              <div className="track-album-metadata"><dt>Album</dt><dd>{inspectorTrack.albumId ? <button type="button" className="track-album-link" onClick={() => openTrackAlbum(inspectorTrack)} title={`Open ${inspectorTrack.album} in Albums`}>{inspectorAlbumLabel}</button> : <span>{inspectorAlbumLabel}</span>}</dd></div>
               <div className="publisher-metadata"><dt>Publisher</dt><dd>{inspectorTrack.publisher ?? "Unknown"}</dd></div>
               <div><dt>Genre</dt><dd>{inspectorTrack.genre ?? "Unknown"}</dd></div>
               <div><dt>Last.fm popularity</dt><dd>{inspectorTrack.playCount === null ? "—" : formatCount(inspectorTrack.playCount)}</dd></div>

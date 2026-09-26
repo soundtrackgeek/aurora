@@ -131,6 +131,22 @@ it("keeps Albums filters and expanded detail separate from a Songs search", asyn
   expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
 
+it.each(["album name", "Album metadata"])("opens the selected track's album from its %s link and returns to the Songs selection", async (link) => {
+  render(<App />);
+  await navigate("Songs");
+  fireEvent.click(await screen.findByRole("row", { name: /Strawberry Swing/ }));
+  const inspector = within(document.querySelector(".inspector") as HTMLElement);
+  expect(inspector.getByRole("button", { name: "Viva la Vida" })).toBeVisible();
+  expect(inspector.getByRole("button", { name: "Viva la Vida (2008)" })).toBeVisible();
+  fireEvent.click(inspector.getByRole("button", { name: link === "album name" ? "Viva la Vida" : "Viva la Vida (2008)" }));
+  expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue('album:"Viva la Vida"');
+  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" }, { timeout: 5_000 })).toBeVisible();
+  expect(inspector.getByRole("tab", { name: "Album" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Back to Songs" }));
+  expect(await screen.findByRole("row", { name: /Strawberry Swing/ })).toHaveAttribute("aria-selected", "true");
+  expect(inspector.getByRole("button", { name: "Viva la Vida (2008)" })).toBeVisible();
+});
+
 it.each([
   ["Years", "Original landscape"],
   ["Ratings", "Album ratings"],
