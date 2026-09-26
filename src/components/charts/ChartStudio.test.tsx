@@ -16,6 +16,43 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("explains a missing weekly archive without leaving a loading spinner", async () => {
+    vi.spyOn(charts, "loadPublishedChartSeries").mockRejectedValue(new Error("Open Published Charts in Music Library"));
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "US weekly" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Open Published Charts in Music Library");
+    expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByText("Updating chart… Previous results remain visible.")).not.toBeInTheDocument();
+  });
+
+  it("chooses a US series, year and exact date and remembers them", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "US weekly" }));
+    await screen.findByRole("heading", { name: "Billboard Hot 100" });
+    fireEvent.change(screen.getByRole("combobox", { name: "US chart" }), { target: { value: "Country Singles Chart" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Chart year" }), { target: { value: "1993" } });
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Week ending" })).toHaveValue("1993-01-05"));
+    fireEvent.click(screen.getByRole("button", { name: "Next published week" }));
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ source: "publishedUs", publishedChart: "Country Singles Chart", selectedYear: 1993, publishedWeek: "1993-01-12" })));
+    expect(JSON.parse(localStorage.getItem("aurora:charts:v1")!).request.publishedWeek).toBe("1993-01-12");
+    fireEvent.click(screen.getByRole("tab", { name: "Year chart" }));
+    expect(await screen.findByRole("heading", { name: "Country Singles Chart · 1993 year chart" })).toBeVisible();
+  });
+
+  it("opens the selected track's real album with its year", async () => {
+    const callbacks = renderStudio();
+    await waitFor(() => expect(callbacks.onSelectTrack).toHaveBeenCalled());
+    const selection = callbacks.onSelectionChange.mock.calls[callbacks.onSelectionChange.mock.calls.length - 1][0] as ChartSelectionContext;
+    const track = callbacks.onSelectTrack.mock.calls[callbacks.onSelectTrack.mock.calls.length - 1][0] as library.Track;
+    const onOpenAlbum = vi.fn();
+    render(<ChartInspector selection={selection} track={track} busy={false} onPlay={vi.fn()} onOpenLibrary={vi.fn()} onOpenAlbum={onOpenAlbum} onOpenArtistAlbums={vi.fn()} onRatingChange={vi.fn()} onLoveChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: `${track.album} (${track.originalYear ?? track.releaseYear})` }));
+    expect(onOpenAlbum).toHaveBeenCalledWith(track);
+  });
+
   it("shows rated-track completeness from the selected library album", async () => {
     const album = (await library.exploreAlbums({})).items[0];
     const loadAlbum = vi.spyOn(library, "loadAlbumDetail").mockResolvedValue({

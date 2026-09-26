@@ -10,8 +10,9 @@ export function loadChartPreferences(fallback: ChartPageRequest): ChartPreferenc
     const r = value?.request;
     const p = r?.period;
     const integer = (n: unknown, min: number, max: number) => Number.isInteger(n) && Number(n) >= min && Number(n) <= max;
-    const sources = r?.kind === "albums" ? ["auroraScore", "officialUk", "vgLista", "billboard"] : ["officialUk", "vgLista", "tiISkuddet", "norsktoppen", "billboard"];
+    const sources = r?.kind === "albums" ? ["auroraScore", "officialUk", "vgLista", "billboard"] : ["officialUk", "vgLista", "tiISkuddet", "norsktoppen", "billboard", "publishedUs"];
     if (!r || !["singles", "albums"].includes(r.kind) || !sources.includes(r.source)
+      || (r.source === "publishedUs" && (typeof r.publishedChart !== "string" || !r.publishedChart.trim() || r.publishedChart.length > 300 || (r.publishedWeek !== undefined && (typeof r.publishedWeek !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(r.publishedWeek)))))
       || !["week", "period"].includes(r.scope) || !["year", "releaseYear"].includes(r.yearBasis)
       || !integer(r.selectedYear, 1890, 2200) || !integer(r.selectedWeek, 1, 53)
       || !integer(r.limit, 1, 1000) || !p || typeof p.label !== "string"

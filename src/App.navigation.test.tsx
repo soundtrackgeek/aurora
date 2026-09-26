@@ -134,6 +134,29 @@ it("keeps Albums filters and expanded detail separate from a Songs search", asyn
   expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
 
+it("opens a US chart song's matched album and returns to its exact chart", async () => {
+  const track = (await library.loadLibrarySnapshot()).tracks.find((candidate) => candidate.title === "Strawberry Swing")!;
+  const originalPage = charts.loadChartPage;
+  vi.spyOn(charts, "loadChartPage").mockImplementation(async (request) => {
+    const page = await originalPage(request);
+    return { ...page, entries: [{ ...page.entries[0], title: track.title, artist: track.artist, matchedTrackId: track.id, matchedAlbumId: track.albumId, matchedAlbumTitle: track.album, loved: true }], totalEntries: 1 };
+  });
+  vi.spyOn(charts, "loadChartEntryTrack").mockResolvedValue(track);
+  render(<App />);
+  await navigate("Charts");
+  fireEvent.click(await screen.findByRole("tab", { name: "US weekly" }));
+  await screen.findByRole("heading", { name: "Billboard Hot 100" });
+  fireEvent.change(screen.getByRole("combobox", { name: "US chart" }), { target: { value: "Mainstream Rock Tracks" } });
+  await screen.findByRole("heading", { name: "Mainstream Rock Tracks" });
+  fireEvent.click(await screen.findByRole("button", { name: "Viva la Vida (2008)" }));
+  expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue('album:"Viva la Vida"');
+  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" }, { timeout: 5_000 })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Charts" }));
+  expect(await screen.findByRole("heading", { name: "Mainstream Rock Tracks" })).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "Week ending" })).toHaveValue("1985-01-05");
+  expect(screen.getByRole("row", { name: /Strawberry Swing/ })).toHaveAttribute("aria-selected", "true");
+});
+
 it.each(["album name", "Album metadata"])("opens the selected track's album from its %s link and returns to the Songs selection", async (link) => {
   render(<App />);
   await navigate("Songs");

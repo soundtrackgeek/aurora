@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime, type Track } from "./library";
 
 export type ChartKind = "singles" | "albums";
-export type ChartSource = "officialUk" | "vgLista" | "tiISkuddet" | "norsktoppen" | "billboard" | "auroraScore";
+export type ChartSource = "officialUk" | "vgLista" | "tiISkuddet" | "norsktoppen" | "billboard" | "auroraScore" | "publishedUs";
 export type ChartScope = "week" | "period";
 export type ChartYearBasis = "year" | "releaseYear";
 
@@ -20,6 +20,8 @@ export interface ChartPageRequest {
   source: ChartSource;
   scope: ChartScope;
   period: ChartPeriod;
+  publishedChart?: string;
+  publishedWeek?: string;
   selectedYear: number;
   selectedWeek: number;
   yearBasis: ChartYearBasis;
@@ -76,6 +78,7 @@ export interface ChartEntry {
   title: string;
   artistKey: string;
   titleKey: string;
+  entryDate?: string | null;
   matchedTrackId: string | null;
   matchedAlbumId: string | null;
   matchedAlbumTitle: string | null;
@@ -261,6 +264,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     norsktoppen: "Norsktoppen",
     billboard: "Billboard",
     auroraScore: "Aurora Score",
+    publishedUs: "US weekly",
   };
   const scoreYear = (album: AlbumScoreEntry) => request.yearBasis === "year" ? album.originalYear : album.releaseYear;
   const scores = previewScores
@@ -280,11 +284,11 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
   return {
     request: effectiveRequest,
     sourceLabel: sourceLabel[request.source],
-    chartTitle: request.source === "auroraScore"
+    chartTitle: request.source === "publishedUs" ? `${request.publishedChart ?? "Billboard Hot 100"}${request.scope === "period" ? ` · ${request.selectedYear} year chart` : ""}` : request.source === "auroraScore"
       ? `Aurora Album Score · ${request.period.label}`
       : `${sourceLabel[request.source]} ${request.kind === "singles" ? "Singles" : "Albums"}${effectiveRequest.scope === "period" ? ` · ${request.period.label}` : " Chart"}`,
     annualOnly,
-    chartDate: effectiveRequest.scope === "week" ? "1985-06-09" : null,
+    chartDate: effectiveRequest.scope === "week" ? request.source === "publishedUs" ? request.publishedWeek ?? null : "1985-06-09" : null,
     weeks: annualOnly ? [] : previewWeeks(request.period),
     entries: entries.slice(0, request.limit),
     totalEntries: entries.length,
@@ -354,4 +358,14 @@ export async function loadChartQueue(request: ChartPageRequest): Promise<Track[]
     return request.kind === "singles" ? previewTracks.filter((track) => ids.has(track.id)) : [];
   }
   return invoke<Track[]>("chart_queue_tracks", { request });
+}
+
+export interface PublishedChartSeries { chart: string; years: number[] }
+export async function loadPublishedChartSeries(): Promise<PublishedChartSeries[]> {
+  if (!isTauriRuntime()) return ["Billboard Hot 100", "Country Singles Chart", "Mainstream Rock Tracks", "Modern Rock Tracks"].map(chart => ({ chart, years: [1985, 1993, 2025] }));
+  return invoke("published_chart_series");
+}
+export async function loadPublishedChartWeeks(chart: string, year: number): Promise<string[]> {
+  if (!isTauriRuntime()) return [`${year}-01-05`, `${year}-01-12`, `${year}-06-08`, `${year}-06-15`];
+  return invoke("published_chart_weeks", { chart, year });
 }

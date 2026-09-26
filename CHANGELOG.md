@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.28.0] - 2026-09-26
+
+### Added
+
+- US weekly Charts picker for every imported series, including Country and Rock, with available years, exact publication dates, previous/next week controls, and a generated yearly song ranking.
+- Read-only integration with Music Library's weekly archive and conservative song-to-catalog matching for playback, artwork, ratings, and library navigation. Missing archives explain how to prepare them in Music Library.
+- Clickable Album (Year) in the Charts Track sidebar, plus printed chart-entry dates. Saved Charts preferences include the US series and exact week.
+- Show more songs for chart results beyond the first 20, retaining source ranks above 100.
+
+### Validation
+
+- Regression coverage for exact calendar dates, duplicate source rows, matching/version boundaries, large chart ranks, picker preferences, and matched-album navigation; browser preview remains sample data.
+
 ## [0.27.2] - 2026-09-26
 
 ### Fixed

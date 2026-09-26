@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. **Show more songs** reveals further results beyond the initial 20.
+
+Weekly charts read Music Library's `published_chart_books` and `published_chart_entries` tables in the configured catalog, without modifying the database. If the archive is missing, open **Published Charts** in Music Library, let preparation finish, then refresh the US picker in Aurora. The older Billboard annual Singles CSV import is separate. Available series, years, and dates reflect the imported archive. Browser preview uses sample songs and dates.
+
+Songs match conservatively against the local catalog using artist and title, including explicit LP/album-version suffixes while retaining live and remix distinctions. Matched songs support playback and library navigation; the Charts Track sidebar now includes a clickable **Album (Year)** that opens the matched album. **Back to Charts** retains your view, and the selected US series, year, date, filters, and song are saved with Charts preferences. Printed source peaks and entry dates may describe the full song run; the generated Year chart is not an official year-end ranking. Chart playback remains limited to the first 100 matched songs.
+
 Aurora 0.27.2 fixes the macOS release verification gate's Charts scroll test. The test now models a user scroll after restoration and checks that the position is saved before navigating away; application navigation behavior is unchanged.
 
 Aurora 0.27.1 makes the selected track's album name clickable in the Tracks sideview and adds an Album (Year) link above Publisher. Both open the album in Albums view; **Back to Songs** returns to the previous track selection and search.

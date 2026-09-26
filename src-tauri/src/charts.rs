@@ -1,7 +1,9 @@
+mod published;
 use crate::{
     catalog::{self, TrackSummary},
     state_store::StateStore,
 };
+pub(crate) use published::PublishedSeries;
 use rusqlite::{Connection, Row, named_params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap};
@@ -25,6 +27,7 @@ pub(crate) enum ChartSource {
     Norsktoppen,
     Billboard,
     AuroraScore,
+    PublishedUs,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -77,6 +80,10 @@ pub(crate) struct ChartPageRequest {
     pub(crate) source: ChartSource,
     pub(crate) scope: ChartScope,
     pub(crate) period: ChartPeriod,
+    #[serde(default)]
+    pub(crate) published_chart: Option<String>,
+    #[serde(default)]
+    pub(crate) published_week: Option<String>,
     pub(crate) selected_year: i32,
     pub(crate) selected_week: u8,
     #[serde(default)]
@@ -179,6 +186,7 @@ pub(crate) struct ChartEntry {
     pub(crate) title: String,
     pub(crate) artist_key: String,
     pub(crate) title_key: String,
+    pub(crate) entry_date: Option<String>,
     pub(crate) matched_track_id: Option<String>,
     pub(crate) matched_album_id: Option<String>,
     pub(crate) matched_album_title: Option<String>,
@@ -300,6 +308,7 @@ fn source_label(source: ChartSource) -> &'static str {
         ChartSource::Norsktoppen => "Norsktoppen",
         ChartSource::Billboard => "Billboard",
         ChartSource::AuroraScore => "Aurora Score",
+        ChartSource::PublishedUs => "US weekly",
     }
 }
 
@@ -336,6 +345,7 @@ fn valid_source(kind: ChartKind, source: ChartSource) -> bool {
                 | ChartSource::VgLista
                 | ChartSource::TiISkuddet
                 | ChartSource::Norsktoppen
+                | ChartSource::PublishedUs
                 | ChartSource::Billboard
         ),
         ChartKind::Albums => matches!(
@@ -375,8 +385,15 @@ fn validate_request(request: &ChartPageRequest) -> Result<(), String> {
     if !(1..=53).contains(&request.selected_week) {
         return Err("The selected chart week is invalid.".to_owned());
     }
-    if request.limit == 0 || request.limit > MAX_CHART_ITEMS {
-        return Err("Chart pages must request between 1 and 100 entries.".to_owned());
+    let max_items = if request.source == ChartSource::PublishedUs {
+        1000
+    } else {
+        MAX_CHART_ITEMS
+    };
+    if request.limit == 0 || request.limit > max_items {
+        return Err(format!(
+            "Chart pages must request between 1 and {max_items} entries."
+        ));
     }
     Ok(())
 }
@@ -690,6 +707,7 @@ fn entries_from_rows(
                     title: row.title,
                     artist_key: row.artist_key,
                     title_key: row.title_key,
+                    entry_date: None,
                     matched_track_id: row.matched_track_id,
                     matched_album_id: row.matched_album_id,
                     matched_album_title: row.matched_album_title,
@@ -771,6 +789,7 @@ fn entries_from_rows(
                 title: row.title,
                 artist_key: row.artist_key,
                 title_key: row.title_key,
+                entry_date: None,
                 matched_track_id: row.matched_track_id,
                 matched_album_id: row.matched_album_id,
                 matched_album_title: row.matched_album_title,
@@ -844,6 +863,9 @@ fn chart_title(
 
 fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<ChartPage, String> {
     validate_request(&request)?;
+    if request.source == ChartSource::PublishedUs {
+        return published::page(connection, request);
+    }
     let effective_scope = if source_shape(request.source) == SourceShape::Weekly {
         request.scope
     } else {
@@ -1004,6 +1026,9 @@ fn query_item_detail(
     validate_request(&request.page)?;
     if request.artist_key.chars().count() > 512 || request.title_key.chars().count() > 512 {
         return Err("The selected chart identity is invalid.".to_owned());
+    }
+    if request.page.source == ChartSource::PublishedUs {
+        return published::detail(connection, request);
     }
     let mut source_ranks = Vec::new();
     for source in detail_sources(request.page.kind) {
@@ -1260,6 +1285,15 @@ pub(crate) fn load_chart_queue(
     query_queue(&connection, request, store)
 }
 
+pub(crate) fn load_published_chart_series() -> Result<Vec<PublishedSeries>, String> {
+    let connection = catalog::open_catalog(&catalog::default_catalog_path()?)?;
+    published::series(&connection)
+}
+pub(crate) fn load_published_chart_weeks(chart: String, year: i32) -> Result<Vec<String>, String> {
+    let connection = catalog::open_catalog(&catalog::default_catalog_path()?)?;
+    published::weeks(&connection, &chart, year)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1476,6 +1510,8 @@ mod tests {
                 to_week: 53,
                 label: "1985".to_owned(),
             },
+            published_chart: None,
+            published_week: None,
             selected_year: 1985,
             selected_week: 23,
             year_basis: ChartYearBasis::Year,
@@ -1551,6 +1587,8 @@ mod tests {
                 to_week: 53,
                 label: "1985".to_owned(),
             },
+            published_chart: None,
+            published_week: None,
             selected_year: 1985,
             selected_week: 1,
             year_basis,
@@ -1647,6 +1685,8 @@ mod tests {
                 to_week: 35,
                 label: "Summer 1985".to_owned(),
             },
+            published_chart: None,
+            published_week: None,
             selected_year: 1985,
             selected_week: 23,
             year_basis: ChartYearBasis::Year,

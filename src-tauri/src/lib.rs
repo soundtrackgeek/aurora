@@ -794,6 +794,19 @@ async fn year_queue_tracks(
 }
 
 #[tauri::command]
+async fn published_chart_series() -> Result<Vec<charts::PublishedSeries>, String> {
+    tauri::async_runtime::spawn_blocking(charts::load_published_chart_series)
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn published_chart_weeks(chart: String, year: i32) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || charts::load_published_chart_weeks(chart, year))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn chart_page(request: ChartPageRequest) -> Result<ChartPage, String> {
     tauri::async_runtime::spawn_blocking(move || charts::load_chart_page(request))
         .await
@@ -1834,6 +1847,8 @@ pub fn run() {
             year_detail,
             year_queue_tracks,
             chart_page,
+            published_chart_series,
+            published_chart_weeks,
             chart_item_detail,
             catalog_chart_rankings,
             chart_entry_track,

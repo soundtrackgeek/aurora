@@ -3554,7 +3554,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.27.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -4028,6 +4028,7 @@ function App() {
               busy={chartPlaybackBusy || Boolean(selectedTrack && inlineSavingKeys.has(selectedTrack.trackKey))}
               onPlay={() => void playChartSelection()}
               onOpenLibrary={openChartSelectionInLibrary}
+              onOpenAlbum={openTrackAlbum}
               onOpenArtistAlbums={openArtistAlbums}
               onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
               onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}

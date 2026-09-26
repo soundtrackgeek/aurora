@@ -1,3 +1,4 @@
+import { PublishedChartPicker } from "./PublishedChartPicker";
 import {
   ArrowDown,
   ArrowUp,
@@ -68,6 +69,7 @@ interface ChartStudioProps {
 
 const sourceOptions: Record<ChartKind, ReadonlyArray<{ source: ChartSource; label: string; annual?: boolean }>> = {
   singles: [
+    { source: "publishedUs", label: "US weekly" },
     { source: "officialUk", label: "Official UK" },
     { source: "vgLista", label: "VG Lista" },
     { source: "tiISkuddet", label: "Ti i Skuddet" },
@@ -168,6 +170,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const [error, setError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<ChartEntry | null>(null);
   const [detail, setDetail] = useState<ChartItemDetail | null>(null);
+  const [visibleCount, setVisibleCount] = useState(20);
   const [queueBusy, setQueueBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -227,6 +230,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }, []);
 
   useEffect(() => {
+    if (request.source === "publishedUs" && !request.publishedWeek) return;
     const pageKey = JSON.stringify([request, catalogRevision, reloadToken]);
     if (loadedPageKeyRef.current === pageKey && currentPageRef.current) {
       // Effects resume after a retained page becomes visible. Resume any interrupted detail load.
@@ -262,6 +266,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             loadedPageKeyRef.current = pageKey;
             currentPageRef.current = nextPage;
             setLoadedRequest(request);
+            setVisibleCount(Math.max(20, selected ? nextPage.entries.indexOf(selected) + 1 : 20));
             setLoadState("ready");
             if (selected) {
               selectEntry(
@@ -306,12 +311,14 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }
 
   function changeKind(kind: ChartKind) {
-    setRequest((current) => ({ ...current, kind, source: kind === "albums" ? "auroraScore" : "officialUk", scope: kind === "albums" ? "period" : "week" }));
+    setRequest((current) => ({ ...current, kind, limit: 100, source: kind === "albums" ? "auroraScore" : "officialUk", scope: kind === "albums" ? "period" : "week" }));
   }
 
   function changeSource(source: ChartSource) {
     const annual = source === "billboard" || source === "auroraScore";
-    setRequest((current) => ({ ...current, source, scope: annual ? "period" : current.scope }));
+    setRequest((current) => ({ ...current, source, limit: source === "publishedUs" ? 1000 : 100, scope: annual ? "period" : current.scope,
+      ...(source === "publishedUs" ? { publishedChart: current.publishedChart ?? "Billboard Hot 100", period: { fromYear: current.selectedYear, toYear: current.selectedYear, fromWeek: 1, toWeek: 53, label: `${current.selectedYear} year chart` } } : {}),
+    }));
   }
 
   function changeScope(scope: ChartScope) {
@@ -341,7 +348,8 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
     }
   }
 
-  const isLoading = loadState === "loading" || (loadState !== "error" && loadedRequest !== request);
+  const awaitingPublishedDate = request.source === "publishedUs" && !request.publishedWeek;
+  const isLoading = !awaitingPublishedDate && (loadState === "loading" || (loadState !== "error" && loadedRequest !== request));
 
   return <section className="chart-studio" aria-busy={isLoading}>
     <header className="chart-studio__header">
@@ -352,6 +360,20 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </div>
     </header>
 
+    <div className="chart-source-row">
+      <div className="chart-sources" role="tablist" aria-label={`${request.kind} chart source`}>
+        {sourceOptions[request.kind].map(({ source, label, annual }) => <button type="button" role="tab" aria-selected={request.source === source} className={annual ? "is-annual" : undefined} onClick={() => changeSource(source)} key={source}><ChartColumn aria-hidden="true" /> {label}{annual ? <small>annual</small> : null}</button>)}
+      </div>
+      <div className="chart-scope" role="tablist" aria-label="Chart calculation">
+        <button type="button" role="tab" aria-selected={request.scope === "week"} disabled={annualSource} onClick={() => changeScope("week")}>Selected week</button>
+        <button type="button" role="tab" aria-selected={request.scope === "period"} onClick={() => changeScope("period")}>{request.source === "publishedUs" ? "Year chart" : "Period chart"}</button>
+      </div>
+    </div>
+
+    {request.source === "publishedUs" ? <>
+      <PublishedChartPicker request={request} onChange={setRequest} revision={catalogRevision} onRefresh={() => setReloadToken((value) => value + 1)} />
+      {Object.values(request.filters ?? {}).some(Boolean) ? <p className="chart-period-note">Artist filters are active. <button type="button" onClick={() => setRequest((current) => ({ ...current, filters: undefined }))}>Clear artist filters</button></p> : null}
+    </> : <>
     <ChartPeriodControls period={request.period} filters={request.filters} onApply={applyPeriod} onFilters={(filters) => setRequest((current) => ({ ...current, filters }))} />
 
     <section className="chart-calendar" aria-label={`${request.period.label} chart calendar`}>
@@ -375,30 +397,22 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       <button type="button" aria-label="Next period" onClick={() => setRequest((current) => ({ ...current, period: { ...current.period, fromYear: current.period.fromYear + 1, toYear: current.period.toYear + 1, label: current.period.label.replace(/\d{4}/g, (year) => String(Number(year) + 1)) }, selectedYear: current.selectedYear + 1 }))}><ChevronRight aria-hidden="true" /></button>
     </section>
 
-    <div className="chart-source-row">
-      <div className="chart-sources" role="tablist" aria-label={`${request.kind} chart source`}>
-        {sourceOptions[request.kind].map(({ source, label, annual }) => <button type="button" role="tab" aria-selected={request.source === source} className={annual ? "is-annual" : undefined} onClick={() => changeSource(source)} key={source}><ChartColumn aria-hidden="true" /> {label}{annual ? <small>annual</small> : null}</button>)}
-      </div>
-      <div className="chart-scope" role="tablist" aria-label="Chart calculation">
-        <button type="button" role="tab" aria-selected={request.scope === "week"} disabled={annualSource} onClick={() => changeScope("week")}>Selected week</button>
-        <button type="button" role="tab" aria-selected={request.scope === "period"} onClick={() => changeScope("period")}>Period chart</button>
-      </div>
-    </div>
+    </>}
 
     {loadState === "error" ? <Feedback state="error" error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : null}
-    <p className="chart-update-status" role="status">{isLoading && page ? "Updating chart… Previous results remain visible." : loadState === "error" && page ? "The previous chart is still shown below." : ""}</p>
+    <p className="chart-update-status" role="status">{awaitingPublishedDate ? "Choose an available chart and published week above. Previous results, if any, remain below." : isLoading && page ? "Updating chart… Previous results remain visible." : loadState === "error" && page ? "The previous chart is still shown below." : ""}</p>
     <ContentTransition type="chart-page">
     <div className="chart-results">
     {!page ? (isLoading ? <Feedback state="loading" error={null} onRetry={() => setReloadToken((value) => value + 1)} /> : null) : <>
       <section className="chart-ranking" aria-labelledby="chart-ranking-heading">
         <header>
-          <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `Week ${page.request.selectedWeek} · ${formatDate(page.chartDate)}` : `${page.request.period.label} · ranked by position finishes`}</p></div></div>
+          <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `${page.request.source === "publishedUs" ? "Week ending" : `Week ${page.request.selectedWeek} ·`} ${formatDate(page.chartDate)}` : `${page.request.period.label} · ${page.request.source === "publishedUs" ? "ranked by #1 weeks, chart weeks, then peak" : "ranked by position finishes"}`}</p></div></div>
           <button type="button" className="button button--primary" disabled={queueBusy || !page.entries.length} onClick={() => void playChart()}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play this chart</button>
         </header>
-        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(20, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the artist filters."}</p>
+        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(visibleCount, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the artist filters."}</p>
         <div className="chart-table" role="table" aria-label={page.chartTitle}>
-          <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" ? "Wks" : "Points"}</span><span>Library</span></div>
-          {page.entries.slice(0, 20).map((entry) => {
+          <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" || page.request.source === "publishedUs" ? "Wks" : "Points"}</span><span>Library</span></div>
+          {page.entries.slice(0, visibleCount).map((entry) => {
             const selected = selectedEntry?.artistKey === entry.artistKey && selectedEntry.titleKey === entry.titleKey;
             return <div className={`chart-row${entry.position <= 3 ? " is-podium" : ""}${selected ? " is-selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} onClick={() => selectEntry(entry, page)} onDoubleClick={() => entry.matchedTrackId && void loadChartEntryTrack(entry.matchedTrackId).then((track) => callbacksRef.current.onPlayQueue([track]))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectEntry(entry, page); } }} key={`${entry.artistKey}:${entry.titleKey}`}>
               <strong className="chart-row__rank">{entry.position}</strong>
@@ -406,11 +420,12 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
               {movementLabel(entry)}
               <span>{page.request.scope === "week" ? entry.previousPosition ?? "—" : entry.weeksAtNumberOne}</span>
               <span>{entry.peakPosition ?? "—"}</span>
-              <span>{formatCount(page.request.scope === "week" ? entry.appearances : entry.totalPoints)}</span>
+              <span>{formatCount(page.request.scope === "week" || page.request.source === "publishedUs" ? entry.appearances : entry.totalPoints)}</span>
               <span className="chart-row__actions">{entry.matchedTrackId || entry.matchedAlbumId ? <CheckCircle2 aria-label="In your library" /> : <span aria-label="Not matched">—</span>}{entry.loved ? <Heart className="is-loved" aria-label="Loved" /> : null}{entry.matchedTrackId ? <button type="button" aria-label={`Play ${entry.title}`} onClick={(event) => { event.stopPropagation(); void loadChartEntryTrack(entry.matchedTrackId!).then((track) => callbacksRef.current.onPlayQueue([track])); }}><Play aria-hidden="true" /></button> : null}</span>
             </div>;
           })}
         </div>
+        {visibleCount < page.entries.length ? <button type="button" className="button button--quiet chart-show-more" onClick={() => setVisibleCount((count) => count + 50)}>Show more songs ({page.entries.length - visibleCount} remaining)</button> : null}
         {queueMessage ? <p className="chart-queue-message" role="status">{queueMessage}</p> : null}
       </section>
 
@@ -424,7 +439,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </section> : null}
       </ContentTransition>
 
-      <section className="chart-score-shelf" aria-labelledby="chart-score-heading">
+      {page.request.source !== "publishedUs" ? <section className="chart-score-shelf" aria-labelledby="chart-score-heading">
         <header>
           <div><h3 id="chart-score-heading">Aurora Album Score <span>· {page.request.period.fromYear === page.request.period.toYear ? page.request.period.fromYear : page.request.period.label}</span></h3><p>Using {page.request.yearBasis === "year" ? "Year" : "Release Year"} for the selected period</p></div>
           <div className="chart-score-shelf__actions">
@@ -436,7 +451,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           </div>
         </header>
         <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
-      </section>
+      </section> : null}
     </>}
     </div>
     </ContentTransition>
@@ -473,6 +488,7 @@ export function ChartInspector({
   busy,
   onPlay,
   onOpenLibrary,
+  onOpenAlbum,
   onOpenArtistAlbums,
   onRatingChange,
   onLoveChange,
@@ -482,6 +498,7 @@ export function ChartInspector({
   busy: boolean;
   onPlay: () => void;
   onOpenLibrary: () => void;
+  onOpenAlbum?: (track: Track) => void;
   onOpenArtistAlbums: (artist: string) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, state: LoveState) => void;
@@ -491,11 +508,13 @@ export function ChartInspector({
     <Artwork track={track ?? entryAsTrack(entry)} size="large" decorative={false} />
     <div className="chart-inspector__heading"><span>#{entry.position}</span><div><h2>{entry.title}</h2><p><ArtistSmartLink artist={entry.artist} onOpen={onOpenArtistAlbums} /></p></div>{track?.loved || entry.loved ? <Heart aria-label="Loved" /> : null}</div>
     <dl className="metadata-list">
+      {selection.kind === "singles" ? <div><dt>Album</dt><dd>{track?.albumId ? <button type="button" className="track-album-link" onClick={() => onOpenAlbum?.(track)} disabled={!onOpenAlbum}>{track.album}{track.originalYear ?? track.releaseYear ? ` (${track.originalYear ?? track.releaseYear})` : ""}</button> : entry.matchedTrackId ? "Loading album…" : "Not matched"}</dd></div> : null}
+      {entry.entryDate ? <div><dt>Entered chart</dt><dd>{entry.entryDate}</dd></div> : null}
       <div><dt>Chart</dt><dd>{selection.chartTitle}</dd></div>
-      <div><dt>{pageRequest.scope === "week" ? "Week" : "Period"}</dt><dd>{pageRequest.scope === "week" ? `${pageRequest.selectedWeek} · ${pageRequest.selectedYear}` : pageRequest.period.label}</dd></div>
+      <div><dt>{pageRequest.scope === "week" ? "Week" : "Period"}</dt><dd>{pageRequest.scope === "week" ? pageRequest.source === "publishedUs" ? formatDate(pageRequest.publishedWeek ?? null) : `${pageRequest.selectedWeek} · ${pageRequest.selectedYear}` : pageRequest.period.label}</dd></div>
       <div><dt>Peak position</dt><dd>{entry.peakPosition === null ? "—" : `#${entry.peakPosition}`}</dd></div>
       <div><dt>{pageRequest.scope === "week" ? "Weeks on chart" : "Appearances"}</dt><dd>{entry.appearances}</dd></div>
-      {pageRequest.scope === "period" ? <><div><dt>Weeks at #1</dt><dd>{entry.weeksAtNumberOne}</dd></div><div><dt>Total points</dt><dd>{formatCount(entry.totalPoints)}</dd></div></> : null}
+      {pageRequest.scope === "period" ? <><div><dt>Weeks at #1</dt><dd>{entry.weeksAtNumberOne}</dd></div>{pageRequest.source !== "publishedUs" ? <div><dt>Total points</dt><dd>{formatCount(entry.totalPoints)}</dd></div> : null}</> : null}
       {entry.albumScore !== null ? <div><dt>Album Score</dt><dd>{entry.albumScore.toFixed(1)}</dd></div> : null}
       {selection.kind === "albums" ? <div><dt>Rating Completeness</dt><dd>{albumRatingProgress ? `${albumRatingProgress.totalTracks > 0 ? Math.round(albumRatingProgress.ratedTracks / albumRatingProgress.totalTracks * 100) : 0}% (${formatCount(albumRatingProgress.ratedTracks)}/${formatCount(albumRatingProgress.totalTracks)})` : "—"}</dd></div> : null}
     </dl>
@@ -504,6 +523,6 @@ export function ChartInspector({
     {track ? <div className="chart-inspector__tags"><label>Your rating</label><InlineRatingControl title={track.title} rating={track.rating} busy={busy} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><label>Love</label><InlineLoveControl title={track.title} loveState={track.loveState} busy={busy} onLoveChange={(state) => onLoveChange(track, state)} /></div> : null}
     <button type="button" className="button button--primary chart-inspector__play" disabled={busy || (!entry.matchedTrackId && !entry.matchedAlbumId)} onClick={onPlay}>{busy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play</button>
     <button type="button" className="button button--quiet chart-inspector__open" disabled={!entry.matchedTrackId && !entry.matchedAlbumId} onClick={onOpenLibrary}><Library aria-hidden="true" /> Open in Library</button>
-    <p><Star aria-hidden="true" /> Weekly sources remain exact. Billboard and Aurora Score are presented as annual or period charts.</p>
+    <p><Star aria-hidden="true" /> Weekly US charts use published dates. Printed entry dates and source peaks can describe the full chart run. Billboard annual and Aurora Score remain separate.</p>
   </div>;
 }
