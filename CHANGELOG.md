@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.28.7 - 2026-09-27
+## [0.28.8] - 2026-09-27
+
+### Fixed
+- Release-note extraction accepts bracketed and plain version headings and stops at either heading style. Added extraction regression checks, including the current release, to prevent packaging failures after successful installer builds.
+
+## [0.28.7] - 2026-09-27
 
 ### Fixed
 - Genre index counts, album and artist lists, decades, related genres, suggestions, highlights, and every queue mode now share verified file-genre corrections with album search instead of reading stale imported genres. Audio files and the imported catalog remain unchanged.

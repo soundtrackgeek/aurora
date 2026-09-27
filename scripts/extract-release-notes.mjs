@@ -8,7 +8,8 @@ if (!version) {
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const changelog = fs.readFileSync("CHANGELOG.md", "utf8").replace(/\r\n?/g, "\n");
-const headingPattern = new RegExp(`^## \\[${escapeRegExp(version)}\\] - (\\d{4}-\\d{2}-\\d{2})\\s*$`, "m");
+const releaseVersion = escapeRegExp(version);
+const headingPattern = new RegExp(`^## (?:\\[${releaseVersion}\\]|${releaseVersion}) - (\\d{4}-\\d{2}-\\d{2})\\s*$`, "m");
 const headingMatch = changelog.match(headingPattern);
 
 if (!headingMatch || headingMatch.index === undefined) {
@@ -17,7 +18,7 @@ if (!headingMatch || headingMatch.index === undefined) {
 
 const bodyStart = headingMatch.index + headingMatch[0].length;
 const remaining = changelog.slice(bodyStart);
-const nextHeadingIndex = remaining.search(/^## \[/m);
+const nextHeadingIndex = remaining.search(/^## /m);
 const sectionBody = (nextHeadingIndex >= 0 ? remaining.slice(0, nextHeadingIndex) : remaining).trim();
 
 if (!sectionBody) {

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.8 fixes release packaging for mixed changelog heading formats, with release-note extraction covered by the verification gate. It includes the verified-genre corrections from 0.28.7.
+
 Aurora 0.28.7 makes the Genre index, details, suggestions, and playback queues use verified saved file genres while catalog synchronization is pending. Previously corrected albums no longer remain under an old genre on this page.
 
 Aurora 0.28.3 resolves unmatched songs and albums across all supported chart archives against current library metadata. Correcting artist/title tags can now restore the library checkmark, artwork, album details, and playback after catalog synchronization, without reimporting charts. Valid existing archive matches are preserved; links to removed catalog items are resolved again. Matching also applies to newly imported chart entries when the chart reloads.
