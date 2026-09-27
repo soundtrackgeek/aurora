@@ -667,6 +667,7 @@ pub(crate) fn apply_tags(
     request: InboxTagApplyRequest,
     cover: Option<&CanonicalCover>,
     recovery_root: &Path,
+    monitored_roots: &[PathBuf],
 ) -> Result<InboxTagApplyResult, String> {
     if (request.fields.is_empty() && cover.is_none())
         || (request.tracks.is_empty() && cover.is_none())
@@ -847,7 +848,7 @@ pub(crate) fn apply_tags(
         removed += 1;
     }
     let rename_result = if request.rename_after_apply {
-        match rename_album_path(&album) {
+        match rename_album_path(&album, monitored_roots) {
             Ok(result) => Some(result),
             Err(error) => {
                 for item in prepared.iter().rev() {
@@ -1205,9 +1206,12 @@ fn hidden_command(executable: &Path) -> Command {
     command
 }
 
-pub(crate) fn rename_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
+pub(crate) fn rename_album(
+    request: InboxRenameRequest,
+    monitored_roots: &[PathBuf],
+) -> Result<InboxRenameResult, String> {
     let album = canonical_directory(&request.album_path)?;
-    rename_album_path(&album)
+    rename_album_path(&album, monitored_roots)
 }
 
 pub(crate) fn rename_albums(
@@ -1265,7 +1269,7 @@ pub(crate) fn rename_albums(
             if !parent_is_monitored && disc_folder_number(&candidate.path).is_some() {
                 Err("Select every disc folder for this release before renaming it. Aurora will merge the discs into one album folder.".to_owned())
             } else {
-                rename_album_path(&candidate.path)
+                rename_album_path(&candidate.path, monitored_roots)
             }
         };
         match result {
@@ -1364,10 +1368,7 @@ fn merge_album_group(
     let final_folder = if parent_is_monitored {
         common_parent.join(&group[0].folder_name)
     } else {
-        common_parent
-            .parent()
-            .ok_or_else(|| "The multi-disc album folder has no parent folder.".to_owned())?
-            .join(&group[0].folder_name)
+        rename_parent(&common_parent, monitored_roots)?.join(&group[0].folder_name)
     };
     let mut created_destination = false;
     let destination_root = if parent_is_monitored {
@@ -1601,7 +1602,30 @@ fn disc_folder_number(path: &Path) -> Option<u32> {
         .ok()
 }
 
-fn rename_album_path(album: &Path) -> Result<InboxRenameResult, String> {
+fn rename_parent(album: &Path, monitored_roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let monitored_roots = monitored_roots
+        .iter()
+        .map(|root| canonical_directory(&root.to_string_lossy()))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Use the closest monitored ancestor; never move a monitored root itself.
+    if monitored_roots.iter().any(|root| path_eq(root, album)) {
+        return Err("Place this album in its own folder inside the monitored Inbox folder before renaming it.".to_owned());
+    }
+    for ancestor in album.ancestors().skip(1) {
+        if monitored_roots.iter().any(|root| path_eq(root, ancestor)) {
+            return Ok(ancestor.to_path_buf());
+        }
+    }
+    album
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "The Inbox album has no parent folder.".to_owned())
+}
+
+fn rename_album_path(
+    album: &Path,
+    monitored_roots: &[PathBuf],
+) -> Result<InboxRenameResult, String> {
     let scanned = scan_album(album)?;
     let album_artist = required_component(scanned.artist.as_deref(), "Album Artist")?;
     let album_title = required_component(scanned.album.as_deref(), "Album")?;
@@ -1609,9 +1633,7 @@ fn rename_album_path(album: &Path) -> Result<InboxRenameResult, String> {
         .year
         .filter(|value| *value > 0)
         .ok_or_else(|| "Add a Year tag before renaming this album.".to_owned())?;
-    let parent = album
-        .parent()
-        .ok_or_else(|| "The Inbox album has no parent folder.".to_owned())?;
+    let parent = rename_parent(album, monitored_roots)?;
     let folder_name = sanitize_component(&format!("{album_artist} - {album_title} ({year})"))?;
     let destination_folder = parent.join(folder_name);
     let folder_renamed = !path_eq(album, &destination_folder);
@@ -3127,6 +3149,44 @@ mod tests {
     }
 
     #[test]
+    fn rename_moves_nested_album_to_monitored_root_and_preserves_collisions() {
+        let root = tempfile::tempdir().unwrap();
+        let album = root.path().join("Artist/Studio Albums/incoming");
+        fs::create_dir_all(&album).unwrap();
+        write_rename_fixture(&album.join("first.mp3"), 1, None, "First");
+        fs::write(album.join("cover.jpg"), b"sidecar").unwrap();
+        let destination = root.path().join("Test Artist - Test Album (1990)");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("keep.txt"), b"existing").unwrap();
+        let roots = vec![root.path().canonicalize().unwrap()];
+        assert!(
+            rename_album(
+                InboxRenameRequest {
+                    album_path: path_text(&album).unwrap(),
+                },
+                &roots
+            )
+            .unwrap_err()
+            .contains("already exists")
+        );
+        assert!(album.join("first.mp3").is_file());
+        assert_eq!(fs::read(destination.join("keep.txt")).unwrap(), b"existing");
+        fs::remove_file(destination.join("keep.txt")).unwrap();
+        fs::remove_dir(&destination).unwrap();
+        let result = rename_albums(
+            InboxBatchRenameRequest {
+                album_paths: vec![path_text(&album).unwrap()],
+            },
+            &roots,
+        )
+        .unwrap();
+        assert!(result.failures.is_empty());
+        assert!(!album.exists());
+        assert!(destination.join("01 - Track Artist - First.mp3").is_file());
+        assert_eq!(fs::read(destination.join("cover.jpg")).unwrap(), b"sidecar");
+    }
+
+    #[test]
     fn rename_album_uses_optional_disc_and_two_digit_tracks() {
         let parent = std::env::temp_dir().join(format!(
             "aurora-inbox-rename-{}-{}",
@@ -3138,9 +3198,12 @@ mod tests {
         write_rename_fixture(&album.join("first.mp3"), 1, None, "First");
         write_rename_fixture(&album.join("second.mp3"), 2, None, "Second");
 
-        let result = rename_album(InboxRenameRequest {
-            album_path: path_text(&album).expect("album path"),
-        })
+        let result = rename_album(
+            InboxRenameRequest {
+                album_path: path_text(&album).expect("album path"),
+            },
+            &[],
+        )
         .expect("rename album");
         let renamed = PathBuf::from(result.album_path);
         assert!(renamed.ends_with("Test Artist - Test Album (1990)"));
@@ -3170,9 +3233,12 @@ mod tests {
         write_rename_fixture(&album.join("disc-one.mp3"), 1, Some(1), "Disc One");
         write_rename_fixture(&album.join("disc-two.mp3"), 1, Some(2), "Disc Two");
 
-        let result = rename_album(InboxRenameRequest {
-            album_path: path_text(&album).expect("album path"),
-        })
+        let result = rename_album(
+            InboxRenameRequest {
+                album_path: path_text(&album).expect("album path"),
+            },
+            &[],
+        )
         .expect("rename multidisc album");
         let renamed = PathBuf::from(result.album_path);
         assert!(renamed.join("1-01 - Track Artist - Disc One.mp3").is_file());
@@ -3188,7 +3254,7 @@ mod tests {
             std::process::id(),
             now_ms()
         ));
-        let incoming = monitored_root.join("Test Album with CD folders");
+        let incoming = monitored_root.join("Artist/Studio Albums/Test Album with CD folders");
         let cd1 = incoming.join("CD1");
         let cd2 = incoming.join("CD2");
         fs::create_dir_all(&cd1).expect("create CD1");
@@ -3406,6 +3472,7 @@ mod tests {
             },
             Some(&cover),
             &parent.join("recovery"),
+            &[],
         )
         .expect("save album cover");
 
@@ -3462,6 +3529,7 @@ mod tests {
             },
             None,
             &recovery,
+            &[],
         )
         .expect("apply tags and recover extra");
 
@@ -3485,8 +3553,8 @@ mod tests {
     #[test]
     fn tag_apply_and_rename_accepts_a_mix_of_untagged_and_tagged_tracks() {
         let root = tempfile::tempdir().expect("temporary Inbox root");
-        let album = root.path().join("Unsorted");
-        fs::create_dir(&album).expect("create album");
+        let album = root.path().join("Artist/Studio Albums/Unsorted");
+        fs::create_dir_all(&album).expect("create album");
         let untagged = album.join("first.mp3");
         let tagged = album.join("second.mp3");
         let audio = [0xff, 0xfb, 0x90, 0x64].repeat(8192);
@@ -3533,6 +3601,7 @@ mod tests {
             },
             None,
             &root.path().join("recovery"),
+            &[root.path().canonicalize().unwrap()],
         )
         .expect("apply tags and rename mixed album");
         assert_eq!(result.changed_tracks, 2);

@@ -511,3 +511,5 @@ Windows settings/snapshot replacement retries temporary sharing conflicts for up
 Aurora sends saved, still-missing MP3 identities to Music Library. Music Library verifies the complete surviving album and commits catalog removals, album metrics, search cleanup, and Updates history atomically. Restored files, unavailable folders, unknown tracks, and changed catalog data prevent deletion sync. Older identity-set failures receive a fresh guarded retry after upgrading Aurora; Music Library must also support verified deletion sync. Empty albums still require the reviewed album-removal workflow.
 
 Charts offers a remembered Library filter: Both (default), In Library, or Not In Library. Chart ranks are preserved and filtering applies before result limits.
+
+Inbox Rename and auto-tag rename now move nested albums to their monitored root, retaining collision checks, sidecars, and rollback.

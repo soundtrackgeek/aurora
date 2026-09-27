@@ -274,6 +274,11 @@ async fn apply_inbox_tags(
     request: InboxTagApplyRequest,
 ) -> Result<InboxTagApplyResult, String> {
     connections::require_music_writes()?;
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
     let cover = artwork::selected_cover(&app, request.artwork_token.as_deref())?;
     let recovery_root = app
         .path()
@@ -281,7 +286,7 @@ async fn apply_inbox_tags(
         .map_err(|error| format!("Aurora could not locate its Inbox recovery folder: {error}"))?
         .join("inbox-recovery");
     tauri::async_runtime::spawn_blocking(move || {
-        inbox::apply_tags(request, cover.as_ref(), &recovery_root)
+        inbox::apply_tags(request, cover.as_ref(), &recovery_root, &monitored_roots)
     })
     .await
     .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
@@ -361,9 +366,17 @@ async fn embed_inbox_album_cover(
 }
 
 #[tauri::command]
-async fn rename_inbox_album(request: InboxRenameRequest) -> Result<InboxRenameResult, String> {
+async fn rename_inbox_album(
+    app: AppHandle,
+    request: InboxRenameRequest,
+) -> Result<InboxRenameResult, String> {
     connections::require_music_writes()?;
-    tauri::async_runtime::spawn_blocking(move || inbox::rename_album(request))
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
+    tauri::async_runtime::spawn_blocking(move || inbox::rename_album(request, &monitored_roots))
         .await
         .map_err(|error| format!("Aurora's Inbox rename worker stopped unexpectedly: {error}"))?
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.5 - 2026-09-27
+
+### Fixed
+- Inbox Rename and auto-tag rename now move nested albums to their monitored root, retaining collision checks, sidecars, and rollback.
+
 ## [0.28.4] - 2026-09-27
 
 ### Added
