@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.7 makes the Genre index, details, suggestions, and playback queues use verified saved file genres while catalog synchronization is pending. Previously corrected albums no longer remain under an old genre on this page.
+
 Aurora 0.28.3 resolves unmatched songs and albums across all supported chart archives against current library metadata. Correcting artist/title tags can now restore the library checkmark, artwork, album details, and playback after catalog synchronization, without reimporting charts. Valid existing archive matches are preserved; links to removed catalog items are resolved again. Matching also applies to newly imported chart entries when the chart reloads.
 
 Aurora 0.28.2 adds Chart info below Last listened in the track inspector and on selected songs in Charts, with all-time peaks and ALL/US/UK/NO filters. US weekly series are listed separately; Billboard annual rankings are explicitly labeled.

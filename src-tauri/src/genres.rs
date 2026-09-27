@@ -144,11 +144,54 @@ fn decode_genre_summary(
     })
 }
 
+// Keep all atlas queries on the same verified genre projection as album search.
+// Views are connection-local; the imported catalog is never modified.
+fn prepare_genre_views(connection: &Connection) -> Result<(), String> {
+    let query_only: bool = connection
+        .pragma_query_value(None, "query_only", |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    connection
+        .pragma_update(None, "query_only", false)
+        .map_err(|error| error.to_string())?;
+    let result = (|| -> rusqlite::Result<()> {
+        connection.execute_batch(crate::live_genres::SCHEMA)?;
+        for (table, expression) in [
+            ("albums", crate::live_genres::album_sql("source")),
+            ("tracks", crate::live_genres::track_sql("source")),
+        ] {
+            let mut statement = connection.prepare(&format!("PRAGMA main.table_info({table})"))?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let columns = columns
+                .into_iter()
+                .map(|column| {
+                    if column == "canonical_genre" {
+                        format!("{expression} AS canonical_genre")
+                    } else {
+                        format!("source.\"{}\"", column.replace('"', "\"\""))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            connection.execute_batch(&format!(
+                "CREATE TEMP VIEW IF NOT EXISTS aurora_genre_{table} AS SELECT {columns} FROM main.{table} AS source;"
+            ))?;
+        }
+        Ok(())
+    })();
+    connection
+        .pragma_update(None, "query_only", query_only)
+        .map_err(|error| error.to_string())?;
+    result.map_err(|error| format!("Could not prepare verified genres: {error}"))
+}
+
 fn query_genre_index(
     connection: &Connection,
     history: &HashMap<String, GenreHistoryInsight>,
     store: Option<&StateStore>,
 ) -> Result<Vec<GenreSummary>, String> {
+    prepare_genre_views(connection)?;
     let mut statement = connection
         .prepare(
             r#"
@@ -162,7 +205,7 @@ fn query_genre_index(
                                 COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
                                 COALESCE(album_score, -1) DESC, COALESCE(year, 0) DESC, id
                      ) AS cover_rank
-              FROM albums
+              FROM aurora_genre_albums
               WHERE NULLIF(TRIM(canonical_genre), '') IS NOT NULL
             )
             SELECT canonical_genre,
@@ -212,7 +255,7 @@ fn query_genre_summary(
                                 COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
                                 COALESCE(album_score, -1) DESC, COALESCE(year, 0) DESC, id
                      ) AS cover_rank
-              FROM albums
+              FROM aurora_genre_albums
               WHERE canonical_genre = ?1
             )
             SELECT canonical_genre,
@@ -256,7 +299,7 @@ fn apply_overlay_deltas(
         .collect::<HashMap<_, _>>();
     let mut statement = connection
         .prepare_cached(
-            "SELECT canonical_genre, import_run_id FROM tracks WHERE file_path = ?1 AND filename = ?2",
+            "SELECT canonical_genre, import_run_id FROM aurora_genre_tracks WHERE file_path = ?1 AND filename = ?2",
         )
         .map_err(|error| format!("Could not prepare genre tag-overlay reconciliation: {error}"))?;
     for overlay in store.all_overlays()? {
@@ -306,16 +349,18 @@ pub(crate) fn load_genre_index(
 ) -> Result<Vec<GenreSummary>, String> {
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    catalog::attach_aurora_state(&connection, store)?;
     let history = history.genre_insights().unwrap_or_default();
     query_genre_index(&connection, &history, Some(store))
 }
 
 fn query_genre_names(connection: &Connection) -> Result<Vec<String>, String> {
+    prepare_genre_views(connection)?;
     let mut statement = connection
         .prepare(
             r#"
             SELECT DISTINCT TRIM(canonical_genre)
-            FROM albums
+            FROM aurora_genre_albums
             WHERE NULLIF(TRIM(canonical_genre), '') IS NOT NULL
             ORDER BY TRIM(canonical_genre) COLLATE NOCASE
             LIMIT ?1
@@ -329,9 +374,10 @@ fn query_genre_names(connection: &Connection) -> Result<Vec<String>, String> {
         .map_err(|error| format!("Could not decode genre suggestions: {error}"))
 }
 
-pub(crate) fn load_genre_names() -> Result<Vec<String>, String> {
+pub(crate) fn load_genre_names(store: &StateStore) -> Result<Vec<String>, String> {
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    catalog::attach_aurora_state(&connection, store)?;
     query_genre_names(&connection)
 }
 
@@ -341,7 +387,7 @@ fn query_decades(connection: &Connection, genre: &str) -> Result<Vec<GenreDecade
             r#"
             SELECT (year / 10) * 10 AS decade,
                    CAST(SUM(total_tracks) AS INTEGER), COUNT(*)
-            FROM albums
+            FROM aurora_genre_albums
             WHERE canonical_genre = ?1
               AND year BETWEEN 1000 AND 9999
             GROUP BY decade
@@ -370,7 +416,7 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
                    COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
                    year, publisher, total_tracks, rated_tracks, loved_tracks, total_seconds,
                    COALESCE(effective_album_rating, calculated_album_rating, album_rating) / 20.0
-            FROM albums
+            FROM aurora_genre_albums
             WHERE canonical_genre = ?1
             ORDER BY (loved_tracks > 0) DESC, loved_tracks DESC,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating, -1) DESC,
@@ -405,7 +451,7 @@ fn query_artists(connection: &Connection, genre: &str) -> Result<Vec<GenreArtist
             r#"
             SELECT COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
                    CAST(SUM(total_tracks) AS INTEGER), COUNT(*), CAST(SUM(loved_tracks) AS INTEGER)
-            FROM albums
+            FROM aurora_genre_albums
             WHERE canonical_genre = ?1
               AND COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist') <> 'Various Artists'
             GROUP BY COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')
@@ -434,14 +480,14 @@ fn query_related(connection: &Connection, genre: &str) -> Result<Vec<RelatedGenr
             r#"
             WITH selected_artists AS MATERIALIZED (
               SELECT DISTINCT album_artist_display
-              FROM albums
+              FROM aurora_genre_albums
               WHERE canonical_genre = ?1
                 AND NULLIF(TRIM(album_artist_display), '') IS NOT NULL
                 AND album_artist_display <> 'Various Artists'
             )
             SELECT a.canonical_genre, COUNT(DISTINCT a.album_artist_display),
                    COUNT(*), CAST(SUM(a.total_tracks) AS INTEGER)
-            FROM albums AS a
+            FROM aurora_genre_albums AS a
             JOIN selected_artists AS selected
               ON selected.album_artist_display = a.album_artist_display
             WHERE a.canonical_genre <> ?1
@@ -486,7 +532,7 @@ fn query_highlights(
                    WHEN '4.5' THEN 90 WHEN '5' THEN 100 WHEN '5.0' THEN 100 END) AS rating_value,
                  love, time_seconds, canonical_genre, album_id, file_path, filename, import_run_id,
                  year AS original_year, publisher
-          FROM tracks
+          FROM aurora_genre_tracks
           WHERE canonical_genre = :genre
             AND (normalized_rating IS NOT NULL OR NULLIF(TRIM(rating_raw), '') IS NOT NULL OR love = 'L')
           ORDER BY rating_value DESC, (love = 'L') DESC, id DESC
@@ -526,7 +572,7 @@ fn query_highlights(
                l.play_count, t.album_id, t.file_path, t.filename, t.import_run_id,
                t.year AS original_year, t.publisher AS publisher,
                t.display_artist AS display_artist
-        FROM tracks AS t
+        FROM aurora_genre_tracks AS t
         LEFT JOIN lastfm_track_popularity AS l
           ON l.artist_key = lower(trim(t.album_artist_display))
          AND l.track_key = lower(trim(t.title))
@@ -546,6 +592,7 @@ fn query_genre_detail(
     history: &HashMap<String, GenreHistoryInsight>,
     store: Option<&StateStore>,
 ) -> Result<GenreDetail, String> {
+    prepare_genre_views(connection)?;
     let genre = validate_genre(genre)?;
     let summary = query_genre_summary(connection, genre, history, store)?;
     let decades = query_decades(connection, genre)?;
@@ -575,6 +622,7 @@ pub(crate) fn load_genre_detail(
 ) -> Result<GenreDetail, String> {
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    catalog::attach_aurora_state(&connection, store)?;
     let history = history.genre_insights().unwrap_or_default();
     query_genre_detail(&connection, &genre, &history, Some(store))
 }
@@ -584,7 +632,7 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
         GenreQueueMode::Radio | GenreQueueMode::Shuffle | GenreQueueMode::Unrated => {
             r#"
             WITH chosen_albums AS MATERIALIZED (
-              SELECT id FROM albums
+              SELECT id FROM aurora_genre_albums
               WHERE canonical_genre = :genre
               ORDER BY RANDOM()
               LIMIT 80
@@ -601,7 +649,7 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                      t.year AS original_year, t.publisher AS publisher,
                      t.display_artist AS display_artist
               FROM chosen_albums AS chosen
-              JOIN tracks AS t ON t.album_id = chosen.id
+              JOIN aurora_genre_tracks AS t ON t.album_id = chosen.id
               WHERE (:unrated = 0 OR (t.normalized_rating IS NULL AND NULLIF(TRIM(t.rating_raw), '') IS NULL))
               ORDER BY
                 CASE WHEN :radio = 1 THEN
@@ -636,7 +684,7 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                      t.file_path, t.filename, t.import_run_id,
                      t.year AS original_year, t.publisher AS publisher,
                      t.display_artist AS display_artist
-              FROM tracks AS t
+              FROM aurora_genre_tracks AS t
               WHERE t.canonical_genre = :genre AND t.love = 'L'
                 AND :radio IN (0, 1) AND :unrated IN (0, 1)
               ORDER BY RANDOM()
@@ -666,7 +714,7 @@ fn queue_sql(mode: GenreQueueMode) -> &'static str {
                      t.file_path, t.filename, t.import_run_id,
                      t.year AS original_year, t.publisher AS publisher,
                      t.display_artist AS display_artist
-              FROM tracks AS t
+              FROM aurora_genre_tracks AS t
               WHERE t.canonical_genre = :genre
                 AND (t.normalized_rating IS NOT NULL OR NULLIF(TRIM(t.rating_raw), '') IS NOT NULL)
                 AND :radio IN (0, 1) AND :unrated IN (0, 1)
@@ -693,6 +741,7 @@ fn query_genre_queue(
     played_track_keys: &HashSet<String>,
     store: Option<&StateStore>,
 ) -> Result<Vec<TrackSummary>, String> {
+    prepare_genre_views(connection)?;
     let genre = validate_genre(&request.genre)?;
     if request.limit == 0 || request.limit > MAX_QUEUE_BATCH {
         return Err(format!(
@@ -762,6 +811,7 @@ pub(crate) fn load_genre_queue(
     };
     let path = catalog::default_catalog_path()?;
     let connection = catalog::open_catalog(&path)?;
+    catalog::attach_aurora_state(&connection, store)?;
     query_genre_queue(&connection, &request, &played, Some(store))
 }
 
@@ -804,6 +854,157 @@ mod tests {
             )
             .expect("seed fixture");
         connection
+    }
+
+    #[test]
+    fn unknown_and_mixed_file_genres_do_not_relabel_whole_albums() {
+        let connection = fixture();
+        connection
+            .execute_batch(crate::live_genres::SCHEMA)
+            .unwrap();
+        connection.execute_batch("INSERT INTO aurora_verified_files VALUES (1,0,1,'Christmas Music'), (2,0,0,NULL), (3,0,1,NULL);").unwrap();
+        crate::live_genres::prepare_cached(&connection).unwrap();
+        let index = query_genre_index(&connection, &HashMap::new(), None).unwrap();
+        let unchanged = index.iter().find(|g| g.name == "Synthwave").unwrap();
+        assert_eq!((unchanged.album_count, unchanged.track_count), (1, 2));
+        assert!(!index.iter().any(|g| g.name == "Christmas Music"));
+        let genre: Option<String> = connection
+            .query_row(
+                "SELECT canonical_genre FROM aurora_genre_tracks WHERE id=3",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(genre, None);
+        let genre: String = connection
+            .query_row(
+                "SELECT canonical_genre FROM aurora_genre_tracks WHERE id=2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(genre, "Synthwave");
+    }
+
+    #[test]
+    #[ignore = "requires local Christmas catalog and verified file cache"]
+    fn live_christmas_corrections_reach_the_atlas() {
+        let connection = catalog::open_catalog(&catalog::default_catalog_path().unwrap()).unwrap();
+        let cache = std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("com.soundtrackgeek.aurora/aurora-file-observations.sqlite3");
+        connection
+            .execute(
+                "ATTACH DATABASE ?1 AS file_observations",
+                [format!(
+                    "file:{}?mode=ro",
+                    cache.to_string_lossy().replace('\\', "/")
+                )],
+            )
+            .unwrap();
+        connection.pragma_update(None, "query_only", false).unwrap();
+        connection
+            .execute_batch(crate::live_genres::SCHEMA)
+            .unwrap();
+        connection
+            .execute_batch(crate::file_observations::LOAD_SQL)
+            .unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        crate::live_genres::prepare_cached(&connection).unwrap();
+        let before: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM albums WHERE canonical_genre='Christmas'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, 9);
+        let index = query_genre_index(&connection, &HashMap::new(), None).unwrap();
+        assert!(!index.iter().any(|g| g.name == "Christmas"));
+        let detail =
+            query_genre_detail(&connection, "Christmas Music", &HashMap::new(), None).unwrap();
+        let moved: i64 = connection.query_row("SELECT COUNT(*) FROM aurora_genre_albums live JOIN main.albums original ON original.id=live.id WHERE original.canonical_genre='Christmas' AND live.canonical_genre='Christmas Music'", [], |r| r.get(0)).unwrap();
+        assert_eq!(moved, 9);
+        eprintln!(
+            "Verified Christmas: 9 stale albums removed; Christmas Music: {} albums, {} tracks",
+            detail.summary.album_count, detail.summary.track_count
+        );
+    }
+
+    #[test]
+    fn verified_genres_move_index_details_names_and_every_queue_mode() {
+        let connection = fixture();
+        connection
+            .execute_batch(crate::live_genres::SCHEMA)
+            .unwrap();
+        connection.execute_batch("INSERT INTO aurora_verified_files SELECT id, 0, 1, 'Christmas Music' FROM tracks WHERE canonical_genre='Synthwave';").unwrap();
+        crate::live_genres::prepare_cached(&connection).unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        let index = query_genre_index(&connection, &HashMap::new(), None).unwrap();
+        assert!(!index.iter().any(|g| g.name == "Synthwave"));
+        let moved = index.iter().find(|g| g.name == "Christmas Music").unwrap();
+        assert_eq!((moved.album_count, moved.track_count), (2, 3));
+        let names = query_genre_names(&connection).unwrap();
+        assert!(names.contains(&"Christmas Music".to_owned()));
+        assert!(!names.contains(&"Synthwave".to_owned()));
+        let detail =
+            query_genre_detail(&connection, "Christmas Music", &HashMap::new(), None).unwrap();
+        assert_eq!(detail.albums.len(), 2);
+        assert_eq!(detail.artists.len(), 2);
+        assert_eq!(detail.decades.iter().map(|d| d.track_count).sum::<i64>(), 3);
+        assert!(
+            detail
+                .highlights
+                .iter()
+                .all(|t| t.genre.as_deref() == Some("Christmas Music"))
+        );
+        for mode in [
+            GenreQueueMode::Radio,
+            GenreQueueMode::Shuffle,
+            GenreQueueMode::Loved,
+            GenreQueueMode::HighestRated,
+            GenreQueueMode::Rediscover,
+            GenreQueueMode::Unrated,
+        ] {
+            for genre in ["Synthwave", "Christmas Music"] {
+                let queue = query_genre_queue(
+                    &connection,
+                    &GenreQueueRequest {
+                        genre: genre.into(),
+                        mode,
+                        limit: 100,
+                        exclude_track_keys: vec![],
+                    },
+                    &HashSet::new(),
+                    None,
+                )
+                .unwrap();
+                if genre == "Synthwave" {
+                    assert!(queue.is_empty());
+                } else {
+                    if mode != GenreQueueMode::Unrated {
+                        assert!(!queue.is_empty());
+                    }
+                    assert!(
+                        queue
+                            .iter()
+                            .all(|t| t.genre.as_deref() == Some("Christmas Music"))
+                    );
+                }
+            }
+        }
+        let original: String = connection
+            .query_row(
+                "SELECT canonical_genre FROM main.albums WHERE id='s1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(original, "Synthwave");
+        assert!(
+            connection
+                .pragma_query_value::<bool, _>(None, "query_only", |r| r.get(0))
+                .unwrap()
+        );
     }
 
     #[test]

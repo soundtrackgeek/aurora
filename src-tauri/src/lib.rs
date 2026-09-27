@@ -748,10 +748,13 @@ async fn genre_index(app: AppHandle) -> Result<Vec<GenreSummary>, String> {
 }
 
 #[tauri::command]
-async fn genre_names() -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(genres::load_genre_names)
-        .await
-        .map_err(|error| format!("The genre-suggestion worker stopped unexpectedly: {error}"))?
+async fn genre_names(app: AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        genres::load_genre_names(&store)
+    })
+    .await
+    .map_err(|error| format!("The genre-suggestion worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]

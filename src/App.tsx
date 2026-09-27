@@ -2581,6 +2581,9 @@ function App() {
   }
 
   async function refreshTagEditorCatalogViews(sync: CatalogSync) {
+    // Verified file tags are available even when catalog import is still pending.
+    setGenreIndexReloadToken((value) => value + 1);
+    setGenreDetailReloadToken((value) => value + 1);
     const albumId = selectedAlbumId;
     if (albumId) pendingExplorerAlbumIdRef.current = albumId;
     const currentScroll = mainScrollRef.current?.scrollTop;
@@ -3563,7 +3566,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.7</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

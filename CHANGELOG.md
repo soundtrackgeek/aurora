@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.7 - 2026-09-27
+
+### Fixed
+- Genre index counts, album and artist lists, decades, related genres, suggestions, highlights, and every queue mode now share verified file-genre corrections with album search instead of reading stale imported genres. Audio files and the imported catalog remain unchanged.
+
 ## [0.28.6] - 2026-09-27
 
 ### Fixed
