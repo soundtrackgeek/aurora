@@ -15,6 +15,7 @@ export interface ChartPeriod {
 }
 
 export interface ChartPageRequest {
+  libraryStatus?: "" | "inLibrary" | "notInLibrary";
   filters?: ChartArtistFilters;
   kind: ChartKind;
   source: ChartSource;
@@ -280,6 +281,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     sourcePosition: entry.sourcePosition,
     totalPoints: request.scope === "period" ? entry.totalPoints : Math.max(1, 101 - index),
   }));
+  const filteredEntries = entries.filter((entry) => !request.libraryStatus || Boolean(entry.matchedTrackId || entry.matchedAlbumId) === (request.libraryStatus === "inLibrary"));
   const effectiveRequest = { ...request, scope: annualOnly ? "period" as const : request.scope };
   return {
     request: effectiveRequest,
@@ -290,9 +292,9 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     annualOnly,
     chartDate: effectiveRequest.scope === "week" ? request.source === "publishedUs" ? request.publishedWeek ?? null : "1985-06-09" : null,
     weeks: annualOnly ? [] : previewWeeks(request.period),
-    entries: entries.slice(0, request.limit),
-    totalEntries: entries.length,
-    albumScoreEntries: scores.slice(0, 5),
+    entries: filteredEntries.slice(0, request.limit),
+    totalEntries: filteredEntries.length,
+    albumScoreEntries: request.libraryStatus === "notInLibrary" ? [] : scores.slice(0, 5),
   };
 }
 

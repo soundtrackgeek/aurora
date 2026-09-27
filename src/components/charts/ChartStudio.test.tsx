@@ -16,6 +16,27 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  it("filters library matches, preserves ranks, and remembers the choice", async () => {
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    const count = document.querySelectorAll(".chart-row").length;
+    const ranks = Array.from(document.querySelectorAll(".chart-row__rank"), (rank) => rank.textContent);
+    expect(screen.getByRole("combobox", { name: "Library" })).toHaveValue("");
+    fireEvent.change(screen.getByRole("combobox", { name: "Library" }), { target: { value: "notInLibrary" } });
+    await waitFor(() => expect(screen.queryByLabelText("In your library")).not.toBeInTheDocument());
+    expect(screen.getByText(/No chart entries match/)).toBeInTheDocument();
+    cleanup();
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    expect(screen.getByRole("combobox", { name: "Library" })).toHaveValue("notInLibrary");
+    fireEvent.change(screen.getByRole("combobox", { name: "Library" }), { target: { value: "inLibrary" } });
+    expect((await screen.findAllByLabelText("In your library")).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Not matched")).not.toBeInTheDocument();
+    expect(Array.from(document.querySelectorAll(".chart-row__rank"), (rank) => rank.textContent)).toEqual(ranks);
+    fireEvent.change(screen.getByRole("combobox", { name: "Library" }), { target: { value: "" } });
+    await waitFor(() => expect(document.querySelectorAll(".chart-row")).toHaveLength(count));
+  });
+
   it("adds the library checkmark and playback after an unmatched song resolves on catalog refresh", async () => {
     const loadPage = charts.loadChartPage;
     let corrected = false;

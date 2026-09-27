@@ -427,8 +427,20 @@ pub(super) fn page(conn: &Connection, request: ChartPageRequest) -> Result<Chart
         }
     }
     let total_entries = entries.len();
-    entries.truncate(request.limit);
+    if request.library_status.is_empty() {
+        entries.truncate(request.limit);
+    }
     match_entries(conn, &mut entries)?;
+    let total_entries = if request.library_status.is_empty() {
+        total_entries
+    } else {
+        entries.retain(|entry| {
+            (entry.matched_track_id.is_some() || entry.matched_album_id.is_some())
+                == (request.library_status == "inLibrary")
+        });
+        entries.len()
+    };
+    entries.truncate(request.limit);
     let chart = request.published_chart.as_deref().unwrap_or("US weekly");
     Ok(ChartPage {
         chart_title: if request.scope == ChartScope::Week {
@@ -477,6 +489,7 @@ mod tests {
 
     fn request() -> ChartPageRequest {
         ChartPageRequest {
+            library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
             source: ChartSource::PublishedUs,
@@ -518,6 +531,23 @@ mod tests {
             (3,'Song (Live)','Artist','Artist','artist-album',80,'',''),
             (4,'Song','Other Artist','Other Artist','remix',80,'','');").unwrap();
         conn
+    }
+
+    #[test]
+    fn library_filter_precedes_limit_and_preserves_printed_ranks() {
+        let conn = fixture();
+        let mut request = request();
+        request.limit = 1;
+        request.library_status = "notInLibrary".into();
+        let page = query_page(&conn, request.clone()).unwrap();
+        assert_eq!(page.total_entries, 2);
+        assert_eq!(page.entries[0].position, 3);
+        assert!(page.entries[0].matched_track_id.is_none());
+        request.library_status = "inLibrary".into();
+        let page = query_page(&conn, request).unwrap();
+        assert_eq!(page.total_entries, 1);
+        assert_eq!(page.entries[0].position, 2);
+        assert_eq!(page.entries[0].matched_track_id.as_deref(), Some("2"));
     }
 
     #[test]
@@ -598,6 +628,13 @@ mod tests {
                 assert_eq!(entry.matched_album_title.as_deref(), Some("Artist Album"));
                 assert_eq!(entry.rating, Some(4.5));
                 assert!(entry.loved);
+                request.library_status = "notInLibrary".into();
+                let missing = query_page(&conn, request.clone()).unwrap();
+                assert_eq!(missing.total_entries, 0);
+                assert!(missing.entries.is_empty());
+                request.library_status = "inLibrary".into();
+                assert_eq!(query_page(&conn, request.clone()).unwrap().total_entries, 1);
+                request.library_status.clear();
             }
         }
         assert_eq!(conn.query_row("SELECT count(*) FROM vg_lista_single_chart_entries WHERE matched_track_id IS NOT NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 0);

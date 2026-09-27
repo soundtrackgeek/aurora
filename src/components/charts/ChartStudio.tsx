@@ -371,6 +371,14 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </div>
     </div>
 
+    <label className="chart-library-filter">Library
+      <select value={request.libraryStatus ?? ""} onChange={(event) => setRequest((current) => ({ ...current, libraryStatus: event.target.value as ChartPageRequest["libraryStatus"] }))}>
+        <option value="">Both</option>
+        <option value="inLibrary">In Library</option>
+        <option value="notInLibrary">Not In Library</option>
+      </select>
+    </label>
+
     {request.source === "publishedUs" ? <>
       <PublishedChartPicker request={request} onChange={setRequest} revision={catalogRevision} onRefresh={() => setReloadToken((value) => value + 1)} />
       {Object.values(request.filters ?? {}).some(Boolean) ? <p className="chart-period-note">Artist filters are active. <button type="button" onClick={() => setRequest((current) => ({ ...current, filters: undefined }))}>Clear artist filters</button></p> : null}
@@ -410,7 +418,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `${page.request.source === "publishedUs" ? "Week ending" : `Week ${page.request.selectedWeek} ·`} ${formatDate(page.chartDate)}` : `${page.request.period.label} · ${page.request.source === "publishedUs" ? "ranked by #1 weeks, chart weeks, then peak" : "ranked by position finishes"}`}</p></div></div>
           <button type="button" className="button button--primary" disabled={queueBusy || !page.entries.length} onClick={() => void playChart()}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play this chart</button>
         </header>
-        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(visibleCount, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the artist filters."}</p>
+        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(visibleCount, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the filters."}</p>
         <div className="chart-table" role="table" aria-label={page.chartTitle}>
           <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" || page.request.source === "publishedUs" ? "Wks" : "Points"}</span><span>Library</span></div>
           {page.entries.slice(0, visibleCount).map((entry) => {

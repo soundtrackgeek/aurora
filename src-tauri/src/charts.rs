@@ -76,6 +76,8 @@ pub(crate) struct ChartPeriod {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChartPageRequest {
     #[serde(default)]
+    pub(crate) library_status: String,
+    #[serde(default)]
     pub(crate) filters: ChartArtistFilters,
     pub(crate) kind: ChartKind,
     pub(crate) source: ChartSource,
@@ -864,6 +866,9 @@ fn chart_title(
 
 fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<ChartPage, String> {
     validate_request(&request)?;
+    if !["", "inLibrary", "notInLibrary"].contains(&request.library_status.as_str()) {
+        return Err("Invalid library filter.".into());
+    }
     if request.source == ChartSource::PublishedUs {
         return published::page(connection, request);
     }
@@ -887,7 +892,15 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     } else {
         effective_scope
     };
-    let (mut entries, total_entries) = entries_from_rows(rows, calculation_scope, request.limit);
+    let (mut entries, mut total_entries) = entries_from_rows(
+        rows,
+        calculation_scope,
+        if request.library_status.is_empty() {
+            request.limit
+        } else {
+            usize::MAX
+        },
+    );
     // Imported matches can remain empty after a catalog tag correction. Resolve
     // those against current tracks without rewriting the companion's archive.
     if request.kind == ChartKind::Singles {
@@ -895,10 +908,21 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     } else {
         published::match_albums(connection, &mut entries)?;
     }
+    if !request.library_status.is_empty() {
+        entries.retain(|entry| {
+            (entry.matched_track_id.is_some() || entry.matched_album_id.is_some())
+                == (request.library_status == "inLibrary")
+        });
+        total_entries = entries.len();
+        entries.truncate(request.limit);
+    }
     let mut album_score_entries =
         query_album_scores(connection, &request.period, request.year_basis)?;
     if let Some(keys) = &artist_keys {
         album_score_entries.retain(|album| keys.contains(&album.artist.trim().to_lowercase()));
+    }
+    if request.library_status == "notInLibrary" {
+        album_score_entries.clear();
     }
     album_score_entries.truncate(5);
     let mut response_request = request;
@@ -1357,6 +1381,25 @@ mod tests {
     }
 
     #[test]
+    fn library_filter_handles_album_scores_and_empty_results() {
+        let connection = score_connection();
+        let mut request = score_request(ChartYearBasis::Year);
+        request.library_status = "inLibrary".into();
+        let page = query_page(&connection, request.clone()).unwrap();
+        assert!(!page.entries.is_empty());
+        assert!(
+            page.entries
+                .iter()
+                .all(|entry| entry.matched_album_id.is_some())
+        );
+        request.library_status = "notInLibrary".into();
+        let page = query_page(&connection, request).unwrap();
+        assert_eq!(page.total_entries, 0);
+        assert!(page.entries.is_empty());
+        assert!(page.album_score_entries.is_empty());
+    }
+
+    #[test]
     fn filters_apply_before_limit_and_to_score_shelf() {
         let connection = score_connection();
         connection.execute_batch("CREATE TABLE musicbrainz_artist_infos (local_artist_key TEXT, artist_type TEXT, life_ended INTEGER, life_end_date TEXT);
@@ -1576,6 +1619,7 @@ mod tests {
     #[test]
     fn requests_reject_incompatible_sources_and_unbounded_periods() {
         let mut request = ChartPageRequest {
+            library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
             source: ChartSource::AuroraScore,
@@ -1653,6 +1697,7 @@ mod tests {
 
     fn score_request(year_basis: ChartYearBasis) -> ChartPageRequest {
         ChartPageRequest {
+            library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,
             source: ChartSource::AuroraScore,
@@ -1751,6 +1796,7 @@ mod tests {
         let path = catalog::default_catalog_path().expect("catalog path");
         let connection = catalog::open_catalog(&path).expect("open catalog");
         let base = ChartPageRequest {
+            library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
             source: ChartSource::OfficialUk,
@@ -1775,6 +1821,7 @@ mod tests {
         let filtered = query_page(
             &connection,
             ChartPageRequest {
+                library_status: String::new(),
                 filters: ChartArtistFilters {
                     country: "GB".into(),
                     artist_type: "Group".into(),
@@ -1817,6 +1864,7 @@ mod tests {
         assert!(!period.entries.is_empty());
         assert!(period.entries[0].appearances >= period.entries[0].weeks_at_number_one);
         let score_request = ChartPageRequest {
+            library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,
             source: ChartSource::AuroraScore,

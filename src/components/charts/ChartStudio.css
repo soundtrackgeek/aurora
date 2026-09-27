@@ -104,3 +104,6 @@
 .chart-show-more { margin: 14px 20px; }
 @container charts (max-width: 1000px) { .published-chart-picker__fields { grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); } .published-chart-picker__steps { grid-column: 1 / -1; } }
 @container charts (max-width: 500px) { .published-chart-picker__fields { grid-template-columns: minmax(0, 1fr); } }
+
+.chart-library-filter { display: flex; align-items: center; gap: 10px; margin-block: 12px; font-size: 13px; }
+.chart-library-filter select { padding: 7px 10px; border: 1px solid #44364e; border-radius: 6px; background: #0d0b13; color: inherit; color-scheme: dark; }

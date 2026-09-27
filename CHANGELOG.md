@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.4] - 2026-09-27
+
+### Added
+
+- Added a remembered Charts Library filter with Both (default), In Library, and Not In Library options.
+
 ## [0.28.3] - 2026-09-27
 
 ### Fixed
