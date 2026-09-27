@@ -91,6 +91,8 @@ export default defineConfig(async () => ({
     },
   },
   test: {
+    // Keep full-app jsdom tests from competing for every CI runner core.
+    maxWorkers: 2,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
   },

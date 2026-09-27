@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.6] - 2026-09-27
+
+### Fixed
+- Stabilized the Charts refresh integration test on shared macOS and Windows release runners with bounded startup waits, slow-start coverage, and two frontend test workers.
+
 ## 0.28.5 - 2026-09-27
 
 ### Fixed

@@ -513,3 +513,5 @@ Aurora sends saved, still-missing MP3 identities to Music Library. Music Library
 Charts offers a remembered Library filter: Both (default), In Library, or Not In Library. Chart ranks are preserved and filtering applies before result limits.
 
 Inbox Rename and auto-tag rename now move nested albums to their monitored root, retaining collision checks, sidecars, and rollback.
+
+Frontend verification uses two test workers to avoid CPU contention on shared release runners. Charts refresh coverage includes delayed app startup and waits for readiness before exercising tag synchronization.
