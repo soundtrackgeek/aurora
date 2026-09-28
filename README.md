@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.10 fixes Chart info lookups for punctuation, accented letters, and artist ampersands, restoring missing UK, Norwegian, and Billboard annual entries alongside US weekly peaks.
+
 Aurora 0.28.9 matches chart songs by full title first and retries balanced parenthetical titles when necessary, while requiring the artist match and leaving ambiguous versions unresolved.
 
 Aurora 0.28.8 fixes release packaging for mixed changelog heading formats, with release-note extraction covered by the verification gate. It includes the verified-genre corrections from 0.28.7.

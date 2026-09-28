@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.10] - 2026-09-28
+
+### Fixed
+- Normalize Track Chart info artist/title lookup keys using the Music Library chart-key rules, so punctuation and accented names no longer hide matched chart entries. This restores Official UK #48, Ti i Skuddet #14, and Billboard annual #97 for Breathe’s “How Can I Fall?” while preserving the separate Hot 100 #3 weekly peak.
+
 ## [0.28.9] - 2026-09-28
 
 ### Fixed
