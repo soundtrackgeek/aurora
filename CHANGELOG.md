@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.9] - 2026-09-28
+
+### Fixed
+- Match chart songs by full title first, then try a balanced-parentheses fallback with the same artist. Preserve printed titles, prefer exact titles, and leave ambiguous version matches unresolved.
+- Apply the fallback to US weekly and other singles charts while retaining indexed catalog lookups and existing album preferences.
+
 ## [0.28.8] - 2026-09-27
 
 ### Fixed

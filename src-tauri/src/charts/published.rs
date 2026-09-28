@@ -129,8 +129,7 @@ fn rows(conn: &Connection, request: &ChartPageRequest) -> Result<Vec<WeeklyRow>,
     Ok(result)
 }
 
-// Deliberately conservative: punctuation/case and explicit LP/album-version suffixes.
-// Live versions, remixes, different artists and arbitrary subtitles remain distinct.
+// Full titles win; parenthetical fallbacks are resolved separately by SongIndex.
 fn key(value: &str) -> String {
     value
         .replace('&', " and ")
@@ -150,6 +149,12 @@ fn title_key(value: &str) -> String {
     normalized
 }
 
+fn parenthetical_key(title: &str) -> Option<String> {
+    crate::chart_song_match::without_parentheses(title)
+        .map(|base| key(&base))
+        .filter(|base| !base.is_empty())
+}
+
 #[derive(Clone)]
 struct Match {
     track_id: String,
@@ -165,15 +170,20 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
     let wanted = entries
         .iter()
         .filter(|e| e.matched_track_id.is_none())
-        .map(|e| (key(&e.artist), title_key(&e.title)))
+        .flat_map(|e| {
+            let mut titles = vec![key(&e.title), title_key(&e.title)];
+            if let Some(base) = parenthetical_key(&e.title) {
+                titles.push(base);
+            }
+            titles
+                .into_iter()
+                .map(|title| (key(&e.artist), title))
+                .collect::<Vec<_>>()
+        })
         .collect::<HashSet<_>>();
     if wanted.is_empty() {
         return Ok(());
     }
-    let titles = wanted
-        .iter()
-        .map(|(_, t)| t.as_str())
-        .collect::<HashSet<_>>();
     // Honor existing annual catalog matches when they resolve to a single live track.
     let annual_exists = conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='billboard_single_chart_entries'", [], |_| Ok(())).optional().map_err(|e| e.to_string())?.is_some();
     let mut preferred = HashMap::<(String, String), HashSet<i64>>::new();
@@ -196,7 +206,8 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             }
         }
     }
-    let mut matches = HashMap::<(String, String), Match>::new();
+    let mut song_index = crate::chart_song_match::SongIndex::default();
+    let mut matches = Vec::<Match>::new();
     // Normalize each distinct artist once, then seek their tracks through the
     // covering artist/title indexes. Normalizing every title in a large catalog
     // on every chart load is prohibitively expensive.
@@ -224,7 +235,13 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         move |context| {
             let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
             let title = context.get::<Option<String>>(1)?.unwrap_or_default();
-            Ok(candidate_identities.contains(&(key(&artist), title_key(&title))))
+            let artist = key(&artist);
+            Ok(
+                candidate_identities.contains(&(artist.clone(), key(&title)))
+                    || candidate_identities.contains(&(artist.clone(), title_key(&title)))
+                    || parenthetical_key(&title)
+                        .is_some_and(|base| candidate_identities.contains(&(artist, base))),
+            )
         },
     )
     .map_err(|e| e.to_string())?;
@@ -253,19 +270,13 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         .map_err(|e| format!("Could not match chart songs to the catalog: {e}"))?;
     let mut cursor = statement.query([]).map_err(|e| e.to_string())?;
     while let Some(row) = cursor.next().map_err(|e| e.to_string())? {
-        let title = title_key(
-            &row.get::<_, Option<String>>(1)
-                .map_err(|e| e.to_string())?
-                .unwrap_or_default(),
-        );
-        if !titles.contains(title.as_str()) {
-            continue;
-        }
+        let raw_title = row
+            .get::<_, Option<String>>(1)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let title = key(&raw_title);
         let artist = key(&row.get::<_, String>(2).map_err(|e| e.to_string())?);
-        let identity = (artist, title);
-        if !wanted.contains(&identity) {
-            continue;
-        }
+        let identity = (artist.clone(), title_key(&raw_title));
         let id: i64 = row.get(0).map_err(|e| e.to_string())?;
         let album_artist = key(&row.get::<_, String>(3).map_err(|e| e.to_string())?);
         let saved = preferred
@@ -286,15 +297,27 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             score: row.get(8).map_err(|e| e.to_string())?,
             preference: (!saved, album_artist != identity.0, id),
         };
-        if matches
-            .get(&identity)
-            .is_none_or(|old| candidate.preference < old.preference)
-        {
-            matches.insert(identity, candidate);
-        }
+        song_index.insert(
+            matches.len(),
+            &[artist],
+            &title,
+            &[title_key(&raw_title)],
+            parenthetical_key(&raw_title).as_deref(),
+        );
+        matches.push(candidate);
     }
     for entry in entries.iter_mut().filter(|e| e.matched_track_id.is_none()) {
-        if let Some(found) = matches.get(&(key(&entry.artist), title_key(&entry.title))) {
+        let candidates = song_index.resolve(
+            &[key(&entry.artist)],
+            &key(&entry.title),
+            &[title_key(&entry.title)],
+            parenthetical_key(&entry.title).as_deref(),
+        );
+        if let Some(found) = candidates
+            .iter()
+            .map(|id| &matches[*id])
+            .min_by_key(|found| found.preference)
+        {
             entry.matched_track_id = Some(found.track_id.clone());
             entry.matched_album_id = found.album_id.clone();
             entry.matched_album_title = found.album_title.clone();
@@ -531,6 +554,94 @@ mod tests {
             (3,'Song (Live)','Artist','Artist','artist-album',80,'',''),
             (4,'Song','Other Artist','Other Artist','remix',80,'','');").unwrap();
         conn
+    }
+
+    #[test]
+    fn parenthetical_examples_match_both_directions_and_exact_title_wins() {
+        for (artist, printed, bare) in [
+            (
+                "'Til Tuesday",
+                "Looking Over My Shoulder (Single Mix)",
+                "Looking Over My Shoulder",
+            ),
+            (
+                "Bon Jovi",
+                "In And Out Of Love (Edit)",
+                "In And Out Of Love",
+            ),
+            (
+                "Jesse Johnson's Revue",
+                "I Want My Girl (Specially Remixed Version)",
+                "I Want My Girl",
+            ),
+            (
+                "Y&T",
+                "Summertime Girls (Studio Version)",
+                "Summertime Girls",
+            ),
+            (
+                "Kim Carnes",
+                "Crazy In The Night (Barking At Airplanes)",
+                "Crazy In The Night",
+            ),
+            (
+                "Tina Turner",
+                "We Don't Need Another Hero (Thunderdome)",
+                "We Don't Need Another Hero",
+            ),
+        ] {
+            for (chart, library) in [(printed, bare), (bare, printed)] {
+                let conn = fixture();
+                conn.execute("DELETE FROM tracks", []).unwrap();
+                conn.execute(
+                    "UPDATE published_chart_entries SET artist=?1, title=?2",
+                    params![artist, chart],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO tracks VALUES (10,?1,?2,?2,'artist-album',80,'','')",
+                    params![library, artist],
+                )
+                .unwrap();
+                let page = super::page(&conn, request()).unwrap();
+                assert_eq!(page.entries[0].title, chart);
+                assert_eq!(
+                    page.entries[0].matched_track_id.as_deref(),
+                    Some("10"),
+                    "{artist}: {chart}"
+                );
+                // An exact title must outrank the older fallback candidate.
+                conn.execute(
+                    "INSERT INTO tracks VALUES (11,?1,?2,?2,'compilation',80,'','')",
+                    params![chart, artist],
+                )
+                .unwrap();
+                let page = super::page(&conn, request()).unwrap();
+                assert_eq!(page.entries[0].matched_track_id.as_deref(), Some("11"));
+            }
+        }
+    }
+
+    #[test]
+    fn parenthetical_fallback_leaves_different_versions_ambiguous() {
+        let conn = fixture();
+        conn.execute("DELETE FROM tracks", []).unwrap();
+        conn.execute(
+            "UPDATE published_chart_entries SET title='Song' WHERE artist='Artist'",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO tracks VALUES
+            (10,'Song (Live)','Artist','Artist','artist-album',80,'',''),
+            (11,'Song (Remix)','Artist','Artist','artist-album',80,'','');",
+        )
+        .unwrap();
+        let mut request = request();
+        request.library_status = "inLibrary".into();
+        assert_eq!(query_page(&conn, request.clone()).unwrap().total_entries, 0);
+        conn.execute("DELETE FROM tracks WHERE id=11", []).unwrap();
+        assert_eq!(query_page(&conn, request).unwrap().total_entries, 1);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.9 matches chart songs by full title first and retries balanced parenthetical titles when necessary, while requiring the artist match and leaving ambiguous versions unresolved.
+
 Aurora 0.28.8 fixes release packaging for mixed changelog heading formats, with release-note extraction covered by the verification gate. It includes the verified-genre corrections from 0.28.7.
 
 Aurora 0.28.7 makes the Genre index, details, suggestions, and playback queues use verified saved file genres while catalog synchronization is pending. Previously corrected albums no longer remain under an old genre on this page.
@@ -519,3 +521,9 @@ Charts offers a remembered Library filter: Both (default), In Library, or Not In
 Inbox Rename and auto-tag rename now move nested albums to their monitored root, retaining collision checks, sidecars, and rollback.
 
 Frontend verification uses two test workers to avoid CPU contention on shared release runners. Charts refresh coverage includes delayed app startup and waits for readiness before exercising tag synchronization.
+
+### Chart song title matching
+
+Chart song matching tries the full artist/title first, then existing title aliases, then a fallback that removes balanced parenthetical groups from either the chart title or the library title. For example, `In And Out Of Love (Edit)` can match `In And Out Of Love` by Bon Jovi, and `We Don't Need Another Hero (Thunderdome)` can match the shorter Tina Turner title. Artist matching remains required; printed chart titles and audio-file tags are unchanged.
+
+An exact title always takes priority. Different parenthetical versions are not matched to each other by stripping both titles; a bare title that could select several different versions stays unmatched. Duplicate copies of the same title retain the usual album preference. Empty or malformed parenthetical titles do not gain fallback matches.
