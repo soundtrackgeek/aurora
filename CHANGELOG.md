@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.11] - 2026-09-29
+
+### Fixed
+- Use a chart identity module shared with Music Library 0.157.0 for all chart artist/title keys. US weekly chart matching now folds accented letters like the other chart sources, and treats "&", "and", "/" and "+" joins and a leading "The" as the same artist credit.
+- Track Chart info reads the identity keys Music Library stores in the US weekly archive, so peaks printed as `Daryl Hall John Oates` or `Daryl Hall / John Oates` are found for a track tagged `Daryl Hall & John Oates`. Archives from older Music Library versions keep the previous case-insensitive exact-spelling lookup.
+
 ## [0.28.10] - 2026-09-28
 
 ### Fixed

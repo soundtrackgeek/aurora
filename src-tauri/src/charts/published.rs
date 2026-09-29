@@ -1,5 +1,6 @@
 //! Read the Music Library weekly archive without modifying its catalog or matches.
 use super::*;
+use crate::chart_identity::{artist_group_key as artist_key, text_key as key};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{BTreeMap, HashSet};
 
@@ -130,15 +131,6 @@ fn rows(conn: &Connection, request: &ChartPageRequest) -> Result<Vec<WeeklyRow>,
 }
 
 // Full titles win; parenthetical fallbacks are resolved separately by SongIndex.
-fn key(value: &str) -> String {
-    value
-        .replace('&', " and ")
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 fn title_key(value: &str) -> String {
     let normalized = key(value);
     for suffix in [" album version", " lp version", " lp"] {
@@ -177,7 +169,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             }
             titles
                 .into_iter()
-                .map(|title| (key(&e.artist), title))
+                .map(|title| (artist_key(&e.artist), title))
                 .collect::<Vec<_>>()
         })
         .collect::<HashSet<_>>();
@@ -200,7 +192,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             .map_err(|e| e.to_string())?
         {
             let (artist, title, id) = row.map_err(|e| e.to_string())?;
-            let identity = (key(&artist), title_key(&title));
+            let identity = (artist_key(&artist), title_key(&title));
             if wanted.contains(&identity) {
                 preferred.entry(identity).or_default().insert(id);
             }
@@ -222,7 +214,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
         move |context| {
             let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
-            Ok(candidate_artists.contains(&key(&artist)))
+            Ok(candidate_artists.contains(&artist_key(&artist)))
         },
     )
     .map_err(|e| e.to_string())?;
@@ -235,7 +227,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         move |context| {
             let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
             let title = context.get::<Option<String>>(1)?.unwrap_or_default();
-            let artist = key(&artist);
+            let artist = artist_key(&artist);
             Ok(
                 candidate_identities.contains(&(artist.clone(), key(&title)))
                     || candidate_identities.contains(&(artist.clone(), title_key(&title)))
@@ -275,10 +267,10 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         let title = key(&raw_title);
-        let artist = key(&row.get::<_, String>(2).map_err(|e| e.to_string())?);
+        let artist = artist_key(&row.get::<_, String>(2).map_err(|e| e.to_string())?);
         let identity = (artist.clone(), title_key(&raw_title));
         let id: i64 = row.get(0).map_err(|e| e.to_string())?;
-        let album_artist = key(&row.get::<_, String>(3).map_err(|e| e.to_string())?);
+        let album_artist = artist_key(&row.get::<_, String>(3).map_err(|e| e.to_string())?);
         let saved = preferred
             .get(&identity)
             .is_some_and(|ids| ids.len() == 1 && ids.contains(&id));
@@ -308,7 +300,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
     }
     for entry in entries.iter_mut().filter(|e| e.matched_track_id.is_none()) {
         let candidates = song_index.resolve(
-            &[key(&entry.artist)],
+            &[artist_key(&entry.artist)],
             &key(&entry.title),
             &[title_key(&entry.title)],
             parenthetical_key(&entry.title).as_deref(),

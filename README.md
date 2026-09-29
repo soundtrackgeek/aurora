@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.11 shares chart identity rules with Music Library 0.157.0: US weekly chart matching folds accents, treats "&"/"and"/"/"/"+" joins and a leading "The" as one artist credit, and Track Chart info finds US weekly peaks printed under other spellings of the same credit. Different names, such as `ELO` and `Electric Light Orchestra`, stay separate. `src-tauri/src/chart_identity.rs` must stay identical to the Music Library copy.
+
 Aurora 0.28.10 fixes Chart info lookups for punctuation, accented letters, and artist ampersands, restoring missing UK, Norwegian, and Billboard annual entries alongside US weekly peaks.
 
 Aurora 0.28.9 matches chart songs by full title first and retries balanced parenthetical titles when necessary, while requiring the artist match and leaving ambiguous versions unresolved.

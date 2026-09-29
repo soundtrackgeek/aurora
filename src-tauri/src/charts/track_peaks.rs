@@ -1,32 +1,5 @@
 use super::*;
-use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
-
-// Keep this key contract aligned with Music Library db::billboard_text_key.
-fn catalog_chart_key(value: &str) -> String {
-    let lowercased = value.replace('&', " and ").to_lowercase();
-    let folded = lowercased
-        .nfd()
-        .filter(|character| !is_combining_mark(*character))
-        .fold(String::new(), |mut normalized, character| {
-            match character {
-                'æ' => normalized.push_str("ae"),
-                'œ' => normalized.push_str("oe"),
-                'ø' => normalized.push('o'),
-                'ð' => normalized.push('d'),
-                'þ' => normalized.push_str("th"),
-                'ł' => normalized.push('l'),
-                'ß' => normalized.push_str("ss"),
-                _ => normalized.push(character),
-            }
-            normalized
-        });
-
-    folded
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use crate::chart_identity::{artist_group_key, text_key as catalog_chart_key};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +14,20 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
             [table],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+}
+
+/// Music Library records a key version once every archive row has identity keys.
+fn published_identity_keys(connection: &Connection) -> Result<bool, String> {
+    if !table_exists(connection, "published_chart_identity")? {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM published_chart_identity)",
+            [],
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())
@@ -89,14 +76,29 @@ fn query(
     if table_exists(connection, "published_chart_books")?
         && table_exists(connection, "published_chart_entries")?
     {
-        let mut statement = connection.prepare(
+        // Keyed archives merge printed spellings (Hall & Oates vs Hall / Oates);
+        // archives from older Music Library versions only match exact spellings.
+        let (identity, artist, title) = if published_identity_keys(connection)? {
+            (
+                "e.artist_group_key = ?1 AND e.title_key = ?2",
+                artist_group_key(artist),
+                title_key,
+            )
+        } else {
+            (
+                "e.artist = ?1 COLLATE NOCASE AND e.title = ?2 COLLATE NOCASE",
+                artist.trim().to_string(),
+                title.trim().to_string(),
+            )
+        };
+        let mut statement = connection.prepare(&format!(
             "SELECT b.chart, MIN(CASE WHEN CAST(e.peak_position AS INTEGER) > 0 THEN MIN(e.position, CAST(e.peak_position AS INTEGER)) ELSE e.position END)
              FROM published_chart_entries e JOIN published_chart_books b ON b.id = e.book_id
-             WHERE e.artist = ?1 COLLATE NOCASE AND e.title = ?2 COLLATE NOCASE AND e.position > 0
+             WHERE {identity} AND e.position > 0
              GROUP BY b.chart ORDER BY b.chart COLLATE NOCASE"
-        ).map_err(|e| e.to_string())?;
+        )).map_err(|e| e.to_string())?;
         let rows = statement
-            .query_map([artist.trim(), title.trim()], |r| {
+            .query_map([artist, title], |r| {
                 Ok(TrackChartPeak {
                     label: r.get(0)?,
                     peak: r.get(1)?,
@@ -188,6 +190,58 @@ mod tests {
             query(&connection, "Beyoncé & Jay-Z", "Déjà Vu (Live)")
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn keyed_published_archives_merge_printed_artist_spellings() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE published_chart_books (id INTEGER, chart TEXT);
+            INSERT INTO published_chart_books VALUES (1,'Billboard Hot 100'),(2,'Adult Contemporary');
+            CREATE TABLE published_chart_identity (id INTEGER PRIMARY KEY, key_version INTEGER);
+            CREATE TABLE published_chart_entries (book_id INTEGER, artist TEXT, title TEXT, position INTEGER, peak_position TEXT, artist_group_key TEXT, title_key TEXT);").unwrap();
+        // Columns added by a migration but not yet keyed keep the exact-spelling lookup.
+        connection
+            .execute(
+                "INSERT INTO published_chart_entries VALUES (1, 'Daryl Hall & John Oates', 'Kiss On My List', 2, '', NULL, NULL)",
+                [],
+            )
+            .unwrap();
+        let unkeyed = query(&connection, "Daryl Hall & John Oates", "Kiss On My List").unwrap();
+        assert_eq!(unkeyed.len(), 1);
+        assert_eq!(unkeyed[0].peak, 2);
+        connection
+            .execute_batch(
+                "DELETE FROM published_chart_entries; INSERT INTO published_chart_identity VALUES (1, 1);",
+            )
+            .unwrap();
+        for (book, artist, title, position) in [
+            (1, "Daryl Hall John Oates", "Kiss on My List", 1),
+            (2, "Daryl Hall / John Oates", "Kiss On My List", 4),
+            (1, "Daryl Hall & John Oates", "Kiss On My List (Live)", 1),
+            (2, "Electric Light Orchestra", "Kiss On My List", 1),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO published_chart_entries VALUES (?1, ?2, ?3, ?4, '', ?5, ?6)",
+                    rusqlite::params![
+                        book,
+                        artist,
+                        title,
+                        position,
+                        artist_group_key(artist),
+                        catalog_chart_key(title)
+                    ],
+                )
+                .unwrap();
+        }
+        let peaks = query(&connection, "Daryl Hall & John Oates", "Kiss On My List").unwrap();
+        assert_eq!(
+            peaks
+                .iter()
+                .map(|p| (p.label.as_str(), p.peak))
+                .collect::<Vec<_>>(),
+            vec![("Adult Contemporary", 4), ("Billboard Hot 100", 1)]
         );
     }
 

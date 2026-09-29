@@ -2,6 +2,7 @@ mod artist_discovery;
 mod artwork;
 mod audio_settings;
 mod catalog;
+mod chart_identity;
 mod chart_song_match;
 mod charts;
 mod connections;
