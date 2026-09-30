@@ -208,6 +208,8 @@ pub struct LibraryIntakeAppliedAlbum {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryIntakeApplyResult {
+    #[serde(default)]
+    pub cover_import_status: Option<String>,
     pub plan_id: String,
     pub session_id: i64,
     pub status: LibraryIntakeApplyStatus,
@@ -1977,6 +1979,7 @@ mod tests {
             session_id: 7,
         };
         let result = LibraryIntakeApplyResult {
+            cover_import_status: None,
             plan_id: "different-plan".to_owned(),
             session_id: 7,
             status: LibraryIntakeApplyStatus::Completed,
@@ -2000,6 +2003,7 @@ mod tests {
             session_id: 7,
         };
         let result = LibraryIntakeApplyResult {
+            cover_import_status: None,
             plan_id: request.plan_id.clone(),
             session_id: request.session_id,
             status: LibraryIntakeApplyStatus::CompletedWithWarnings,

@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight, Check, FolderInput, LoaderCircle, X } from "
 import { useMemo, useState } from "react";
 import {
   libraryIntakeAdapter,
+  intakeCompletionMessage,
   libraryIntakeCategories,
   type LibraryIntakeCategoryId,
   type LibraryIntakePreview,
@@ -68,7 +69,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       const result = await applyReviewedTargets(targets, destinations, previews);
       const completedAlbums = result.albumCount;
       await onApplied();
-      const summary = `${completedAlbums} ${completedAlbums === 1 ? "album" : "albums"} moved, covers archived, and library catalog updated.`;
+      const summary = intakeCompletionMessage(completedAlbums, result.coverImportStatus);
       onCompleted(result.cleanupWarnings.length ? `${summary} ${result.cleanupWarnings.join(" ")}` : summary);
       onClose();
     } catch (nextError) {

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.15 reports cover archiving as complete only when Music Library confirms it and refreshes cached artwork after completed batches. Use Music Library 0.157.3 or newer for indexed audio-quality caching, bounded post-import lock retries, and durable recovery of unfinished quality/cover work. Album moves and catalog imports are never repeated by this recovery.
+
 Aurora 0.28.14 matches chart songs to library tracks credited to collaborations: `JOHN LENNON – WOMAN` finds a track tagged `John Lennon & Yoko Ono`, and `DAVE STEWART WITH BARBARA GASKIN` finds `Dave Stewart & Barbara Gaskin`. This last-resort step runs only when no full-credit match exists and requires the chart's lead artist to be a main performer of the library track; featured guests are ignored.
 
 Aurora 0.28.13 stabilizes the Charts verification tests on slower Windows release runners. Full-chart, incremental-loading, saved-view, retry, and live-search coverage use deterministic timer control and scoped result queries, including cancellation of an earlier search while typing. Chart behavior remains as introduced in 0.28.12.

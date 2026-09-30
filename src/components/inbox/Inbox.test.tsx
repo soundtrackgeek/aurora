@@ -549,7 +549,7 @@ describe("Inbox", () => {
     ] });
     load.mockResolvedValue({ ...snapshot, albums: [albums[1]] });
     fireEvent.click(add);
-    expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(await screen.findByText("2 albums moved and library catalog updated.")).toBeInTheDocument();
     expect(apply).toHaveBeenCalledExactlyOnceWith({ planId: "selected-batch", sessionId: 80 });
     expect(catalogChanged).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("row", { name: /Unselected album by/ })).toBeInTheDocument();
@@ -594,7 +594,7 @@ describe("Inbox", () => {
     expect(preview).toHaveBeenNthCalledWith(2, { targets: albums.slice(0, 24).map((album) => ({ sourcePath: album.path, category: "scores", albumOnly: true })) });
     load.mockResolvedValue({ ...snapshot, albums: [albums[24]] });
     fireEvent.click(add);
-    expect(await screen.findByText("24 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(await screen.findByText("24 albums moved and library catalog updated.")).toBeInTheDocument();
     expect(apply).toHaveBeenCalledExactlyOnceWith({ planId: "batch-scores", sessionId: 100 });
     expect(screen.getByRole("row", { name: "Album 25 by Baltimoore" })).toBeInTheDocument();
   });
@@ -662,7 +662,7 @@ describe("Inbox", () => {
     expect(preview).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledWith({ planId: "folder-plan-1", sessionId: 41 });
     expect(catalogChanged).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(await screen.findByText("1 album moved and library catalog updated.")).toBeInTheDocument();
   });
 
   it("previews and applies every non-empty monitored folder from All folders", async () => {
@@ -700,7 +700,7 @@ describe("Inbox", () => {
     ] });
     fireEvent.click(screen.getByRole("button", { name: "Add 2 albums" }));
     await waitFor(() => expect(apply).toHaveBeenCalledExactlyOnceWith({ planId: "all-batch", sessionId: 51 }));
-    expect(await screen.findByText("2 albums moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(await screen.findByText("2 albums moved and library catalog updated.")).toBeInTheDocument();
   });
 
   it("retries an unchanged Inbox intake when catalog synchronization makes the fresh plan stale", async () => {
@@ -733,7 +733,7 @@ describe("Inbox", () => {
     expect(preview).toHaveBeenCalledTimes(2);
     expect(apply).toHaveBeenNthCalledWith(1, { planId: "retry-plan-1", sessionId: 71 });
     expect(apply).toHaveBeenNthCalledWith(2, { planId: "retry-plan-2", sessionId: 72 });
-    expect(await screen.findByText("1 album moved, covers archived, and library catalog updated.")).toBeInTheDocument();
+    expect(await screen.findByText("1 album moved and library catalog updated.")).toBeInTheDocument();
   });
 
   it("stops when a fresh apply-time preview no longer matches the reviewed intake", async () => {

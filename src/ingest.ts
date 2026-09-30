@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "./library";
+import { refreshLibraryArtwork } from "./albumArtwork";
 
 export type LibraryIntakeCategoryId = "general" | "scores" | "synthwave";
 export type LibraryIntakeAction = "add" | "replace" | "remove";
@@ -76,6 +77,7 @@ export interface LibraryIntakeApplyAlbum {
 }
 
 export interface LibraryIntakeApplyResult {
+  coverImportStatus?: "completed" | "pending" | "notApplicable";
   planId: string;
   sessionId: number;
   status: "completed" | "completedWithWarnings";
@@ -86,6 +88,13 @@ export interface LibraryIntakeApplyResult {
   backupPath: string | null;
   albums: LibraryIntakeApplyAlbum[];
   cleanupWarnings: string[];
+}
+
+export function intakeCompletionMessage(albumCount: number, coverImportStatus?: string) {
+  const albums = `${albumCount} ${albumCount === 1 ? "album" : "albums"}`;
+  return coverImportStatus === "completed"
+    ? `${albums} moved, covers archived, and library catalog updated.`
+    : `${albums} moved and library catalog updated.${coverImportStatus === "pending" ? " Cover archiving is pending recovery." : ""}`;
 }
 
 export interface LibraryIntakeProgress {
@@ -202,7 +211,9 @@ export async function applyLibraryIntakeBatch(
   if (!isTauriRuntime()) {
     throw new Error("Adding music is available in the native Aurora app.");
   }
-  return invoke<LibraryIntakeApplyResult>("apply_library_intake_batch", { request });
+  const result = await invoke<LibraryIntakeApplyResult>("apply_library_intake_batch", { request });
+  if (result.coverImportStatus === "completed") refreshLibraryArtwork();
+  return result;
 }
 
 export async function previewLibraryMoveToInbox(

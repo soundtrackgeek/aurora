@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { libraryIntakeAdapter, type LibraryIntakePreview, type LibraryIntakeSelectionRequest } from "../../ingest";
+import { intakeCompletionMessage, libraryIntakeAdapter, type LibraryIntakePreview, type LibraryIntakeSelectionRequest } from "../../ingest";
 import { InboxLibraryIntakeDialog } from "./InboxLibraryIntakeDialog";
+
+it("only reports archived covers after the bridge confirms completion", () => {
+  expect(intakeCompletionMessage(6, "completed")).toContain("covers archived");
+  expect(intakeCompletionMessage(6, "pending")).toBe("6 albums moved and library catalog updated. Cover archiving is pending recovery.");
+  expect(intakeCompletionMessage(1)).toBe("1 album moved and library catalog updated.");
+});
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 

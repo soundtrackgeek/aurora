@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { refreshAlbumArtwork } from "./albumArtwork";
+import { refreshAlbumArtwork, refreshLibraryArtwork } from "./albumArtwork";
 import { Artwork } from "./components/Artwork";
 import type { Track } from "./library";
 
@@ -25,4 +25,13 @@ it("retries failed artwork across mounted views after replacement without changi
     expect(image.getAttribute("src")).not.toBe(before);
   }
   expect(screen.getByAltText("other cover")).toHaveAttribute("src", otherBefore);
+});
+
+it("refreshes cached and failed covers across views after batch artwork completes", () => {
+  render(<><Cover albumId="batch-one" /><Cover albumId="batch-two" /></>);
+  const oldSource = screen.getByAltText("batch-one cover").getAttribute("src");
+  fireEvent.error(screen.getByAltText("batch-two cover"));
+  act(() => refreshLibraryArtwork());
+  expect(screen.getByAltText("batch-one cover").getAttribute("src")).not.toBe(oldSource);
+  expect(screen.getByAltText("batch-two cover")).toBeInTheDocument();
 });

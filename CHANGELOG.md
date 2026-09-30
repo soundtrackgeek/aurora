@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.15] - 2026-09-30
+
+### Fixed
+- Report successful cover archiving only after the companion confirms completion; show pending cover recovery honestly, including results from older companions.
+- Refresh mounted and previously failed artwork after a batch confirms cover completion, so replacements display their current covers.
+- Use Music Library 0.157.3 for the post-import SQLite lock fix and recovery of missing covers.
+
 ## [0.28.14] - 2026-09-30
 
 ### Fixed
