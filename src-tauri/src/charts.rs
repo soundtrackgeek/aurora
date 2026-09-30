@@ -76,6 +76,8 @@ pub(crate) struct ChartPeriod {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChartPageRequest {
     #[serde(default)]
+    pub(crate) search: String,
+    #[serde(default)]
     pub(crate) library_status: String,
     #[serde(default)]
     pub(crate) filters: ChartArtistFilters,
@@ -382,23 +384,39 @@ fn validate_period(period: &ChartPeriod) -> Result<(), String> {
 
 fn validate_request(request: &ChartPageRequest) -> Result<(), String> {
     validate_period(&request.period)?;
+    if request.search.chars().count() > 200 {
+        return Err("Chart search must be no longer than 200 characters.".to_owned());
+    }
     if !valid_source(request.kind, request.source) {
         return Err("That chart source is not available for this chart type.".to_owned());
     }
     if !(1..=53).contains(&request.selected_week) {
         return Err("The selected chart week is invalid.".to_owned());
     }
-    let max_items = if request.source == ChartSource::PublishedUs {
-        1000
-    } else {
-        MAX_CHART_ITEMS
-    };
-    if request.limit == 0 || request.limit > max_items {
-        return Err(format!(
-            "Chart pages must request between 1 and {max_items} entries."
-        ));
+    if request.limit > 1000 {
+        return Err(
+            "Chart pages must request between 1 and 1000 entries, or 0 for the full chart."
+                .to_owned(),
+        );
     }
     Ok(())
+}
+
+impl ChartPageRequest {
+    fn entry_limit(&self) -> usize {
+        if self.limit == 0 {
+            usize::MAX
+        } else {
+            self.limit
+        }
+    }
+
+    fn matches_search(&self, entry: &ChartEntry) -> bool {
+        let search = self.search.trim().to_lowercase();
+        search.is_empty()
+            || entry.title.to_lowercase().contains(&search)
+            || entry.artist.to_lowercase().contains(&search)
+    }
 }
 
 fn table_for(kind: ChartKind, source: ChartSource) -> Result<&'static str, String> {
@@ -895,12 +913,16 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
     let (mut entries, mut total_entries) = entries_from_rows(
         rows,
         calculation_scope,
-        if request.library_status.is_empty() {
-            request.limit
+        if request.library_status.is_empty() && request.search.trim().is_empty() {
+            request.entry_limit()
         } else {
             usize::MAX
         },
     );
+    if !request.search.trim().is_empty() {
+        entries.retain(|entry| request.matches_search(entry));
+        total_entries = entries.len();
+    }
     // Imported matches can remain empty after a catalog tag correction. Resolve
     // those against current tracks without rewriting the companion's archive.
     if request.kind == ChartKind::Singles {
@@ -914,8 +936,8 @@ fn query_page(connection: &Connection, request: ChartPageRequest) -> Result<Char
                 == (request.library_status == "inLibrary")
         });
         total_entries = entries.len();
-        entries.truncate(request.limit);
     }
+    entries.truncate(request.entry_limit());
     let mut album_score_entries =
         query_album_scores(connection, &request.period, request.year_basis)?;
     if let Some(keys) = &artist_keys {
@@ -1461,6 +1483,117 @@ mod tests {
     }
 
     #[test]
+    fn full_chart_keeps_period_ranking_beyond_one_thousand_entries() {
+        let rows = (0..1105)
+            .map(|index| row(&format!("Song {index:04}"), index % 100 + 1, 1))
+            .collect::<Vec<_>>();
+        let (limited, total) = entries_from_rows(rows.clone(), ChartScope::Period, 100);
+        let (full, full_total) = entries_from_rows(rows, ChartScope::Period, usize::MAX);
+        assert_eq!(total, 1105);
+        assert_eq!(full_total, total);
+        assert_eq!(full.len(), total);
+        assert_eq!(
+            limited.iter().map(|entry| &entry.title).collect::<Vec<_>>(),
+            full.iter()
+                .take(100)
+                .map(|entry| &entry.title)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(full.last().unwrap().position, 1105);
+    }
+
+    #[test]
+    fn full_score_chart_and_search_include_entries_beyond_the_page_limit() {
+        let connection = score_connection();
+        for index in 0..1105 {
+            connection.execute("INSERT INTO albums VALUES (?1, ?2, 'Needle Artist', 1985, 1985, ?3, 100, NULL, NULL, 0)", rusqlite::params![format!("extra-{index}"), format!("Extra Album {index:04}"), 1105 - index]).unwrap();
+        }
+        let mut request = score_request(ChartYearBasis::Year);
+        request.limit = 200;
+        assert_eq!(
+            query_page(&connection, request.clone())
+                .unwrap()
+                .entries
+                .len(),
+            200
+        );
+        request.limit = 0;
+        for status in ["", "inLibrary"] {
+            request.library_status = status.into();
+            let page = query_page(&connection, request.clone()).unwrap();
+            assert_eq!(page.entries.len(), 1106);
+            assert_eq!(page.total_entries, page.entries.len());
+        }
+        request.limit = 1;
+        request.search = " eXtRa AlBuM 1104 ".into();
+        let page = query_page(&connection, request.clone()).unwrap();
+        assert_eq!(page.total_entries, 1);
+        assert_eq!(page.entries[0].title, "Extra Album 1104");
+        assert_eq!(page.entries[0].position, 1106);
+        request.search = "needle artist".into();
+        let page = query_page(&connection, request.clone()).unwrap();
+        assert_eq!(page.total_entries, 1105);
+        assert_eq!(page.entries.len(), 1);
+        request.search = "No such album".into();
+        assert_eq!(query_page(&connection, request).unwrap().total_entries, 0);
+    }
+
+    #[test]
+    #[ignore = "reads the user's live read-only Music Library chart tables"]
+    fn live_1981_full_chart_and_search() {
+        let connection = catalog::open_catalog(&catalog::default_catalog_path().unwrap()).unwrap();
+        let mut request = score_request(ChartYearBasis::Year);
+        request.kind = ChartKind::Singles;
+        request.source = ChartSource::OfficialUk;
+        request.period = ChartPeriod {
+            from_year: 1981,
+            from_week: 1,
+            to_year: 1981,
+            to_week: 53,
+            label: "1981 W1 – 1981 W53".into(),
+        };
+        request.selected_year = 1981;
+        let limited = query_page(&connection, request.clone()).unwrap();
+        assert_eq!(limited.entries.len(), 100);
+        request.limit = 200;
+        assert_eq!(
+            query_page(&connection, request.clone())
+                .unwrap()
+                .entries
+                .len(),
+            200
+        );
+        request.limit = 0;
+        let full = query_page(&connection, request.clone()).unwrap();
+        assert!(full.total_entries > 100);
+        assert_eq!(full.entries.len(), full.total_entries);
+        assert_eq!(full.entries[0].title, "STAND AND DELIVER");
+        assert_eq!(
+            limited
+                .entries
+                .iter()
+                .map(|entry| &entry.title)
+                .collect::<Vec<_>>(),
+            full.entries
+                .iter()
+                .take(100)
+                .map(|entry| &entry.title)
+                .collect::<Vec<_>>()
+        );
+        let last = full.entries.last().unwrap();
+        request.limit = 100;
+        request.search = last.title.to_lowercase();
+        let searched = query_page(&connection, request).unwrap();
+        assert!(
+            searched
+                .entries
+                .iter()
+                .any(|entry| entry.position == last.position && entry.title_key == last.title_key)
+        );
+        println!("LIVE_1981_CHART={}", serde_json::to_string(&full).unwrap());
+    }
+
+    #[test]
     fn period_charts_keep_matched_album_title_with_its_identity() {
         let mut matched = row("Sports", 12, 1);
         matched.matched_album_id = Some("sports-expanded".into());
@@ -1619,6 +1752,7 @@ mod tests {
     #[test]
     fn requests_reject_incompatible_sources_and_unbounded_periods() {
         let mut request = ChartPageRequest {
+            search: String::new(),
             library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
@@ -1697,6 +1831,7 @@ mod tests {
 
     fn score_request(year_basis: ChartYearBasis) -> ChartPageRequest {
         ChartPageRequest {
+            search: String::new(),
             library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,
@@ -1796,6 +1931,7 @@ mod tests {
         let path = catalog::default_catalog_path().expect("catalog path");
         let connection = catalog::open_catalog(&path).expect("open catalog");
         let base = ChartPageRequest {
+            search: String::new(),
             library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
@@ -1821,6 +1957,7 @@ mod tests {
         let filtered = query_page(
             &connection,
             ChartPageRequest {
+                search: String::new(),
                 library_status: String::new(),
                 filters: ChartArtistFilters {
                     country: "GB".into(),
@@ -1864,6 +2001,7 @@ mod tests {
         assert!(!period.entries.is_empty());
         assert!(period.entries[0].appearances >= period.entries[0].weeks_at_number_one);
         let score_request = ChartPageRequest {
+            search: String::new(),
             library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Albums,

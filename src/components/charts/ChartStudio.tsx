@@ -165,13 +165,13 @@ function Feedback({ state, error, onRetry }: { state: ChartLoadState; error: str
 export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTrack, onPlayQueue, onOpenArtistAlbums }: ChartStudioProps) {
   const [preferences] = useState(() => loadChartPreferences(initialRequest));
   const [request, setRequest] = useState(preferences.request);
+  const [searchText, setSearchText] = useState(preferences.request.search ?? "");
   const [page, setPage] = useState<ChartPage | null>(null);
   const [loadedRequest, setLoadedRequest] = useState<ChartPageRequest | null>(null);
   const [loadState, setLoadState] = useState<ChartLoadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<ChartEntry | null>(null);
   const [detail, setDetail] = useState<ChartItemDetail | null>(null);
-  const [visibleCount, setVisibleCount] = useState(20);
   const [queueBusy, setQueueBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -184,6 +184,13 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   const callbacksRef = useRef({ onSelectionChange, onSelectTrack, onPlayQueue });
   const [reloadToken, setReloadToken] = useState(0);
   const annualSource = request.source === "billboard" || request.source === "auroraScore";
+
+  useEffect(() => {
+    const search = searchText.trim();
+    if (search === (request.search ?? "")) return;
+    const timer = window.setTimeout(() => setRequest((current) => ({ ...current, search })), 200);
+    return () => window.clearTimeout(timer);
+  }, [searchText, request.search]);
 
   useEffect(() => {
     saveChartPreferences(request, selectedEntry ?? preferences.selection);
@@ -267,7 +274,6 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             loadedPageKeyRef.current = pageKey;
             currentPageRef.current = nextPage;
             setLoadedRequest(request);
-            setVisibleCount(Math.max(20, selected ? nextPage.entries.indexOf(selected) + 1 : 20));
             setLoadState("ready");
             if (selected) {
               selectEntry(
@@ -312,12 +318,12 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }
 
   function changeKind(kind: ChartKind) {
-    setRequest((current) => ({ ...current, kind, limit: 100, source: kind === "albums" ? "auroraScore" : "officialUk", scope: kind === "albums" ? "period" : "week" }));
+    setRequest((current) => ({ ...current, kind, source: kind === "albums" ? "auroraScore" : "officialUk", scope: kind === "albums" ? "period" : "week" }));
   }
 
   function changeSource(source: ChartSource) {
     const annual = source === "billboard" || source === "auroraScore";
-    setRequest((current) => ({ ...current, source, limit: source === "publishedUs" ? 1000 : 100, scope: annual ? "period" : current.scope,
+    setRequest((current) => ({ ...current, source, scope: annual ? "period" : current.scope,
       ...(source === "publishedUs" ? { publishedChart: current.publishedChart ?? "Billboard Hot 100", period: { fromYear: current.selectedYear, toYear: current.selectedYear, fromWeek: 1, toWeek: 53, label: `${current.selectedYear} year chart` } } : {}),
     }));
   }
@@ -350,7 +356,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   }
 
   const awaitingPublishedDate = request.source === "publishedUs" && !request.publishedWeek;
-  const isLoading = !awaitingPublishedDate && (loadState === "loading" || (loadState !== "error" && loadedRequest !== request));
+  const isLoading = !awaitingPublishedDate && (searchText.trim() !== (request.search ?? "") || loadState === "loading" || (loadState !== "error" && loadedRequest !== request));
 
   return <section className="chart-studio" aria-busy={isLoading}>
     <header className="chart-studio__header">
@@ -371,6 +377,10 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </div>
     </div>
 
+    <div className="chart-filters">
+    <label className="chart-search-filter">Find in this chart
+      <input type="search" placeholder="Song or artist…" maxLength={200} value={searchText} onChange={(event) => setSearchText(event.target.value)} />
+    </label>
     <label className="chart-library-filter">Library
       <select value={request.libraryStatus ?? ""} onChange={(event) => setRequest((current) => ({ ...current, libraryStatus: event.target.value as ChartPageRequest["libraryStatus"] }))}>
         <option value="">Both</option>
@@ -378,6 +388,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
         <option value="notInLibrary">Not In Library</option>
       </select>
     </label>
+    </div>
 
     {request.source === "publishedUs" ? <>
       <PublishedChartPicker request={request} onChange={setRequest} revision={catalogRevision} onRefresh={() => setReloadToken((value) => value + 1)} />
@@ -418,10 +429,13 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           <div><span className="chart-ranking__source"><ChartColumn aria-hidden="true" /></span><div><h2 id="chart-ranking-heading">{page.chartTitle}</h2><p>{page.request.source === "auroraScore" ? `${page.request.period.label} · ranked by Album Score using ${page.request.yearBasis === "year" ? "Year" : "Release Year"}` : page.request.scope === "week" ? `${page.request.source === "publishedUs" ? "Week ending" : `Week ${page.request.selectedWeek} ·`} ${formatDate(page.chartDate)}` : `${page.request.period.label} · ${page.request.source === "publishedUs" ? "ranked by #1 weeks, chart weeks, then peak" : "ranked by position finishes"}`}</p></div></div>
           <button type="button" className="button button--primary" disabled={queueBusy || !page.entries.length} onClick={() => void playChart()}>{queueBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play this chart</button>
         </header>
-        <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${Math.min(visibleCount, page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the filters."}</p>
+        <div className="chart-result-controls">
+          <p className="chart-period-note" role="status">{page.entries.length ? `Showing ${formatCount(page.entries.length)} of ${formatCount(page.totalEntries)} matching entries` : "No chart entries match this period and these filters. Try another period or clear the filters."}</p>
+          {page.entries.length < page.totalEntries ? <button type="button" className="button button--quiet" disabled={isLoading || awaitingPublishedDate} onClick={() => setRequest((current) => ({ ...current, limit: 0 }))}>Show full chart</button> : page.request.limit === 0 && page.totalEntries > 100 ? <button type="button" className="button button--quiet" disabled={isLoading || awaitingPublishedDate} onClick={() => setRequest((current) => ({ ...current, limit: 100 }))}>Show top 100</button> : null}
+        </div>
         <div className="chart-table" role="table" aria-label={page.chartTitle}>
           <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" || page.request.source === "publishedUs" ? "Wks" : "Points"}</span><span>Library</span></div>
-          {page.entries.slice(0, visibleCount).map((entry) => {
+          {page.entries.map((entry) => {
             const selected = selectedEntry?.artistKey === entry.artistKey && selectedEntry.titleKey === entry.titleKey;
             return <div className={`chart-row${entry.position <= 3 ? " is-podium" : ""}${selected ? " is-selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} onClick={() => selectEntry(entry, page)} onDoubleClick={() => entry.matchedTrackId && void loadChartEntryTrack(entry.matchedTrackId).then((track) => callbacksRef.current.onPlayQueue([track]))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectEntry(entry, page); } }} key={`${entry.artistKey}:${entry.titleKey}`}>
               <strong className="chart-row__rank">{entry.position}</strong>
@@ -434,7 +448,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             </div>;
           })}
         </div>
-        {visibleCount < page.entries.length ? <button type="button" className="button button--quiet chart-show-more" onClick={() => setVisibleCount((count) => count + 50)}>Show more songs ({page.entries.length - visibleCount} remaining)</button> : null}
+        {page.entries.length < page.totalEntries ? <button type="button" className="button button--quiet chart-show-more" disabled={isLoading || awaitingPublishedDate} onClick={() => setRequest((current) => ({ ...current, limit: page.entries.length >= 1000 ? 0 : Math.min(1000, page.entries.length + 100) }))}>{page.entries.length >= 1000 ? "Show full chart" : `Show next ${formatCount(Math.min(100, page.totalEntries - page.entries.length))} entries`} ({formatCount(page.totalEntries - page.entries.length)} remaining)</button> : null}
         {queueMessage ? <p className="chart-queue-message" role="status">{queueMessage}</p> : null}
       </section>
 

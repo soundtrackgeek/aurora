@@ -441,9 +441,10 @@ pub(super) fn page(conn: &Connection, request: ChartPageRequest) -> Result<Chart
             entry.movement = None;
         }
     }
+    entries.retain(|entry| request.matches_search(entry));
     let total_entries = entries.len();
     if request.library_status.is_empty() {
-        entries.truncate(request.limit);
+        entries.truncate(request.entry_limit());
     }
     match_entries(conn, &mut entries)?;
     let total_entries = if request.library_status.is_empty() {
@@ -455,7 +456,7 @@ pub(super) fn page(conn: &Connection, request: ChartPageRequest) -> Result<Chart
         });
         entries.len()
     };
-    entries.truncate(request.limit);
+    entries.truncate(request.entry_limit());
     let chart = request.published_chart.as_deref().unwrap_or("US weekly");
     Ok(ChartPage {
         chart_title: if request.scope == ChartScope::Week {
@@ -504,6 +505,7 @@ mod tests {
 
     fn request() -> ChartPageRequest {
         ChartPageRequest {
+            search: String::new(),
             library_status: String::new(),
             filters: ChartArtistFilters::default(),
             kind: ChartKind::Singles,
@@ -546,6 +548,48 @@ mod tests {
             (3,'Song (Live)','Artist','Artist','artist-album',80,'',''),
             (4,'Song','Other Artist','Other Artist','remix',80,'','');").unwrap();
         conn
+    }
+
+    #[test]
+    fn full_weekly_and_year_charts_and_search_reach_beyond_one_thousand() {
+        let conn = fixture();
+        for index in 0..1105 {
+            conn.execute("INSERT INTO published_chart_entries VALUES (1, 'Needle Artist', ?1, '1993-01-02', ?2, '', '1', '', ?2, '')", params![format!("Extra Song {index:04}"), index + 200]).unwrap();
+        }
+        conn.execute("INSERT INTO tracks VALUES (5,'Extra Song 1104','Needle Artist','Needle Artist','artist-album',80,'','')", []).unwrap();
+        for scope in [ChartScope::Week, ChartScope::Period] {
+            let mut request = request();
+            request.scope = scope;
+            request.limit = 100;
+            let limited = page(&conn, request.clone()).unwrap();
+            assert_eq!(limited.entries.len(), 100);
+            request.limit = 0;
+            let full = page(&conn, request.clone()).unwrap();
+            assert_eq!(full.entries.len(), full.total_entries);
+            assert_eq!(full.total_entries, 1108);
+            assert_eq!(
+                limited
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.title)
+                    .collect::<Vec<_>>(),
+                full.entries
+                    .iter()
+                    .take(100)
+                    .map(|entry| &entry.title)
+                    .collect::<Vec<_>>()
+            );
+            request.limit = 1;
+            request.search = " eXtRa SoNg 1104 ".into();
+            request.library_status = "inLibrary".into();
+            let searched = page(&conn, request.clone()).unwrap();
+            assert_eq!(searched.total_entries, 1);
+            assert_eq!(searched.entries[0].title, "Extra Song 1104");
+            assert!(searched.entries[0].position > 1000);
+            request.library_status.clear();
+            request.search = "needle artist".into();
+            assert_eq!(page(&conn, request).unwrap().total_entries, 1105);
+        }
     }
 
     #[test]

@@ -4,6 +4,11 @@ import { chartPresets, type ChartPageRequest } from "./charts";
 
 const request: ChartPageRequest = { kind: "albums", source: "vgLista", scope: "period", period: chartPresets[0], selectedYear: 1985, selectedWeek: 23, yearBasis: "releaseYear", limit: 100, filters: { country: "NO", artistType: "Group", status: "active" } };
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+it("remembers the full chart without a result cap", () => {
+  const full = { ...request, limit: 0, search: "needle artist" };
+  saveChartPreferences(full, { artistKey: "artist", titleKey: "album" });
+  expect(loadChartPreferences(request).request).toEqual(full);
+});
 it("remembers the US series and exact published date independently of ISO week", () => {
   const weekly: ChartPageRequest = { ...request, kind: "singles", source: "publishedUs", scope: "week", publishedChart: "Country Singles Chart", publishedWeek: "1993-01-02", selectedYear: 1993, selectedWeek: 1, limit: 1000 };
   saveChartPreferences(weekly, { artistKey: "Artist", titleKey: "Song" });
@@ -13,7 +18,7 @@ it("round trips filters, year basis and identity without caching catalog data", 
   saveChartPreferences(request, { artistKey: "artist", titleKey: "album" });
   expect(loadChartPreferences({ ...request, source: "officialUk" })).toEqual({ request, selection: { artistKey: "artist", titleKey: "album" } });
 });
-it.each(["broken", "null", JSON.stringify({ request: { ...request, period: null } }), JSON.stringify({ request: { ...request, selectedWeek: 999 } }), JSON.stringify({ request: { ...request, filters: { country: 123 } } }), JSON.stringify({ request: { ...request, source: "norsktoppen" } })])("rejects malformed preferences: %s", (value) => {
+it.each(["broken", "null", JSON.stringify({ request: { ...request, period: null } }), JSON.stringify({ request: { ...request, selectedWeek: 999 } }), JSON.stringify({ request: { ...request, filters: { country: 123 } } }), JSON.stringify({ request: { ...request, source: "norsktoppen" } }), JSON.stringify({ request: { ...request, search: 123 } }), JSON.stringify({ request: { ...request, search: "x".repeat(201) } })])("rejects malformed preferences: %s", (value) => {
   localStorage.setItem("aurora:charts:v1", value);
   expect(loadChartPreferences(request)).toEqual({ request, selection: null });
 });

@@ -102,8 +102,14 @@
 .published-chart-picker__steps button:disabled { opacity: .35; }
 .published-chart-picker__steps svg { width: 16px; }
 .chart-show-more { margin: 14px 20px; }
+.chart-result-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 20px; }
+.chart-result-controls .chart-period-note { margin: 0; }
 @container charts (max-width: 1000px) { .published-chart-picker__fields { grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); } .published-chart-picker__steps { grid-column: 1 / -1; } }
 @container charts (max-width: 500px) { .published-chart-picker__fields { grid-template-columns: minmax(0, 1fr); } }
 
 .chart-library-filter { display: flex; align-items: center; gap: 10px; margin-block: 12px; font-size: 13px; }
 .chart-library-filter select { padding: 7px 10px; border: 1px solid #44364e; border-radius: 6px; background: #0d0b13; color: inherit; color-scheme: dark; }
+.chart-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-block: 12px; }
+.chart-filters .chart-library-filter { margin-block: 0; }
+.chart-search-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; }
+.chart-search-filter input { width: 260px; max-width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid #44364e; border-radius: 6px; background: #0d0b13; color: inherit; color-scheme: dark; font: inherit; }

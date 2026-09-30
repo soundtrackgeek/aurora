@@ -15,6 +15,7 @@ export interface ChartPeriod {
 }
 
 export interface ChartPageRequest {
+  search?: string;
   libraryStatus?: "" | "inLibrary" | "notInLibrary";
   filters?: ChartArtistFilters;
   kind: ChartKind;
@@ -26,6 +27,7 @@ export interface ChartPageRequest {
   selectedYear: number;
   selectedWeek: number;
   yearBasis: ChartYearBasis;
+  /** Maximum entries to return; 0 returns the full matching chart. */
   limit: number;
 }
 
@@ -281,7 +283,9 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     sourcePosition: entry.sourcePosition,
     totalPoints: request.scope === "period" ? entry.totalPoints : Math.max(1, 101 - index),
   }));
-  const filteredEntries = entries.filter((entry) => !request.libraryStatus || Boolean(entry.matchedTrackId || entry.matchedAlbumId) === (request.libraryStatus === "inLibrary"));
+  const search = request.search?.trim().toLowerCase() ?? "";
+  const filteredEntries = entries.filter((entry) => (!request.libraryStatus || Boolean(entry.matchedTrackId || entry.matchedAlbumId) === (request.libraryStatus === "inLibrary"))
+    && (!search || entry.title.toLowerCase().includes(search) || entry.artist.toLowerCase().includes(search)));
   const effectiveRequest = { ...request, scope: annualOnly ? "period" as const : request.scope };
   return {
     request: effectiveRequest,
@@ -292,7 +296,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     annualOnly,
     chartDate: effectiveRequest.scope === "week" ? request.source === "publishedUs" ? request.publishedWeek ?? null : "1985-06-09" : null,
     weeks: annualOnly ? [] : previewWeeks(request.period),
-    entries: filteredEntries.slice(0, request.limit),
+    entries: request.limit === 0 ? filteredEntries : filteredEntries.slice(0, request.limit),
     totalEntries: filteredEntries.length,
     albumScoreEntries: request.libraryStatus === "notInLibrary" ? [] : scores.slice(0, 5),
   };

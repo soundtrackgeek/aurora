@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.28.12] - 2026-09-30
+
+### Added
+- Add **Show full chart**, **Show next 100 entries**, and **Show top 100** to Charts, with complete results across weekly, period, published US, and Aurora Score charts, including charts larger than 1,000 entries.
+- Add **Find in this chart**, a live song/album-title and artist search that covers every entry in the chosen chart before applying the result limit, combines with existing filters, and preserves original chart positions.
+- Remember search and result limits with the chart view, preserve selection while expanding results, and keep previous results available during updates or recoverable errors.
+
+### Fixed
+- Remove the 100-entry fetch limit that left period charts reporting more matching entries than users could browse.
+
 ## [0.28.11] - 2026-09-29
 
 ### Fixed

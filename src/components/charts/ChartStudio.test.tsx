@@ -16,6 +16,103 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
+  async function largeChart(totalEntries = 1105) {
+    const original = await charts.loadChartPage({ kind: "singles", source: "officialUk", scope: "period", period: charts.chartPresets[0], selectedYear: 1985, selectedWeek: 23, yearBasis: "year", limit: 100 });
+    const entries = Array.from({ length: totalEntries }, (_, index) => ({
+      ...original.entries[0], position: index + 1, artist: index === totalEntries - 1 ? "Needle Artist" : "Test Artist", artistKey: `artist-${index + 1}`, titleKey: `song-${index + 1}`,
+      title: `Song ${index + 1}`, loved: false, matchedTrackId: null, matchedAlbumId: null, artworkAlbumId: null,
+    }));
+    vi.spyOn(charts, "loadChartItemDetail").mockResolvedValue({ sourceRanks: [] });
+    const load = vi.spyOn(charts, "loadChartPage").mockImplementation(async (request) => {
+      const search = request.search?.trim().toLowerCase() ?? "";
+      const matching = entries.filter((entry) => !search || entry.title.toLowerCase().includes(search) || entry.artist.toLowerCase().includes(search));
+      return { ...original, request, entries: request.limit === 0 ? matching : matching.slice(0, request.limit), totalEntries: matching.length };
+    });
+    return load;
+  }
+
+  it("loads the full chart beyond 1000 while preserving selection", async () => {
+    await largeChart();
+    renderStudio();
+    await screen.findByText("Showing 100 of 1,105 matching entries");
+    fireEvent.click(screen.getByText("Song 90").closest('[role="row"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
+    await screen.findByText("Showing 1,105 of 1,105 matching entries");
+    expect(screen.getByText("Song 1105")).toBeInTheDocument();
+    expect(screen.getByText("Song 90").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
+    expect(document.querySelectorAll(".chart-row")).toHaveLength(1105);
+    expect(document.querySelector(".chart-show-more")).not.toBeInTheDocument();
+  });
+
+  it("remembers the full chart and can return to the top 100", async () => {
+    const load = await largeChart(201);
+    renderStudio();
+    await screen.findByText("Showing 100 of 201 matching entries");
+    fireEvent.click(screen.getByText("Song 90").closest('[role="row"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
+    await screen.findByText("Showing 201 of 201 matching entries");
+    cleanup();
+    renderStudio();
+    await screen.findByText("Showing 201 of 201 matching entries");
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 0 }));
+    expect(screen.getByText("Song 90").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Show top 100" }));
+    await screen.findByText("Showing 100 of 201 matching entries");
+    expect(screen.queryByText("Song 201")).not.toBeInTheDocument();
+  });
+
+  it("fetches the next 100 and keeps full-chart mode when changing kind or source", async () => {
+    const load = await largeChart(621);
+    renderStudio();
+    await screen.findByText("Showing 100 of 621 matching entries");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 100 entries (521 remaining)" }));
+    await screen.findByText("Showing 200 of 621 matching entries");
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 200 }));
+    expect(screen.getByText("Song 101")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
+    await screen.findByText("Showing 621 of 621 matching entries");
+    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "auroraScore", limit: 0 })));
+    fireEvent.click(screen.getByRole("tab", { name: "VG Lista" }));
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "vgLista", limit: 0 })));
+  });
+
+  it("retains the initial 100 on a failed full-chart load and retries", async () => {
+    const load = await largeChart(621);
+    renderStudio();
+    await screen.findByText("Showing 100 of 621 matching entries");
+    load.mockRejectedValueOnce(new Error("Chart temporarily unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Chart temporarily unavailable");
+    expect(screen.getByText("Showing 100 of 621 matching entries")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByText("Showing 621 of 621 matching entries");
+  });
+
+  it("live search finds songs and artists below the loaded 100 and restores after clearing", async () => {
+    const load = await largeChart(621);
+    renderStudio();
+    await screen.findByText("Showing 100 of 621 matching entries");
+    const search = screen.getByRole("searchbox", { name: "Find in this chart" });
+    fireEvent.change(search, { target: { value: " SoNg 621 " } });
+    await screen.findByText("Showing 1 of 1 matching entries");
+    expect(screen.getByText("Song 621")).toBeInTheDocument();
+    expect(document.querySelector(".chart-row__rank")).toHaveTextContent("621");
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ search: "SoNg 621", limit: 100 }));
+    fireEvent.change(search, { target: { value: "needle artist" } });
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ search: "needle artist" })));
+    await waitFor(() => expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false"));
+    expect(screen.getByText("Song 621")).toBeInTheDocument();
+    cleanup();
+    renderStudio();
+    await screen.findByText("Showing 1 of 1 matching entries");
+    expect(screen.getByRole("searchbox", { name: "Find in this chart" })).toHaveValue("needle artist");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find in this chart" }), { target: { value: "Missing song" } });
+    await screen.findByText(/No chart entries match/);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find in this chart" }), { target: { value: "" } });
+    await screen.findByText("Showing 100 of 621 matching entries");
+  });
+
   it("filters library matches, preserves ranks, and remembers the choice", async () => {
     renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });

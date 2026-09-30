@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.12 lets you browse every matching Charts entry. **Show full chart** beside the count loads the complete selected chart, including periods with more than 1,000 entries. **Show next 100 entries** loads another batch; **Show top 100** returns to a compact view. **Find in this chart** filters live by song/album title or artist across the entire chosen chart, including entries outside the loaded batch, while preserving chart positions. It combines with Library and artist metadata filters. Search text and the result limit are remembered with the chart view. Previous results remain visible during updates, and failed loads can be retried.
+
 Aurora 0.28.11 shares chart identity rules with Music Library 0.157.0: US weekly chart matching folds accents, treats "&"/"and"/"/"/"+" joins and a leading "The" as one artist credit, and Track Chart info finds US weekly peaks printed under other spellings of the same credit. Different names, such as `ELO` and `Electric Light Orchestra`, stay separate. `src-tauri/src/chart_identity.rs` must stay identical to the Music Library copy.
 
 Aurora 0.28.10 fixes Chart info lookups for punctuation, accented letters, and artist ampersands, restoring missing UK, Norwegian, and Billboard annual entries alongside US weekly peaks.
@@ -16,7 +18,7 @@ Aurora 0.28.2 adds Chart info below Last listened in the track inspector and on 
 
 Previous update: Opening Tags now requeues saved album-artist edits when the catalog still has the old artist, including previously blocked syncs. Install Music Library 0.155.1 or newer, then reopen the affected album’s Tags to synchronize its card and aartist search results without rewriting MP3s.
 
-Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. **Show more songs** reveals further results beyond the initial 20.
+Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. Use the result controls to browse the full chart.
 
 Weekly charts read Music Library's `published_chart_books` and `published_chart_entries` tables in the configured catalog, without modifying the database. If the archive is missing, open **Published Charts** in Music Library, let preparation finish, then refresh the US picker in Aurora. The older Billboard annual Singles CSV import is separate. Available series, years, and dates reflect the imported archive. Browser preview uses sample songs and dates.
 

@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { chartAlbumSearchQuery } from "./charts";
+import { chartAlbumSearchQuery, chartPresets, loadChartPage, type ChartPageRequest } from "./charts";
 import { filterTracks, type Track } from "./library";
+
+it("full-chart preview returns every filtered match while retaining ranks", async () => {
+  const request: ChartPageRequest = { kind: "singles", source: "officialUk", scope: "period", period: chartPresets[0], selectedYear: 1985, selectedWeek: 23, yearBasis: "year", limit: 1 };
+  const limited = await loadChartPage(request);
+  const full = await loadChartPage({ ...request, limit: 0, libraryStatus: "inLibrary" });
+  expect(limited.entries).toHaveLength(1);
+  expect(full.entries.length).toBeGreaterThan(1);
+  expect(full.entries).toHaveLength(full.totalEntries);
+  expect(full.entries[0]).toEqual(limited.entries[0]);
+  const titleSearch = await loadChartPage({ ...request, search: " KaYlEiGh ", libraryStatus: "inLibrary" });
+  expect(titleSearch.entries).toHaveLength(1);
+  expect(titleSearch.entries[0].title).toBe("Kayleigh");
+  expect(titleSearch.entries[0].position).toBe(2);
+  const artistSearch = await loadChartPage({ ...request, search: "marillion", limit: 0 });
+  expect(artistSearch.entries).toEqual(titleSearch.entries);
+  const empty = await loadChartPage({ ...request, limit: 0, libraryStatus: "notInLibrary" });
+  expect(empty.entries).toHaveLength(empty.totalEntries);
+});
 
 function track(id: string, album: string, artist = "Huey Lewis and the News"): Track {
   return {
