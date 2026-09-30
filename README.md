@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.14 matches chart songs to library tracks credited to collaborations: `JOHN LENNON – WOMAN` finds a track tagged `John Lennon & Yoko Ono`, and `DAVE STEWART WITH BARBARA GASKIN` finds `Dave Stewart & Barbara Gaskin`. This last-resort step runs only when no full-credit match exists and requires the chart's lead artist to be a main performer of the library track; featured guests are ignored.
+
 Aurora 0.28.13 stabilizes the Charts verification tests on slower Windows release runners. Full-chart, incremental-loading, saved-view, retry, and live-search coverage use deterministic timer control and scoped result queries, including cancellation of an earlier search while typing. Chart behavior remains as introduced in 0.28.12.
 
 Aurora 0.28.12 lets you browse every matching Charts entry. **Show full chart** beside the count loads the complete selected chart, including periods with more than 1,000 entries. **Show next 100 entries** loads another batch; **Show top 100** returns to a compact view. **Find in this chart** filters live by song/album title or artist across the entire chosen chart, including entries outside the loaded batch, while preserving chart positions. It combines with Library and artist metadata filters. Search text and the result limit are remembered with the chart view. Previous results remain visible during updates, and failed loads can be retried.

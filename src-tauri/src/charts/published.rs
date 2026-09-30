@@ -1,6 +1,6 @@
 //! Read the Music Library weekly archive without modifying its catalog or matches.
 use super::*;
-use crate::chart_identity::{artist_group_key as artist_key, text_key as key};
+use crate::chart_identity::{artist_group_key as artist_key, main_performers, text_key as key};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{BTreeMap, HashSet};
 
@@ -176,6 +176,23 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
     if wanted.is_empty() {
         return Ok(());
     }
+    // A chart lead can reach a library collaboration ("John Lennon" vs "John
+    // Lennon & Yoko Ono"); SongIndex only uses it after full-credit matches fail.
+    let wanted_performers = entries
+        .iter()
+        .filter(|e| e.matched_track_id.is_none())
+        .flat_map(|e| {
+            let titles = [key(&e.title), title_key(&e.title)];
+            main_performers(&e.artist)
+                .into_iter()
+                .take(1)
+                .flat_map(move |performer| titles.clone().map(|title| (performer.clone(), title)))
+        })
+        .collect::<HashSet<_>>();
+    let candidate_performers = wanted_performers
+        .iter()
+        .map(|(performer, _)| performer.clone())
+        .collect::<HashSet<_>>();
     // Honor existing annual catalog matches when they resolve to a single live track.
     let annual_exists = conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='billboard_single_chart_entries'", [], |_| Ok(())).optional().map_err(|e| e.to_string())?.is_some();
     let mut preferred = HashMap::<(String, String), HashSet<i64>>::new();
@@ -214,7 +231,10 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
         move |context| {
             let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
-            Ok(candidate_artists.contains(&artist_key(&artist)))
+            Ok(candidate_artists.contains(&artist_key(&artist))
+                || main_performers(&artist)
+                    .iter()
+                    .any(|performer| candidate_performers.contains(performer)))
         },
     )
     .map_err(|e| e.to_string())?;
@@ -227,13 +247,15 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         move |context| {
             let artist = context.get::<Option<String>>(0)?.unwrap_or_default();
             let title = context.get::<Option<String>>(1)?.unwrap_or_default();
+            let performers = main_performers(&artist);
             let artist = artist_key(&artist);
-            Ok(
-                candidate_identities.contains(&(artist.clone(), key(&title)))
-                    || candidate_identities.contains(&(artist.clone(), title_key(&title)))
-                    || parenthetical_key(&title)
-                        .is_some_and(|base| candidate_identities.contains(&(artist, base))),
-            )
+            Ok(performers.iter().any(|performer| {
+                wanted_performers.contains(&(performer.clone(), key(&title)))
+                    || wanted_performers.contains(&(performer.clone(), title_key(&title)))
+            }) || candidate_identities.contains(&(artist.clone(), key(&title)))
+                || candidate_identities.contains(&(artist.clone(), title_key(&title)))
+                || parenthetical_key(&title)
+                    .is_some_and(|base| candidate_identities.contains(&(artist, base))))
         },
     )
     .map_err(|e| e.to_string())?;
@@ -267,7 +289,8 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         let title = key(&raw_title);
-        let artist = artist_key(&row.get::<_, String>(2).map_err(|e| e.to_string())?);
+        let display_artist = row.get::<_, String>(2).map_err(|e| e.to_string())?;
+        let artist = artist_key(&display_artist);
         let identity = (artist.clone(), title_key(&raw_title));
         let id: i64 = row.get(0).map_err(|e| e.to_string())?;
         let album_artist = artist_key(&row.get::<_, String>(3).map_err(|e| e.to_string())?);
@@ -292,6 +315,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         song_index.insert(
             matches.len(),
             &[artist],
+            &main_performers(&display_artist),
             &title,
             &[title_key(&raw_title)],
             parenthetical_key(&raw_title).as_deref(),
@@ -301,6 +325,7 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
     for entry in entries.iter_mut().filter(|e| e.matched_track_id.is_none()) {
         let candidates = song_index.resolve(
             &[artist_key(&entry.artist)],
+            &main_performers(&entry.artist),
             &key(&entry.title),
             &[title_key(&entry.title)],
             parenthetical_key(&entry.title).as_deref(),
@@ -590,6 +615,37 @@ mod tests {
             request.search = "needle artist".into();
             assert_eq!(page(&conn, request).unwrap().total_entries, 1105);
         }
+    }
+
+    #[test]
+    fn charted_lead_artist_matches_library_collaboration() {
+        let conn = fixture();
+        conn.execute_batch(
+            "INSERT INTO published_chart_entries VALUES
+               (1,'JOHN LENNON','WOMAN','1993-01-02',20,'','1','',20,''),
+               (1,'DURAN DURAN','WOMAN','1993-01-02',21,'','1','',21,''),
+               (1,'DAVE STEWART WITH BARBARA GASKIN','IT''S MY PARTY','1993-01-02',22,'','1','',22,'');
+             INSERT INTO tracks VALUES
+               (6,'Woman','John Lennon & Yoko Ono','John Lennon & Yoko Ono','artist-album',80,'',''),
+               (7,'It''s My Party','Dave Stewart & Barbara Gaskin','Dave Stewart','artist-album',80,'','');",
+        )
+        .unwrap();
+        let chart = page(&conn, request()).unwrap();
+        let matched = |artist: &str| {
+            chart
+                .entries
+                .iter()
+                .find(|entry| entry.artist == artist)
+                .unwrap()
+                .matched_track_id
+                .clone()
+        };
+        assert_eq!(matched("JOHN LENNON"), Some("6".into()));
+        assert_eq!(
+            matched("DAVE STEWART WITH BARBARA GASKIN"),
+            Some("7".into())
+        );
+        assert_eq!(matched("DURAN DURAN"), None);
     }
 
     #[test]

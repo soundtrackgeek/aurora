@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.14] - 2026-09-30
+
+### Fixed
+- Show the library match for chart songs whose library track is credited to a collaboration. When no full-credit match exists, a song matches when the chart's lead artist is one of the library track's main performers, so Official UK Singles' `JOHN LENNON – WOMAN` now finds a track by `John Lennon & Yoko Ono`. Guests after "feat.", "with", "vs", "x", or in parentheses are ignored, so remakes featuring the original artist are not matched to the original. Uses the chart matching rules shared with Music Library 0.157.1.
+
 ## [0.28.13] - 2026-09-30
 
 ### Fixed
