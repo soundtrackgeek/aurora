@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartInspector, ChartStudio, type ChartSelectionContext } from "./ChartStudio";
 import * as charts from "../../charts";
 import * as library from "../../library";
+import { saveChartPreferences } from "../../chartPreferences";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
 function renderStudio() {
   const onSelectionChange = vi.fn();
@@ -16,8 +17,10 @@ function renderStudio() {
 }
 
 describe("ChartStudio", () => {
-  async function largeChart(totalEntries = 1105) {
+  async function largeChart(totalEntries = 1105, fullChart = false) {
     const original = await charts.loadChartPage({ kind: "singles", source: "officialUk", scope: "period", period: charts.chartPresets[0], selectedYear: 1985, selectedWeek: 23, yearBasis: "year", limit: 100 });
+    vi.useFakeTimers();
+    if (fullChart) saveChartPreferences({ ...original.request, limit: 0 }, null);
     const entries = Array.from({ length: totalEntries }, (_, index) => ({
       ...original.entries[0], position: index + 1, artist: index === totalEntries - 1 ? "Needle Artist" : "Test Artist", artistKey: `artist-${index + 1}`, titleKey: `song-${index + 1}`,
       title: `Song ${index + 1}`, loved: false, matchedTrackId: null, matchedAlbumId: null, artworkAlbumId: null,
@@ -31,86 +34,133 @@ describe("ChartStudio", () => {
     return load;
   }
 
+  async function advanceChart(milliseconds = 0) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
+    // The debounce updates request first; its React effect then schedules the page load.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  }
+
+  const resultControls = () => within(document.querySelector(".chart-result-controls")! as HTMLElement);
+  const chartRows = () => document.querySelectorAll<HTMLElement>(".chart-row");
+  const chartSearch = () => within(document.querySelector(".chart-filters")! as HTMLElement).getByRole("searchbox", { name: "Find in this chart" });
+  const expectCount = (count: string) => expect(resultControls().getByRole("status")).toHaveTextContent(count);
+
   it("loads the full chart beyond 1000 while preserving selection", async () => {
     await largeChart();
     renderStudio();
-    await screen.findByText("Showing 100 of 1,105 matching entries");
-    fireEvent.click(screen.getByText("Song 90").closest('[role="row"]')!);
-    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
-    await screen.findByText("Showing 1,105 of 1,105 matching entries");
-    expect(screen.getByText("Song 1105")).toBeInTheDocument();
-    expect(screen.getByText("Song 90").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
-    expect(document.querySelectorAll(".chart-row")).toHaveLength(1105);
+    await advanceChart();
+    expectCount("Showing 100 of 1,105 matching entries");
+    fireEvent.click(chartRows()[89]);
+    fireEvent.click(resultControls().getByRole("button", { name: "Show full chart" }));
+    await advanceChart();
+    expectCount("Showing 1,105 of 1,105 matching entries");
+    expect(chartRows()).toHaveLength(1105);
+    expect(chartRows()[1104].querySelector(".chart-row__identity strong")).toHaveTextContent("Song 1105");
+    expect(chartRows()[89]).toHaveAttribute("aria-selected", "true");
     expect(document.querySelector(".chart-show-more")).not.toBeInTheDocument();
   });
 
   it("remembers the full chart and can return to the top 100", async () => {
     const load = await largeChart(201);
     renderStudio();
-    await screen.findByText("Showing 100 of 201 matching entries");
-    fireEvent.click(screen.getByText("Song 90").closest('[role="row"]')!);
-    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
-    await screen.findByText("Showing 201 of 201 matching entries");
+    await advanceChart();
+    expectCount("Showing 100 of 201 matching entries");
+    fireEvent.click(chartRows()[89]);
+    fireEvent.click(resultControls().getByRole("button", { name: "Show full chart" }));
+    await advanceChart();
+    expectCount("Showing 201 of 201 matching entries");
     cleanup();
     renderStudio();
-    await screen.findByText("Showing 201 of 201 matching entries");
+    await advanceChart();
+    expectCount("Showing 201 of 201 matching entries");
     expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 0 }));
-    expect(screen.getByText("Song 90").closest('[role="row"]')).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Show top 100" }));
-    await screen.findByText("Showing 100 of 201 matching entries");
-    expect(screen.queryByText("Song 201")).not.toBeInTheDocument();
+    expect(chartRows()[89]).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(resultControls().getByRole("button", { name: "Show top 100" }));
+    await advanceChart();
+    expectCount("Showing 100 of 201 matching entries");
+    expect(chartRows()).toHaveLength(100);
   });
 
-  it("fetches the next 100 and keeps full-chart mode when changing kind or source", async () => {
+  it("fetches the next 100 entries beyond the initial page", async () => {
     const load = await largeChart(621);
     renderStudio();
-    await screen.findByText("Showing 100 of 621 matching entries");
-    fireEvent.click(screen.getByRole("button", { name: "Show next 100 entries (521 remaining)" }));
-    await screen.findByText("Showing 200 of 621 matching entries");
+    await advanceChart();
+    expectCount("Showing 100 of 621 matching entries");
+    fireEvent.click(within(document.querySelector(".chart-ranking")! as HTMLElement).getByRole("button", { name: "Show next 100 entries (521 remaining)" }));
+    await advanceChart();
+    expectCount("Showing 200 of 621 matching entries");
     expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 200 }));
-    expect(screen.getByText("Song 101")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
-    await screen.findByText("Showing 621 of 621 matching entries");
-    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
-    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "auroraScore", limit: 0 })));
-    fireEvent.click(screen.getByRole("tab", { name: "VG Lista" }));
-    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "vgLista", limit: 0 })));
+    expect(chartRows()).toHaveLength(200);
+    expect(chartRows()[100].querySelector(".chart-row__identity strong")).toHaveTextContent("Song 101");
+  });
+
+  it("keeps full-chart mode when changing kind or source", async () => {
+    const load = await largeChart(3, true);
+    renderStudio();
+    await advanceChart();
+    expectCount("Showing 3 of 3 matching entries");
+    fireEvent.click(within(document.querySelector(".chart-kind")! as HTMLElement).getByRole("tab", { name: "Albums" }));
+    await advanceChart();
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "auroraScore", limit: 0 }));
+    fireEvent.click(within(document.querySelector(".chart-sources")! as HTMLElement).getByRole("tab", { name: "VG Lista" }));
+    await advanceChart();
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "albums", source: "vgLista", limit: 0 }));
+    expect(chartRows()).toHaveLength(3);
   });
 
   it("retains the initial 100 on a failed full-chart load and retries", async () => {
     const load = await largeChart(621);
     renderStudio();
-    await screen.findByText("Showing 100 of 621 matching entries");
+    await advanceChart();
+    expectCount("Showing 100 of 621 matching entries");
     load.mockRejectedValueOnce(new Error("Chart temporarily unavailable"));
-    fireEvent.click(screen.getByRole("button", { name: "Show full chart" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Chart temporarily unavailable");
-    expect(screen.getByText("Showing 100 of 621 matching entries")).toBeInTheDocument();
+    fireEvent.click(resultControls().getByRole("button", { name: "Show full chart" }));
+    await advanceChart();
+    expect(screen.getByRole("alert")).toHaveTextContent("Chart temporarily unavailable");
+    expectCount("Showing 100 of 621 matching entries");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await screen.findByText("Showing 621 of 621 matching entries");
+    await advanceChart();
+    expectCount("Showing 621 of 621 matching entries");
+    expect(chartRows()).toHaveLength(621);
   });
 
   it("live search finds songs and artists below the loaded 100 and restores after clearing", async () => {
     const load = await largeChart(621);
     renderStudio();
-    await screen.findByText("Showing 100 of 621 matching entries");
-    const search = screen.getByRole("searchbox", { name: "Find in this chart" });
+    await advanceChart();
+    expectCount("Showing 100 of 621 matching entries");
+    const search = chartSearch();
+    fireEvent.change(search, { target: { value: "Song 620" } });
+    await advanceChart(199);
+    expect(load).toHaveBeenCalledTimes(1);
     fireEvent.change(search, { target: { value: " SoNg 621 " } });
-    await screen.findByText("Showing 1 of 1 matching entries");
-    expect(screen.getByText("Song 621")).toBeInTheDocument();
+    expect(search).toHaveValue(" SoNg 621 ");
+    await advanceChart(199);
+    expect(load).toHaveBeenCalledTimes(1);
+    expectCount("Showing 100 of 621 matching entries");
+    await advanceChart(1);
+    expectCount("Showing 1 of 1 matching entries");
+    expect(chartRows()).toHaveLength(1);
+    expect(chartRows()[0].querySelector(".chart-row__identity strong")).toHaveTextContent("Song 621");
     expect(document.querySelector(".chart-row__rank")).toHaveTextContent("621");
     expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ search: "SoNg 621", limit: 100 }));
     fireEvent.change(search, { target: { value: "needle artist" } });
-    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ search: "needle artist" })));
-    await waitFor(() => expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false"));
-    expect(screen.getByText("Song 621")).toBeInTheDocument();
+    await advanceChart(200);
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ search: "needle artist" }));
+    expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false");
+    expect(chartRows()[0].querySelector(".chart-row__identity strong")).toHaveTextContent("Song 621");
     cleanup();
     renderStudio();
-    await screen.findByText("Showing 1 of 1 matching entries");
-    expect(screen.getByRole("searchbox", { name: "Find in this chart" })).toHaveValue("needle artist");
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in this chart" }), { target: { value: "Missing song" } });
-    await screen.findByText(/No chart entries match/);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in this chart" }), { target: { value: "" } });
-    await screen.findByText("Showing 100 of 621 matching entries");
+    await advanceChart();
+    expectCount("Showing 1 of 1 matching entries");
+    expect(chartSearch()).toHaveValue("needle artist");
+    fireEvent.change(chartSearch(), { target: { value: "Missing song" } });
+    await advanceChart(200);
+    expect(resultControls().getByRole("status")).toHaveTextContent("No chart entries match");
+    expect(chartRows()).toHaveLength(0);
+    fireEvent.change(chartSearch(), { target: { value: "" } });
+    await advanceChart(200);
+    expectCount("Showing 100 of 621 matching entries");
   });
 
   it("filters library matches, preserves ranks, and remembers the choice", async () => {

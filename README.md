@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.13 stabilizes the Charts verification tests on slower Windows release runners. Full-chart, incremental-loading, saved-view, retry, and live-search coverage use deterministic timer control and scoped result queries, including cancellation of an earlier search while typing. Chart behavior remains as introduced in 0.28.12.
+
 Aurora 0.28.12 lets you browse every matching Charts entry. **Show full chart** beside the count loads the complete selected chart, including periods with more than 1,000 entries. **Show next 100 entries** loads another batch; **Show top 100** returns to a compact view. **Find in this chart** filters live by song/album title or artist across the entire chosen chart, including entries outside the loaded batch, while preserving chart positions. It combines with Library and artist metadata filters. Search text and the result limit are remembered with the chart view. Previous results remain visible during updates, and failed loads can be retried.
 
 Aurora 0.28.11 shares chart identity rules with Music Library 0.157.0: US weekly chart matching folds accents, treats "&"/"and"/"/"/"+" joins and a leading "The" as one artist credit, and Track Chart info finds US weekly peaks printed under other spellings of the same credit. Different names, such as `ELO` and `Electric Light Orchestra`, stay separate. `src-tauri/src/chart_identity.rs` must stay identical to the Music Library copy.

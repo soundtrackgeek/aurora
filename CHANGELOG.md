@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.13] - 2026-09-30
+
+### Fixed
+- Stabilize Windows release verification for full Charts and live search: control page-load and debounce timers explicitly, scope DOM queries, and split incremental loading from kind/source retention checks.
+- Retain real rendering coverage for 1,105 chart rows, saved full-chart views, retry recovery, and search below the first 100 entries. Verify that newer typing cancels an earlier pending search without increasing test timeouts.
+
 ## [0.28.12] - 2026-09-30
 
 ### Added
