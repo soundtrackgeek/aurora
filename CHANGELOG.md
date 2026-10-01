@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.16] - 2026-10-01
+
+### Fixed
+- Chart info in the track inspector no longer says "No chart appearances found" for tracks that show chart badges in the tracklist. Peak lookups now use the same fallbacks as the stored chart ranks: the exact title first, then the title without balanced parenthetical version suffixes (`Colour of Love (Massive version)` finds `Colour of Love`), then the chart lead as a main performer of a collaboration credit.
+
 ## [0.28.15] - 2026-09-30
 
 ### Fixed

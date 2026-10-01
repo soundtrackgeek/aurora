@@ -1,5 +1,6 @@
 use super::*;
-use crate::chart_identity::{artist_group_key, text_key as catalog_chart_key};
+use crate::chart_identity::{artist_group_key, main_performers, text_key as catalog_chart_key};
+use crate::chart_song_match::without_parentheses;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,16 +48,38 @@ fn query(
     }
     let artist_key = catalog_chart_key(artist);
     let title_key = catalog_chart_key(title);
+    // Library titles carry version suffixes ("Colour of Love (Massive version)")
+    // that charts do not print, and collaborations are credited by their lead.
+    // Like the stored chart ranks, try the exact identity first, then fall back.
+    let base_key = without_parentheses(title).map(|base| catalog_chart_key(&base));
+    let titles = std::iter::once(title_key.clone())
+        .chain(base_key.filter(|base| !base.is_empty() && *base != title_key))
+        .collect::<Vec<_>>();
+    let artists = std::iter::once(artist_key.clone())
+        .chain(
+            main_performers(artist)
+                .into_iter()
+                .filter(|performer| *performer != artist_key),
+        )
+        .collect::<Vec<_>>();
     let mut peaks = Vec::new();
     for source in detail_sources(ChartKind::Singles) {
         let table = table_for(ChartKind::Singles, *source)?;
         if !table_exists(connection, table)? {
             continue;
         }
-        let peak: Option<i64> = connection.query_row(
-            &format!("SELECT MIN(rank) FROM {table} WHERE artist_key = ?1 AND title_key = ?2 AND rank > 0"),
-            [&artist_key, &title_key], |r| r.get(0),
-        ).map_err(|e| format!("Could not read track chart peaks: {e}"))?;
+        let mut peak: Option<i64> = None;
+        'lookup: for artist_key in &artists {
+            for title_key in &titles {
+                peak = connection.query_row(
+                    &format!("SELECT MIN(rank) FROM {table} WHERE artist_key = ?1 AND title_key = ?2 AND rank > 0"),
+                    [artist_key, title_key], |r| r.get(0),
+                ).map_err(|e| format!("Could not read track chart peaks: {e}"))?;
+                if peak.is_some() {
+                    break 'lookup;
+                }
+            }
+        }
         if let Some(peak) = peak {
             peaks.push(TrackChartPeak {
                 label: if *source == ChartSource::Billboard {
@@ -78,38 +101,50 @@ fn query(
     {
         // Keyed archives merge printed spellings (Hall & Oates vs Hall / Oates);
         // archives from older Music Library versions only match exact spellings.
-        let (identity, artist, title) = if published_identity_keys(connection)? {
-            (
-                "e.artist_group_key = ?1 AND e.title_key = ?2",
-                artist_group_key(artist),
-                title_key,
-            )
+        let keyed = published_identity_keys(connection)?;
+        let identity = if keyed {
+            "e.artist_group_key = ?1 AND e.title_key = ?2"
         } else {
-            (
-                "e.artist = ?1 COLLATE NOCASE AND e.title = ?2 COLLATE NOCASE",
-                artist.trim().to_string(),
-                title.trim().to_string(),
-            )
+            "e.artist = ?1 COLLATE NOCASE AND e.title = ?2 COLLATE NOCASE"
         };
+        let mut attempts = Vec::new();
+        if keyed {
+            let group_artists =
+                std::iter::once(artist_group_key(artist)).chain(main_performers(artist));
+            for group_artist in group_artists {
+                for title in &titles {
+                    attempts.push((group_artist.clone(), title.clone()));
+                }
+            }
+        } else {
+            attempts.push((artist.trim().to_string(), title.trim().to_string()));
+            if let Some(base) = without_parentheses(title.trim()) {
+                attempts.push((artist.trim().to_string(), base));
+            }
+        }
         let mut statement = connection.prepare(&format!(
             "SELECT b.chart, MIN(CASE WHEN CAST(e.peak_position AS INTEGER) > 0 THEN MIN(e.position, CAST(e.peak_position AS INTEGER)) ELSE e.position END)
              FROM published_chart_entries e JOIN published_chart_books b ON b.id = e.book_id
              WHERE {identity} AND e.position > 0
              GROUP BY b.chart ORDER BY b.chart COLLATE NOCASE"
         )).map_err(|e| e.to_string())?;
-        let rows = statement
-            .query_map([artist, title], |r| {
-                Ok(TrackChartPeak {
-                    label: r.get(0)?,
-                    peak: r.get(1)?,
-                    country: "US",
+        for (artist, title) in attempts {
+            let rows = statement
+                .query_map([artist, title], |r| {
+                    Ok(TrackChartPeak {
+                        label: r.get(0)?,
+                        peak: r.get(1)?,
+                        country: "US",
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?;
-        peaks.extend(
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?,
-        );
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            if !rows.is_empty() {
+                peaks.extend(rows);
+                break;
+            }
+        }
     }
     Ok(peaks)
 }
@@ -186,8 +221,13 @@ mod tests {
         let peaks = query(&connection, "Beyoncé & Jay-Z", "Déjà Vu").unwrap();
         assert_eq!(peaks.len(), 1);
         assert_eq!(peaks[0].peak, 1);
+        // A library version suffix falls back to the plain chart title, like the track badges.
+        assert_eq!(
+            query(&connection, "Beyoncé & Jay-Z", "Déjà Vu (Live)").unwrap()[0].peak,
+            1
+        );
         assert!(
-            query(&connection, "Beyoncé & Jay-Z", "Déjà Vu (Live)")
+            query(&connection, "Beyoncé & Jay-Z", "Déjà Vu Reprise")
                 .unwrap()
                 .is_empty()
         );
@@ -243,6 +283,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("Adult Contemporary", 4), ("Billboard Hot 100", 1)]
         );
+    }
+
+    #[test]
+    fn version_suffixes_and_collaboration_leads_fall_back_after_exact_match() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE official_uk_single_chart_entries (artist_key TEXT, title_key TEXT, rank INTEGER);
+            INSERT INTO official_uk_single_chart_entries VALUES ('snap','colour of love',54),('snap','colour of love massive version',9),('john lennon','imagine',1);").unwrap();
+        let peaks = query(&connection, "Snap!", "Colour of Love (Massive version)").unwrap();
+        assert_eq!(peaks.len(), 1);
+        assert_eq!(peaks[0].peak, 9);
+        let peaks = query(&connection, "Snap!", "Colour of Love (Radio Edit)").unwrap();
+        assert_eq!(peaks[0].peak, 54);
+        let peaks = query(&connection, "John Lennon & Yoko Ono", "Imagine").unwrap();
+        assert_eq!(peaks[0].peak, 1);
     }
 
     #[test]

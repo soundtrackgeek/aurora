@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.16 fixes Chart info in the track inspector showing no appearances for tracks that have chart badges: peak lookups now also match titles with version suffixes such as `(Massive version)` and collaboration credits, exactly like the tracklist badges.
+
 Aurora 0.28.15 reports cover archiving as complete only when Music Library confirms it and refreshes cached artwork after completed batches. Use Music Library 0.157.3 or newer for indexed audio-quality caching, bounded post-import lock retries, and durable recovery of unfinished quality/cover work. Album moves and catalog imports are never repeated by this recovery.
 
 Aurora 0.28.14 matches chart songs to library tracks credited to collaborations: `JOHN LENNON – WOMAN` finds a track tagged `John Lennon & Yoko Ono`, and `DAVE STEWART WITH BARBARA GASKIN` finds `Dave Stewart & Barbara Gaskin`. This last-resort step runs only when no full-credit match exists and requires the chart's lead artist to be a main performer of the library track; featured guests are ignored.
