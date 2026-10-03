@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.17 adds [docs/improvement-roadmap.md](docs/improvement-roadmap.md): an assessment of the current codebase with 20 improvements to existing features, 20 proposed features, researched external services and libraries, and a suggested sequence. Application behavior is unchanged from 0.28.16.
+
 Aurora 0.28.16 fixes Chart info in the track inspector showing no appearances for tracks that have chart badges: peak lookups now also match titles with version suffixes such as `(Massive version)` and collaboration credits, exactly like the tracklist badges.
 
 Aurora 0.28.15 reports cover archiving as complete only when Music Library confirms it and refreshes cached artwork after completed batches. Use Music Library 0.157.3 or newer for indexed audio-quality caching, bounded post-import lock retries, and durable recovery of unfinished quality/cover work. Album moves and catalog imports are never repeated by this recovery.

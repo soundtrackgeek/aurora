@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.17] - 2026-10-03
+
+### Documentation
+- Added `docs/improvement-roadmap.md`, a whole-codebase assessment with 20 improvements to existing features, 20 proposed new features, and researched online services, APIs, and libraries (with sources) that could extend Aurora while keeping the read-only catalog, verified MP3 writes, bounded payloads, and opt-in network use. Application behavior is unchanged.
+
 ## [0.28.16] - 2026-10-01
 
 ### Fixed
