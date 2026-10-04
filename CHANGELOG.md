@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.22] - 2026-10-04
+
+### Fixed
+- Implement roadmap improvement 6: register the single-instance guard before other plugins and application setup, preventing duplicate playback engines, Aurora database writers, state publishers, and global-shortcut registrations.
+- Show, restore, and focus the existing main window on another launch while preserving its size and maximized state. Forward the launch arguments and working directory through `app://second-instance` for future launch handlers.
+
 ## [0.28.21] - 2026-10-04
 
 ### Fixed

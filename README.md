@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.22 allows one running instance. Launching Aurora again brings the existing window forward, including when it is minimized or hidden, without starting another playback engine, state publisher, or database writer. Launch arguments and the launching directory are forwarded through `app://second-instance` for future file and deep-link handlers. See [Single-instance startup](docs/single-instance.md) for the native verification procedure.
+
 Aurora 0.28.21 keeps the update prompt compact: it shows the available version and the **Later** / **Install and restart** buttons without release notes, so the actions remain visible on small screens. Download progress and update errors still appear when needed.
 
 Aurora 0.28.20 moves state-snapshot publication, catalog detection, Music Library retries, pending-tag reconciliation, playback advancement, and history refresh to independent native schedules. React subscribes to change events, so hidden or minimized windows no longer control sync or playback progress. Playback retains its local playhead clock and a 15-second recovery heartbeat. Automatic update checks run at startup, after an hour on focus, and every six hours, with exponential backoff after failures; manual checks remain available. See [Native background events](docs/native-events.md) for schedules, ordering, and lifecycle contracts.

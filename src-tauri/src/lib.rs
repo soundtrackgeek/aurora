@@ -34,6 +34,7 @@ mod ratings;
 mod remote_affinity;
 mod replay_gain;
 mod shortcuts;
+mod single_instance;
 mod snapshot_io;
 mod state_store;
 mod state_sync;
@@ -1731,6 +1732,8 @@ async fn tonehavn_logout(app: AppHandle) -> Result<tonehavn::Status, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Reject duplicate launches before plugins or setup acquire shared resources.
+        .plugin(single_instance::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(

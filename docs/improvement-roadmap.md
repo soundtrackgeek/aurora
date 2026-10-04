@@ -135,7 +135,9 @@ The most important case: while the app is running, **OneDrive state-snapshot pub
 - an optional light theme;
 - **an accent color taken from the now-playing cover.** Rust already decodes covers to make thumbnails, so it can extract dominant colors at the same time and expose them as CSS variables.
 
-### 6. Allow only one running instance
+### 6. Allow only one running instance - DONE
+
+**Implemented in 0.28.22.** The single-instance plugin is registered first, before other plugins and application setup. Later launches show, unminimize, and focus the existing main window and forward their arguments and working directory through `app://second-instance`. See [Single-instance startup](single-instance.md) for the contract and native checks. The assessment below records the original baseline.
 
 **Today.** Aurora uses neither `tauri-plugin-single-instance` nor an OS mutex. A second launch (a double-clicked shortcut, or autostart plus a manual launch) starts a second playback engine, a second writer for `aurora-history.sqlite3`, a second state-sync publisher, and competing global-shortcut registrations.
 
