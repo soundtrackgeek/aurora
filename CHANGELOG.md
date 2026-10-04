@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.18] - 2026-10-04
+
+### Changed
+- Implemented improvement-roadmap item 1: extracted explorer/workspace, inspector/artist, catalog synchronization, settings, and destination state into typed domain hooks, with a small app-scoped external store for shared navigation, selected track, and catalog invalidation.
+- Load destination containers and their inspectors on demand while preserving retained pages, Back navigation, restored workspace state, and existing playback/tag synchronization behavior.
+- Added focused domain and shared-store regression coverage alongside the existing full-app navigation and refresh tests.
+
 ## [0.28.17] - 2026-10-03
 
 ### Documentation

@@ -20,7 +20,7 @@ it.each(["Universe", "Songs", "Albums", "Artists", "Tags"])("keeps Album details
   render(<App />);
   await screen.findByRole("region", { name: "Library overview" });
   if (destination !== "Universe") await navigate(destination);
-  fireEvent.click(within(screen.getByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
+  fireEvent.click(within(await screen.findByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
   fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
   const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
   const tabs = within(screen.getByRole("tablist", { name: "Library details" }));

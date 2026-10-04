@@ -68,6 +68,8 @@ Every online integration proposed below follows the pattern already used for Las
 
 ### 1. Split `App.tsx` into domain modules
 
+**Implemented in 0.28.18.** Explorer/workspace, inspector/artist, catalog sync, tag mutations, settings, and destination data now live in typed domain hooks under `src/app/`. An app-scoped `useSyncExternalStore` store shares navigation, track selection, and catalog invalidation; lazy route containers retain the existing `RememberedPage` boundaries. Scroll restoration also waits for lazy route content. See [Frontend domain architecture](frontend-domains.md) for module ownership and regression contracts. The assessment below records the original baseline.
+
 **Today.** [`src/App.tsx`](../src/App.tsx) is 4,202 lines. The `App` component holds 145 `useState`, 71 `useRef`, and 38 `useEffect` hooks. Explorer state, inspector selection, catalog-sync status, Inbox and Charts handoffs, playback glue, and workspace restoration all live in one closure, next to the inline `Universe` and `UpdateDialog` components.
 
 **Why it matters.** Almost every feature edits the same file. A state change in one domain re-renders the whole shell. Tests such as `App.chartRefresh.test.tsx` and `App.navigation.test.tsx` have to mount the entire application, which is a major source of the runner-speed flakiness described in [#19](#19-make-tests-deterministic-and-match-ci-to-release-platforms). Startup cost grows with it too: `npm run build` produces one **666 kB** entry chunk and warns about chunks over 500 kB, because only Inbox, Add Music, Artist page, and Listening Report are lazy-loaded.

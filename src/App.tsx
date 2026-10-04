@@ -1,14 +1,7 @@
-import { TrackChartInfo } from "./components/charts/TrackChartInfo";
-import { RememberedPage } from "./components/navigation/RememberedPage";
-import { ContentTransition } from "./components/ContentTransition";
-import { transitionContent } from "./contentTransition";
-import { AlbumMoveOperation, type AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
-import { RemoveAlbumButton } from "./components/explorer/RemoveAlbumButton";
-import { loadWorkspaceCheckpoint, saveWorkspaceCheckpoint, restoreWorkspaceScroll, loadWorkspacePages } from "./workspaceRestoration";
 import {
   Activity,
-  ArrowLeft,
   Album,
+  ArrowLeft,
   AudioLines,
   BadgeCheck,
   CircleUserRound,
@@ -31,149 +24,71 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Activity as ReactActivity, lazy, Suspense, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Activity as ReactActivity, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
-import { Artwork } from "./components/Artwork";
-import { ArtistSmartLink } from "./components/ArtistSmartLink";
+import { AppStoreProvider } from "./app/AppStoreProvider";
+import { useArtistNavigation } from "./app/artist/useArtistNavigation";
+import { EmptyInspector } from "./app/components/EmptyInspector";
+import { Universe } from "./app/components/Universe";
+import { UpdateDialog } from "./app/components/UpdateDialog";
+import { useGenresDomain } from "./app/domains/useGenresDomain";
+import { useHistoryDomain } from "./app/domains/useHistoryDomain";
+import { useObservatoryDomain } from "./app/domains/useObservatoryDomain";
+import { usePlaylistsDomain } from "./app/domains/usePlaylistsDomain";
+import { usePublishersDomain } from "./app/domains/usePublishersDomain";
+import { useRatingsDomain } from "./app/domains/useRatingsDomain";
+import { useYearsDomain } from "./app/domains/useYearsDomain";
+import { explorerCountKey, explorerRequestKey } from "./app/explorer/explorerQueries";
+import { useExplorerResults } from "./app/explorer/useExplorerResults";
+import { useExplorerWorkspace } from "./app/explorer/useExplorerWorkspace";
+import { useInspectorMetadata } from "./app/inspector/useInspectorMetadata";
+import { useInspectorSelection } from "./app/inspector/useInspectorSelection";
+import { useNavigationState, useWorkspaceNavigation } from "./app/navigation/useWorkspaceNavigation";
+import { useWorkspaceCheckpoint, useWorkspaceRestoration } from "./app/navigation/useWorkspaceRestoration";
 import {
+  ArtistInspector,
+  ArtistRoute,
   ChartInspector,
-  ChartStudio,
-  type ChartSelectionContext,
-} from "./components/charts/ChartStudio";
+  ChartsRoute,
+  GenresRoute,
+  HistoryRoute,
+  LibraryRoute,
+  ObservatoryRoute,
+  PlaylistsRoute,
+  PublisherAlbumInspector,
+  PublishersRoute,
+  RatingAlbumInspector,
+  RatingsRoute,
+  YearAlbumInspector,
+  YearsRoute
+} from "./app/routes/DestinationRoutes";
+import { useAppSettings } from "./app/settings/useAppSettings";
+import { useTagMutations } from "./app/tags/useTagMutations";
+import { useAppSlice, useAppStore } from "./app/useAppStore";
+import { ArtistSmartLink } from "./components/ArtistSmartLink";
+import { Artwork } from "./components/Artwork";
 import { CatalogChartRanks } from "./components/charts/CatalogChartRanks";
-import { LaptopModeButton } from "./components/LaptopModeButton";
+import type { ChartSelectionContext } from "./components/charts/ChartStudio";
+import { TrackChartInfo } from "./components/charts/TrackChartInfo";
+import { ContentTransition } from "./components/ContentTransition";
+import type { AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
+import { AlbumMoveOperation, SettingsDialog, TagEditor } from "./app/components/LazyPanels";
 import {
-  DeepExplorer,
-  type ExplorerAlbum,
   type ExplorerFilters,
-  type ExplorerLoadState,
-  type ExplorerSelection,
-  type ExplorerView,
+  type ExplorerView
 } from "./components/explorer/DeepExplorer";
 import { resolveExplorerAlbumInspectorContext } from "./components/explorer/inspectorContext";
-import { ArtistWorld, type ArtistWorldState } from "./components/musicbrainz/ArtistWorld";
-import { Observatory, type ObservatoryLoadState } from "./components/curation/Observatory";
-import {
-  ListeningHistory,
-  type HistoryDateRange,
-  type HistoryLoadState,
-} from "./components/history/ListeningHistory";
+import { RemoveAlbumButton } from "./components/explorer/RemoveAlbumButton";
 import { UniverseListeningMemory } from "./components/history/UniverseListeningMemory";
-import { GenreAtlas, type GenreAtlasLoadState } from "./components/genres/GenreAtlas";
-import {
-  YearAlbumInspector,
-  YearsExplorer,
-  type YearsLoadState,
-} from "./components/library/YearsExplorer";
-import {
-  RatingAlbumInspector,
-  RatingsStudio,
-  type RatingsLoadState,
-} from "./components/ratings/RatingsStudio";
-import { TonightsAlbum } from "./components/ratings/TonightsAlbum";
-import { loadTonightQueue } from "./tonight";
-import {
-  PublisherAlbumInspector,
-  PublisherSignalTimeline,
-  type PublisherLoadState,
-} from "./components/publishers/PublisherSignalTimeline";
+import { LaptopModeButton } from "./components/LaptopModeButton";
+import { RememberedPage } from "./components/navigation/RememberedPage";
 import {
   SidebarNavigation,
   type SidebarDestination,
 } from "./components/navigation/SidebarNavigation";
 import { PlayerBar } from "./components/PlayerBar";
-import { PlaylistsPage } from "./components/playlists/PlaylistsPage";
-import { shufflePlaylistTracks } from "./playlistOrder";
-import { listMusicLibraryPlaylists, loadSelectedPlaylistId, saveSelectedPlaylistId, type SavedPlaylistSummary } from "./playlists";
 import { QueuePanel } from "./components/QueuePanel";
-import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
-import { TagEditor } from "./components/TagEditor";
-import {
-  exploreAlbums,
-  exploreArtists,
-  exploreTracks,
-  displayTrackArtist,
-  formatCount,
-  formatDuration,
-  catalogRefreshIsConsistent,
-  deleteAlbumTracks,
-  loadAlbumDetail,
-  loadAlbumPopularity,
-  loadArtistDetail,
-  loadCatalogRevision,
-  loadLibrarySnapshot,
-  applyAlbumTrackMetricsProjection,
-  applyAlbumTrackTagProjection,
-  applyAlbumPopularity,
-  applyEditableTrackTagProjection,
-  applyTrackTagProjection,
-  type AlbumSummary,
-  type Artist,
-  type ArtistDetail,
-  type ExplorerCursor,
-  type LibrarySnapshot,
-  type Track,
-} from "./library";
-import {
-  exportMusicBrainzCuration,
-  loadArtistIntelligence,
-  loadArtistReviewPage,
-  undoMusicBrainzCuration,
-  updateArtistIdentityDecision,
-  updateReleaseGroupDecision,
-  type ArtistDecisionRequest,
-  type ArtistIntelligence,
-  type ArtistReviewFilter,
-  type ArtistReviewItem,
-  type ReleaseDecisionRequest,
-} from "./musicbrainz";
-import { shouldFollowPlaybackTransition, usePlayback } from "./playback";
-import { preparePopulatedInputForFocus } from "./searchFocusGuard";
-import {
-  loadHistoryPage,
-  loadTrackHistoryInsight,
-  saveHistoryPlayThreshold,
-  type HistoryOutcomeFilter,
-  type HistoryPage,
-  type TrackHistoryInsight,
-} from "./history";
-import {
-  loadGenreDetail,
-  loadGenreIndex,
-  loadGenreQueue,
-  saveGenreRadioSession,
-  type GenreDetail,
-  type GenreQueueMode,
-  type GenreRadioSession,
-  type GenreSummary,
-} from "./genres";
-import {
-  loadLaptopModeStatus,
-  updateLaptopMode,
-  type LaptopModeStatus,
-} from "./laptopMode";
-import {
-  loadLayoutPreferences,
-  nextLeftSidebarMode,
-  saveLayoutPreferences,
-} from "./layoutPreferences";
-import {
-  defaultExplorerFilters,
-  defaultExplorerSort,
-  explorerViewForDestination,
-  explorerSorts,
-  loadViewPreferences,
-  saveViewPreferences,
-  shouldRetargetTagsForAlbumSelection,
-  shouldUseExplorerTagSelection,
-} from "./viewPreferences";
-import {
-  createExplorerRefreshQueue,
-  mergeRefreshedExplorerPage,
-  refreshedExplorerCursor,
-  resolveExplorerRefreshPreservation,
-  shouldReuseExplorerPage,
-} from "./explorerRefresh";
+import { transitionContent } from "./contentTransition";
 import {
   effectiveDisplayPreferences,
   loadDisplayPreferences,
@@ -181,78 +96,61 @@ import {
   type DisplayViewKey,
 } from "./displayPreferences";
 import {
-  advanceCatalogProjectionToken,
-  advanceCatalogTrackProjectionTokens,
-  reconcilePendingTags,
-  retryPendingLibrarySync,
+  loadLayoutPreferences,
+  nextLeftSidebarMode,
+  saveLayoutPreferences,
+} from "./layoutPreferences";
+import {
+  applyAlbumTrackMetricsProjection,
+  deleteAlbumTracks,
+  displayTrackArtist,
+  formatCount,
+  formatDuration,
+  loadAlbumDetail,
+  loadLibrarySnapshot,
+  type Artist,
+  type LibrarySnapshot,
+  type Track
+} from "./library";
+import { usePlayback } from "./playback";
+import {
+  type RatingAlbum,
+  type RatingMode
+} from "./ratings";
+import { preparePopulatedInputForFocus } from "./searchFocusGuard";
+import {
   tagValuesForTrack,
   trackWithReconciledTags,
-  trackWithTagValues,
-  updateTrackTags,
-  type CatalogSync,
-  type TagReconciliationChange,
-  type TagValues,
+  type TagReconciliationChange
 } from "./tags";
 import { useAuroraUpdater } from "./updater";
 import {
-  loadRatingAlbumPage,
-  loadRatingAlbumQueue,
-  loadRatingAlbumTracks,
-  loadRatingCollection,
-  loadRatingsOverview,
-  type CompletionKind,
-  type RatingAlbum,
-  type RatingAlbumPage,
-  type RatingMode,
-  type RatingsOverview,
-} from "./ratings";
+  defaultExplorerFilters,
+  defaultExplorerSort,
+  explorerSorts,
+  explorerViewForDestination,
+  loadViewPreferences,
+  saveViewPreferences,
+  shouldUseExplorerTagSelection
+} from "./viewPreferences";
 
+import { catalogSyncMessage } from "./app/catalog/catalogSyncNotice";
+import { useCatalogProjection } from "./app/catalog/useCatalogProjection";
+import { useCatalogRevision } from "./app/catalog/useCatalogRevision";
+import { usePendingLibrarySync } from "./app/catalog/usePendingLibrarySync";
 import {
-  listenForGlobalShortcutResults,
-  loadGlobalShortcutSettings,
-  defaultShortcutBindings,
-  updateGlobalShortcutSettings,
-  type GlobalShortcutSettingsRequest,
-  type GlobalShortcutStatus,
-  type GlobalShortcutResult,
-} from "./shortcuts";
-import {
-  loadAudioSettings,
-  updateAudioSettings,
-  type AudioSettingsRequest,
-  type AudioSettingsStatus,
-} from "./audio";
-import {
-  loadCatalogChartRankings,
   chartAlbumSearchQuery,
-  loadChartEntryTrack,
-  type CatalogChartRankings,
+  loadChartEntryTrack
 } from "./charts";
-import {
-  loadYearAlbumTracks,
-  loadYearDetail,
-  loadYearOverview,
-  loadYearQueue,
-  type YearAlbum,
-  type YearDetail,
-  type YearOverview,
-  type YearSelection,
-} from "./years";
-import {
-  loadPublisherAlbumTracks,
-  loadPublisherDetail,
-  loadPublisherOverview,
-  loadPublisherQueue,
-  type PublisherAlbum,
-  type PublisherDetail,
-  type PublisherOverview,
-  type PublisherSummary,
-} from "./publishers";
 import {
   libraryIntakeAdapter,
   type LibraryIntakeApplyRequest,
   type LibraryIntakePreview,
 } from "./ingest";
+import type { PlaybackSnapshot } from "./playback";
+import {
+  type YearSelection
+} from "./years";
 
 const AddFolderDialog = lazy(async () => {
   const module = await import("./components/AddFolderDialog");
@@ -263,7 +161,6 @@ const Inbox = lazy(async () => {
   const module = await import("./components/inbox/Inbox");
   return { default: module.Inbox };
 });
-const ArtistPage = lazy(async () => ({ default: (await import("./components/artist/ArtistPage")).ArtistPage }));
 
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
@@ -283,132 +180,6 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
 };
 
 const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), and love (album loved-track count). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, and love:1..3; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 (one or more), and love:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
-const explorerSearchDebounceMs = 2_000;
-const catalogSyncRetryIntervalMs = 5_000;
-
-function catalogSyncNeedsRetry(sync: CatalogSync | null): boolean {
-  return sync?.status === "pending";
-}
-
-function catalogSyncMessage(sync: CatalogSync): string {
-  if (sync.status === "synced" && sync.pendingFolderCount > 0) {
-    return `Music Library updated this edit · ${formatCount(sync.pendingFolderCount)} other ${sync.pendingFolderCount === 1 ? "folder is" : "folders are"} pending; retrying automatically`;
-  }
-  if (sync.status === "pending") {
-    return `MP3 changes are saved · ${sync.message?.trim() || "Music Library update pending; retrying automatically."}`;
-  }
-  if (sync.status === "blocked") {
-    return `MP3 changes are saved · ${sync.message?.trim() || "Music Library update needs attention; automatic retries are paused."}`;
-  }
-  return sync.message?.trim() || "Music Library updated.";
-}
-
-function genreSummaryWithTrackChange(
-  summary: GenreSummary,
-  before: Track,
-  after: Track,
-): GenreSummary {
-  if (summary.name !== before.genre || before.genre !== after.genre) return summary;
-  const ratedTracks = Math.max(
-    0,
-    summary.ratedTracks + Number(after.rating !== null) - Number(before.rating !== null),
-  );
-  const ratingSum = (summary.averageRating ?? 0) * summary.ratedTracks
-    - (before.rating ?? 0)
-    + (after.rating ?? 0);
-  return {
-    ...summary,
-    ratedTracks,
-    averageRating: ratedTracks > 0 ? Math.min(5, Math.max(0, ratingSum / ratedTracks)) : null,
-    lovedTracks: Math.max(0, summary.lovedTracks + Number(after.loved) - Number(before.loved)),
-  };
-}
-
-type ExplorerResult = {
-  tracks: Track[];
-  albums: AlbumSummary[];
-  artists: Artist[];
-  nextCursor: ExplorerCursor | null;
-  totalCount: number;
-};
-
-async function loadExplorerPage(
-  view: ExplorerView,
-  filters: ExplorerFilters,
-  cursor?: ExplorerCursor,
-  localOnly = true,
-): Promise<ExplorerResult> {
-  const shared = {
-    pageSize: 50,
-    cursor,
-    search: filters.query.trim() || undefined,
-    genre: filters.genre ?? undefined,
-  };
-  if (view === "tracks") {
-    const page = await exploreTracks({
-      ...shared,
-      rating: typeof filters.rating === "number" ? filters.rating : undefined,
-      unrated: filters.rating === "unrated" || undefined,
-      loveState: filters.love === "all" ? undefined : filters.love,
-      yearFrom: filters.yearFrom ?? undefined,
-      yearTo: filters.yearTo ?? undefined,
-      yearBasis: filters.yearBasis,
-      missingYear: filters.yearMissing || undefined,
-      artist: filters.artist ?? undefined,
-      sort: explorerSorts.tracks.includes(filters.sort)
-        ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "albumAsc" | "albumDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
-        : "newest",
-    }, { localOnly });
-    return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
-  }
-  if (view === "albums") {
-    const page = await exploreAlbums({
-      ...shared,
-      rating: typeof filters.rating === "number" ? filters.rating : undefined,
-      unrated: filters.rating === "unrated" || undefined,
-      yearFrom: filters.yearFrom ?? undefined,
-      yearTo: filters.yearTo ?? undefined,
-      yearBasis: filters.yearBasis,
-      missingYear: filters.yearMissing || undefined,
-      artist: filters.artist ?? undefined,
-      sort: explorerSorts.albums.includes(filters.sort)
-        ? filters.sort as "newest" | "oldest" | "titleAsc" | "titleDesc" | "artistAsc" | "artistDesc" | "yearAsc" | "yearDesc" | "releaseYearAsc" | "releaseYearDesc" | "ratingAsc" | "ratingDesc"
-        : "yearDesc",
-    }, { localOnly });
-    return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
-  }
-  const page = await exploreArtists({
-    ...shared,
-    sort: filters.sort === "trackCountDesc"
-      ? "trackCountDesc"
-      : filters.sort === "trackCountAsc"
-        ? "trackCountAsc"
-        : filters.sort === "artistDesc"
-          ? "nameDesc"
-          : "nameAsc",
-  }, { localOnly });
-  return { tracks: [], albums: [], artists: page.items, nextCursor: page.nextCursor, totalCount: page.totalCount };
-}
-
-function explorerCountKey(view: ExplorerView, filters: ExplorerFilters): string {
-  return JSON.stringify([
-    view,
-    filters.query.trim(),
-    filters.rating,
-    filters.love,
-    filters.yearFrom,
-    filters.yearTo,
-    filters.yearBasis,
-    filters.yearMissing,
-    filters.genre,
-    filters.artist,
-  ]);
-}
-
-function explorerRequestKey(view: ExplorerView, filters: ExplorerFilters, reloadToken: number): string {
-  return JSON.stringify([view, filters, reloadToken]);
-}
-
 function historyDateLabel(timestamp: number | null): string {
   if (timestamp === null) return "Never";
   return new Intl.DateTimeFormat(undefined, {
@@ -420,151 +191,71 @@ function historyDateLabel(timestamp: number | null): string {
   }).format(new Date(timestamp));
 }
 
-function EmptyInspector() {
-  return (
-    <div className="inspector-empty">
-      <Disc3 aria-hidden="true" />
-      <h2>Select a track</h2>
-      <p>Select a song, then press play or double-click its library row.</p>
-    </div>
-  );
-}
-
-function Universe({ artists, activeArtist, onSelect }: { artists: Artist[]; activeArtist: string | null; onSelect: (artist: Artist) => void }) {
-  const visibleArtists = artists.slice(0, 8);
-  return (
-    <section className="universe" aria-labelledby="universe-title">
-      <div className="universe__heading">
-        <p className="eyebrow">Your listening gravity</p>
-        <h1 id="universe-title">Welcome back, Jørn.</h1>
-        <p>Choose a world to focus the library.</p>
-      </div>
-      <div className="universe__quote">
-        <p>“Music is the shorthand of emotion.”</p>
-        <span>— Leo Tolstoy</span>
-      </div>
-      <div className="solar-system" aria-label="Top artists in your music universe">
-        <span className="sun" aria-hidden="true" />
-        {[0, 1, 2, 3].map((orbit) => <span className={`orbit orbit--${orbit + 1}`} key={orbit} aria-hidden="true" />)}
-        {visibleArtists.map((artist, index) => (
-          <button
-            type="button"
-            className={`planet planet--${index + 1}${activeArtist === artist.name ? " is-active" : ""}`}
-            key={artist.id}
-            onClick={() => onSelect(artist)}
-            aria-label={`Explore ${artist.name}, ${formatCount(artist.trackCount)} tracks`}
-            aria-pressed={activeArtist === artist.name}
-          >
-            <span className="planet__dot" />
-            <span className="planet__label">{artist.name}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function UpdateDialog({ version, phase, progress, message, onInstall, onDismiss }: {
-  version: string | null;
-  phase: string;
-  progress: number | null;
-  message: string | null;
-  onInstall: () => void;
-  onDismiss: () => void;
-}) {
-  const isWorking = phase === "checking" || phase === "downloading" || phase === "installing";
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
-        <div className="update-dialog__icon"><Download aria-hidden="true" /></div>
-        <div>
-          <p className="eyebrow">Aurora update</p>
-          <h2 id="update-title">{phase === "checking" ? "Checking for updates…" : phase === "upToDate" ? "Aurora is up to date" : phase === "error" ? "Update couldn’t complete" : `Version ${version ?? "unknown"} is ready`}</h2>
-          <p>{phase === "checking" ? "Looking for a newer Aurora release…" : message || "Install the latest Aurora build now. The app will close, update in place, and restart."}</p>
-        </div>
-        {isWorking && phase !== "checking" && (
-          <div className="update-progress" aria-live="polite">
-            <div className="update-progress__track"><span style={{ width: `${progress ?? 12}%` }} /></div>
-            <span>{phase === "installing" ? "Installing…" : progress === null ? "Downloading…" : `Downloading ${progress}%`}</span>
-          </div>
-        )}
-        {phase === "error" && <p className="update-error" role="alert">{message}</p>}
-        <div className="update-dialog__actions">
-          <button type="button" className="button button--quiet" onClick={onDismiss} disabled={isWorking}>{version ? "Later" : "Close"}</button>
-          {version && <button type="button" className="button button--primary" onClick={onInstall} disabled={isWorking}>
-            {isWorking ? "Updating…" : "Install and restart"}
-          </button>}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function App() {
   const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
-  const [initialWorkspace] = useState(loadWorkspaceCheckpoint);
-  const workspaceRef = useRef(initialWorkspace);
-  const restoringScrollRef = useRef(false);
-  const scrollReadyRef = useRef(false);
+  const explorerWorkspace = useExplorerWorkspace(initialViewPreferences);
+  const {
+    explorerView,
+    setExplorerView,
+    explorerFilters,
+    setExplorerFilters,
+    explorerTracks,
+    setExplorerTracks,
+    explorerAlbums,
+    setExplorerAlbums,
+    explorerArtists,
+    explorerCursor,
+    explorerCount,
+    explorerLoadState,
+    setExplorerLoadState,
+    explorerError,
+    isLoadingMore,
+    setIsLoadingMore,
+    explorerReloadToken,
+    setExplorerReloadToken,
+    explorerSelection,
+    setExplorerSelection,
+    exploreRequestRef,
+    loadedExplorerRequestKeyRef,
+    explorerRestorationPendingRef,
+    preserveExplorerOnReloadRef,
+    pendingExplorerAlbumIdRef
+  } = explorerWorkspace;
+  const {
+    settingsOpen,
+    setSettingsOpen,
+    settingsInitialTab,
+    shortcutStatus,
+    shortcutSaving,
+    shortcutError,
+    audioStatus,
+    audioSaving,
+    audioError,
+    laptopModeStatus,
+    laptopModeBusy,
+    laptopModeError,
+    toggleLaptopMode,
+    saveGlobalShortcuts,
+    saveAudioSettings,
+    openSettings
+  } = useAppSettings(() => setExplorerReloadToken(value => value + 1));
+  const workspaceRestoration = useWorkspaceRestoration();
+  const { restoringScrollRef, scrollReadyRef, mainScrollRef, scrollPositionByDestinationRef } = workspaceRestoration;
+  const navigationState = useNavigationState();
+  const { artistPageName, setArtistPageName, visitedArtists, setVisitedArtists, navigationRevision, setNavigationRevision, navigationHistory } = navigationState;
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
-  const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight } | null>(null);
-  const [inspectorView, setInspectorView] = useState(initialViewPreferences.inspectorView);
-  const [tagSelectionKind, setTagSelectionKind] = useState(initialViewPreferences.tagSelectionKind);
-  const [inspectorArtistName, setInspectorArtistName] = useState<string | null>(null);
-  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
-  const [artistPageName, setArtistPageName] = useState<string | null>(null);
-  const [visitedArtists, setVisitedArtists] = useState<string[]>([]);
-  const [navigationRevision, setNavigationRevision] = useState(0);
-  const [navigationHistory, setNavigationHistory] = useState<ReturnType<typeof captureNavigationView>[]>([]);
-  const savedViewsRef = useRef(new Map<string, ReturnType<typeof captureNavigationView>>());
-  const [artistIntelligence, setArtistIntelligence] = useState<ArtistIntelligence | null>(null);
-  const [artistWorldState, setArtistWorldState] = useState<ArtistWorldState>("loading");
-  const [artistWorldError, setArtistWorldError] = useState<string | null>(null);
-  const [curationError, setCurationError] = useState<string | null>(null);
-  const [curationActionBusy, setCurationActionBusy] = useState<string | null>(null);
-  const [curationMessage, setCurationMessage] = useState<string | null>(null);
-  const [reviewItems, setReviewItems] = useState<ArtistReviewItem[]>([]);
-  const [reviewCursor, setReviewCursor] = useState<string | null>(null);
-  const [reviewFilter, setReviewFilter] = useState<ArtistReviewFilter>("needsReview");
-  const [reviewSearch, setReviewSearch] = useState("");
-  const [reviewLoadState, setReviewLoadState] = useState<ObservatoryLoadState>("loading");
-  const [reviewError, setReviewError] = useState<string | null>(null);
-  const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
-  const [reviewReloadToken, setReviewReloadToken] = useState(0);
-  const [activeNav, setActiveNavState] = useState<SidebarDestination>(initialViewPreferences.activeNav);
-  const [savedPlaylists, setSavedPlaylists] = useState<SavedPlaylistSummary[]>([]);
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(loadSelectedPlaylistId);
-  const [playlistsLoading, setPlaylistsLoading] = useState(false);
-  const [playlistsError, setPlaylistsError] = useState<string | null>(null);
-  const [playlistsReloadToken, setPlaylistsReloadToken] = useState(0);
+  const selectedTrack = useAppSlice("selectedTrack");
+  const { setSelectedTrack, setActiveDestination: setActiveNavState, setCatalogRevision: setChartReloadToken } = useAppStore();
+
+  const activeNav = useAppSlice("activeDestination");
+
   const [layoutPreferences, setLayoutPreferences] = useState(loadLayoutPreferences);
   const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const [reloadToken, setReloadToken] = useState(0);
-  const [explorerView, setExplorerView] = useState<ExplorerView>(initialViewPreferences.explorerView);
-  const [explorerFilters, setExplorerFilters] = useState<ExplorerFilters>(initialViewPreferences.explorerFilters);
-  const [explorerTracks, setExplorerTracks] = useState<Track[]>([]);
-  const [explorerAlbums, setExplorerAlbums] = useState<AlbumSummary[]>([]);
-  const [explorerArtists, setExplorerArtists] = useState<Artist[]>([]);
-  const [explorerCursor, setExplorerCursor] = useState<ExplorerCursor | null>(null);
-  const [explorerCount, setExplorerCount] = useState<{ key: string; total: number } | null>(null);
-  const [explorerLoadState, setExplorerLoadState] = useState<ExplorerLoadState>("loading");
-  const [explorerError, setExplorerError] = useState<string | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [explorerReloadToken, setExplorerReloadToken] = useState(0);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(initialViewPreferences.selectedAlbumId);
-  const [albumFileRefreshRequest, setAlbumFileRefreshRequest] = useState<{ albumId: string; requestId: number } | null>(null);
-  const [explorerSelection, setExplorerSelection] = useState<ExplorerSelection | null>(null);
-  const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
-  const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
-  const [catalogChartRanks, setCatalogChartRanks] = useState<CatalogChartRankings>({ tracks: {}, albums: {} });
-  const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [catalogSyncNotice, setCatalogSyncNotice] = useState<CatalogSync | null>(null);
-  const [reconciliationHasMore, setReconciliationHasMore] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [addFolderOpen, setAddFolderOpen] = useState(false);
   const [backgroundIntakeNotice, setBackgroundIntakeNotice] = useState<{
@@ -572,194 +263,360 @@ function App() {
     message: string;
   } | null>(null);
   const backgroundIntakeRunningRef = useRef(false);
-  const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
-  const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
-  const [laptopModeStatus, setLaptopModeStatus] = useState<LaptopModeStatus | null>(null);
-  const [laptopModeBusy, setLaptopModeBusy] = useState(false);
-  const [laptopModeError, setLaptopModeError] = useState<string | null>(null);
-  const albumOrderRevisionRef = useRef(0);
-  const [historyPage, setHistoryPage] = useState<HistoryPage | null>(null);
-  const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("loading");
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historySearch, setHistorySearch] = useState("");
-  const [historyOutcome, setHistoryOutcome] = useState<HistoryOutcomeFilter>("all");
-  const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
-  const [historyDateRange, setHistoryDateRange] = useState<HistoryDateRange>("all");
-  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
-  const [historySavingThreshold, setHistorySavingThreshold] = useState(false);
-  const [historyThresholdMessage, setHistoryThresholdMessage] = useState<string | null>(null);
-  const [historyReloadToken, setHistoryReloadToken] = useState(0);
-  const [genreAtlasGenres, setGenreAtlasGenres] = useState<GenreSummary[]>([]);
-  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
-  const [genreDetail, setGenreDetail] = useState<GenreDetail | null>(null);
-  const [genreSearch, setGenreSearch] = useState("");
-  const [genreIndexState, setGenreIndexState] = useState<GenreAtlasLoadState>("loading");
-  const [genreDetailState, setGenreDetailState] = useState<GenreAtlasLoadState>("loading");
-  const [genreIndexError, setGenreIndexError] = useState<string | null>(null);
-  const [genreDetailError, setGenreDetailError] = useState<string | null>(null);
-  const [genreIndexReloadToken, setGenreIndexReloadToken] = useState(0);
-  const [genreDetailReloadToken, setGenreDetailReloadToken] = useState(0);
-  const [genreQueueBusy, setGenreQueueBusy] = useState<GenreQueueMode | null>(null);
-  const [genreQueueMessage, setGenreQueueMessage] = useState<string | null>(null);
-  const [genreRadioSession, setGenreRadioSession] = useState<GenreRadioSession | null>(null);
-  const [publisherOverview, setPublisherOverview] = useState<PublisherOverview | null>(null);
-  const [publisherDetail, setPublisherDetail] = useState<PublisherDetail | null>(null);
-  const [publisherLoadState, setPublisherLoadState] = useState<PublisherLoadState>("loading");
-  const [publisherDetailState, setPublisherDetailState] = useState<PublisherLoadState>("loading");
-  const [publisherError, setPublisherError] = useState<string | null>(null);
-  const [publisherDetailError, setPublisherDetailError] = useState<string | null>(null);
-  const [publisherSearch, setPublisherSearch] = useState("");
-  const [publisherReloadToken, setPublisherReloadToken] = useState(0);
-  const [publisherQueueBusy, setPublisherQueueBusy] = useState(false);
-  const [publisherQueueMessage, setPublisherQueueMessage] = useState<string | null>(null);
-  const [selectedPublisherAlbum, setSelectedPublisherAlbum] = useState<PublisherAlbum | null>(null);
-  const [publisherAlbumTracks, setPublisherAlbumTracks] = useState<Track[]>([]);
-  const [publisherAlbumBusy, setPublisherAlbumBusy] = useState(false);
-  const [yearOverview, setYearOverview] = useState<YearOverview | null>(null);
-  const [yearDetail, setYearDetail] = useState<YearDetail | null>(null);
-  const [yearLoadState, setYearLoadState] = useState<YearsLoadState>("loading");
-  const [yearDetailState, setYearDetailState] = useState<YearsLoadState>("loading");
-  const [yearError, setYearError] = useState<string | null>(null);
-  const [yearDetailError, setYearDetailError] = useState<string | null>(null);
-  const [yearReloadToken, setYearReloadToken] = useState(0);
-  const [yearQueueBusy, setYearQueueBusy] = useState(false);
-  const [yearQueueMessage, setYearQueueMessage] = useState<string | null>(null);
-  const [selectedYearAlbum, setSelectedYearAlbum] = useState<YearAlbum | null>(null);
-  const [yearAlbumTracks, setYearAlbumTracks] = useState<Track[]>([]);
-  const [yearAlbumBusy, setYearAlbumBusy] = useState(false);
+
   const [chartSelection, setChartSelection] = useState<ChartSelectionContext | null>(null);
   const [chartPlaybackBusy, setChartPlaybackBusy] = useState(false);
-  const [chartReloadToken, setChartReloadToken] = useState(0);
-  const [ratingsOverview, setRatingsOverview] = useState<RatingsOverview | null>(null);
-  const [ratingsPage, setRatingsPage] = useState<RatingAlbumPage | null>(null);
-  const [ratingsLoadState, setRatingsLoadState] = useState<RatingsLoadState>("loading");
-  const [ratingsPageState, setRatingsPageState] = useState<RatingsLoadState>("loading");
-  const [ratingsError, setRatingsError] = useState<string | null>(null);
-  const [ratingsPageError, setRatingsPageError] = useState<string | null>(null);
-  const [ratingsReloadToken, setRatingsReloadToken] = useState(0);
-  const [ratingsRefreshing, setRatingsRefreshing] = useState(false);
-  const [ratingsCompletion, setRatingsCompletion] = useState<CompletionKind>("partiallyRated");
-  const [ratingsRemainingTracks, setRatingsRemainingTracks] = useState<number | null>(null);
-  const [selectedRatingAlbum, setSelectedRatingAlbum] = useState<RatingAlbum | null>(null);
-  const [ratingAlbumTracks, setRatingAlbumTracks] = useState<Track[]>([]);
-  const [ratingsQueueBusy, setRatingsQueueBusy] = useState(false);
-  const [ratingsQueueMessage, setRatingsQueueMessage] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("audio");
-  const [shortcutStatus, setShortcutStatus] = useState<GlobalShortcutStatus | null>(null);
-  const [shortcutSaving, setShortcutSaving] = useState(false);
-  const [shortcutError, setShortcutError] = useState<string | null>(null);
-  const [audioStatus, setAudioStatus] = useState<AudioSettingsStatus | null>(null);
-  const [audioSaving, setAudioSaving] = useState(false);
-  const [audioError, setAudioError] = useState<string | null>(null);
+
   const searchRef = useRef<HTMLInputElement>(null);
-  const mainScrollRef = useRef<HTMLDivElement>(null);
-  const scrollPositionByDestinationRef = useRef<Record<string, number>>(initialWorkspace.scroll);
-  const exploreRequestRef = useRef(0);
-  const loadedExplorerRequestKeyRef = useRef<string | null>(null);
-  const loadedExplorerViewKeyRef = useRef<string | null>(null);
-  const explorerCursorRef = useRef<ExplorerCursor | null>(null);
-  const explorerLoadedRef = useRef(0);
-  const explorerLocalOnlyRef = useRef(true);
-  const [queueExplorerRefresh] = useState(() => createExplorerRefreshQueue<ExplorerResult>());
-  const explorerLoadingMoreRef = useRef(false);
-  const albumRequestRef = useRef(0);
-  const artistRequestRef = useRef(0);
-  const reviewRequestRef = useRef(0);
-  const historyRequestRef = useRef(0);
+
   const loadedPageRequestsRef = useRef(new Map<string, string>());
-  const [universeHistoryPage, setUniverseHistoryPage] = useState<HistoryPage | null>(null);
-  const genreIndexRequestRef = useRef(0);
-  const genreDetailRequestRef = useRef(0);
-  const genreQueueRequestRef = useRef(0);
-  const publisherOverviewRequestRef = useRef(0);
-  const publisherDetailRequestRef = useRef(0);
-  const publisherAlbumRequestRef = useRef(0);
-  const publisherLoadedSearchRef = useRef<string | null>(null);
-  const publisherDetailRef = useRef<PublisherDetail | null>(publisherDetail);
-  const selectedPublisherAlbumRef = useRef<PublisherAlbum | null>(selectedPublisherAlbum);
-  const yearOverviewRequestRef = useRef(0);
-  const yearDetailRequestRef = useRef(0);
-  const yearAlbumRequestRef = useRef(0);
-  const yearLoadedTokenRef = useRef(-1);
-  const yearDetailRef = useRef<YearDetail | null>(yearDetail);
-  const selectedYearAlbumRef = useRef<YearAlbum | null>(selectedYearAlbum);
-  const ratingsRequestRef = useRef(0);
-  const ratingsPageRequestRef = useRef(0);
-  const ratingsAlbumRequestRef = useRef(0);
-  const ratingsLoadedTokenRef = useRef(-1);
-  const ratingsPreserveInspectorTokenRef = useRef<number | null>(null);
-  const selectedRatingAlbumRef = useRef<RatingAlbum | null>(selectedRatingAlbum);
-  const genreRefillRunningRef = useRef(false);
-  const playlistQueueSessionRef = useRef<{ tracks: Track[]; nextIndex: number; queueKeys: string[] } | null>(null);
-  const playlistRefillRunningRef = useRef(false);
-  const playlistRefillPromiseRef = useRef<Promise<unknown> | null>(null);
-  const reconciliationRunningRef = useRef(false);
-  const librarySyncRunningRef = useRef(false);
-  const catalogSyncNoticeRef = useRef<CatalogSync | null>(null);
-  const latestTagProjectionTokenRef = useRef(0);
-  const latestTrackProjectionTokensRef = useRef<ReadonlyMap<string, number>>(new Map());
-  const latestCatalogSyncTokenRef = useRef(0);
-  const appFocusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
-  const catalogRevisionRef = useRef<string | null>(null);
-  const catalogRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
-  const catalogRefreshRequestedRef = useRef(false);
+
   const appMountedRef = useRef(true);
-  const selectedTrackRef = useRef<Track | null>(selectedTrack);
-  const previousPlaybackTrackKeyRef = useRef<string | null>(null);
-  const selectedAlbumIdRef = useRef<string | null>(selectedAlbumId);
-  const explorerRestorationPendingRef = useRef(true);
-  const preserveExplorerOnReloadRef = useRef(false);
-  const pendingExplorerAlbumIdRef = useRef<string | null>(null);
   const activeNavRef = useRef(activeNav);
-  const inspectorViewRef = useRef(inspectorView);
-  const inspectorArtistNameRef = useRef(inspectorArtistName);
-  const openArtistInspectorRef = useRef<(artistName: string) => void>(() => undefined);
-  const inlineSaveRef = useRef<Set<string>>(new Set());
-  const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
   const updater = useAuroraUpdater();
   const playback = usePlayback();
   const appendPlayback = playback.append;
   const rebindPlaybackCatalog = playback.rebindCatalog;
-  const selectedGenreRef = useRef(selectedGenre);
-  selectedGenreRef.current = selectedGenre;
 
-  useEffect(() => {
-    const session = playlistQueueSessionRef.current;
-    if (!session || playback.state.currentIndex === null || playlistRefillRunningRef.current) return;
-    if (playback.state.queue.length !== session.queueKeys.length
-      || playback.state.queue.some((track, index) => track.trackKey !== session.queueKeys[index])) {
-      playlistQueueSessionRef.current = null;
-      return;
+  const {
+    inspectorArtistName, setInspectorArtistName, inspectorArtistNameRef,
+    artistDetail, setArtistDetail, artistIntelligence, setArtistIntelligence,
+    artistWorldState, setArtistWorldState, artistWorldError, setArtistWorldError,
+    artistRequestRef, openArtistInspector, openArtistInspectorRef,
+  } = useArtistNavigation({
+    onShowArtistInspector: () => setInspectorView("artist"),
+    onClearCurationError: () => setCurationError(null),
+  });
+  const {
+    inspectorView,
+    setInspectorView,
+    inspectorViewRef,
+    tagSelectionKind,
+    setTagSelectionKind,
+    selectedAlbumId,
+    setSelectedAlbumId,
+    selectedAlbumIdRef,
+    selectedTrackRef,
+    albumTracks,
+    setAlbumTracks,
+    albumTracksTruncated,
+    setAlbumTracksTruncated,
+    albumDetailState,
+    setAlbumDetailState,
+    setAlbumFileRefreshRequest,
+    albumRequestRef,
+    selectTrack,
+    selectAlbum,
+    playExplorerAlbum
+  } = useInspectorSelection({
+    initialViewPreferences, selectedTrack, setSelectedTrack, artistRequestRef, playback,
+    setExplorerAlbums, endGenreQueue: () => endGenreQueue(),
+    setSyncMessage: (value) => setSyncMessage(value),
+  });
+
+  const {
+    genreAtlasGenres,
+    setGenreAtlasGenres,
+    selectedGenre,
+    setSelectedGenre,
+    genreDetail,
+    setGenreDetail,
+    genreSearch,
+    setGenreSearch,
+    genreIndexState,
+    genreDetailState,
+    genreIndexError,
+    genreDetailError,
+    setGenreIndexReloadToken,
+    setGenreDetailReloadToken,
+    genreQueueBusy,
+    genreQueueMessage,
+    genreRadioSession,
+    endGenreQueue,
+    startGenreQueue,
+  } = useGenresDomain({
+    activeNav,
+    loadedPageRequestsRef,
+    playback,
+    appendPlayback,
+    libraryReady: snapshot !== null,
+  });
+
+  const {
+    savedPlaylists,
+    selectedPlaylistId,
+    setSelectedPlaylistId,
+    playlistsLoading,
+    playlistsError,
+    setPlaylistsReloadToken,
+    startPlaylistQueue,
+  } = usePlaylistsDomain({
+    playback,
+    appendPlayback,
+    libraryReady: snapshot !== null,
+    endGenreQueue,
+    selectTrack,
+  });
+
+  const {
+    publisherOverview,
+    publisherDetail,
+    publisherLoadState,
+    publisherDetailState,
+    publisherError,
+    publisherDetailError,
+    publisherSearch,
+    setPublisherSearch,
+    setPublisherReloadToken,
+    publisherQueueBusy,
+    publisherQueueMessage,
+    selectedPublisherAlbum,
+    publisherAlbumTracks,
+    setPublisherAlbumTracks,
+    publisherAlbumBusy,
+    selectPublisher,
+    openPublisherAlbum,
+    playPublisher,
+    playPublisherAlbum,
+  } = usePublishersDomain({
+    setInspectorView,
+    setTagSelectionKind,
+    activeNav,
+    loadedPageRequestsRef,
+    inspectorViewRef,
+    playback,
+    libraryReady: snapshot !== null,
+    endGenreQueue,
+    selectTrack,
+  });
+
+  const {
+    yearOverview,
+    yearDetail,
+    yearLoadState,
+    yearDetailState,
+    yearError,
+    yearDetailError,
+    setYearReloadToken,
+    yearQueueBusy,
+    yearQueueMessage,
+    selectedYearAlbum,
+    yearAlbumTracks,
+    setYearAlbumTracks,
+    yearAlbumBusy,
+    selectYear,
+    openYearAlbum,
+    playYear,
+    playYearAlbum,
+  } = useYearsDomain({
+    setInspectorView,
+    setTagSelectionKind,
+    activeNav,
+    inspectorViewRef,
+    playback,
+    libraryReady: snapshot !== null,
+    endGenreQueue,
+    selectTrack,
+  });
+
+  const {
+    ratingsOverview,
+    ratingsPage,
+    ratingsLoadState,
+    ratingsPageState,
+    ratingsError,
+    ratingsPageError,
+    setRatingsReloadToken,
+    ratingsRefreshing,
+    setRatingsRefreshing,
+    setRatingsCompletion,
+    ratingsRemainingTracks,
+    setRatingsRemainingTracks,
+    selectedRatingAlbum,
+    ratingAlbumTracks,
+    setRatingAlbumTracks,
+    ratingsQueueBusy,
+    ratingsQueueMessage,
+    openRatingAlbum,
+    playRatingCollection,
+    playRatingAlbumUnrated,
+    playTonightAlbum,
+  } = useRatingsDomain({
+    setInspectorView,
+    setTagSelectionKind,
+    activeNav,
+    loadedPageRequestsRef,
+    inspectorViewRef,
+    playback,
+    libraryReady: snapshot !== null,
+    endGenreQueue,
+    selectTrack,
+  });
+
+  const {
+    historyPage,
+    historyLoadState,
+    historyError,
+    historySearch,
+    setHistorySearch,
+    historyOutcome,
+    setHistoryOutcome,
+    historyDeviceId,
+    setHistoryDeviceId,
+    historyDateRange,
+    setHistoryDateRange,
+    historyLoadingMore,
+    setHistoryLoadingMore,
+    historySavingThreshold,
+    historyThresholdMessage,
+    setHistoryReloadToken,
+    universeHistoryPage,
+    loadMoreHistory,
+    savePlayedThreshold,
+    playHistoryTrack,
+  } = useHistoryDomain({
+    activeNav,
+    loadedPageRequestsRef,
+    playback,
+    libraryReady: snapshot !== null,
+    endGenreQueue,
+    selectTrack,
+  });
+
+  const {
+    curationError,
+    setCurationError,
+    curationActionBusy,
+    curationMessage,
+    reviewItems,
+    reviewCursor,
+    reviewFilter,
+    setReviewFilter,
+    reviewSearch,
+    setReviewSearch,
+    reviewLoadState,
+    reviewError,
+    reviewLoadingMore,
+    setReviewLoadingMore,
+    setReviewReloadToken,
+    applyArtistDecision,
+    applyReleaseDecision,
+    loadMoreReviewItems,
+    undoCuration,
+    exportCuration,
+  } = useObservatoryDomain({
+    setInspectorView,
+    inspectorArtistName,
+    setInspectorArtistName,
+    setArtistDetail,
+    setArtistIntelligence,
+    setArtistWorldState,
+    activeNav,
+    artistRequestRef,
+    loadedPageRequestsRef,
+    libraryReady: snapshot !== null,
+  });
+
+  useLayoutEffect(() => { activeNavRef.current = activeNav; }, [activeNav]);
+
+  const { trackHistory, catalogChartRanks } = useInspectorMetadata({
+    selectedTrack, setSelectedTrack, selectedAlbumId, albumTracks, explorerView,
+    explorerTracks, explorerAlbums, selectedYearAlbum, snapshot, yearAlbumTracks,
+    ratingAlbumTracks, publisherAlbumTracks, genreDetail,
+  });
+
+  const libraryReady = snapshot !== null;
+  const {
+    latestTagProjectionTokenRef,
+    latestTrackProjectionTokensRef,
+    acceptTrackProjectionKeys,
+  } = useCatalogProjection();
+
+  const onCatalogRefresh = useCallback((nextSnapshot: LibrarySnapshot, rebound: PlaybackSnapshot) => {
+    setLoadError(null);
+    setSnapshot(nextSnapshot);
+    const selectedKey = selectedTrackRef.current?.trackKey;
+    if (selectedKey) {
+      const reboundSelection = rebound.queue.find((track) => track.trackKey === selectedKey)
+        ?? nextSnapshot.tracks.find((track) => track.trackKey === selectedKey);
+      if (reboundSelection) setSelectedTrack(reboundSelection);
     }
-    if (session.nextIndex >= session.tracks.length) return;
-    if (playback.state.queue.length - playback.state.currentIndex - 1 >= 20) return;
-    const nextTracks = session.tracks.slice(session.nextIndex, session.nextIndex + 100);
-    playlistRefillRunningRef.current = true;
-    const refill = appendPlayback(nextTracks);
-    playlistRefillPromiseRef.current = refill;
-    void refill.then((next) => {
-      if (playlistQueueSessionRef.current !== session) return;
-      if (!next) { playlistQueueSessionRef.current = null; return; }
-      session.nextIndex += nextTracks.length;
-      session.queueKeys = next.queue.map((track) => track.trackKey);
-    }).finally(() => {
-      playlistRefillRunningRef.current = false;
-      if (playlistRefillPromiseRef.current === refill) playlistRefillPromiseRef.current = null;
-    });
-  }, [playback.state, appendPlayback]);
-  activeNavRef.current = activeNav;
-  selectedTrackRef.current = selectedTrack;
-  selectedAlbumIdRef.current = selectedAlbumId;
-  explorerCursorRef.current = explorerCursor;
-  explorerLoadedRef.current = explorerTracks.length + explorerAlbums.length + explorerArtists.length;
-  inspectorViewRef.current = inspectorView;
-  inspectorArtistNameRef.current = inspectorArtistName;
-  publisherDetailRef.current = publisherDetail;
-  selectedPublisherAlbumRef.current = selectedPublisherAlbum;
-  yearDetailRef.current = yearDetail;
-  selectedYearAlbumRef.current = selectedYearAlbum;
-  selectedRatingAlbumRef.current = selectedRatingAlbum;
+
+    const currentScroll = mainScrollRef.current?.scrollTop;
+    if (typeof currentScroll === "number" && currentScroll > 0) {
+      scrollPositionByDestinationRef.current[activeNavRef.current] = currentScroll;
+    }
+    restoringScrollRef.current = true;
+    preserveExplorerOnReloadRef.current = true;
+    if (selectedAlbumIdRef.current) pendingExplorerAlbumIdRef.current = selectedAlbumIdRef.current;
+    setExplorerReloadToken((value) => value + 1);
+    setReviewReloadToken((value) => value + 1);
+    setHistoryReloadToken((value) => value + 1);
+    setGenreIndexReloadToken((value) => value + 1);
+    setGenreDetailReloadToken((value) => value + 1);
+    setPublisherReloadToken((value) => value + 1);
+    setYearReloadToken((value) => value + 1);
+    setChartReloadToken((value) => value + 1);
+    setSyncMessage("Music Library import detected · refreshed Aurora");
+    const artistName = inspectorArtistNameRef.current;
+    if (inspectorViewRef.current === "artist" && artistName) {
+      openArtistInspectorRef.current(artistName);
+    }
+  }, [inspectorArtistNameRef, inspectorViewRef, mainScrollRef, openArtistInspectorRef, pendingExplorerAlbumIdRef, preserveExplorerOnReloadRef, restoringScrollRef, scrollPositionByDestinationRef, selectedAlbumIdRef, selectedTrackRef, setChartReloadToken, setExplorerReloadToken, setGenreDetailReloadToken, setGenreIndexReloadToken, setHistoryReloadToken, setPublisherReloadToken, setReviewReloadToken, setSelectedTrack, setYearReloadToken]);
+
+  const { catalogRevisionRef, refreshCatalogIfChanged } = useCatalogRevision({
+    libraryReady,
+    latestTagProjectionTokenRef,
+    rebindPlaybackCatalog,
+    onCatalogRefresh,
+  });
+
+  const applyReconciliationChanges = useCallback((changes: TagReconciliationChange[]) => {
+    if (changes.length === 0) return;
+    const byTrackKey = new Map(changes.map((change) => [change.trackKey, change]));
+    const reconcile = (track: Track) => {
+      const change = byTrackKey.get(track.trackKey);
+      return change ? trackWithReconciledTags(track, change) : track;
+    };
+    setExplorerTracks((current) => current.map(reconcile));
+    setAlbumTracks((current) => current.map(reconcile));
+    setYearAlbumTracks((current) => current.map(reconcile));
+    setRatingAlbumTracks((current) => current.map(reconcile));
+    setPublisherAlbumTracks((current) => current.map(reconcile));
+    setGenreDetail((current) => current ? {
+      ...current,
+      highlights: current.highlights.map(reconcile),
+    } : current);
+    setSelectedTrack((current) => current ? reconcile(current) : current);
+    setSnapshot((current) => current ? { ...current, tracks: current.tracks.map(reconcile) } : current);
+  }, [setAlbumTracks, setExplorerTracks, setGenreDetail, setPublisherAlbumTracks, setRatingAlbumTracks, setSelectedTrack, setYearAlbumTracks]);
+
+  const onChartsChanged = useCallback(() => setChartReloadToken(value => value + 1), [setChartReloadToken]);
+  const { catalogSyncNotice, handleCatalogSync } = usePendingLibrarySync({
+    libraryReady,
+    reloadToken,
+    refreshCatalogIfChanged,
+    acceptTrackProjectionKeys,
+    onReconciliationChanges: applyReconciliationChanges,
+    onChartsChanged,
+    setSyncMessage,
+  });
+
+  const {
+    inlineSavingKeys, inlineTagRevisions, applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange,
+  } = useTagMutations({
+    snapshot, setSnapshot, selectedTrack, setSelectedTrack, activeNav, setSyncMessage,
+    explorer: explorerWorkspace,
+    inspector: { selectedAlbumId, albumTracks, setAlbumTracks, setAlbumTracksTruncated, setAlbumDetailState, albumRequestRef },
+    workspace: workspaceRestoration,
+    genres: { setGenreDetail, setGenreAtlasGenres, setGenreIndexReloadToken, setGenreDetailReloadToken },
+    years: { yearAlbumTracks, setYearAlbumTracks },
+    ratings: { ratingAlbumTracks, setRatingAlbumTracks },
+    publishers: { publisherAlbumTracks, setPublisherAlbumTracks },
+    projection: { acceptTrackProjectionKeys, latestTrackProjectionTokensRef },
+    handleCatalogSync,
+    playback,
+  });
 
   useEffect(() => {
     appMountedRef.current = true;
@@ -767,24 +624,6 @@ function App() {
       appMountedRef.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    const currentTrack = playback.state.currentTrack;
-    const previousTrackKey = previousPlaybackTrackKeyRef.current;
-    previousPlaybackTrackKeyRef.current = currentTrack?.trackKey ?? null;
-    if (
-      !currentTrack
-      || currentTrack.trackKey === previousTrackKey
-      || !shouldFollowPlaybackTransition(
-        previousTrackKey,
-        selectedTrackRef.current?.trackKey ?? null,
-        tagSelectionKind,
-      )
-    ) return;
-    artistRequestRef.current += 1;
-    setSelectedTrack(currentTrack);
-    setTagSelectionKind("track");
-  }, [playback.state.currentTrack, tagSelectionKind]);
 
   useEffect(() => {
     saveLayoutPreferences(layoutPreferences);
@@ -807,117 +646,27 @@ function App() {
 
   const pageKey = artistPageName ? `artist:${artistPageName}` : activeNav;
   const scrollExplorerView = explorerViewForDestination(activeNav);
-  scrollReadyRef.current = loadError !== null || (snapshot !== null && (artistPageName !== null || scrollExplorerView === null
-    || explorerLoadState === "error"
-    || (explorerLoadState === "ready" && !explorerRestorationPendingRef.current && albumDetailState !== "loading"
-      && loadedExplorerRequestKeyRef.current === explorerRequestKey(explorerView, explorerFilters, explorerReloadToken))));
-
-  scrollReadyRef.current = scrollReadyRef.current && (artistPageName !== null || ({
-    History: historyLoadState !== "loading",
-    Observatory: reviewLoadState !== "loading",
-    Genres: genreIndexState !== "loading" && genreDetailState !== "loading",
-    Publishers: publisherLoadState !== "loading" && publisherDetailState !== "loading",
-    Years: yearLoadState !== "loading" && yearDetailState !== "loading",
-    Ratings: ratingsLoadState !== "loading" && ratingsPageState !== "loading",
-  } as Partial<Record<SidebarDestination, boolean>>)[activeNav] !== false);
-
-  useEffect(() => {
-    if (explorerLoadState !== "ready" || explorerRestorationPendingRef.current
-      || loadedExplorerRequestKeyRef.current !== explorerRequestKey(explorerView, explorerFilters, explorerReloadToken)) return;
-    workspaceRef.current = {
-      ...workspaceRef.current,
-      explorerKey: explorerRequestKey(explorerView, explorerFilters, 0),
-      loaded: explorerTracks.length + explorerAlbums.length + explorerArtists.length,
-      trackKey: selectedTrack?.trackKey ?? null,
-    };
-    saveWorkspaceCheckpoint(workspaceRef.current);
-  }, [explorerLoadState, explorerView, explorerFilters, explorerReloadToken, explorerTracks.length, explorerAlbums.length, explorerArtists.length, selectedTrack]);
-
   useLayoutEffect(() => {
-    const scrollContainer = mainScrollRef.current;
-    if (!scrollContainer) return undefined;
-    restoringScrollRef.current = true;
-    return restoreWorkspaceScroll(scrollContainer, scrollPositionByDestinationRef.current[pageKey] ?? 0,
-      () => scrollReadyRef.current
-        && !scrollContainer.querySelector('.chart-studio[aria-busy="true"]:not([style*="display: none"])')
-        && (artistPageName ? !!scrollContainer.querySelector('.artist-page:not([style*="display: none"])') : true),
-      () => { restoringScrollRef.current = false; });
-  }, [pageKey, artistPageName, navigationRevision]);
+    scrollReadyRef.current = loadError !== null || (snapshot !== null && (artistPageName !== null || scrollExplorerView === null
+      || explorerLoadState === "error"
+      || (explorerLoadState === "ready" && !explorerRestorationPendingRef.current && albumDetailState !== "loading"
+        && loadedExplorerRequestKeyRef.current === explorerRequestKey(explorerView, explorerFilters, explorerReloadToken))));
 
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void loadLaptopModeStatus()
-        .then((status) => {
-          if (cancelled) return;
-          if (status.albumOrderRevision > albumOrderRevisionRef.current) {
-            albumOrderRevisionRef.current = status.albumOrderRevision;
-            setExplorerReloadToken((value) => value + 1);
-          }
-          setLaptopModeStatus(status);
-          setLaptopModeError(null);
-        })
-        .catch((error: unknown) => {
-          if (!cancelled) setLaptopModeError(error instanceof Error ? error.message : String(error));
-        });
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 5_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
+    scrollReadyRef.current = scrollReadyRef.current && (artistPageName !== null || ({
+      History: historyLoadState !== "loading",
+      Observatory: reviewLoadState !== "loading",
+      Genres: genreIndexState !== "loading" && genreDetailState !== "loading",
+      Publishers: publisherLoadState !== "loading" && publisherDetailState !== "loading",
+      Years: yearLoadState !== "loading" && yearDetailState !== "loading",
+      Ratings: ratingsLoadState !== "loading" && ratingsPageState !== "loading",
+    } as Partial<Record<SidebarDestination, boolean>>)[activeNav] !== false);
 
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: () => void = () => undefined;
-    void listenForGlobalShortcutResults((result) => shortcutResultHandlerRef.current(result))
-      .then((stop) => {
-        if (cancelled) stop();
-        else unlisten = stop;
-      })
-      .catch((error: unknown) => console.warn("Aurora could not listen for shortcut results", error));
-    return () => {
-      cancelled = true;
-      unlisten();
-    };
-  }, []);
+  });
 
-  useEffect(() => {
-    if (!settingsOpen) return;
-    let cancelled = false;
-    void Promise.allSettled([loadGlobalShortcutSettings(), loadAudioSettings()]).then(([shortcuts, audio]) => {
-      if (cancelled) return;
-      if (shortcuts.status === "fulfilled") setShortcutStatus(shortcuts.value);
-      else {
-        const message = shortcuts.reason instanceof Error ? shortcuts.reason.message : String(shortcuts.reason);
-        setShortcutStatus({
-          platform: navigator.userAgent.includes("Mac") ? "macos" : "windows",
-          enabled: true,
-          registered: false,
-          platformAvailable: true,
-          error: message,
-          warning: null,
-          bindings: defaultShortcutBindings,
-        });
-      }
-      if (audio.status === "fulfilled") setAudioStatus(audio.value);
-      else {
-        const message = audio.reason instanceof Error ? audio.reason.message : String(audio.reason);
-        setAudioStatus({
-          settings: { outputDeviceId: "system-default", replayGainMode: "off" },
-          devices: [],
-          activeDeviceId: null,
-          activeDeviceLabel: null,
-          usingFallback: false,
-          message: null,
-          error: message,
-        });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [settingsOpen]);
+  useWorkspaceCheckpoint({
+    workspace: workspaceRestoration, explorer: explorerWorkspace, selectedTrack,
+    pageKey, artistPageName, navigationRevision
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -936,34 +685,7 @@ function App() {
         if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
       });
     return () => { cancelled = true; };
-  }, [reloadToken]);
-
-  useEffect(() => {
-    const visibleTracks = explorerView === "tracks" ? explorerTracks : albumTracks;
-    const trackIds = [...new Set([
-      ...visibleTracks.map((track) => track.id),
-      ...(selectedTrack ? [selectedTrack.id] : []),
-    ])].slice(0, 100);
-    const albumIds = [...new Set([
-      ...explorerAlbums.map((album) => album.id),
-      ...(selectedAlbumId ? [selectedAlbumId] : []),
-      ...(selectedYearAlbum ? [selectedYearAlbum.id] : []),
-    ])].slice(0, 200 - trackIds.length);
-    if (trackIds.length === 0 && albumIds.length === 0) {
-      return;
-    }
-    let cancelled = false;
-    void loadCatalogChartRankings({ trackIds, albumIds })
-      .then((rankings) => {
-        if (!cancelled) setCatalogChartRanks(rankings);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setCatalogChartRanks({ tracks: {}, albums: {} });
-        console.warn("Aurora could not load Music Library chart rankings", error);
-      });
-    return () => { cancelled = true; };
-  }, [albumTracks, explorerAlbums, explorerTracks, explorerView, selectedAlbumId, selectedTrack, selectedYearAlbum]);
+  }, [catalogRevisionRef, reloadToken, setSelectedTrack]);
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
@@ -978,149 +700,6 @@ function App() {
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
-
-  useEffect(() => {
-    const trackKey = selectedTrack?.trackKey;
-    if (!trackKey) return;
-    let cancelled = false;
-    const refresh = () => {
-      void loadTrackHistoryInsight(trackKey)
-        .then((value) => {
-          if (!cancelled) setTrackHistory({ trackKey, value });
-        })
-        .catch(() => undefined);
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 15_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [selectedTrack?.trackKey]);
-
-  const libraryReady = snapshot !== null;
-
-  useEffect(() => {
-    if (!libraryReady) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setPlaylistsLoading(true);
-      setPlaylistsError(null);
-      void listMusicLibraryPlaylists().then((items) => {
-        if (cancelled) return;
-        setSavedPlaylists(items);
-        setSelectedPlaylistId((current) => items.some((item) => item.id === current) ? current : items[0]?.id ?? null);
-        setPlaylistsLoading(false);
-      }).catch((error: unknown) => {
-        if (cancelled) return;
-        setPlaylistsError(error instanceof Error ? error.message : String(error));
-        setPlaylistsLoading(false);
-      });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [libraryReady, playlistsReloadToken]);
-
-  useEffect(() => {
-    if (selectedPlaylistId !== null && savedPlaylists.some((item) => item.id === selectedPlaylistId)) {
-      saveSelectedPlaylistId(selectedPlaylistId);
-    }
-  }, [savedPlaylists, selectedPlaylistId]);
-
-  const refreshCatalogIfChanged = useCallback((
-    isCurrent: () => boolean = () => true,
-  ): Promise<boolean> => {
-    const shouldContinue = () => appMountedRef.current && isCurrent();
-    if (!shouldContinue()) return Promise.resolve(false);
-    const runningRefresh = catalogRefreshPromiseRef.current;
-    if (runningRefresh) {
-      catalogRefreshRequestedRef.current = true;
-      return runningRefresh;
-    }
-
-    const refreshOnce = async (): Promise<boolean> => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const projectionTokenAtStart = latestTagProjectionTokenRef.current;
-        const revision = await loadCatalogRevision();
-        if (!shouldContinue()) return false;
-        const previousRevision = catalogRevisionRef.current;
-        if (previousRevision === null) {
-          catalogRevisionRef.current = revision;
-          return false;
-        }
-        if (revision === previousRevision) return false;
-
-        const reboundResult = await rebindPlaybackCatalog();
-        if (!shouldContinue() || reboundResult === null) return false;
-
-        const nextSnapshot = await loadLibrarySnapshot();
-        if (!shouldContinue()) return false;
-        if (!catalogRefreshIsConsistent(
-          revision,
-          reboundResult.catalogRevision,
-          nextSnapshot.catalogRevision,
-        )) {
-          if (attempt === 0) continue;
-          throw new Error("The Music Library catalog changed again during Aurora's refresh.");
-        }
-        if (latestTagProjectionTokenRef.current !== projectionTokenAtStart) {
-          if (attempt === 0) continue;
-          catalogRefreshRequestedRef.current = true;
-          return false;
-        }
-
-        const rebound = reboundResult.playback;
-        setLoadError(null);
-        setSnapshot(nextSnapshot);
-        const selectedKey = selectedTrackRef.current?.trackKey;
-        if (selectedKey) {
-          const reboundSelection = rebound.queue.find((track) => track.trackKey === selectedKey)
-            ?? nextSnapshot.tracks.find((track) => track.trackKey === selectedKey);
-          if (reboundSelection) setSelectedTrack(reboundSelection);
-        }
-        catalogRevisionRef.current = revision;
-
-        const currentScroll = mainScrollRef.current?.scrollTop;
-        if (typeof currentScroll === "number" && currentScroll > 0) {
-          scrollPositionByDestinationRef.current[activeNavRef.current] = currentScroll;
-        }
-        restoringScrollRef.current = true;
-        preserveExplorerOnReloadRef.current = true;
-        if (selectedAlbumIdRef.current) pendingExplorerAlbumIdRef.current = selectedAlbumIdRef.current;
-        setExplorerReloadToken((value) => value + 1);
-        setReviewReloadToken((value) => value + 1);
-        setHistoryReloadToken((value) => value + 1);
-        setGenreIndexReloadToken((value) => value + 1);
-        setGenreDetailReloadToken((value) => value + 1);
-        setPublisherReloadToken((value) => value + 1);
-        setYearReloadToken((value) => value + 1);
-        setChartReloadToken((value) => value + 1);
-        setSyncMessage("Music Library import detected · refreshed Aurora");
-        const artistName = inspectorArtistNameRef.current;
-        if (inspectorViewRef.current === "artist" && artistName) {
-          openArtistInspectorRef.current(artistName);
-        }
-        return true;
-      }
-      return false;
-    };
-
-    const runRefresh = async (): Promise<boolean> => {
-      let refreshed = false;
-      do {
-        catalogRefreshRequestedRef.current = false;
-        refreshed = await refreshOnce() || refreshed;
-      } while (catalogRefreshRequestedRef.current && shouldContinue());
-      return refreshed;
-    };
-
-    const refreshTask = runRefresh().finally(() => {
-      if (catalogRefreshPromiseRef.current === refreshTask) {
-        catalogRefreshPromiseRef.current = null;
-      }
-    });
-    catalogRefreshPromiseRef.current = refreshTask;
-    return refreshTask;
-  }, [rebindPlaybackCatalog]);
 
   const startBackgroundIntake = useCallback((
     request: LibraryIntakeApplyRequest,
@@ -1169,841 +748,14 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [backgroundIntakeNotice]);
 
-  const handleCatalogSync = useCallback(async (
-    sync: CatalogSync | null | undefined,
-    announceSuccess = false,
-  ): Promise<boolean> => {
-    if (!sync) return false;
-    const previousSyncToken = latestCatalogSyncTokenRef.current;
-    const syncDecision = advanceCatalogProjectionToken(
-      latestCatalogSyncTokenRef.current,
-      sync.projectionToken,
-    );
-    if (!syncDecision.accepted) return false;
-    latestCatalogSyncTokenRef.current = syncDecision.latestToken;
-    const previous = catalogSyncNoticeRef.current;
-    const wasUnsettled = previous?.status === "pending" || previous?.status === "blocked";
-    const needsRetry = catalogSyncNeedsRetry(sync);
-    if (needsRetry || sync.status === "blocked" || announceSuccess || wasUnsettled) {
-      catalogSyncNoticeRef.current = sync;
-      setCatalogSyncNotice(sync);
-    } else if (!previous) {
-      catalogSyncNoticeRef.current = sync;
-    }
-    try {
-      const refreshed = await refreshCatalogIfChanged();
-      // Successful tag synchronization need not create an import run. Refresh
-      // retained Charts even when the import-based catalog revision is unchanged.
-      if (!refreshed && sync.status === "synced"
-        && (announceSuccess || wasUnsettled || syncDecision.latestToken !== previousSyncToken)) {
-        setChartReloadToken((value) => value + 1);
-      }
-      return refreshed;
-    } catch (error) {
-      console.warn("Aurora could not check Music Library for partial sync updates yet", error);
-      return false;
-    }
-  }, [refreshCatalogIfChanged]);
-
-  const acceptTrackProjectionKeys = useCallback((
-    trackKeys: readonly string[],
-    projectionToken: number | null | undefined,
-  ) => {
-    const decision = advanceCatalogTrackProjectionTokens(
-      latestTagProjectionTokenRef.current,
-      latestTrackProjectionTokensRef.current,
-      projectionToken,
-      trackKeys,
-    );
-    latestTagProjectionTokenRef.current = decision.latestToken;
-    latestTrackProjectionTokensRef.current = decision.latestTrackTokens;
-    return decision;
-  }, []);
-
-  useEffect(() => {
-    if (!libraryReady) return;
-    let cancelled = false;
-    const isCurrent = () => !cancelled;
-    const refreshQuietly = () => {
-      void refreshCatalogIfChanged(isCurrent).catch((error: unknown) => {
-        console.warn("Aurora could not check the Music Library catalog revision", error);
-      });
-    };
-    const initialRefresh = window.setTimeout(refreshQuietly, 0);
-    const interval = window.setInterval(refreshQuietly, 5_000);
-    const refreshOnFocus = refreshQuietly;
-    window.addEventListener("focus", refreshOnFocus);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(initialRefresh);
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshOnFocus);
-    };
-  }, [libraryReady, refreshCatalogIfChanged]);
-
-  const refreshExplorerFiles = useCallback((
-    view: ExplorerView, filters: ExplorerFilters, targetCount: number, requestId: number,
-    cancelled: () => boolean = () => false,
-  ) => {
-    const obsolete = () => cancelled() || requestId !== exploreRequestRef.current;
-    queueExplorerRefresh({
-      load: () => loadWorkspacePages<ExplorerResult>(
-        (cursor) => loadExplorerPage(view, filters, cursor, false), targetCount, obsolete,
-      ),
-      cancelled: obsolete,
-      apply: (page) => {
-        // Replace the complete loaded window: merging would retain albums that
-        // no longer satisfy a pending genre/completeness filter.
-        setExplorerTracks(page.tracks);
-        setExplorerAlbums(page.albums);
-        setExplorerArtists(page.artists);
-        setExplorerCursor(page.nextCursor);
-        setExplorerCount({ key: explorerCountKey(view, filters), total: page.totalCount });
-        explorerLocalOnlyRef.current = false;
-        const selected = selectedAlbumIdRef.current;
-        if (view === "albums" && selected && !page.albums.some((album) => album.id === selected)) {
-          albumRequestRef.current += 1;
-          setSelectedAlbumId(null);
-          setAlbumTracks([]);
-          setAlbumTracksTruncated(false);
-          setAlbumDetailState("ready");
-        }
-      },
-      failed: (error) => console.warn("Aurora kept local search results after file refresh failed", error),
-    });
-  }, [queueExplorerRefresh]);
-
-  const refreshSelectedAlbumPopularity = useCallback((albumId: string, requestId: number) => {
-    void loadAlbumPopularity(albumId).then((popularity) => {
-      if (requestId !== albumRequestRef.current) return;
-      setAlbumTracks((current) => applyAlbumPopularity(current, popularity));
-    }).catch(() => {
-      // Cached evidence remains visible when Last.fm is offline or not configured.
-    });
-  }, []);
-
-  const refreshSelectedAlbumFiles = useCallback((albumId: string, requestId: number) => {
-    void loadAlbumDetail(albumId).then((detail) => {
-      if (requestId !== albumRequestRef.current) return;
-      const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
-      setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-      setAlbumTracksTruncated(detail.tracksTruncated);
-      setSelectedTrack((current) => detail.tracks.find((track) => track.trackKey === current?.trackKey) ?? detail.tracks[0] ?? null);
-    }).catch((error: unknown) => {
-      // Keep the local tracks usable if the music share cannot be refreshed.
-      console.warn("Aurora could not refresh album files", error);
-    }).finally(() => {
-      if (requestId === albumRequestRef.current) refreshSelectedAlbumPopularity(albumId, requestId);
-    });
-  }, [refreshSelectedAlbumPopularity]);
-
-  // Starting an urgent file readback inside the transition's promise callback can
-  // interrupt snapshot capture. Effects run after the selected detail commits.
-  useEffect(() => {
-    if (albumFileRefreshRequest && albumFileRefreshRequest.requestId === albumRequestRef.current) {
-      refreshSelectedAlbumFiles(albumFileRefreshRequest.albumId, albumFileRefreshRequest.requestId);
-    }
-  }, [albumFileRefreshRequest, refreshSelectedAlbumFiles]);
-
-  useEffect(() => {
-    const candidates = [
-      ...(snapshot?.tracks ?? []),
-      ...explorerTracks,
-      ...albumTracks,
-      ...yearAlbumTracks,
-      ...ratingAlbumTracks,
-      ...publisherAlbumTracks,
-      ...(genreDetail?.highlights ?? []),
-    ];
-    if (candidates.length === 0) return;
-    const timer = window.setTimeout(() => {
-      setSelectedTrack((current) => {
-        if (!current) return current;
-        return candidates.find((track) => track.trackKey === current.trackKey) ?? current;
-      });
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [
-    snapshot,
-    explorerTracks,
-    albumTracks,
-    yearAlbumTracks,
-    ratingAlbumTracks,
-    publisherAlbumTracks,
-    genreDetail,
-  ]);
-
-  useEffect(() => {
-    const explorerActive = libraryReady && !artistPageName && explorerViewForDestination(activeNav) !== null;
-    const preservation = resolveExplorerRefreshPreservation(
-      preserveExplorerOnReloadRef.current,
-      explorerActive,
-      loadedExplorerViewKeyRef.current === explorerRequestKey(explorerView, explorerFilters, 0),
-    );
-    preserveExplorerOnReloadRef.current = preservation.pending;
-    if (!explorerActive) return;
-    const preservingCurrentView = preservation.preservingCurrentView;
-    const localOnly = !preservingCurrentView || explorerLocalOnlyRef.current;
-    const requestKey = explorerRequestKey(explorerView, explorerFilters, explorerReloadToken);
-    if (shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current, requestKey, preservingCurrentView)) return;
-    const restoringStoredView = explorerRestorationPendingRef.current;
-    const handoffAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
-    const restoredAlbumId = handoffAlbumId
-      ?? (preservingCurrentView && explorerView === "albums" ? selectedAlbumIdRef.current : null)
-      ?? (restoringStoredView && explorerView === "albums" ? initialViewPreferences.selectedAlbumId : null);
-    const restoredTrackKey = preservingCurrentView ? selectedTrackRef.current?.trackKey : restoringStoredView ? initialWorkspace.trackKey : null;
-    const preservedLoaded = explorerLoadedRef.current;
-    const preservedCursor = explorerCursorRef.current;
-    const preservedScroll = preservingCurrentView
-      ? (mainScrollRef.current?.scrollTop ?? scrollPositionByDestinationRef.current[activeNav] ?? 0)
-      : null;
-    if (preservedScroll !== null && preservedScroll > 0) {
-      restoringScrollRef.current = true;
-    }
-    const requestId = ++exploreRequestRef.current;
-    let cancelled = false;
-    albumRequestRef.current += 1;
-    const clearDetailTimer = window.setTimeout(() => {
-      if (cancelled) return;
-      setIsLoadingMore(false);
-      if (!preservingCurrentView) {
-        if (!restoredAlbumId) setSelectedAlbumId(null);
-        setAlbumTracks([]);
-        setAlbumTracksTruncated(false);
-      }
-    }, 0);
-    const timer = window.setTimeout(() => {
-      if (!preservingCurrentView) setExplorerLoadState("loading");
-      setExplorerError(null);
-      setExplorerCursor(null);
-      explorerLocalOnlyRef.current = localOnly;
-      void loadWorkspacePages<ExplorerResult>(
-        (cursor) => loadExplorerPage(explorerView, explorerFilters, cursor, localOnly),
-        restoringStoredView && initialWorkspace.explorerKey === explorerRequestKey(explorerView, explorerFilters, 0)
-          ? initialWorkspace.loaded
-          : (preservingCurrentView ? preservedLoaded : 0),
-        () => cancelled,
-      )
-        .then((page) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== exploreRequestRef.current) return;
-            setExplorerTracks((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.tracks) : page.tracks);
-            setExplorerAlbums((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.albums) : page.albums);
-            setExplorerArtists((current) => preservingCurrentView ? mergeRefreshedExplorerPage(current, page.artists) : page.artists);
-            setExplorerCursor(preservingCurrentView
-              ? refreshedExplorerCursor(preservedLoaded, page.tracks.length + page.albums.length + page.artists.length, preservedCursor, page.nextCursor)
-              : page.nextCursor);
-            setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
-            setExplorerLoadState("ready");
-            loadedExplorerRequestKeyRef.current = requestKey;
-            loadedExplorerViewKeyRef.current = explorerRequestKey(explorerView, explorerFilters, 0);
-            const restoreScrollIfPreserved = () => {
-              if (preservedScroll !== null && preservedScroll > 0) {
-                const scrollContainer = mainScrollRef.current;
-                if (scrollContainer) {
-                  restoreWorkspaceScroll(
-                    scrollContainer,
-                    preservedScroll,
-                    () => scrollReadyRef.current,
-                    () => { restoringScrollRef.current = false; },
-                  );
-                  return;
-                }
-              }
-              restoringScrollRef.current = false;
-            };
-            if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
-              const albumDetailRequestId = ++albumRequestRef.current;
-              setSelectedAlbumId(restoredAlbumId);
-              if (!preservingCurrentView) {
-                setAlbumDetailState("loading");
-              }
-              void loadAlbumDetail(restoredAlbumId, { localOnly: true })
-                .then((detail) => {
-                  transitionContent(() => {
-                    if (albumDetailRequestId !== albumRequestRef.current) return;
-                    const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-                    setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
-                      ? current.map((album) => album.id === detail.album.id ? projectedAlbum : album)
-                      : [projectedAlbum, ...current]);
-                    setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-                    setAlbumTracksTruncated(detail.tracksTruncated);
-                    setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
-                    setAlbumDetailState("ready");
-                    setAlbumFileRefreshRequest({ albumId: restoredAlbumId, requestId: albumDetailRequestId });
-                    restoreScrollIfPreserved();
-                  }, "album-detail", !preservingCurrentView);
-                })
-                .catch((error: unknown) => {
-                  if (albumDetailRequestId !== albumRequestRef.current) return;
-                  console.warn("Aurora could not restore album details", error);
-                  setAlbumDetailState("error");
-                  restoreScrollIfPreserved();
-                });
-            } else {
-              if (restoringStoredView) {
-                setSelectedAlbumId(null);
-              }
-              restoreScrollIfPreserved();
-            }
-            if (handoffAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
-            explorerRestorationPendingRef.current = false;
-            if (localOnly) refreshExplorerFiles(explorerView, explorerFilters,
-              Math.max(preservingCurrentView ? preservedLoaded : 0, page.tracks.length + page.albums.length + page.artists.length),
-              requestId, () => cancelled);
-          }, "artist-detail", !preservingCurrentView);
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== exploreRequestRef.current) return;
-          explorerRestorationPendingRef.current = false;
-          restoringScrollRef.current = false;
-          setExplorerError(error instanceof Error ? error.message : String(error));
-          if (preservingCurrentView) {
-            console.warn("Aurora kept the current Library view after its background refresh failed", error);
-          } else {
-            setExplorerLoadState("error");
-          }
-        });
-    }, preservingCurrentView ? 0 : (explorerFilters.query.trim() ? explorerSearchDebounceMs : 0));
-    return () => {
-      cancelled = true;
-      window.clearTimeout(clearDetailTimer);
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, artistPageName, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialViewPreferences.selectedAlbumId, initialWorkspace, refreshSelectedAlbumFiles, refreshExplorerFiles]);
-
-  useEffect(() => {
-    if (
-      libraryReady
-      && ["Inbox", "Observatory", "Charts", "Playlists", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav)
-    ) explorerRestorationPendingRef.current = false;
-  }, [activeNav, libraryReady]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Genres") return;
-    const pageRequestKey = String(genreIndexReloadToken);
-    if (loadedPageRequestsRef.current.get("genre-index") === pageRequestKey) return;
-    const requestId = ++genreIndexRequestRef.current;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setGenreIndexState("loading");
-      setGenreIndexError(null);
-      void loadGenreIndex()
-        .then((items) => {
-          if (cancelled || requestId !== genreIndexRequestRef.current) return;
-          loadedPageRequestsRef.current.set("genre-index", pageRequestKey);
-          setGenreAtlasGenres(items);
-          setSelectedGenre((current) => current && items.some((item) => item.name === current)
-            ? current
-            : items[0]?.name ?? null);
-          setGenreIndexState("ready");
-        })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== genreIndexRequestRef.current) return;
-          setGenreIndexError(error instanceof Error ? error.message : String(error));
-          setGenreIndexState("error");
-        });
-    }, 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, genreIndexReloadToken]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Genres" || !selectedGenre) return;
-    const pageRequestKey = JSON.stringify([selectedGenre, genreDetailReloadToken]);
-    if (loadedPageRequestsRef.current.get("genre-detail") === pageRequestKey) return;
-    const requestId = ++genreDetailRequestRef.current;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setGenreDetailState("loading");
-      setGenreDetailError(null);
-      void loadGenreDetail(selectedGenre)
-        .then((detail) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== genreDetailRequestRef.current) return;
-            loadedPageRequestsRef.current.set("genre-detail", pageRequestKey);
-            setGenreDetail(detail);
-            setGenreDetailState("ready");
-          }, "collection");
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== genreDetailRequestRef.current) return;
-          setGenreDetailError(error instanceof Error ? error.message : String(error));
-          setGenreDetailState("error");
-        });
-    }, 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, selectedGenre, genreDetailReloadToken]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Publishers") return;
-    const pageRequestKey = JSON.stringify([publisherSearch, publisherReloadToken]);
-    if (loadedPageRequestsRef.current.get("publishers") === pageRequestKey) return;
-    const requestId = ++publisherOverviewRequestRef.current;
-    publisherDetailRequestRef.current += 1;
-    publisherAlbumRequestRef.current += 1;
-    const preserveSelection = publisherLoadedSearchRef.current === publisherSearch;
-    const previousPublisher = preserveSelection
-      ? publisherDetailRef.current?.publisher.name ?? null
-      : null;
-    const previousAlbumId = preserveSelection
-      ? selectedPublisherAlbumRef.current?.id ?? null
-      : null;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setPublisherLoadState("loading");
-      setPublisherDetailState("loading");
-      setPublisherError(null);
-      setPublisherDetailError(null);
-      setPublisherQueueMessage(null);
-      const detailRequest = previousPublisher
-        ? loadPublisherDetail(previousPublisher).catch(() => null)
-        : Promise.resolve(null);
-      void Promise.all([loadPublisherOverview(publisherSearch), detailRequest])
-        .then(([overview, refreshedDetail]) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
-            const detail = refreshedDetail ?? overview.initialDetail;
-            publisherLoadedSearchRef.current = publisherSearch;
-            loadedPageRequestsRef.current.set("publishers", pageRequestKey);
-            setPublisherOverview(overview);
-            setPublisherDetail(detail);
-            setPublisherLoadState("ready");
-            setPublisherDetailState("ready");
-            const initialAlbum = detail.albums.find((album) => album.id === previousAlbumId)
-              ?? detail.albums[0]
-              ?? null;
-            setSelectedPublisherAlbum(initialAlbum);
-            setPublisherAlbumTracks([]);
-            if (!initialAlbum) return;
-            if (!preserveSelection) setInspectorView("album");
-            const albumRequestId = ++publisherAlbumRequestRef.current;
-            void loadPublisherAlbumTracks(initialAlbum)
-              .then((tracks) => {
-                transitionContent(() => {
-                  if (!cancelled && albumRequestId === publisherAlbumRequestRef.current) {
-                    setPublisherAlbumTracks(tracks);
-                  }
-                }, "collection");
-              })
-              .catch(() => undefined);
-          }, "collection");
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== publisherOverviewRequestRef.current) return;
-          setPublisherError(error instanceof Error ? error.message : String(error));
-          setPublisherLoadState("error");
-          setPublisherDetailState("error");
-        });
-    }, publisherSearch.trim() ? 160 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, publisherReloadToken, publisherSearch]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Years") return;
-    if (yearOverview && yearLoadedTokenRef.current === yearReloadToken) {
-      setYearLoadState("ready");
-      return;
-    }
-    const requestId = ++yearOverviewRequestRef.current;
-    yearDetailRequestRef.current += 1;
-    const preserveSelection = yearLoadedTokenRef.current >= 0;
-    const previousSelection = preserveSelection ? yearDetailRef.current?.selection ?? null : null;
-    const previousAlbumId = preserveSelection ? selectedYearAlbumRef.current?.id ?? null : null;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setYearLoadState("loading");
-      setYearDetailState("loading");
-      setYearError(null);
-      setYearDetailError(null);
-      setYearQueueMessage(null);
-      const detailRequest = previousSelection
-        ? loadYearDetail(previousSelection).catch(() => null)
-        : Promise.resolve(null);
-      void Promise.all([loadYearOverview(), detailRequest])
-        .then(([overview, refreshedDetail]) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== yearOverviewRequestRef.current) return;
-            const detail = refreshedDetail ?? overview.initialDetail;
-            setYearOverview(overview);
-            yearLoadedTokenRef.current = yearReloadToken;
-            setYearDetail(detail);
-            setYearLoadState("ready");
-            setYearDetailState("ready");
-            const initialAlbum = detail.albums.find((album) => album.id === previousAlbumId)
-              ?? detail.albums[0]
-              ?? null;
-            setSelectedYearAlbum(initialAlbum);
-            setYearAlbumTracks([]);
-            if (!initialAlbum) return;
-            if (!preserveSelection) setInspectorView("album");
-            const albumRequestId = ++yearAlbumRequestRef.current;
-            void loadYearAlbumTracks(initialAlbum)
-              .then((tracks) => {
-                transitionContent(() => {
-                  if (albumRequestId === yearAlbumRequestRef.current) setYearAlbumTracks(tracks);
-                }, "collection");
-              })
-              .catch(() => undefined);
-          }, "collection");
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== yearOverviewRequestRef.current) return;
-          setYearError(error instanceof Error ? error.message : String(error));
-          setYearLoadState("error");
-          setYearDetailState("error");
-        });
-    }, 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, yearOverview, yearReloadToken]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Ratings") return;
-    const pageRequestKey = String(ratingsReloadToken);
-    if (loadedPageRequestsRef.current.get("ratings-overview") === pageRequestKey) return;
-    const requestId = ++ratingsRequestRef.current;
-    ratingsPageRequestRef.current += 1;
-    ratingsAlbumRequestRef.current += 1;
-    const preserveSelection = ratingsLoadedTokenRef.current >= 0;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (!preserveSelection) {
-        setRatingsLoadState("loading");
-        setRatingsPageState("loading");
-        setRatingsPage(null);
-      }
-      setRatingsError(null);
-      setRatingsPageError(null);
-      setRatingsQueueMessage(null);
-      void loadRatingsOverview()
-        .then((overview) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== ratingsRequestRef.current) return;
-            loadedPageRequestsRef.current.set("ratings-overview", pageRequestKey);
-            setRatingsOverview(overview);
-            ratingsPreserveInspectorTokenRef.current = preserveSelection
-              ? ratingsReloadToken
-              : null;
-            ratingsLoadedTokenRef.current = ratingsReloadToken;
-            setRatingsLoadState("ready");
-          }, "collection");
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== ratingsRequestRef.current) return;
-          setRatingsError(error instanceof Error ? error.message : String(error));
-          setRatingsLoadState("error");
-          setRatingsPageState("error");
-          setRatingsRefreshing(false);
-        });
-    }, 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, ratingsReloadToken]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Ratings" || !ratingsOverview) return;
-    if (ratingsLoadedTokenRef.current !== ratingsReloadToken) return;
-    const pageRequestKey = JSON.stringify([ratingsCompletion, ratingsRemainingTracks, ratingsReloadToken]);
-    if (loadedPageRequestsRef.current.get("ratings-page") === pageRequestKey) return;
-    const pageRequestId = ++ratingsPageRequestRef.current;
-    ratingsAlbumRequestRef.current += 1;
-    const preserveSelection = ratingsPreserveInspectorTokenRef.current === ratingsReloadToken;
-    const previousAlbumId = preserveSelection ? selectedRatingAlbumRef.current?.id ?? null : null;
-    let cancelled = false;
-    if (!preserveSelection) setRatingsPageState("loading");
-    setRatingsPageError(null);
-    const request = ratingsCompletion === "partiallyRated" && ratingsRemainingTracks === null
-      ? Promise.resolve(ratingsOverview.initialPage)
-      : loadRatingAlbumPage(ratingsCompletion, ratingsCompletion === "partiallyRated" ? ratingsRemainingTracks : null);
-    void request
-      .then((page) => {
-        transitionContent(() => {
-          if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
-          loadedPageRequestsRef.current.set("ratings-page", pageRequestKey);
-          setRatingsPage(page);
-          setRatingsPageState("ready");
-          setRatingsRefreshing(false);
-          const initialAlbum = page.albums.find((album) => album.id === previousAlbumId)
-            ?? page.albums[0]
-            ?? null;
-          setSelectedRatingAlbum(initialAlbum);
-          setRatingAlbumTracks([]);
-          ratingsPreserveInspectorTokenRef.current = null;
-          if (!initialAlbum) return;
-          if (!preserveSelection) setInspectorView("album");
-          const albumRequestId = ++ratingsAlbumRequestRef.current;
-          void loadRatingAlbumTracks(initialAlbum)
-            .then((tracks) => {
-              transitionContent(() => {
-                if (!cancelled && albumRequestId === ratingsAlbumRequestRef.current) {
-                  setRatingAlbumTracks(tracks);
-                }
-              }, "collection");
-            })
-            .catch(() => undefined);
-        }, "collection");
-  })
-      .catch((error: unknown) => {
-        if (cancelled || pageRequestId !== ratingsPageRequestRef.current) return;
-        setRatingsPageError(error instanceof Error ? error.message : String(error));
-        setRatingsPageState("error");
-        setRatingsRefreshing(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeNav, libraryReady, ratingsCompletion, ratingsOverview, ratingsReloadToken, ratingsRemainingTracks]);
-
-  useEffect(() => {
-    if (!genreRadioSession) return;
-    if (playback.state.queue.length === 0 || playback.state.currentIndex === null) return;
-    const remaining = playback.state.queue.length - playback.state.currentIndex - 1;
-    if (remaining >= 20 || genreRefillRunningRef.current) return;
-    const requestId = ++genreQueueRequestRef.current;
-    genreRefillRunningRef.current = true;
-    const excluded = playback.state.queue.map((track) => track.trackKey);
-    void loadGenreQueue({
-      genre: genreRadioSession.genre,
-      mode: genreRadioSession.mode,
-      limit: 100,
-      excludeTrackKeys: excluded,
-    })
-      .then(async (tracks) => {
-        if (requestId !== genreQueueRequestRef.current) return;
-        if (tracks.length === 0) {
-          setGenreQueueMessage(`Aurora reached the end of this ${genreRadioSession.genre} expedition.`);
-          return;
-        }
-        const next = await appendPlayback(tracks);
-        if (requestId === genreQueueRequestRef.current && next) {
-          setGenreQueueMessage(`Added ${formatCount(tracks.length)} more ${genreRadioSession.genre} tracks.`);
-        }
-      })
-      .catch((error: unknown) => {
-        if (requestId === genreQueueRequestRef.current) {
-          setGenreQueueMessage(`Could not refill Genre Radio: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      })
-      .finally(() => {
-        if (requestId === genreQueueRequestRef.current) genreRefillRunningRef.current = false;
-      });
-  }, [appendPlayback, genreRadioSession, playback.state.currentIndex, playback.state.queue]);
-
-  useEffect(() => {
-    if (!libraryReady || activeNav !== "Observatory") return;
-    const pageRequestKey = JSON.stringify([reviewFilter, reviewSearch, reviewReloadToken]);
-    if (loadedPageRequestsRef.current.get("observatory") === pageRequestKey) return;
-    const requestId = ++reviewRequestRef.current;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setReviewLoadState("loading");
-      setReviewError(null);
-      setReviewCursor(null);
-      void loadArtistReviewPage({ pageSize: 50, filter: reviewFilter, search: reviewSearch.trim() || undefined })
-        .then((page) => {
-          transitionContent(() => {
-            if (cancelled || requestId !== reviewRequestRef.current) return;
-            loadedPageRequestsRef.current.set("observatory", pageRequestKey);
-            setReviewItems(page.items);
-            setReviewCursor(page.nextCursor);
-            setReviewLoadState("ready");
-          }, "page");
-  })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== reviewRequestRef.current) return;
-          setReviewError(error instanceof Error ? error.message : String(error));
-          setReviewLoadState("error");
-        });
-    }, reviewSearch.trim() ? 160 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeNav, libraryReady, reviewFilter, reviewSearch, reviewReloadToken]);
-
-  useEffect(() => {
-    if (!libraryReady || (activeNav !== "History" && activeNav !== "Universe")) return;
-    const pageRequestKey = JSON.stringify(activeNav === "History" ? [historySearch, historyOutcome, historyDeviceId, historyDateRange, historyReloadToken] : [historyReloadToken]);
-    if (loadedPageRequestsRef.current.get(activeNav) === pageRequestKey) return;
-    const requestId = ++historyRequestRef.current;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (activeNav === "History") setHistoryLoadState("loading");
-      setHistoryError(null);
-      const startedAfterMs = activeNav === "History" && historyDateRange !== "all"
-        ? Date.now() - Number(historyDateRange) * 86_400_000
-        : undefined;
-      void loadHistoryPage({
-        pageSize: activeNav === "History" ? 50 : 5,
-        search: activeNav === "History" ? historySearch.trim() || undefined : undefined,
-        outcome: activeNav === "History" ? historyOutcome : "all",
-        deviceId: activeNav === "History" ? historyDeviceId ?? undefined : undefined,
-        startedAfterMs,
-      })
-        .then((page) => {
-          if (cancelled || requestId !== historyRequestRef.current) return;
-          loadedPageRequestsRef.current.set(activeNav, pageRequestKey);
-          if (activeNav === "Universe") setUniverseHistoryPage(page);
-          else setHistoryPage(page);
-          setHistoryLoadState("ready");
-        })
-        .catch((error: unknown) => {
-          if (cancelled || requestId !== historyRequestRef.current) return;
-          setHistoryError(error instanceof Error ? error.message : String(error));
-          setHistoryLoadState("error");
-        });
-    }, activeNav === "History" && historySearch.trim() ? 160 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [
-    activeNav,
-    libraryReady,
-    historySearch,
-    historyOutcome,
-    historyDeviceId,
-    historyDateRange,
-    historyReloadToken,
-  ]);
-
-  useEffect(() => {
-    if (activeNav !== "History") return;
-    const interval = window.setInterval(() => {
-      setHistoryReloadToken((value) => value + 1);
-    }, 15_000);
-    return () => window.clearInterval(interval);
-  }, [activeNav]);
-
-  const applyReconciliationChanges = useCallback((changes: TagReconciliationChange[]) => {
-    if (changes.length === 0) return;
-    const byTrackKey = new Map(changes.map((change) => [change.trackKey, change]));
-    const reconcile = (track: Track) => {
-      const change = byTrackKey.get(track.trackKey);
-      return change ? trackWithReconciledTags(track, change) : track;
-    };
-    setExplorerTracks((current) => current.map(reconcile));
-    setAlbumTracks((current) => current.map(reconcile));
-    setYearAlbumTracks((current) => current.map(reconcile));
-    setRatingAlbumTracks((current) => current.map(reconcile));
-    setPublisherAlbumTracks((current) => current.map(reconcile));
-    setGenreDetail((current) => current ? {
-      ...current,
-      highlights: current.highlights.map(reconcile),
-    } : current);
-    setSelectedTrack((current) => current ? reconcile(current) : current);
-    setSnapshot((current) => current ? { ...current, tracks: current.tracks.map(reconcile) } : current);
-  }, []);
-
-  const refreshExternalTagChanges = useCallback(async () => {
-    if (reconciliationRunningRef.current) return;
-    reconciliationRunningRef.current = true;
-    try {
-      const report = await reconcilePendingTags();
-      setReconciliationHasMore(report.hasMore);
-      const projection = acceptTrackProjectionKeys(
-        report.changes.map((change) => change.trackKey),
-        report.projectionToken,
-      );
-      applyReconciliationChanges(report.changes.filter((change) => (
-        projection.acceptedTrackKeys.has(change.trackKey)
-      )));
-      if (report.externalChanges > 0) {
-        setSyncMessage(`Refreshed ${formatCount(report.externalChanges)} external tag ${report.externalChanges === 1 ? "change" : "changes"}`);
-      } else if (report.issues.length > 0 || report.hasMore) {
-        setSyncMessage(report.issues.length === 1 && report.issues[0]?.message
-          ? report.issues[0].message
-          : `${formatCount(report.issues.length)} tag ${report.issues.length === 1 ? "item needs" : "items need"} attention`);
-      } else if (!catalogSyncNeedsRetry(catalogSyncNoticeRef.current)) {
-        setSyncMessage(null);
-      }
-    } catch (error) {
-      console.warn("Aurora could not reconcile pending tags", error);
-      setReconciliationHasMore(true);
-      setSyncMessage("Tag and Music Library refresh will retry automatically");
-    } finally {
-      reconciliationRunningRef.current = false;
-    }
-  }, [acceptTrackProjectionKeys, applyReconciliationChanges]);
-
-  const retryPendingLibrarySyncNow = useCallback(async () => {
-    if (librarySyncRunningRef.current) return;
-    librarySyncRunningRef.current = true;
-    try {
-      await handleCatalogSync(await retryPendingLibrarySync());
-    } catch (error) {
-      console.warn("Aurora could not retry the pending Music Library update", error);
-    } finally {
-      librarySyncRunningRef.current = false;
-    }
-  }, [handleCatalogSync]);
-
-  useEffect(() => {
-    if (!libraryReady) return;
-    const initialRefresh = window.setTimeout(() => void refreshExternalTagChanges(), 0);
-    const refreshOnFocus = () => {
-      appFocusedRef.current = true;
-      void refreshExternalTagChanges();
-    };
-    const pauseOnBlur = () => {
-      appFocusedRef.current = false;
-    };
-    appFocusedRef.current = document.hasFocus();
-    window.addEventListener("focus", refreshOnFocus);
-    window.addEventListener("blur", pauseOnBlur);
-    return () => {
-      window.clearTimeout(initialRefresh);
-      window.removeEventListener("focus", refreshOnFocus);
-      window.removeEventListener("blur", pauseOnBlur);
-    };
-  }, [libraryReady, reloadToken, refreshExternalTagChanges]);
-
-  useEffect(() => {
-    if (!libraryReady || !reconciliationHasMore) return;
-    const interval = window.setInterval(() => {
-      if (appFocusedRef.current) void refreshExternalTagChanges();
-    }, catalogSyncRetryIntervalMs);
-    return () => window.clearInterval(interval);
-  }, [libraryReady, reconciliationHasMore, refreshExternalTagChanges]);
-
-  useEffect(() => {
-    if (!libraryReady) return;
-    const initialRetry = window.setTimeout(() => void retryPendingLibrarySyncNow(), 0);
-    return () => window.clearTimeout(initialRetry);
-  }, [libraryReady, reloadToken, retryPendingLibrarySyncNow]);
-
-  useEffect(() => {
-    if (!libraryReady || !catalogSyncNeedsRetry(catalogSyncNotice)) return;
-    const interval = window.setInterval(() => {
-      void retryPendingLibrarySyncNow();
-    }, catalogSyncRetryIntervalMs);
-    return () => window.clearInterval(interval);
-  }, [catalogSyncNotice, libraryReady, retryPendingLibrarySyncNow]);
-
-  useEffect(() => {
-    if (catalogSyncNotice?.status !== "synced") return;
-    const settledNotice = catalogSyncNotice;
-    const timeout = window.setTimeout(() => {
-      if (catalogSyncNoticeRef.current !== settledNotice) return;
-      catalogSyncNoticeRef.current = null;
-      setCatalogSyncNotice(null);
-    }, 6_000);
-    return () => window.clearTimeout(timeout);
-  }, [catalogSyncNotice]);
+  const { loadMoreExplorerResults } = useExplorerResults({
+    explorer: explorerWorkspace, workspace: workspaceRestoration, activeNav, artistPageName, libraryReady,
+    initialSelectedAlbumId: initialViewPreferences.selectedAlbumId,
+    selection: {
+      selectedAlbumIdRef, selectedTrackRef, albumRequestRef, setSelectedAlbumId, setSelectedTrack,
+      setAlbumTracks, setAlbumTracksTruncated, setAlbumDetailState, setAlbumFileRefreshRequest
+    },
+  });
 
   function playTrack(
     track: Track,
@@ -2018,115 +770,6 @@ function App() {
     void playback.play(queue, track.id);
   }
 
-  async function startPlaylistQueue(tracks: Track[], index: number, shuffle = false): Promise<boolean> {
-    const remaining = shuffle ? shufflePlaylistTracks(tracks) : tracks.slice(index);
-    const first = remaining.slice(0, 100);
-    if (first.length === 0) return false;
-    playlistQueueSessionRef.current = null;
-    if (playlistRefillPromiseRef.current) await playlistRefillPromiseRef.current;
-    endGenreQueue();
-    if (playback.state.shuffle && !await playback.setShuffle(false)) return false;
-    selectTrack(first[0]);
-    const next = await playback.play(first, first[0].id);
-    if (!next) return false;
-    playlistQueueSessionRef.current = {
-      tracks: remaining,
-      nextIndex: first.length,
-      queueKeys: next.queue.map((track) => track.trackKey),
-    };
-    return true;
-  }
-
-  function endGenreQueue() {
-    genreQueueRequestRef.current += 1;
-    genreRefillRunningRef.current = false;
-    setGenreRadioSession(null);
-    saveGenreRadioSession(null);
-    setGenreQueueMessage(null);
-  }
-
-  async function startGenreQueue(mode: GenreQueueMode) {
-    if (!selectedGenre || genreQueueBusy) return;
-    const requestedGenre = selectedGenre;
-    const requestId = ++genreQueueRequestRef.current;
-    genreRefillRunningRef.current = false;
-    setGenreQueueBusy(mode);
-    setGenreQueueMessage(null);
-    try {
-      const tracks = await loadGenreQueue({
-        genre: requestedGenre,
-        mode,
-        limit: 100,
-        excludeTrackKeys: [],
-      });
-      if (requestId !== genreQueueRequestRef.current || selectedGenreRef.current !== requestedGenre) return;
-      if (tracks.length === 0) {
-        setGenreQueueMessage(`No ${requestedGenre} tracks match this expedition yet.`);
-        return;
-      }
-      const next = await playback.play(tracks, tracks[0].id);
-      if (requestId !== genreQueueRequestRef.current || selectedGenreRef.current !== requestedGenre || !next) return;
-      const session: GenreRadioSession = { version: 1, genre: requestedGenre, mode };
-      setGenreRadioSession(session);
-      saveGenreRadioSession(session);
-      setGenreQueueMessage(`Loaded ${formatCount(tracks.length)} tracks. Aurora will refill with bounded batches.`);
-    } catch (error) {
-      if (requestId === genreQueueRequestRef.current) {
-        setGenreQueueMessage(error instanceof Error ? error.message : String(error));
-      }
-    } finally {
-      if (requestId === genreQueueRequestRef.current) setGenreQueueBusy(null);
-    }
-  }
-
-  function selectPublisher(publisher: PublisherSummary) {
-    transitionContent(() => {
-      const requestId = ++publisherDetailRequestRef.current;
-      publisherAlbumRequestRef.current += 1;
-      setPublisherDetailState("loading");
-      setPublisherDetailError(null);
-      setPublisherQueueMessage(null);
-      void loadPublisherDetail(publisher.name)
-        .then((detail) => {
-          transitionContent(() => {
-            if (requestId !== publisherDetailRequestRef.current) return;
-            setPublisherDetail(detail);
-            setPublisherDetailState("ready");
-            const initialAlbum = detail.albums[0] ?? null;
-            setSelectedPublisherAlbum(initialAlbum);
-            setPublisherAlbumTracks([]);
-            if (initialAlbum) openPublisherAlbum(initialAlbum);
-          }, "collection");
-        })
-        .catch((error: unknown) => {
-          if (requestId !== publisherDetailRequestRef.current) return;
-          setPublisherDetailError(error instanceof Error ? error.message : String(error));
-          setPublisherDetailState("error");
-        });
-    }, "collection");
-  }
-
-  function openPublisherAlbum(album: PublisherAlbum) {
-    transitionContent(() => {
-      const requestId = ++publisherAlbumRequestRef.current;
-      setSelectedPublisherAlbum(album);
-      setTagSelectionKind("album");
-      if (inspectorViewRef.current !== "tags") setInspectorView("album");
-      setPublisherAlbumTracks([]);
-      void loadPublisherAlbumTracks(album)
-        .then((tracks) => {
-          transitionContent(() => {
-            if (requestId === publisherAlbumRequestRef.current) setPublisherAlbumTracks(tracks);
-          }, "collection");
-        })
-        .catch((error: unknown) => {
-          if (requestId === publisherAlbumRequestRef.current) {
-            setPublisherDetailError(error instanceof Error ? error.message : String(error));
-          }
-        });
-    }, "collection");
-  }
-
   function explorePublisher(publisher: string) {
     transitionContent(() => {
 
@@ -2139,98 +782,6 @@ function App() {
         sort: "releaseYearDesc",
       });
     }, "page");
-  }
-
-  async function playPublisher(publisher: string) {
-    if (publisherQueueBusy) return;
-    setPublisherQueueBusy(true);
-    setPublisherQueueMessage(null);
-    try {
-      const tracks = await loadPublisherQueue(publisher, 100);
-      if (!tracks.length) {
-        setPublisherQueueMessage("No playable tracks were found for this publisher.");
-        return;
-      }
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) {
-        selectTrack(tracks[0]);
-        setPublisherQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from ${publisher}.`);
-      }
-    } catch (error) {
-      setPublisherQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPublisherQueueBusy(false);
-    }
-  }
-
-  async function playPublisherAlbum(album: PublisherAlbum) {
-    if (publisherAlbumBusy) return;
-    setPublisherAlbumBusy(true);
-    try {
-      const tracks = selectedPublisherAlbum?.id === album.id && publisherAlbumTracks.length
-        ? publisherAlbumTracks
-        : await loadPublisherAlbumTracks(album);
-      if (!tracks.length) {
-        setPublisherQueueMessage(`${album.title} has no playable tracks.`);
-        return;
-      }
-      setPublisherAlbumTracks(tracks);
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) selectTrack(tracks[0]);
-    } catch (error) {
-      setPublisherQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPublisherAlbumBusy(false);
-    }
-  }
-
-  function selectYear(selection: YearSelection) {
-    transitionContent(() => {
-      const requestId = ++yearDetailRequestRef.current;
-      setYearDetailState("loading");
-      setYearDetailError(null);
-      setYearQueueMessage(null);
-      void loadYearDetail(selection)
-        .then((detail) => {
-          transitionContent(() => {
-            if (requestId !== yearDetailRequestRef.current) return;
-            setYearDetail(detail);
-            setYearDetailState("ready");
-            const nextAlbum = detail.albums[0] ?? null;
-            setSelectedYearAlbum(nextAlbum);
-            setYearAlbumTracks([]);
-            if (nextAlbum) openYearAlbum(nextAlbum);
-          }, "collection");
-        })
-        .catch((error: unknown) => {
-          if (requestId !== yearDetailRequestRef.current) return;
-          setYearDetailError(error instanceof Error ? error.message : String(error));
-          setYearDetailState("error");
-        });
-    }, "collection");
-  }
-
-  function openYearAlbum(album: YearAlbum) {
-    transitionContent(() => {
-      const requestId = ++yearAlbumRequestRef.current;
-      setSelectedYearAlbum(album);
-      setYearAlbumTracks([]);
-      setTagSelectionKind("album");
-      if (inspectorViewRef.current !== "tags") setInspectorView("album");
-      void loadYearAlbumTracks(album)
-        .then((tracks) => {
-          transitionContent(() => {
-            if (requestId === yearAlbumRequestRef.current) setYearAlbumTracks(tracks);
-          }, "collection");
-        })
-        .catch((error: unknown) => {
-          if (requestId === yearAlbumRequestRef.current) {
-            console.warn("Aurora could not open this year edition", error);
-          }
-        });
-    }, "collection");
   }
 
   function exploreYear(selection: YearSelection) {
@@ -2248,51 +799,6 @@ function App() {
         sort: selection.basis === "release" ? "releaseYearDesc" : "albumAsc",
       });
     }, "page");
-  }
-
-  async function playYear(selection: YearSelection) {
-    if (yearQueueBusy) return;
-    setYearQueueBusy(true);
-    setYearQueueMessage(null);
-    try {
-      const tracks = await loadYearQueue(selection, 100);
-      if (tracks.length === 0) {
-        setYearQueueMessage("No playable tracks were found for this clock selection.");
-        return;
-      }
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) {
-        selectTrack(tracks[0]);
-        setYearQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from this ${selection.basis} year.`);
-      }
-    } catch (error) {
-      setYearQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setYearQueueBusy(false);
-    }
-  }
-
-  async function playYearAlbum(album: YearAlbum) {
-    if (yearAlbumBusy) return;
-    setYearAlbumBusy(true);
-    try {
-      const tracks = selectedYearAlbum?.id === album.id && yearAlbumTracks.length
-        ? yearAlbumTracks
-        : await loadYearAlbumTracks(album);
-      if (!tracks.length) {
-        setYearQueueMessage(`${album.title} has no playable tracks in the bounded album detail.`);
-        return;
-      }
-      setYearAlbumTracks(tracks);
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) selectTrack(tracks[0]);
-    } catch (error) {
-      setYearQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setYearAlbumBusy(false);
-    }
   }
 
   async function playChartQueue(tracks: Track[]): Promise<boolean> {
@@ -2342,29 +848,6 @@ function App() {
     }, "page");
   }
 
-  function openRatingAlbum(album: RatingAlbum) {
-    transitionContent(() => {
-      const requestId = ++ratingsAlbumRequestRef.current;
-      setSelectedRatingAlbum(album);
-      if (shouldRetargetTagsForAlbumSelection(inspectorViewRef.current)) {
-        setTagSelectionKind("album");
-        setInspectorView("album");
-      }
-      setRatingAlbumTracks([]);
-      void loadRatingAlbumTracks(album)
-        .then((tracks) => {
-          transitionContent(() => {
-            if (requestId === ratingsAlbumRequestRef.current) setRatingAlbumTracks(tracks);
-          }, "collection");
-        })
-        .catch((error: unknown) => {
-          if (requestId === ratingsAlbumRequestRef.current) {
-            setRatingsPageError(error instanceof Error ? error.message : String(error));
-          }
-        });
-    }, "collection");
-  }
-
   function goToRatingAlbum(album: RatingAlbum) {
     transitionContent(() => {
 
@@ -2395,65 +878,6 @@ function App() {
     }, "page");
   }
 
-  async function playRatingCollection(mode: RatingMode, rating: number | null) {
-    if (ratingsQueueBusy) return;
-    setRatingsQueueBusy(true);
-    setRatingsQueueMessage(null);
-    try {
-      const tracks = await loadRatingCollection(mode, rating, 100);
-      if (!tracks.length) {
-        setRatingsQueueMessage("No playable tracks matched this rating band.");
-        return;
-      }
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) {
-        selectTrack(tracks[0]);
-        setRatingsQueueMessage(`Loaded ${formatCount(tracks.length)} tracks from this ${mode === "tracks" ? "track" : "album"} rating band.`);
-      }
-    } catch (error) {
-      setRatingsQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRatingsQueueBusy(false);
-    }
-  }
-
-  async function playRatingAlbumUnrated(album: RatingAlbum) {
-    if (ratingsQueueBusy) return;
-    setRatingsQueueBusy(true);
-    setRatingsQueueMessage(null);
-    try {
-      const tracks = await loadRatingAlbumQueue(album, true, 100);
-      if (!tracks.length) {
-        setRatingsQueueMessage(`${album.title} has no unrated tracks left.`);
-        return;
-      }
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) {
-        selectTrack(tracks[0]);
-        setRatingsQueueMessage(`Loaded ${formatCount(tracks.length)} unrated tracks from ${album.title}.`);
-      }
-    } catch (error) {
-      setRatingsQueueMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRatingsQueueBusy(false);
-    }
-  }
-
-  async function playTonightAlbum(album: RatingAlbum, minutes: number) {
-    if (ratingsQueueBusy) throw new Error("Album playback is already loading.");
-    setRatingsQueueBusy(true);
-    try {
-      const tracks = await loadTonightQueue(album, minutes);
-      if (!tracks.length) throw new Error("This album has no playable tracks. Request fresh suggestions.");
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (!next) throw new Error("Album playback could not start. Check the player status.");
-      selectTrack(tracks[0]);
-    } finally { setRatingsQueueBusy(false); }
-  }
-
   function exploreRatingCollection(mode: RatingMode, rating: number | null) {
     transitionContent(() => {
 
@@ -2478,297 +902,6 @@ function App() {
     }, "page");
   }
 
-  async function toggleLaptopMode() {
-    if (!laptopModeStatus || laptopModeBusy) return;
-    setLaptopModeBusy(true);
-    setLaptopModeError(null);
-    try {
-      setLaptopModeStatus(await updateLaptopMode(!laptopModeStatus.laptopMode));
-    } catch (error) {
-      setLaptopModeError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLaptopModeBusy(false);
-    }
-  }
-
-  function selectTrack(track: Track) {
-    artistRequestRef.current += 1;
-    setSelectedTrack(track);
-    setTagSelectionKind("track");
-    if (inspectorViewRef.current !== "tags") setInspectorView("track");
-  }
-
-  function applyTrackChanges(updatedTracks: Track[], sync?: CatalogSync): boolean {
-    const projection = acceptTrackProjectionKeys(
-      updatedTracks.map((track) => track.trackKey),
-      sync?.projectionToken,
-    );
-    const acceptedTracks = updatedTracks.filter((track) => (
-      projection.acceptedTrackKeys.has(track.trackKey)
-    ));
-    if (acceptedTracks.length === 0) return projection.complete;
-    const updatedByKey = new Map(acceptedTracks.map((track) => [track.trackKey, track]));
-    const project = (track: Track) => {
-      const updated = updatedByKey.get(track.trackKey);
-      return updated ? applyEditableTrackTagProjection(track, updated) : track;
-    };
-    const knownTracks = [
-      ...(selectedTrack ? [selectedTrack] : []),
-      ...explorerTracks,
-      ...albumTracks,
-      ...yearAlbumTracks,
-      ...ratingAlbumTracks,
-      ...publisherAlbumTracks,
-      ...(snapshot?.tracks ?? []),
-    ];
-    const baselines = new Map(knownTracks.map((track) => [track.trackKey, track]));
-    if (explorerFilters.query.trim() && acceptedTracks.some((track) => {
-      const baseline = baselines.get(track.trackKey);
-      return baseline && baseline.genre !== track.genre;
-    })) {
-      const currentScroll = mainScrollRef.current?.scrollTop;
-      if (typeof currentScroll === "number" && currentScroll > 0) {
-        scrollPositionByDestinationRef.current[activeNav] = currentScroll;
-      }
-      restoringScrollRef.current = true;
-      preserveExplorerOnReloadRef.current = true;
-      if (selectedAlbumId) pendingExplorerAlbumIdRef.current = selectedAlbumId;
-      setExplorerReloadToken((value) => value + 1);
-    }
-
-    setSelectedTrack((current) => current ? project(current) : current);
-    setExplorerTracks((current) => current.map(project));
-    setExplorerAlbums((current) => current.map((album) => (
-      applyAlbumTrackTagProjection(album, acceptedTracks)
-    )));
-    setAlbumTracks((current) => current.map(project));
-    setYearAlbumTracks((current) => current.map(project));
-    setRatingAlbumTracks((current) => current.map(project));
-    setPublisherAlbumTracks((current) => current.map(project));
-    setGenreDetail((current) => {
-      if (!current) return current;
-      const summary = acceptedTracks.reduce((next, updated) => {
-        const baseline = baselines.get(updated.trackKey);
-        return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
-      }, current.summary);
-      return { ...current, summary, highlights: current.highlights.map(project) };
-    });
-    setGenreAtlasGenres((current) => current.map((summary) => acceptedTracks.reduce((next, updated) => {
-      const baseline = baselines.get(updated.trackKey);
-      return baseline ? genreSummaryWithTrackChange(next, baseline, updated) : next;
-    }, summary)));
-    acceptedTracks.forEach((track) => playback.refreshTrack(track, true));
-    setSnapshot((current) => {
-      if (!current) return current;
-      const deltas = acceptedTracks.reduce((totals, updated) => {
-        const baseline = baselines.get(updated.trackKey);
-        if (!baseline) return totals;
-        totals.loved += Number(updated.loved) - Number(baseline.loved);
-        totals.rated += Number(updated.rating !== null) - Number(baseline.rating !== null);
-        return totals;
-      }, { loved: 0, rated: 0 });
-      return {
-        ...current,
-        summary: {
-          ...current.summary,
-          loved: Math.max(0, current.summary.loved + deltas.loved),
-          rated: Math.max(0, current.summary.rated + deltas.rated),
-        },
-        tracks: current.tracks.map(project),
-      };
-    });
-    return projection.complete;
-  }
-
-  async function refreshTagEditorCatalogViews(sync: CatalogSync) {
-    // Verified file tags are available even when catalog import is still pending.
-    setGenreIndexReloadToken((value) => value + 1);
-    setGenreDetailReloadToken((value) => value + 1);
-    const albumId = selectedAlbumId;
-    if (albumId) pendingExplorerAlbumIdRef.current = albumId;
-    const currentScroll = mainScrollRef.current?.scrollTop;
-    if (typeof currentScroll === "number" && currentScroll > 0) {
-      scrollPositionByDestinationRef.current[activeNav] = currentScroll;
-    }
-    const catalogRefreshed = await handleCatalogSync(sync, true);
-    if (catalogRefreshed || !albumId) return;
-    if (pendingExplorerAlbumIdRef.current === albumId) pendingExplorerAlbumIdRef.current = null;
-    if (sync.status !== "synced") return;
-
-    const requestId = ++albumRequestRef.current;
-    try {
-      const detail = await loadAlbumDetail(albumId);
-      if (requestId !== albumRequestRef.current) return;
-      const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
-      setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-      setAlbumTracksTruncated(detail.tracksTruncated);
-      setSelectedTrack((current) => {
-        if (!current || current.albumId !== albumId) return current;
-        return detail.tracks.find((candidate) => candidate.trackKey === current.trackKey) ?? current;
-      });
-      setAlbumDetailState("ready");
-    } catch (error) {
-      console.warn("Aurora could not refresh the selected album after the tag edit", error);
-    }
-  }
-
-  function applyTrackChange(updated: Track, previous?: Track, updateSelected = true) {
-    const baseline = previous ?? (selectedTrack?.trackKey === updated.trackKey ? selectedTrack : undefined);
-    const refreshMatchingTrack = (track: Track) => track.trackKey === updated.trackKey
-      ? applyTrackTagProjection(track, updated)
-      : track;
-    if (updateSelected) {
-      setSelectedTrack((current) => current ? refreshMatchingTrack(current) : current);
-    }
-    setExplorerTracks((current) => current.map(refreshMatchingTrack));
-    if (updated.albumId && updated.albumId === selectedAlbumId) {
-      const projectedTracks = albumTracks.map(refreshMatchingTrack);
-      setExplorerAlbums((current) => current.map((album) => (
-        album.id === updated.albumId
-          ? applyAlbumTrackMetricsProjection(album, projectedTracks)
-          : album
-      )));
-    }
-    setAlbumTracks((current) => current.map(refreshMatchingTrack));
-    setYearAlbumTracks((current) => current.map(refreshMatchingTrack));
-    setRatingAlbumTracks((current) => current.map(refreshMatchingTrack));
-    setPublisherAlbumTracks((current) => current.map(refreshMatchingTrack));
-    setGenreDetail((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        summary: baseline ? genreSummaryWithTrackChange(current.summary, baseline, updated) : current.summary,
-        highlights: current.highlights.map(refreshMatchingTrack),
-      };
-    });
-    if (baseline) {
-      setGenreAtlasGenres((current) => current.map((summary) => genreSummaryWithTrackChange(summary, baseline, updated)));
-    }
-    playback.refreshTrack(updated);
-    setSnapshot((current) => {
-      if (!current) return current;
-      const lovedDelta = baseline ? Number(updated.loved) - Number(baseline.loved) : 0;
-      const ratedDelta = baseline ? Number(updated.rating !== null) - Number(baseline.rating !== null) : 0;
-      return {
-        ...current,
-        summary: {
-          ...current.summary,
-          loved: Math.max(0, current.summary.loved + lovedDelta),
-          rated: Math.max(0, current.summary.rated + ratedDelta),
-        },
-        tracks: current.tracks.map(refreshMatchingTrack),
-      };
-    });
-  }
-
-  shortcutResultHandlerRef.current = (result) => {
-    if (result.playback) playback.applySnapshot(result.playback);
-    const projection = result.success && result.catalogSync
-      ? acceptTrackProjectionKeys(
-        result.track ? [result.track.trackKey] : [],
-        result.catalogSync.projectionToken,
-      )
-      : null;
-    if (result.track && projection && !projection.acceptedTrackKeys.has(result.track.trackKey)) return;
-    setSyncMessage(result.success ? result.message : `Shortcut failed: ${result.message}`);
-    if (result.track) applyTrackChange(result.track, result.previousTrack ?? undefined);
-    if (result.success && result.catalogSync) {
-      void handleCatalogSync(result.catalogSync, true);
-    }
-  };
-
-  async function saveGlobalShortcuts(request: GlobalShortcutSettingsRequest) {
-    setShortcutSaving(true);
-    setShortcutError(null);
-    try {
-      setShortcutStatus(await updateGlobalShortcutSettings(request));
-    } catch (error) {
-      setShortcutError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setShortcutSaving(false);
-    }
-  }
-
-  async function saveAudioSettings(request: AudioSettingsRequest) {
-    setAudioSaving(true);
-    setAudioError(null);
-    try {
-      setAudioStatus(await updateAudioSettings(request));
-    } catch (error) {
-      setAudioError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAudioSaving(false);
-    }
-  }
-
-  function openSettings(tab: SettingsTab = "audio") {
-    setSettingsInitialTab(tab);
-    setShortcutError(null);
-    setAudioError(null);
-    setSettingsOpen(true);
-  }
-
-  async function saveInlineTagChange(track: Track, desired: TagValues) {
-    if (inlineSaveRef.current.has(track.trackKey)) return;
-    const expected = tagValuesForTrack(track);
-    if (JSON.stringify(expected) === JSON.stringify(desired)) return;
-
-    inlineSaveRef.current.add(track.trackKey);
-    setInlineSavingKeys((current) => new Set(current).add(track.trackKey));
-    setSyncMessage(null);
-
-    const optimistic = trackWithTagValues(track, desired);
-    const projectionTokenAtStart = latestTrackProjectionTokensRef.current.get(track.trackKey) ?? 0;
-    applyTrackChange(optimistic, track, false);
-    try {
-      const snapshot = await updateTrackTags(track, expected, desired);
-      const projection = acceptTrackProjectionKeys(
-        [snapshot.track.trackKey],
-        snapshot.catalogSync?.projectionToken,
-      );
-      if (!projection.acceptedTrackKeys.has(snapshot.track.trackKey)) return;
-      applyTrackChange(snapshot.track, optimistic);
-      await handleCatalogSync(snapshot.catalogSync, true);
-      setInlineTagRevisions((current) => ({
-        ...current,
-        [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
-      }));
-      if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumId) {
-        const albumId = snapshot.track.albumId;
-        const requestId = ++albumRequestRef.current;
-        try {
-          const detail = await loadAlbumDetail(albumId);
-          if (requestId === albumRequestRef.current) {
-            const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-            setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
-            setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-            setAlbumTracksTruncated(detail.tracksTruncated);
-            setSelectedTrack((current) => {
-              if (!current || current.albumId !== albumId) return current;
-              return detail.tracks.find((candidate) => candidate.trackKey === current.trackKey) ?? current;
-            });
-          }
-        } catch (error) {
-          console.warn("Aurora could not refresh the album rating after the track edit", error);
-        }
-      }
-    } catch (error) {
-      if ((latestTrackProjectionTokensRef.current.get(track.trackKey) ?? 0) === projectionTokenAtStart) {
-        applyTrackChange(track, optimistic, false);
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      setSyncMessage(`Could not save ${track.title}: ${message}`);
-    } finally {
-      inlineSaveRef.current.delete(track.trackKey);
-      setInlineSavingKeys((current) => {
-        const next = new Set(current);
-        next.delete(track.trackKey);
-        return next;
-      });
-    }
-  }
-
   function changeExplorerView(view: ExplorerView) {
     if (view === explorerView) return;
     setExplorerSelection(null);
@@ -2779,124 +912,22 @@ function App() {
     if (view !== "albums") setSelectedAlbumId(null);
   }
 
-  function captureNavigationView() {
-    return {
-      destination: activeNav, artist: artistPageName, key: pageKey,
-      scroll: restoringScrollRef.current ? scrollPositionByDestinationRef.current[pageKey] ?? 0 : mainScrollRef.current?.scrollTop ?? 0,
-      explorerView, explorerFilters, explorerTracks, explorerAlbums, explorerArtists,
-      explorerCursor, explorerCount, explorerLoadState, explorerError, explorerSelection,
-      selectedAlbumId, albumTracks, albumTracksTruncated, albumDetailState, selectedArtistId,
-      selectedTrack, inspectorView, tagSelectionKind, inspectorArtistName, artistDetail,
-      artistIntelligence, artistWorldState, artistWorldError,
-      loadedKey: loadedExplorerRequestKeyRef.current, viewKey: loadedExplorerViewKeyRef.current,
-      localOnly: explorerLocalOnlyRef.current, revision: explorerReloadToken,
-    };
-  }
-
-  function rememberCurrentView(push: boolean) {
-    const view = captureNavigationView();
-    exploreRequestRef.current += 1;
-    albumRequestRef.current += 1;
-    artistRequestRef.current += 1;
-    setIsLoadingMore(false);
-    explorerLoadingMoreRef.current = false;
-    setHistoryLoadingMore(false);
-    setReviewLoadingMore(false);
-    scrollPositionByDestinationRef.current[view.key] = view.scroll;
-    savedViewsRef.current.set(view.key, view);
-    workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
-    saveWorkspaceCheckpoint(workspaceRef.current);
-    restoringScrollRef.current = true;
-    if (push) setNavigationHistory((current) => [...current, view].slice(-50));
-  }
-
-  function restoreNavigationView(view: ReturnType<typeof captureNavigationView>) {
-    // Invalidate requests from the page being left before restoring its predecessor.
-    exploreRequestRef.current += 1;
-    albumRequestRef.current += 1;
-    artistRequestRef.current += 1;
-    setExplorerView(view.explorerView);
-    setExplorerFilters(view.explorerFilters);
-    setExplorerTracks(view.explorerTracks);
-    setExplorerAlbums(view.explorerAlbums);
-    setExplorerArtists(view.explorerArtists);
-    setExplorerCursor(view.explorerCursor);
-    setExplorerCount(view.explorerCount);
-    setExplorerLoadState(view.explorerLoadState);
-    setExplorerError(view.explorerError);
-    setExplorerSelection(view.explorerSelection);
-    setSelectedAlbumId(view.selectedAlbumId);
-    setAlbumTracks(view.albumTracks);
-    setAlbumTracksTruncated(view.albumTracksTruncated);
-    setAlbumDetailState(view.albumDetailState === "loading" ? "ready" : view.albumDetailState);
-    setSelectedArtistId(view.selectedArtistId);
-    setSelectedTrack(view.selectedTrack);
-    setInspectorView(view.inspectorView);
-    setTagSelectionKind(view.tagSelectionKind);
-    setInspectorArtistName(view.inspectorArtistName);
-    setArtistDetail(view.artistDetail);
-    setArtistIntelligence(view.artistIntelligence);
-    setArtistWorldState(view.artistWorldState);
-    setArtistWorldError(view.artistWorldError);
-    setIsLoadingMore(false);
-    explorerLoadingMoreRef.current = false;
-    loadedExplorerRequestKeyRef.current = view.explorerLoadState === "ready" && view.albumDetailState !== "loading" ? view.loadedKey : null;
-    loadedExplorerViewKeyRef.current = view.viewKey;
-    explorerLocalOnlyRef.current = view.localOnly;
-    preserveExplorerOnReloadRef.current = view.revision !== explorerReloadToken || view.albumDetailState === "loading";
-    scrollPositionByDestinationRef.current[view.key] = view.scroll;
-    setNavigationRevision((value) => value + 1);
-    setArtistPageName(view.artist);
-    setActiveNavState(view.destination);
-  }
-
-  function goBack() {
-    const previous = navigationHistory[navigationHistory.length - 1];
-    if (!previous) return;
-    transitionContent(() => {
-      rememberCurrentView(false);
-      setNavigationHistory((current) => current.slice(0, -1));
-      restoreNavigationView(previous);
-    }, "page");
-  }
-
-  // Used by explicit drilldowns as well as sidebar navigation, including same-page searches.
-  function setActiveNav(destination: SidebarDestination) {
-    transitionContent(() => {
-      rememberCurrentView(true);
-      scrollPositionByDestinationRef.current[destination] = 0;
-      setNavigationRevision((value) => value + 1);
-      setArtistPageName(null);
-      setActiveNavState(destination);
-    }, "page");
-  }
+  const { rememberCurrentView, goBack, setActiveNav, navigate } = useWorkspaceNavigation({
+    navigation: navigationState, workspace: workspaceRestoration, explorer: explorerWorkspace, activeNav, setActiveNavState,
+    setHistoryLoadingMore, setReviewLoadingMore, changeExplorerView, expandLibraryNavigation,
+    selection: {
+      selectedAlbumId, setSelectedAlbumId, albumTracks, setAlbumTracks, albumTracksTruncated, setAlbumTracksTruncated,
+      albumDetailState, setAlbumDetailState, selectedArtistId, setSelectedArtistId, selectedTrack, setSelectedTrack,
+      inspectorView, setInspectorView, tagSelectionKind, setTagSelectionKind, inspectorArtistName, setInspectorArtistName,
+      artistDetail, setArtistDetail, artistIntelligence, setArtistIntelligence, artistWorldState, setArtistWorldState,
+      artistWorldError, setArtistWorldError, albumRequestRef, artistRequestRef
+    },
+  });
 
   function expandLibraryNavigation() {
     setLayoutPreferences((current) => current.libraryExpanded
       ? current
       : { ...current, libraryExpanded: true });
-  }
-
-  function navigate(label: SidebarDestination) {
-    if (label === activeNav && !artistPageName) return;
-    transitionContent(() => {
-      rememberCurrentView(true);
-      const saved = savedViewsRef.current.get(label);
-      if (saved) restoreNavigationView(saved);
-      else {
-        setNavigationRevision((value) => value + 1);
-        setArtistPageName(null);
-        setActiveNavState(label);
-        const view = explorerViewForDestination(label);
-        if (view) {
-          changeExplorerView(view);
-          setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[view] });
-          setSelectedAlbumId(null);
-          setExplorerSelection(null);
-        }
-      }
-      if (label !== "Universe" && label !== "Observatory" && label !== "History") expandLibraryNavigation();
-    }, "page");
   }
 
   function focusArtist(artist: Artist, destination: "tracks" | "albums" = "tracks") {
@@ -2940,226 +971,6 @@ function App() {
       setExplorerView("tracks");
       setExplorerFilters({ ...defaultExplorerFilters, genre, sort: "newest" });
     }, "page");
-  }
-
-  function openArtistInspector(artistName: string) {
-    transitionContent(() => {
-      const requestId = ++artistRequestRef.current;
-      setInspectorArtistName(artistName);
-      setInspectorView("artist");
-      setArtistDetail(null);
-      setArtistIntelligence(null);
-      setArtistWorldError(null);
-      setCurationError(null);
-      setArtistWorldState("loading");
-      void Promise.allSettled([
-        loadArtistDetail(artistName).then((detail) => {
-          if (requestId === artistRequestRef.current) transitionContent(() => setArtistDetail(detail), "artist-detail");
-          return detail;
-        }),
-        loadArtistIntelligence(artistName).then((intelligence) => {
-          if (requestId === artistRequestRef.current) transitionContent(() => setArtistIntelligence(intelligence), "artist-detail");
-          return intelligence;
-        }),
-      ]).then(([catalogResult, intelligenceResult]) => {
-        transitionContent(() => {
-          if (requestId !== artistRequestRef.current) return;
-          if (catalogResult.status === "fulfilled") setArtistDetail(catalogResult.value);
-          if (intelligenceResult.status === "fulfilled") setArtistIntelligence(intelligenceResult.value);
-          if (catalogResult.status === "rejected" && intelligenceResult.status === "rejected") {
-            const catalogMessage = catalogResult.reason instanceof Error ? catalogResult.reason.message : String(catalogResult.reason);
-            const intelligenceMessage = intelligenceResult.reason instanceof Error ? intelligenceResult.reason.message : String(intelligenceResult.reason);
-            setArtistWorldError(`${catalogMessage} ${intelligenceMessage}`);
-            setArtistWorldState("error");
-            return;
-          }
-          setArtistWorldError(catalogResult.status === "rejected"
-            ? "The local catalog summary is unavailable; MusicBrainz context is still shown."
-            : intelligenceResult.status === "rejected"
-              ? "MusicBrainz context is unavailable; the local catalog remains usable."
-              : null);
-          setArtistWorldState("ready");
-        }, "artist-detail");
-      });
-    }, "artist-detail");
-  }
-
-  openArtistInspectorRef.current = openArtistInspector;
-
-  async function applyArtistDecision(request: ArtistDecisionRequest) {
-    if (curationActionBusy) return;
-    const requestId = ++artistRequestRef.current;
-    setCurationActionBusy("artist");
-    setCurationError(null);
-    setCurationMessage(null);
-    try {
-      const intelligence = await updateArtistIdentityDecision(request);
-      if (requestId !== artistRequestRef.current || inspectorArtistName !== request.artist) return;
-      setArtistIntelligence(intelligence);
-      setArtistWorldState("ready");
-      setCurationMessage(request.action === "clear"
-        ? `Cleared Aurora's identity override for ${request.artist}.`
-        : request.action === "ignore"
-          ? `Ignored ${request.artist} in Aurora.`
-          : `Confirmed ${request.artist} as ${intelligence.identity?.canonicalName ?? request.artist}.`);
-      setReviewReloadToken((value) => value + 1);
-    } catch (error) {
-      if (requestId === artistRequestRef.current) {
-        setCurationError(error instanceof Error ? error.message : String(error));
-      }
-    } finally {
-      setCurationActionBusy((current) => current === "artist" ? null : current);
-    }
-  }
-
-  async function applyReleaseDecision(request: ReleaseDecisionRequest) {
-    if (curationActionBusy) return;
-    const requestId = ++artistRequestRef.current;
-    setCurationActionBusy(`release:${request.releaseMbid}`);
-    setCurationError(null);
-    setCurationMessage(null);
-    try {
-      const intelligence = await updateReleaseGroupDecision(request);
-      if (requestId !== artistRequestRef.current || inspectorArtistName !== request.artist) return;
-      setArtistIntelligence(intelligence);
-      setArtistWorldState("ready");
-      setCurationMessage(request.action === "link"
-        ? "Linked the MusicBrainz release group to the selected local album."
-        : request.action === "notInScope"
-          ? "Marked the release group as not in scope."
-          : request.action === "ignore"
-            ? "Ignored the release group."
-            : "Cleared Aurora's release override.");
-      setReviewReloadToken((value) => value + 1);
-    } catch (error) {
-      if (requestId === artistRequestRef.current) {
-        setCurationError(error instanceof Error ? error.message : String(error));
-      }
-    } finally {
-      setCurationActionBusy((current) => current === `release:${request.releaseMbid}` ? null : current);
-    }
-  }
-
-  async function loadMoreReviewItems() {
-    if (!reviewCursor || reviewLoadingMore) return;
-    const requestId = ++reviewRequestRef.current;
-    setReviewLoadingMore(true);
-    try {
-      const page = await loadArtistReviewPage({
-        pageSize: 50,
-        cursor: reviewCursor,
-        filter: reviewFilter,
-        search: reviewSearch.trim() || undefined,
-      });
-      if (requestId !== reviewRequestRef.current) return;
-      setReviewItems((current) => {
-        const existing = new Set(current.map((item) => item.artistKey));
-        return [...current, ...page.items.filter((item) => !existing.has(item.artistKey))];
-      });
-      setReviewCursor(page.nextCursor);
-    } catch (error) {
-      if (requestId === reviewRequestRef.current) {
-        setReviewError(error instanceof Error ? error.message : String(error));
-        setReviewLoadState("error");
-      }
-    } finally {
-      if (requestId === reviewRequestRef.current) setReviewLoadingMore(false);
-    }
-  }
-
-  async function undoCuration() {
-    if (curationActionBusy) return;
-    setCurationActionBusy("undo");
-    setCurationMessage(null);
-    try {
-      const intelligence = await undoMusicBrainzCuration();
-      if (!intelligence) {
-        setCurationMessage("There is no Aurora curation decision to undo.");
-        return;
-      }
-      setInspectorArtistName(intelligence.artist);
-      setInspectorView("artist");
-      setArtistIntelligence(intelligence);
-      setArtistWorldState("ready");
-      setCurationError(null);
-      setCurationMessage(`Undid the latest decision for ${intelligence.artist}.`);
-      void loadArtistDetail(intelligence.artist).then(setArtistDetail).catch(() => setArtistDetail(null));
-      setReviewReloadToken((value) => value + 1);
-    } catch (error) {
-      setCurationMessage(`Could not undo the latest decision: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setCurationActionBusy(null);
-    }
-  }
-
-  async function exportCuration() {
-    if (curationActionBusy) return;
-    setCurationActionBusy("export");
-    setCurationMessage(null);
-    try {
-      const result = await exportMusicBrainzCuration();
-      setCurationMessage(`Exported ${formatCount(result.artistDecisions)} artist and ${formatCount(result.releaseDecisions)} release decisions to ${result.path}`);
-    } catch (error) {
-      setCurationMessage(`Could not export the overlay snapshot: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setCurationActionBusy(null);
-    }
-  }
-
-  function selectAlbum(album: ExplorerAlbum | null) {
-    transitionContent(() => {
-      const requestId = ++albumRequestRef.current;
-      artistRequestRef.current += 1;
-      setSelectedAlbumId(album?.id ?? null);
-      setAlbumTracks([]);
-      setAlbumTracksTruncated(false);
-      if (!album) {
-        setAlbumDetailState("ready");
-        setInspectorView("track");
-        setTagSelectionKind("track");
-        return;
-      }
-      setSelectedTrack(null);
-      setTagSelectionKind("album");
-      if (inspectorViewRef.current !== "tags") setInspectorView("album");
-      setAlbumDetailState("loading");
-      if (!album) return;
-      void loadAlbumDetail(album.id, { localOnly: true })
-        .then((detail) => {
-          transitionContent(() => {
-            if (requestId !== albumRequestRef.current) return;
-            const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-            setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
-            setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
-            setAlbumTracksTruncated(detail.tracksTruncated);
-            setSelectedTrack(detail.tracks[0] ?? null);
-            setAlbumDetailState("ready");
-            setAlbumFileRefreshRequest({ albumId: album.id, requestId });
-          }, "album-detail");
-        })
-        .catch((error: unknown) => {
-          if (requestId !== albumRequestRef.current) return;
-          console.warn("Aurora could not open album details", error);
-          setAlbumDetailState("error");
-        });
-    }, "album-detail");
-  }
-
-  async function playExplorerAlbum(album: ExplorerAlbum) {
-    try {
-      const tracks = selectedAlbumId === album.id && albumTracks.length > 0
-        ? albumTracks
-        : (await loadAlbumDetail(album.id)).tracks;
-      if (tracks.length === 0) {
-        setSyncMessage(`${album.title} has no playable tracks in the bounded album detail.`);
-        return;
-      }
-      endGenreQueue();
-      const next = await playback.play(tracks, tracks[0].id);
-      if (next) selectTrack(tracks[0]);
-    } catch (error) {
-      setSyncMessage(`Could not play ${album.title}: ${error instanceof Error ? error.message : String(error)}`);
-    }
   }
 
   async function handleAlbumRemoved(albumId: string, warnings: string[], destination: string) {
@@ -3258,90 +1069,6 @@ function App() {
     }
   }
 
-  async function loadMoreExplorerResults() {
-    // During debounce, the visible cursor can still belong to the previous search.
-    // Pagination must not cancel its replacement request or append across searches.
-    if (!explorerCursor || explorerLoadingMoreRef.current
-      || explorerLoadState !== "ready"
-      || !shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current,
-        explorerRequestKey(explorerView, explorerFilters, explorerReloadToken), false)) return;
-    const requestId = ++exploreRequestRef.current;
-    const localOnly = explorerLocalOnlyRef.current;
-    const loadedBefore = explorerLoadedRef.current;
-    explorerLoadingMoreRef.current = true;
-    setIsLoadingMore(true);
-    try {
-      const page = await loadExplorerPage(explorerView, explorerFilters, explorerCursor, localOnly);
-      if (requestId !== exploreRequestRef.current) return;
-      setExplorerTracks((current) => [...current, ...page.tracks]);
-      setExplorerAlbums((current) => [...current, ...page.albums]);
-      setExplorerArtists((current) => [...current, ...page.artists]);
-      setExplorerCursor(page.nextCursor);
-      setExplorerCount({ key: explorerCountKey(explorerView, explorerFilters), total: page.totalCount });
-      if (localOnly) refreshExplorerFiles(explorerView, explorerFilters,
-        loadedBefore + page.tracks.length + page.albums.length + page.artists.length, requestId);
-    } catch (error) {
-      if (requestId === exploreRequestRef.current) {
-        setExplorerError(error instanceof Error ? error.message : String(error));
-        setExplorerLoadState("error");
-      }
-    } finally {
-      explorerLoadingMoreRef.current = false;
-      if (requestId === exploreRequestRef.current) setIsLoadingMore(false);
-    }
-  }
-
-  async function loadMoreHistory() {
-    if (!historyPage?.nextCursor || historyLoadingMore) return;
-    const requestId = ++historyRequestRef.current;
-    setHistoryLoadingMore(true);
-    try {
-      const startedAfterMs = historyDateRange === "all"
-        ? undefined
-        : Date.now() - Number(historyDateRange) * 86_400_000;
-      const next = await loadHistoryPage({
-        pageSize: 50,
-        cursor: historyPage.nextCursor,
-        search: historySearch.trim() || undefined,
-        outcome: historyOutcome,
-        deviceId: historyDeviceId ?? undefined,
-        startedAfterMs,
-      });
-      if (requestId !== historyRequestRef.current) return;
-      setHistoryPage((current) => current ? {
-        ...next,
-        items: [...current.items, ...next.items],
-      } : next);
-    } catch (error) {
-      if (requestId === historyRequestRef.current) {
-        setHistoryError(error instanceof Error ? error.message : String(error));
-        setHistoryLoadState("error");
-      }
-    } finally {
-      if (requestId === historyRequestRef.current) setHistoryLoadingMore(false);
-    }
-  }
-
-  async function savePlayedThreshold(value: number) {
-    setHistorySavingThreshold(true);
-    setHistoryThresholdMessage(null);
-    try {
-      const saved = await saveHistoryPlayThreshold(value);
-      setHistoryPage((current) => current ? { ...current, playThresholdSeconds: saved } : current);
-      setHistoryThresholdMessage(`A play now registers after ${saved} ${saved === 1 ? "second" : "seconds"}.`);
-    } catch (error) {
-      setHistoryThresholdMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setHistorySavingThreshold(false);
-    }
-  }
-
-  function playHistoryTrack(track: Track) {
-    endGenreQueue();
-    selectTrack(track);
-    void playback.play([track], track.id);
-  }
-
   function submitSearch(event: FormEvent) {
     event.preventDefault();
   }
@@ -3380,38 +1107,38 @@ function App() {
   const explorerTagTarget = !shouldUseExplorerTagSelection(activeNav)
     ? undefined
     : explorerSelection?.kind === "tracks"
-    ? explorerSelection.tracks.length === 0
-      ? null
-      : explorerSelection.tracks.length === 1
-        ? {
+      ? explorerSelection.tracks.length === 0
+        ? null
+        : explorerSelection.tracks.length === 1
+          ? {
             kind: "track" as const,
             trackId: explorerSelection.tracks[0].id,
             trackKey: explorerSelection.tracks[0].trackKey,
             label: explorerSelection.tracks[0].title,
           }
-        : {
+          : {
             kind: "tracks" as const,
             tracks: explorerSelection.tracks.map((track) => ({ trackId: track.id, trackKey: track.trackKey })),
             label: `${formatCount(explorerSelection.tracks.length)} tracks selected`,
           }
-    : explorerSelection?.kind === "albums"
-      ? explorerSelection.albums.length === 0
-        ? null
-        : explorerSelection.albums.length === 1
-          ? { kind: "album" as const, albumId: explorerSelection.albums[0].id, label: explorerSelection.albums[0].title }
-          : {
+      : explorerSelection?.kind === "albums"
+        ? explorerSelection.albums.length === 0
+          ? null
+          : explorerSelection.albums.length === 1
+            ? { kind: "album" as const, albumId: explorerSelection.albums[0].id, label: explorerSelection.albums[0].title }
+            : {
               kind: "albums" as const,
               albumIds: explorerSelection.albums.map((album) => album.id),
               label: `${formatCount(explorerSelection.albums.length)} albums selected`,
             }
-      : undefined;
+        : undefined;
   const tagEditorTarget = explorerTagTarget !== undefined
     ? explorerTagTarget
     : tagSelectionKind === "album"
-    ? albumTagTarget
-    : inspectorTrack
-      ? { kind: "track" as const, trackId: inspectorTrack.id, trackKey: inspectorTrack.trackKey, label: inspectorTrack.title }
-      : null;
+      ? albumTagTarget
+      : inspectorTrack
+        ? { kind: "track" as const, trackId: inspectorTrack.id, trackKey: inspectorTrack.trackKey, label: inspectorTrack.title }
+        : null;
   const tagEditorKey = !tagEditorTarget
     ? "none"
     : tagEditorTarget.kind === "album"
@@ -3441,48 +1168,48 @@ function App() {
   const topbarSearchValue = activeNav === "Playlists" || activeNav === "Inbox"
     ? ""
     : activeNav === "Observatory"
-    ? reviewSearch
-    : activeNav === "History"
-      ? historySearch
-      : activeNav === "Genres"
-        ? genreSearch
-        : activeNav === "Publishers"
-          ? publisherSearch
-        : activeNav === "Years"
-          ? ""
-        : explorerFilters.query;
+      ? reviewSearch
+      : activeNav === "History"
+        ? historySearch
+        : activeNav === "Genres"
+          ? genreSearch
+          : activeNav === "Publishers"
+            ? publisherSearch
+            : activeNav === "Years"
+              ? ""
+              : explorerFilters.query;
   const topbarSearchPlaceholder = activeNav === "Playlists"
     ? "Playlist search is coming soon…"
     : activeNav === "Inbox"
-    ? "Inbox search is coming after folder monitoring…"
-    : activeNav === "Observatory"
-    ? "Search artists to review…"
-    : activeNav === "History"
-      ? "Search listening history…"
-      : activeNav === "Genres"
-        ? "Search your genre atlas…"
-        : activeNav === "Publishers"
-          ? "Search publishers…"
-        : activeNav === "Years"
-          ? "Year search arrives with the timeline…"
-        : explorerView === "tracks"
-          ? "Search year:1985..1987, OR, NOT…"
-          : "Search your universe…";
+      ? "Inbox search is coming after folder monitoring…"
+      : activeNav === "Observatory"
+        ? "Search artists to review…"
+        : activeNav === "History"
+          ? "Search listening history…"
+          : activeNav === "Genres"
+            ? "Search your genre atlas…"
+            : activeNav === "Publishers"
+              ? "Search publishers…"
+              : activeNav === "Years"
+                ? "Year search arrives with the timeline…"
+                : explorerView === "tracks"
+                  ? "Search year:1985..1987, OR, NOT…"
+                  : "Search your universe…";
   const topbarSearchLabel = activeNav === "Playlists"
     ? "Playlist search is not available yet"
     : activeNav === "Inbox"
-    ? "Inbox search is not available yet"
-    : activeNav === "Observatory"
-    ? "Search MusicBrainz review artists"
-    : activeNav === "History"
-      ? "Search listening history"
-      : activeNav === "Genres"
-        ? "Search genres"
-        : activeNav === "Publishers"
-          ? "Search publishers"
-        : activeNav === "Years"
-          ? "Year search is not available yet"
-        : "Search your music universe";
+      ? "Inbox search is not available yet"
+      : activeNav === "Observatory"
+        ? "Search MusicBrainz review artists"
+        : activeNav === "History"
+          ? "Search listening history"
+          : activeNav === "Genres"
+            ? "Search genres"
+            : activeNav === "Publishers"
+              ? "Search publishers"
+              : activeNav === "Years"
+                ? "Year search is not available yet"
+                : "Search your music universe";
 
   function updateTopbarSearch(value: string) {
     if (artistPageName) {
@@ -3566,7 +1293,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.17</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.18</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -3675,129 +1402,117 @@ function App() {
         <div
           className="main-scroll"
           ref={mainScrollRef}
-          onScroll={(event) => {
-            if (restoringScrollRef.current) return;
-            const nextScroll = event.currentTarget.scrollTop;
-            if (nextScroll === 0 && (scrollPositionByDestinationRef.current[pageKey] ?? 0) > 0 && !scrollReadyRef.current) {
-              return;
-            }
-            scrollPositionByDestinationRef.current[pageKey] = nextScroll;
-            workspaceRef.current = { ...workspaceRef.current, scroll: { ...scrollPositionByDestinationRef.current } };
-            saveWorkspaceCheckpoint(workspaceRef.current);
-          }}
+          onScroll={workspaceRestoration.rememberScroll}
+          data-page-key={pageKey}
           data-text-size={activeDisplayPreferences.textSize}
           data-cover-size={activeDisplayPreferences.coverSize}
         >
           {snapshot ? (
             <ContentTransition type="page">
-            {visitedArtists.map((artist) => (
-              <RememberedPage key={artist} active={artistPageName === artist}>
-              <Suspense fallback={<section className="inbox-load" role="status">Opening artist…</section>}>
-                <ArtistPage artist={artist} catalogRevision={chartReloadToken} onOpenArtist={openArtistAlbums}
-                  onOpenAlbum={(album) => {
-                    transitionContent(() => {
-                      pendingExplorerAlbumIdRef.current = album.id;
-                      setSelectedAlbumId(album.id);
-                      setInspectorView("album");
-                      setTagSelectionKind("album");
-                      setArtistPageName(null);
-                      setActiveNav("Albums");
-                      setExplorerView("albums");
-                      setExplorerFilters({ ...defaultExplorerFilters, artist: album.artist, sort: "yearDesc" });
-                      setExplorerReloadToken((value) => value + 1);
-                    }, "page");
-                  }}
-                  onPlay={playChartQueue} onSettings={() => openSettings("metadata")} />
-              </Suspense>
+              {visitedArtists.map((artist) => (
+                <RememberedPage key={artist} active={artistPageName === artist}>
+                  <ArtistRoute artist={artist} onOpenArtist={openArtistAlbums}
+                    onOpenAlbum={(album) => {
+                      transitionContent(() => {
+                        pendingExplorerAlbumIdRef.current = album.id;
+                        setSelectedAlbumId(album.id);
+                        setInspectorView("album");
+                        setTagSelectionKind("album");
+                        setArtistPageName(null);
+                        setActiveNav("Albums");
+                        setExplorerView("albums");
+                        setExplorerFilters({ ...defaultExplorerFilters, artist: album.artist, sort: "yearDesc" });
+                        setExplorerReloadToken((value) => value + 1);
+                      }, "page");
+                    }}
+                    onPlay={playChartQueue} onSettings={() => openSettings("metadata")} />
+                </RememberedPage>
+              ))}
+              <RememberedPage active={!artistPageName && activeNav === "Inbox"}>
+                <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
+                  <Inbox
+                    onOpenMetadataSettings={() => openSettings("metadata")}
+                    onCatalogChanged={refreshCatalogIfChanged}
+                  />
+                </Suspense>
               </RememberedPage>
-            ))}
-            <RememberedPage active={!artistPageName && activeNav === "Inbox"}>
-              <Suspense fallback={<section className="inbox-load" aria-live="polite">Opening Inbox…</section>}>
-                <Inbox
-                  onOpenMetadataSettings={() => openSettings("metadata")}
-                  onCatalogChanged={refreshCatalogIfChanged}
+              <RememberedPage active={!artistPageName && activeNav === "Observatory"}>
+                <ObservatoryRoute
+                  items={reviewItems}
+                  selectedArtistKey={artistIntelligence?.artistKey ?? null}
+                  filter={reviewFilter}
+                  loadState={reviewLoadState}
+                  errorMessage={reviewError}
+                  hasMore={reviewCursor !== null}
+                  loadingMore={reviewLoadingMore}
+                  actionBusy={curationActionBusy === "export" || curationActionBusy === "undo" ? curationActionBusy : null}
+                  message={curationMessage}
+                  onFilterChange={setReviewFilter}
+                  onSelect={(item) => openArtistInspector(item.displayArtist)}
+                  onLoadMore={() => void loadMoreReviewItems()}
+                  onRefresh={() => setReviewReloadToken((value) => value + 1)}
+                  onUndo={() => void undoCuration()}
+                  onExport={() => void exportCuration()}
                 />
-              </Suspense>
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Observatory"}>
-              <Observatory
-                items={reviewItems}
-                selectedArtistKey={artistIntelligence?.artistKey ?? null}
-                filter={reviewFilter}
-                loadState={reviewLoadState}
-                errorMessage={reviewError}
-                hasMore={reviewCursor !== null}
-                loadingMore={reviewLoadingMore}
-                actionBusy={curationActionBusy === "export" || curationActionBusy === "undo" ? curationActionBusy : null}
-                message={curationMessage}
-                onFilterChange={setReviewFilter}
-                onSelect={(item) => openArtistInspector(item.displayArtist)}
-                onLoadMore={() => void loadMoreReviewItems()}
-                onRefresh={() => setReviewReloadToken((value) => value + 1)}
-                onUndo={() => void undoCuration()}
-                onExport={() => void exportCuration()}
-              />
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Charts"}>
-              <ChartStudio
-                catalogRevision={chartReloadToken}
-                onOpenArtistAlbums={openArtistAlbums}
-                onSelectionChange={(selection, options) => {
-                  setChartSelection(selection);
-                  if (selection && !options?.preserveInspector) {
-                    setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
-                    setInspectorView(selection.kind === "albums" ? "album" : "track");
-                  }
-                }}
-                onSelectTrack={(track, options) => {
-                  if (!options?.preserveInspector) {
-                    selectTrack(track);
-                    return;
-                  }
-                  setSelectedTrack((current) => current?.trackKey === track.trackKey ? track : current);
-                }}
-                onPlayQueue={playChartQueue}
-              />
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Playlists"}>
-              <PlaylistsPage
-                active={!artistPageName && activeNav === "Playlists"}
-                playlists={savedPlaylists}
-                selectedId={selectedPlaylistId}
-                listLoading={playlistsLoading}
-                listError={playlistsError}
-                onSelect={setSelectedPlaylistId}
-                onRefresh={() => setPlaylistsReloadToken((value) => value + 1)}
-                onPlay={startPlaylistQueue}
-              />
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "History"}>
-              <ListeningHistory
-                page={historyPage}
-                loadState={historyLoadState}
-                errorMessage={historyError}
-                search={historySearch}
-                outcome={historyOutcome}
-                deviceId={historyDeviceId}
-                dateRange={historyDateRange}
-                isLoadingMore={historyLoadingMore}
-                isSavingThreshold={historySavingThreshold}
-                thresholdMessage={historyThresholdMessage}
-                onSearchChange={setHistorySearch}
-                onOutcomeChange={setHistoryOutcome}
-                onDeviceChange={setHistoryDeviceId}
-                onDateRangeChange={setHistoryDateRange}
-                onSaveThreshold={(value) => void savePlayedThreshold(value)}
-                onSelectTrack={selectTrack}
-                onPlayTrack={playHistoryTrack}
-                onOpenArtistAlbums={openArtistAlbums}
-                onLoadMore={() => void loadMoreHistory()}
-                onRefresh={() => setHistoryReloadToken((value) => value + 1)}
-              />
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Genres"}>
-              <ContentTransition type="collection">
-                <GenreAtlas
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Charts"}>
+                <ChartsRoute
+                  onOpenArtistAlbums={openArtistAlbums}
+                  onSelectionChange={(selection, options) => {
+                    setChartSelection(selection);
+                    if (selection && !options?.preserveInspector) {
+                      setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
+                      setInspectorView(selection.kind === "albums" ? "album" : "track");
+                    }
+                  }}
+                  onSelectTrack={(track, options) => {
+                    if (!options?.preserveInspector) {
+                      selectTrack(track);
+                      return;
+                    }
+                    setSelectedTrack((current) => current?.trackKey === track.trackKey ? track : current);
+                  }}
+                  onPlayQueue={playChartQueue}
+                />
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Playlists"}>
+                <PlaylistsRoute
+                  active={!artistPageName && activeNav === "Playlists"}
+                  playlists={savedPlaylists}
+                  selectedId={selectedPlaylistId}
+                  listLoading={playlistsLoading}
+                  listError={playlistsError}
+                  onSelect={setSelectedPlaylistId}
+                  onRefresh={() => setPlaylistsReloadToken((value) => value + 1)}
+                  onPlay={startPlaylistQueue}
+                />
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "History"}>
+                <HistoryRoute
+                  page={historyPage}
+                  loadState={historyLoadState}
+                  errorMessage={historyError}
+                  search={historySearch}
+                  outcome={historyOutcome}
+                  deviceId={historyDeviceId}
+                  dateRange={historyDateRange}
+                  isLoadingMore={historyLoadingMore}
+                  isSavingThreshold={historySavingThreshold}
+                  thresholdMessage={historyThresholdMessage}
+                  onSearchChange={setHistorySearch}
+                  onOutcomeChange={setHistoryOutcome}
+                  onDeviceChange={setHistoryDeviceId}
+                  onDateRangeChange={setHistoryDateRange}
+                  onSaveThreshold={(value) => void savePlayedThreshold(value)}
+                  onSelectTrack={selectTrack}
+                  onPlayTrack={playHistoryTrack}
+                  onOpenArtistAlbums={openArtistAlbums}
+                  onLoadMore={() => void loadMoreHistory()}
+                  onRefresh={() => setHistoryReloadToken((value) => value + 1)}
+                />
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Genres"}>
+                <GenresRoute
                   genres={genreAtlasGenres}
                   selectedGenre={selectedGenre}
                   detail={genreDetail}
@@ -3825,11 +1540,9 @@ function App() {
                   onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                   onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                 />
-              </ContentTransition>
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Publishers"}>
-              <ContentTransition type="collection">
-                <PublisherSignalTimeline
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Publishers"}>
+                <PublishersRoute
                   overview={publisherOverview}
                   detail={publisherDetail}
                   loadState={publisherLoadState}
@@ -3846,11 +1559,9 @@ function App() {
                   onRetry={() => setPublisherReloadToken((value) => value + 1)}
                   onRetryDetail={() => publisherDetail && selectPublisher(publisherDetail.publisher)}
                 />
-              </ContentTransition>
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Years"}>
-              <ContentTransition type="collection">
-                <YearsExplorer
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Years"}>
+                <YearsRoute
                   overview={yearOverview}
                   detail={yearDetail}
                   loadState={yearLoadState}
@@ -3868,12 +1579,10 @@ function App() {
                   onRetry={() => setYearReloadToken((value) => value + 1)}
                   onRetryDetail={() => yearDetail && selectYear(yearDetail.selection)}
                 />
-              </ContentTransition>
-            </RememberedPage>
-            <RememberedPage active={!artistPageName && activeNav === "Ratings"}>
-              <ContentTransition type="collection">
-                <TonightsAlbum onPlay={playTonightAlbum} onOpen={goToRatingAlbum} onSettings={() => openSettings("connections")} playbackBusy={ratingsQueueBusy} />
-                <RatingsStudio
+              </RememberedPage>
+              <RememberedPage active={!artistPageName && activeNav === "Ratings"}>
+                <RatingsRoute
+                  tonight={{ onPlay: playTonightAlbum, onOpen: goToRatingAlbum, onSettings: () => openSettings("connections"), playbackBusy: ratingsQueueBusy }}
                   overview={ratingsOverview}
                   page={ratingsPage}
                   selectedAlbum={selectedRatingAlbum}
@@ -3906,89 +1615,85 @@ function App() {
                   onRetry={() => setRatingsReloadToken((value) => value + 1)}
                   onRetryPage={() => setRatingsReloadToken((value) => value + 1)}
                 />
-              </ContentTransition>
-            </RememberedPage>
-            <ReactActivity mode={showExplorerCount ? "visible" : "hidden"}>
-              {activeNav === "Universe" ? <>
-              <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
-              <section className="stats" aria-label="Library overview">
-                {stats.map(({ label, value, detail, icon: Icon, tone }) => (
-                  <article className={`stat stat--${tone}`} key={label}>
-                    <div className="stat__icon"><Icon aria-hidden="true" /></div>
-                    <div><span>{label}</span><strong>{formatCount(value ?? 0)}</strong><small>{detail}</small></div>
-                    <Activity className="stat__spark" aria-hidden="true" />
-                  </article>
-                ))}
-                <article className="source-card">
-                  <Gauge aria-hidden="true" />
-                  <div><span>Source</span><strong>{snapshot.sourceState === "connected" ? "Live" : "Preview"}</strong><small>{snapshot.sourceLabel}</small></div>
-                  {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
-                </article>
-              </section>
-              {universeHistoryPage && <UniverseListeningMemory page={universeHistoryPage} onOpenHistory={() => navigate("History")} />}
-              </> : null}
-
-              {(["Universe", "Songs", "Albums", "Artists", "Tags"] as const).map((destination) => (
-              <RememberedPage key={destination} active={showExplorerCount && activeNav === destination}>
-              <ContentTransition type="artist-detail">
-                <DeepExplorer
-                  view={explorerView}
-                  filters={explorerFilters}
-                  tracks={explorerTracks}
-                  albums={explorerAlbums}
-                  artists={explorerArtists}
-                  selectedTrackId={selectedTrack?.id ?? null}
-                  currentTrackKey={playback.state.currentTrack?.trackKey ?? null}
-                  playbackActive={playback.state.status === "playing"}
-                  selectedAlbumId={selectedAlbumId}
-                  selectedArtistId={selectedArtistId}
-                  albumTracks={albumTracks}
-                  albumTracksTruncated={albumTracksTruncated}
-                  trackChartRanks={catalogChartRanks.tracks}
-                  albumChartRanks={catalogChartRanks.albums}
-                  loadState={explorerLoadState}
-                  errorMessage={explorerError}
-                  albumDetailState={albumDetailState}
-                  pageInfo={{ loaded: explorerLoaded, hasMore: explorerCursor !== null, isLoadingMore }}
-                  busyTrackKeys={inlineSavingKeys}
-                  onViewChange={changeExplorerView}
-                  onFiltersChange={(filters) => {
-                    setExplorerSelection(null);
-                    setExplorerFilters(filters);
-                  }}
-                  onSelectTrack={selectTrack}
-                  onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
-                  onSelectAlbum={selectAlbum}
-                  onSelectArtist={(artist) => { if (artist) openArtistAlbums(artist.name); else setSelectedArtistId(null); }}
-                  onOpenArtistAlbums={openArtistAlbums}
-                  onLoadMore={() => void loadMoreExplorerResults()}
-                  onRetry={() => {
-                    if (selectedAlbumId && albumDetailState === "error") {
-                      const album = explorerAlbums.find((candidate) => candidate.id === selectedAlbumId);
-                      if (album) selectAlbum(album);
-                    } else {
-                      setExplorerReloadToken((value) => value + 1);
-                    }
-                  }}
-                  onClearFilters={() => {
-                    setExplorerSelection(null);
-                    setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] });
-                  }}
-                  onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
-                  onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
-                  onDeleteTracks={deleteExplorerAlbumTracks}
-                  onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
-                  onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
-                  albumMoveBusy={albumMoveRequest !== null}
-                  onSelectionChange={(selection) => {
-                    setExplorerSelection(selection);
-                    setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
-                  }}
-                />
-              </ContentTransition>
               </RememberedPage>
-              ))}
-            </ReactActivity>
+              <ReactActivity mode={showExplorerCount ? "visible" : "hidden"}>
+                {activeNav === "Universe" ? <>
+                  <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
+                  <section className="stats" aria-label="Library overview">
+                    {stats.map(({ label, value, detail, icon: Icon, tone }) => (
+                      <article className={`stat stat--${tone}`} key={label}>
+                        <div className="stat__icon"><Icon aria-hidden="true" /></div>
+                        <div><span>{label}</span><strong>{formatCount(value ?? 0)}</strong><small>{detail}</small></div>
+                        <Activity className="stat__spark" aria-hidden="true" />
+                      </article>
+                    ))}
+                    <article className="source-card">
+                      <Gauge aria-hidden="true" />
+                      <div><span>Source</span><strong>{snapshot.sourceState === "connected" ? "Live" : "Preview"}</strong><small>{snapshot.sourceLabel}</small></div>
+                      {snapshot.sourceState === "connected" && <BadgeCheck aria-label="Connected read-only" />}
+                    </article>
+                  </section>
+                  {universeHistoryPage && <UniverseListeningMemory page={universeHistoryPage} onOpenHistory={() => navigate("History")} />}
+                </> : null}
+
+                {(["Universe", "Songs", "Albums", "Artists", "Tags"] as const).map((destination) => (
+                  <RememberedPage key={destination} active={showExplorerCount && activeNav === destination}>
+                    <LibraryRoute
+                      view={explorerView}
+                      filters={explorerFilters}
+                      tracks={explorerTracks}
+                      albums={explorerAlbums}
+                      artists={explorerArtists}
+                      currentTrackKey={playback.state.currentTrack?.trackKey ?? null}
+                      playbackActive={playback.state.status === "playing"}
+                      selectedAlbumId={selectedAlbumId}
+                      selectedArtistId={selectedArtistId}
+                      albumTracks={albumTracks}
+                      albumTracksTruncated={albumTracksTruncated}
+                      trackChartRanks={catalogChartRanks.tracks}
+                      albumChartRanks={catalogChartRanks.albums}
+                      loadState={explorerLoadState}
+                      errorMessage={explorerError}
+                      albumDetailState={albumDetailState}
+                      pageInfo={{ loaded: explorerLoaded, hasMore: explorerCursor !== null, isLoadingMore }}
+                      busyTrackKeys={inlineSavingKeys}
+                      onViewChange={changeExplorerView}
+                      onFiltersChange={(filters) => {
+                        setExplorerSelection(null);
+                        setExplorerFilters(filters);
+                      }}
+                      onSelectTrack={selectTrack}
+                      onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
+                      onSelectAlbum={selectAlbum}
+                      onSelectArtist={(artist) => { if (artist) openArtistAlbums(artist.name); else setSelectedArtistId(null); }}
+                      onOpenArtistAlbums={openArtistAlbums}
+                      onLoadMore={() => void loadMoreExplorerResults()}
+                      onRetry={() => {
+                        if (selectedAlbumId && albumDetailState === "error") {
+                          const album = explorerAlbums.find((candidate) => candidate.id === selectedAlbumId);
+                          if (album) selectAlbum(album);
+                        } else {
+                          setExplorerReloadToken((value) => value + 1);
+                        }
+                      }}
+                      onClearFilters={() => {
+                        setExplorerSelection(null);
+                        setExplorerFilters({ ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView] });
+                      }}
+                      onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+                      onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+                      onDeleteTracks={deleteExplorerAlbumTracks}
+                      onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
+                      onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
+                      albumMoveBusy={albumMoveRequest !== null}
+                      onSelectionChange={(selection) => {
+                        setExplorerSelection(selection);
+                        setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
+                      }}
+                    />
+                  </RememberedPage>
+                ))}
+              </ReactActivity>
             </ContentTransition>
           ) : loadError ? (
             <section className="load-state load-state--error" role="alert">
@@ -4073,7 +1778,7 @@ function App() {
         ) : inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">
             <ContentTransition type="artist-detail">
-              <ArtistWorld
+              <ArtistInspector
                 key={inspectorArtistName}
                 artistName={inspectorArtistName}
                 catalogDetail={artistDetail}
@@ -4199,4 +1904,6 @@ function App() {
   );
 }
 
-export default App;
+export default function AuroraApp() {
+  return <AppStoreProvider><App /></AppStoreProvider>;
+}
