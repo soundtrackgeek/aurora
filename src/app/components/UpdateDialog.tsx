@@ -16,7 +16,8 @@ export function UpdateDialog({ version, phase, progress, message, onInstall, onD
         <div>
           <p className="eyebrow">Aurora update</p>
           <h2 id="update-title">{phase === "checking" ? "Checking for updates…" : phase === "upToDate" ? "Aurora is up to date" : phase === "error" ? "Update couldn’t complete" : `Version ${version ?? "unknown"} is ready`}</h2>
-          <p>{phase === "checking" ? "Looking for a newer Aurora release…" : message || "Install the latest Aurora build now. The app will close, update in place, and restart."}</p>
+          {phase === "checking" && <p>Looking for a newer Aurora release…</p>}
+          {phase === "upToDate" && <p>{message || "You’re running the latest Aurora version."}</p>}
         </div>
         {isWorking && phase !== "checking" && (
           <div className="update-progress" aria-live="polite">

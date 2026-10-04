@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.21] - 2026-10-04
+
+### Fixed
+- Keep the update modal compact by showing the available version without release notes, so the Later and Install and restart buttons remain visible on small screens. Preserve download progress and display update errors once.
+
 ## [0.28.20] - 2026-10-04
 
 ### Changed

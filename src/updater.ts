@@ -64,7 +64,7 @@ export function useAuroraUpdater() {
         phase: "available",
         version: update.version,
         progress: null,
-        message: update.body ?? null,
+        message: null,
         isPromptOpen: manual || firstPrompt,
       });
     } catch (error) {

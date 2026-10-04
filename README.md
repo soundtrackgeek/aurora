@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.21 keeps the update prompt compact: it shows the available version and the **Later** / **Install and restart** buttons without release notes, so the actions remain visible on small screens. Download progress and update errors still appear when needed.
+
 Aurora 0.28.20 moves state-snapshot publication, catalog detection, Music Library retries, pending-tag reconciliation, playback advancement, and history refresh to independent native schedules. React subscribes to change events, so hidden or minimized windows no longer control sync or playback progress. Playback retains its local playhead clock and a 15-second recovery heartbeat. Automatic update checks run at startup, after an hour on focus, and every six hours, with exponential backoff after failures; manual checks remain available. See [Native background events](docs/native-events.md) for schedules, ordering, and lifecycle contracts.
 
 Aurora 0.28.18 splits the frontend into domain hooks and lazy destination containers. Explorer loading, workspace restoration, inspector selection, artist navigation, catalog synchronization, and destination data now have explicit module boundaries. A small app-scoped store shares selection, navigation, and catalog invalidation; pages load on demand while retaining their existing navigation state. See [Frontend domain architecture](docs/frontend-domains.md) for ownership and extension guidance.
