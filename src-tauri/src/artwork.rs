@@ -1,9 +1,12 @@
-use crate::{ArtworkSelectionState, InboxState, catalog, tagging::read_tag_for_write};
+use crate::{
+    ArtworkSelectionState, InboxState, catalog, cover_cache::CoverCache,
+    tagging::read_tag_for_write,
+};
 use id3::{
     TagLike,
     frame::{Picture, PictureType},
 };
-use image::{ImageFormat, ImageReader, imageops::FilterType};
+use image::{ImageDecoder, ImageFormat, ImageReader, imageops::FilterType};
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -11,7 +14,7 @@ use std::{
     collections::{VecDeque, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
-    io::Cursor,
+    io::{BufRead, Cursor, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -236,6 +239,10 @@ fn response(
         .expect("valid cover response")
 }
 
+pub(crate) fn cover_error_response(status: http::StatusCode) -> http::Response<Vec<u8>> {
+    response(status, "text/plain", Vec::new())
+}
+
 #[derive(Debug, PartialEq)]
 enum CoverSource {
     Album(String),
@@ -317,13 +324,24 @@ fn source_fingerprint(
     Ok(format!("{:016x}-{size}.webp", hasher.finish()))
 }
 
+fn decode_cover<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<image::DynamicImage, String> {
+    let decoder = reader
+        .into_decoder()
+        .map_err(|_| "Aurora could not identify this album cover.".to_owned())?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_COVER_PIXELS {
+        return Err("The album-cover dimensions are outside Aurora's safe range.".to_owned());
+    }
+    image::DynamicImage::from_decoder(decoder)
+        .map_err(|_| "Aurora could not decode this album cover.".to_owned())
+}
+
 fn encode_thumbnail(source: &Path, size: u32) -> Result<Vec<u8>, String> {
-    let image = ImageReader::open(source)
+    let reader = ImageReader::open(source)
         .map_err(|_| "Aurora could not open this album cover.".to_owned())?
         .with_guessed_format()
-        .map_err(|_| "Aurora could not identify this album cover.".to_owned())?
-        .decode()
-        .map_err(|_| "Aurora could not decode this album cover.".to_owned())?;
+        .map_err(|_| "Aurora could not identify this album cover.".to_owned())?;
+    let image = decode_cover(reader)?;
     let thumbnail = image.resize(size, size, FilterType::Lanczos3);
     let mut output = Cursor::new(Vec::new());
     thumbnail
@@ -343,7 +361,11 @@ fn encode_embedded_thumbnail(source: &Path, size: u32) -> Result<Vec<u8>, String
             if picture.data.is_empty() || picture.data.len() as u64 > MAX_COVER_BYTES {
                 continue;
             }
-            if let Ok(image) = image::load_from_memory(&picture.data) {
+            let reader = ImageReader::new(Cursor::new(&picture.data)).with_guessed_format();
+            if let Ok(image) = reader
+                .map_err(|error| error.to_string())
+                .and_then(decode_cover)
+            {
                 decoded = Some(image);
                 break;
             }
@@ -361,61 +383,22 @@ fn encode_embedded_thumbnail(source: &Path, size: u32) -> Result<Vec<u8>, String
     Ok(output.into_inner())
 }
 
-fn cache_thumbnail(cache_path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = cache_path
-        .parent()
-        .ok_or_else(|| "Aurora's cover cache has no parent directory.".to_owned())?;
-    fs::create_dir_all(parent)
-        .map_err(|_| "Aurora could not create its cover cache.".to_owned())?;
-    let sequence = TEMPORARY_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let temporary: PathBuf =
-        cache_path.with_extension(format!("{}-{sequence}.tmp", std::process::id()));
-    fs::write(&temporary, bytes)
-        .map_err(|_| "Aurora could not stage a cover thumbnail.".to_owned())?;
-    match fs::rename(&temporary, cache_path) {
-        Ok(()) => Ok(()),
-        Err(_) if cache_path.is_file() => {
-            let _ = fs::remove_file(&temporary);
-            Ok(())
-        }
-        Err(_) => {
-            let _ = fs::remove_file(&temporary);
-            Err("Aurora could not finish caching a cover thumbnail.".to_owned())
-        }
-    }
-}
-
-fn load_thumbnail<R: Runtime>(
-    app: &AppHandle<R>,
-    album_id: &str,
-    size: u32,
-) -> Result<Vec<u8>, String> {
+fn load_thumbnail(album_id: &str, size: u32, cache: &CoverCache) -> Result<Vec<u8>, String> {
     let Some(entry) = catalog::resolve_cover_archive_entry(album_id)? else {
-        let cache_root = app
-            .path()
-            .app_cache_dir()
-            .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
-            .join("embedded-album-covers");
         return load_embedded_album_thumbnail(
             album_id,
             &catalog::embedded_cover_candidates(album_id)?,
             size,
-            &cache_root,
+            cache,
         );
     };
     let source = entry.path;
     let filename = source_fingerprint(album_id, &source, size, Some(MAX_COVER_BYTES))?;
-    let cache_path = app
-        .path()
-        .app_cache_dir()
-        .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
-        .join("covers")
-        .join(filename);
-    if let Ok(bytes) = fs::read(&cache_path) {
+    if let Some(bytes) = cache.read("covers", &filename) {
         return Ok(bytes);
     }
     let bytes = encode_thumbnail(&source, size)?;
-    cache_thumbnail(&cache_path, &bytes)?;
+    let _ = cache.store("covers", &filename, &bytes);
     Ok(bytes)
 }
 
@@ -423,18 +406,17 @@ fn load_embedded_album_thumbnail(
     album_id: &str,
     candidates: &[PathBuf],
     size: u32,
-    cache_root: &Path,
+    cache: &CoverCache,
 ) -> Result<Vec<u8>, String> {
     for source in candidates {
         let Ok(filename) = source_fingerprint(album_id, source, size, None) else {
             continue;
         };
-        let cache_path = cache_root.join(filename);
-        if let Ok(bytes) = fs::read(&cache_path) {
+        if let Some(bytes) = cache.read("embedded-album-covers", &filename) {
             return Ok(bytes);
         }
         if let Ok(bytes) = encode_embedded_thumbnail(source, size) {
-            cache_thumbnail(&cache_path, &bytes)?;
+            let _ = cache.store("embedded-album-covers", &filename, &bytes);
             return Ok(bytes);
         }
     }
@@ -445,6 +427,7 @@ fn load_inbox_thumbnail<R: Runtime>(
     app: &AppHandle<R>,
     track_path: &str,
     size: u32,
+    cache: &CoverCache,
 ) -> Result<Vec<u8>, String> {
     let source = app
         .state::<InboxState>()
@@ -452,17 +435,11 @@ fn load_inbox_thumbnail<R: Runtime>(
         .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
         .resolve_cover_track(track_path)?;
     let filename = source_fingerprint(track_path, &source, size, None)?;
-    let cache_path = app
-        .path()
-        .app_cache_dir()
-        .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
-        .join("inbox-covers")
-        .join(filename);
-    if let Ok(bytes) = fs::read(&cache_path) {
+    if let Some(bytes) = cache.read("inbox-covers", &filename) {
         return Ok(bytes);
     }
     let bytes = encode_embedded_thumbnail(&source, size)?;
-    cache_thumbnail(&cache_path, &bytes)?;
+    let _ = cache.store("inbox-covers", &filename, &bytes);
     Ok(bytes)
 }
 
@@ -470,6 +447,7 @@ fn load_selected_thumbnail<R: Runtime>(
     app: &AppHandle<R>,
     token: &str,
     size: u32,
+    cache: &CoverCache,
 ) -> Result<Vec<u8>, String> {
     let source = app
         .state::<ArtworkSelectionState>()
@@ -477,31 +455,26 @@ fn load_selected_thumbnail<R: Runtime>(
         .map_err(|_| "Aurora's album-cover picker stopped unexpectedly.".to_owned())?
         .resolve(token)?;
     let filename = source_fingerprint(token, &source, size, Some(MAX_COVER_BYTES))?;
-    let cache_path = app
-        .path()
-        .app_cache_dir()
-        .map_err(|_| "Aurora's cache directory is unavailable.".to_owned())?
-        .join("selected-covers")
-        .join(filename);
-    if let Ok(bytes) = fs::read(&cache_path) {
+    if let Some(bytes) = cache.read("selected-covers", &filename) {
         return Ok(bytes);
     }
     let bytes = encode_thumbnail(&source, size)?;
-    cache_thumbnail(&cache_path, &bytes)?;
+    let _ = cache.store("selected-covers", &filename, &bytes);
     Ok(bytes)
 }
 
 pub(crate) fn handle_cover_request<R: Runtime>(
     app: &AppHandle<R>,
     request: &http::Request<Vec<u8>>,
+    cache: &CoverCache,
 ) -> http::Response<Vec<u8>> {
     let Ok((source, size)) = parse_request(request) else {
         return response(http::StatusCode::BAD_REQUEST, "text/plain", Vec::new());
     };
     let result = match source {
-        CoverSource::Album(album_id) => load_thumbnail(app, &album_id, size),
-        CoverSource::InboxTrack(track_path) => load_inbox_thumbnail(app, &track_path, size),
-        CoverSource::Selected(token) => load_selected_thumbnail(app, &token, size),
+        CoverSource::Album(album_id) => load_thumbnail(&album_id, size, cache),
+        CoverSource::InboxTrack(track_path) => load_inbox_thumbnail(app, &track_path, size, cache),
+        CoverSource::Selected(token) => load_selected_thumbnail(app, &token, size, cache),
     };
     match result {
         Ok(bytes) => response(http::StatusCode::OK, "image/webp", bytes),
@@ -576,15 +549,16 @@ mod tests {
         assert!(decoded.width() <= 64);
         assert!(decoded.height() <= 64);
         let cache_root = path.with_extension("cache");
+        let cache = CoverCache::new(cache_root.clone(), 1024 * 1024);
         let missing = path.with_extension("missing.mp3");
         let candidates = vec![missing, path.clone()];
-        let fallback = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root)
+        let fallback = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache)
             .expect("unindexed album uses embedded artwork after an unavailable track");
         assert_eq!(fallback, webp);
-        let cached = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root)
+        let cached = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache)
             .expect("cached embedded cover");
         assert_eq!(cached, webp);
-        assert!(load_embedded_album_thumbnail("empty", &[], 64, &cache_root).is_err());
+        assert!(load_embedded_album_thumbnail("empty", &[], 64, &cache).is_err());
         // Replacing the embedded image changes the source fingerprint and thumbnail.
         let mut png = Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(100, 200)
@@ -598,11 +572,79 @@ mod tests {
             data: png.into_inner(),
         });
         tag.write_to_path(&path, Version::Id3v24).unwrap();
-        let replaced =
-            load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache_root).unwrap();
+        let replaced = load_embedded_album_thumbnail("unindexed", &candidates, 64, &cache).unwrap();
         let decoded = image::load_from_memory(&replaced).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (32, 64));
         fs::remove_dir_all(cache_root).unwrap();
         fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn embedded_artwork_still_loads_when_cache_cannot_be_written() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mp3");
+        File::create(&source)
+            .unwrap()
+            .write_all(b"FAKE-MPEG-AUDIO")
+            .unwrap();
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        let mut tag = Tag::new();
+        tag.add_frame(Picture {
+            mime_type: "image/png".to_owned(),
+            picture_type: PictureType::CoverFront,
+            description: String::new(),
+            data: png.into_inner(),
+        });
+        tag.write_to_path(&source, Version::Id3v24).unwrap();
+        // A file in place of the cache root makes directory creation fail.
+        let cache_root = root.path().join("blocked");
+        fs::write(&cache_root, b"blocked").unwrap();
+        let cache = CoverCache::new(cache_root, 1024);
+        let bytes = load_embedded_album_thumbnail("album", &[source], 64, &cache).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (64, 64));
+    }
+
+    #[test]
+    fn protocol_failures_are_never_cached() {
+        for status in [
+            http::StatusCode::BAD_REQUEST,
+            http::StatusCode::NOT_FOUND,
+            http::StatusCode::SERVICE_UNAVAILABLE,
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            let response = cover_error_response(status);
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()[http::header::CACHE_CONTROL], "no-store");
+            assert_eq!(
+                response.headers()[http::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "*"
+            );
+        }
+    }
+
+    #[test]
+    fn thumbnail_decoder_rejects_oversized_dimensions_before_reading_pixels() {
+        let mut bmp = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 2)
+            .write_to(&mut bmp, ImageFormat::Bmp)
+            .unwrap();
+        let mut bytes = bmp.into_inner();
+        // Keep a tiny valid BMP header, advertising dimensions just over 100 MP.
+        // There is no large pixel buffer to allocate or read in this fixture.
+        bytes[18..22].copy_from_slice(&10_001_u32.to_le_bytes());
+        bytes[22..26].copy_from_slice(&10_000_u32.to_le_bytes());
+        let error = decode_cover(ImageReader::with_format(
+            Cursor::new(bytes),
+            ImageFormat::Bmp,
+        ))
+        .expect_err("reject dimensions");
+        assert_eq!(
+            error,
+            "The album-cover dimensions are outside Aurora's safe range."
+        );
     }
 }

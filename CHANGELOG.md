@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.23] - 2026-10-04
+
+### Changed
+- Implement roadmap improvement 3: serve `aurora-cover` through Tauri's asynchronous responder, with three workers and a nonblocking queue capped at 256 pending requests. Disk reads, catalog resolution, image decoding, and WebP encoding run off the WebView resource callback.
+- Cap derived thumbnails across `covers`, `embedded-album-covers`, `inbox-covers`, and `selected-covers` at a shared 1 GiB. Sweep at startup, persist access timestamps for LRU ordering across restarts, and evict before each atomic cache write. Clean only Aurora's abandoned staging files; preserve source artwork, MP3s, and unrelated caches.
+- Return successfully decoded artwork even if the cache is unavailable. Preserve fingerprint invalidation, embedded fallback, bounded thumbnail sizes, response headers, and apply the 100 MP image-dimension limit before decoding thumbnails.
+- Cover worker concurrency/overflow, cross-directory eviction, restart LRU, concurrent writes, cleanup boundaries, and cache-write fallback with deterministic regression tests.
+
 ## [0.28.22] - 2026-10-04
 
 ### Fixed

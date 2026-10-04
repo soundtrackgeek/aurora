@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.23 implements roadmap improvement 3: album, embedded, Inbox, and selected-cover requests use an asynchronous protocol with three decode workers and a bounded queue. Their derived WebP thumbnails share a 1 GiB disk-cache budget; startup cleanup and eviction on writes remove the least recently used thumbnails, with access ordering retained across restarts. Source artwork and MP3s are untouched, and a cache-write failure still returns a decoded image. See [Cover protocol and cache](docs/cover-cache.md) for limits and verification.
+
 Aurora 0.28.22 allows one running instance. Launching Aurora again brings the existing window forward, including when it is minimized or hidden, without starting another playback engine, state publisher, or database writer. Launch arguments and the launching directory are forwarded through `app://second-instance` for future file and deep-link handlers. See [Single-instance startup](docs/single-instance.md) for the native verification procedure.
 
 Aurora 0.28.21 keeps the update prompt compact: it shows the available version and the **Later** / **Install and restart** buttons without release notes, so the actions remain visible on small screens. Download progress and update errors still appear when needed.

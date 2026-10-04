@@ -6,6 +6,8 @@ mod chart_identity;
 mod chart_song_match;
 mod charts;
 mod connections;
+mod cover_cache;
+mod cover_protocol;
 mod curation;
 mod curation_store;
 mod device_mode;
@@ -1752,8 +1754,8 @@ pub fn run() {
                 })
                 .build(),
         )
-        .register_uri_scheme_protocol("aurora-cover", |context, request| {
-            artwork::handle_cover_request(context.app_handle(), &request)
+        .register_asynchronous_uri_scheme_protocol("aurora-cover", |context, request, responder| {
+            cover_protocol::dispatch(context.app_handle(), request, responder);
         })
         .register_asynchronous_uri_scheme_protocol(
             "aurora-artist",
@@ -1772,6 +1774,9 @@ pub fn run() {
                 let _ = dotenvy::dotenv();
             }
             let state_directory = app.path().app_data_dir()?;
+            app.manage(cover_protocol::CoverProtocol::new(
+                app.path().app_cache_dir()?,
+            )?);
             connections::initialize(&state_directory).map_err(std::io::Error::other)?;
             #[cfg(target_os = "macos")]
             std::thread::spawn(|| {

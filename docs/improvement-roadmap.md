@@ -107,7 +107,9 @@ The most important case: while the app is running, **OneDrive state-snapshot pub
 - Emit `playback://state` from the playback runtime on every transition (track change, play/pause, seek, queue edit, device fallback). Keep the 250 ms local playhead clock and keep the 2 s poll only as a slow heartbeat (for example, every 15 s). Use `tauri::ipc::Channel` for high-frequency streams.
 - Check for updates at startup, on focus when at least an hour has passed, and every 6 hours, with exponential backoff after failures. Keep the manual **Check for updates** button.
 
-### 3. Make the cover protocol async and cap its disk cache
+### 3. Make the cover protocol async and cap its disk cache - DONE
+
+**Implemented in 0.28.23.** The asynchronous `aurora-cover` responder dispatches to three workers with at most 256 pending requests. All four cover-thumbnail folders share a 1 GiB LRU budget, swept at startup and enforced before atomic writes. Cache reads persist their access timestamps for restart ordering; generated covers still display when caching fails. Source fingerprints and embedded fallbacks are retained. See [Cover protocol and cache](cover-cache.md) for the contract and regression checks. The assessment below records the original baseline.
 
 **Today.** [`lib.rs:1735`](../src-tauri/src/lib.rs) registers `aurora-cover` with the **synchronous** `register_uri_scheme_protocol`. On a cache miss, the protocol thread decodes a source of up to 32 MiB / 100 MP, resizes it with Lanczos3, and encodes WebP. The `aurora-artist` protocol was already moved to the asynchronous responder for this exact reason (see the README note on Artists-page portraits). Thumbnails are written to `covers/` and `embedded-album-covers/` under names derived from a source fingerprint, and nothing ever evicts them. Replaced covers therefore leave orphans, and 76k covers in several sizes (64–512 px) can grow without limit.
 
