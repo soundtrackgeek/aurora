@@ -100,6 +100,9 @@ pub(crate) struct LibrarySyncReport {
 }
 
 impl LibrarySyncReport {
+    pub(crate) fn made_progress(&self) -> bool {
+        !self.completed_directories.is_empty()
+    }
     pub(crate) fn completed(&self, directory: &str) -> bool {
         self.completed_directories
             .contains(&normalized_directory(directory))
@@ -127,6 +130,19 @@ impl Default for LibrarySyncCoordinator {
 }
 
 impl LibrarySyncCoordinator {
+    pub(crate) fn status(&self, store: &StateStore) -> Result<CatalogSync, String> {
+        let projection_token = self.reserve_background_projection_token();
+        let (retryable, blocked) = store.library_folder_sync_counts()?;
+        let mut status = if retryable > 0 {
+            CatalogSync::pending(retryable, blocked, None)
+        } else if blocked > 0 {
+            CatalogSync::blocked(blocked, None)
+        } else {
+            CatalogSync::synced()
+        };
+        status.projection_token = Some(projection_token);
+        Ok(status)
+    }
     /// Keeps the authoritative MP3 write, durable queue receipt, and native playback projection in
     /// one order. The returned token lets the frontend reject an older response delivered late.
     pub(crate) fn serialize_tag_edit<T>(&self, operation: impl FnOnce() -> T) -> (T, u64) {

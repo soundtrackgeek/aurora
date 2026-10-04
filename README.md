@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora 0.28.19 fixes the macOS release verification test's cold Library route race. Album transition tests now wait for the initial snapshot and lazy module loading before querying album covers, while retaining the check that local details commit before file reconciliation starts. Application behavior and test timeouts are unchanged.
+Aurora 0.28.20 moves state-snapshot publication, catalog detection, Music Library retries, pending-tag reconciliation, playback advancement, and history refresh to independent native schedules. React subscribes to change events, so hidden or minimized windows no longer control sync or playback progress. Playback retains its local playhead clock and a 15-second recovery heartbeat. Automatic update checks run at startup, after an hour on focus, and every six hours, with exponential backoff after failures; manual checks remain available. See [Native background events](docs/native-events.md) for schedules, ordering, and lifecycle contracts.
 
 Aurora 0.28.18 splits the frontend into domain hooks and lazy destination containers. Explorer loading, workspace restoration, inspector selection, artist navigation, catalog synchronization, and destination data now have explicit module boundaries. A small app-scoped store shares selection, navigation, and catalog invalidation; pages load on demand while retaining their existing navigation state. See [Frontend domain architecture](docs/frontend-domains.md) for ownership and extension guidance.
 

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { loadAudioSettings, updateAudioSettings, type AudioSettingsRequest, type AudioSettingsStatus } from '../../audio';
 import type { SettingsTab } from '../../components/SettingsDialog';
 import { loadLaptopModeStatus, updateLaptopMode, type LaptopModeStatus } from '../../laptopMode';
+import { subscribeNativeEvent } from '../../nativeEvents';
 import {
   defaultShortcutBindings,
   loadGlobalShortcutSettings,
@@ -38,26 +39,33 @@ export function useAppSettings(onAlbumOrderChanged: () => void) {
 
   useEffect(() => {
     let cancelled = false;
+    let request = 0;
+    const apply = (status: LaptopModeStatus) => {
+      if (cancelled) return;
+      if (status.albumOrderRevision > albumOrderRevisionRef.current) {
+        albumOrderRevisionRef.current = status.albumOrderRevision;
+        onAlbumOrderChangedRef.current();
+      }
+      setLaptopModeStatus(status);
+      setLaptopModeError(null);
+    };
     const refresh = () => {
+      const sequence = ++request;
       void loadLaptopModeStatus()
         .then((status) => {
-          if (cancelled) return;
-          if (status.albumOrderRevision > albumOrderRevisionRef.current) {
-            albumOrderRevisionRef.current = status.albumOrderRevision;
-            onAlbumOrderChangedRef.current();
-          }
-          setLaptopModeStatus(status);
-          setLaptopModeError(null);
+          if (sequence === request) apply(status);
         })
         .catch((error: unknown) => {
           if (!cancelled) setLaptopModeError(error instanceof Error ? error.message : String(error));
         });
     };
-    refresh();
-    const interval = window.setInterval(refresh, 5_000);
+    const stop = subscribeNativeEvent<LaptopModeStatus>("sync://status", (status) => {
+      request += 1;
+      apply(status);
+    }, refresh);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      stop();
     };
   }, []);
 

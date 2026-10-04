@@ -24,6 +24,7 @@ mod library_sync;
 mod live_genres;
 mod media_controls;
 mod musicbrainz;
+mod native_events;
 mod pcm_buffer;
 mod playback;
 mod playback_persistence;
@@ -86,7 +87,7 @@ use state_store::StateStore;
 use std::sync::Mutex;
 use tag_model::{TagEditRequest, TagEditorTarget, TagEditorUpdateRequest, TagEditorUpdateResult};
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use waveform::{FileSignature, WaveformSnapshot, WaveformStore, WaveformWorkCoordinator};
 use years::{YearDetail, YearOverview, YearQueueRequest, YearSelection};
@@ -425,6 +426,12 @@ async fn library_snapshot(app: AppHandle) -> Result<LibrarySnapshot, String> {
     })
     .await
     .map_err(|error| format!("The catalog worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+fn acknowledge_catalog_revision(app: AppHandle, revision: String) {
+    app.state::<native_events::NativeBackgroundTasks>()
+        .acknowledge_catalog(revision);
 }
 
 #[tauri::command]
@@ -1468,7 +1475,7 @@ async fn undo_track_tag_edit(
     .map_err(|error| format!("The tag undo worker stopped unexpectedly: {error}"))?
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TagReconciliationProjection {
     #[serde(flatten)]
@@ -1501,6 +1508,16 @@ async fn refresh_external_tag_changes(
 }
 
 #[tauri::command]
+async fn library_sync_status(app: AppHandle) -> Result<CatalogSync, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<LibrarySyncCoordinator>()
+            .status(&app.state::<StateStore>())
+    })
+    .await
+    .map_err(|error| format!("The Music Library status reader stopped: {error}"))?
+}
+
+#[tauri::command]
 async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, String> {
     connections::require_music_writes()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1518,10 +1535,10 @@ async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, Strin
 async fn laptop_mode_status(app: AppHandle) -> Result<LaptopModeStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<LaptopState>();
-        let mut runtime = state
+        let runtime = state
             .lock()
             .map_err(|_| "Aurora's Laptop Mode monitor stopped unexpectedly.".to_owned())?;
-        Ok(runtime.status(false))
+        Ok(runtime.cached_status())
     })
     .await
     .map_err(|error| format!("The Laptop Mode monitor stopped unexpectedly: {error}"))?
@@ -1797,6 +1814,10 @@ pub fn run() {
             let audio_store = AudioSettingsStore::load(state_directory.join("aurora-audio.json"));
             let mut runtime = PlaybackRuntime::new(store.clone(), history.clone(), audio_store)
                 .map_err(std::io::Error::other)?;
+            let playback_app = app.handle().clone();
+            runtime.attach_events(move |snapshot| {
+                let _ = playback_app.emit("playback://state", snapshot);
+            });
             let initial_playback = runtime.snapshot();
             let tag_service = TagService::new(store.clone()).map_err(std::io::Error::other)?;
             app.manage(store);
@@ -1820,6 +1841,12 @@ pub fn run() {
             }
             if let Err(error) = media_controls::initialize(app.handle(), &initial_playback) {
                 eprintln!("{error}");
+            }
+            app.manage(native_events::NativeBackgroundTasks::default());
+            let background = app.state::<native_events::NativeBackgroundTasks>();
+            if let Err(error) = background.start(app.handle()) {
+                background.stop();
+                return Err(std::io::Error::other(error).into());
             }
             Ok(())
         })
@@ -1850,6 +1877,7 @@ pub fn run() {
             connect_music_shares,
             library_snapshot,
             catalog_revision,
+            acknowledge_catalog_revision,
             list_music_library_playlists,
             music_library_playlist,
             artist_tracks,
@@ -1928,6 +1956,7 @@ pub fn run() {
             undo_track_tag_edit,
             refresh_external_tag_changes,
             retry_pending_library_sync,
+            library_sync_status,
             laptop_mode_status,
             set_laptop_mode,
             listening_history_page,
@@ -1973,6 +2002,7 @@ pub fn run() {
                 }
                 release_global_shortcuts(app);
                 media_controls::release(app);
+                app.state::<native_events::NativeBackgroundTasks>().stop();
             }
         });
 }

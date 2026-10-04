@@ -417,6 +417,34 @@ pub(crate) struct HistoryStore {
 }
 
 impl HistoryStore {
+    /// Local logical revision plus bounded peer snapshot fingerprints. No full
+    /// history page is loaded just to discover whether the UI needs refreshing.
+    pub(crate) fn revision(&self) -> Result<String, String> {
+        let revision: i64 = self
+            .open()?
+            .query_row(
+                "SELECT content_revision FROM history_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut fingerprints = vec![revision.to_string()];
+        for path in self.available_sources() {
+            if path == self.path {
+                continue;
+            }
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                fingerprints.push(format!(
+                    "{}:{}:{:?}",
+                    path.display(),
+                    metadata.len(),
+                    metadata.modified().ok()
+                ));
+            }
+        }
+        Ok(fingerprints.join("|"))
+    }
+
     pub(crate) fn local_device_id(path: &Path) -> Result<Option<String>, String> {
         if !path.is_file() {
             return Ok(None);

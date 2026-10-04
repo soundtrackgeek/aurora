@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { subscribeNativeEvent } from "../../nativeEvents";
 import { type HistoryDateRange, type HistoryLoadState } from "../../components/history/ListeningHistory";
 import { type SidebarDestination } from "../../components/navigation/SidebarNavigation";
 import { loadHistoryPage, saveHistoryPlayThreshold, type HistoryOutcomeFilter, type HistoryPage } from "../../history";
@@ -85,12 +86,10 @@ export function useHistoryDomain({
   ]);
 
   useEffect(() => {
-    if (activeNav !== "History") return;
-    const interval = window.setInterval(() => {
+    return subscribeNativeEvent<string>("history://revision", () => {
       setHistoryReloadToken((value) => value + 1);
-    }, 15_000);
-    return () => window.clearInterval(interval);
-  }, [activeNav]);
+    });
+  }, []);
 
   async function loadMoreHistory() {
     if (!historyPage?.nextCursor || historyLoadingMore) return;

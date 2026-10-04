@@ -470,3 +470,8 @@ export async function retryPendingLibrarySync(): Promise<CatalogSync> {
   }
   return invoke<CatalogSync>("retry_pending_library_sync");
 }
+
+export async function loadLibrarySyncStatus(): Promise<CatalogSync> {
+  if (!isTauriRuntime()) return { status: "synced", pendingFolderCount: 0 };
+  return invoke<CatalogSync>("library_sync_status");
+}

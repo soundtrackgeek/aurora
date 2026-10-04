@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import * as tags from "../../tags";
+import * as events from "../../nativeEvents";
 import { useCatalogProjection } from "./useCatalogProjection";
 import { usePendingLibrarySync } from "./usePendingLibrarySync";
 
@@ -70,22 +71,22 @@ it("serializes library retries and ignores stale sync tokens", async () => {
   expect(input.onChartsChanged).toHaveBeenCalledTimes(1);
 });
 
-it("retries pending syncs, stops blocked syncs, and removes timers on unmount", async () => {
+it("loads initial sync status without scheduling frontend retries", async () => {
   vi.useFakeTimers();
   const input = { ...options(), libraryReady: true };
   vi.spyOn(tags, "reconcilePendingTags").mockResolvedValue(report());
-  const retry = vi.spyOn(tags, "retryPendingLibrarySync").mockResolvedValue({ status: "pending", pendingFolderCount: 1 });
+  const status = vi.spyOn(tags, "loadLibrarySyncStatus").mockResolvedValue({ status: "pending", pendingFolderCount: 1 });
   const { result, unmount } = renderHook(() => {
     const projection = useCatalogProjection();
     return usePendingLibrarySync({ ...input, acceptTrackProjectionKeys: projection.acceptTrackProjectionKeys });
   });
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  expect(retry).toHaveBeenCalledTimes(1);
+  expect(status).toHaveBeenCalledTimes(1);
   await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-  expect(retry).toHaveBeenCalledTimes(2);
+  expect(status).toHaveBeenCalledTimes(1);
   await act(async () => { await result.current.handleCatalogSync({ status: "blocked", pendingFolderCount: 1 }); });
   await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-  expect(retry).toHaveBeenCalledTimes(2);
+  expect(status).toHaveBeenCalledTimes(1);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
 });
@@ -104,4 +105,36 @@ it("discards reconciliation results after unmount", async () => {
   await request;
   expect(input.onReconciliationChanges).not.toHaveBeenCalled();
   expect(input.setSyncMessage).not.toHaveBeenCalled();
+});
+
+it("projects pushed reconciliation and library status without a retry request", async () => {
+  vi.useFakeTimers();
+  const input = { ...options(), libraryReady: true };
+  const callbacks = new Map<string, (payload: unknown) => void>();
+  const release = vi.fn();
+  vi.spyOn(events, "subscribeNativeEvent").mockImplementation((name, receive, ready) => {
+    callbacks.set(name, receive);
+    ready?.();
+    return release;
+  });
+  vi.spyOn(tags, "reconcilePendingTags").mockResolvedValue(report());
+  vi.spyOn(tags, "loadLibrarySyncStatus").mockResolvedValue({ status: "pending", pendingFolderCount: 1, projectionToken: 1 });
+  const retry = vi.spyOn(tags, "retryPendingLibrarySync");
+  const { result, unmount } = renderHook(() => {
+    const projection = useCatalogProjection();
+    return usePendingLibrarySync({ ...input, acceptTrackProjectionKeys: projection.acceptTrackProjectionKeys });
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  const change: tags.TagReconciliationChange = { trackKey: "changed", values: { rating: 5, loveState: "loved", releaseYear: 2000 }, syncState: null };
+  await act(async () => {
+    callbacks.get("tags://reconciled")?.(report([change]));
+    callbacks.get("library-sync://status")?.({ status: "synced", pendingFolderCount: 0, projectionToken: 10 });
+  });
+  expect(input.onReconciliationChanges).toHaveBeenLastCalledWith([change]);
+  expect(result.current.catalogSyncNotice?.status).toBe("synced");
+  expect(input.onChartsChanged).toHaveBeenCalled();
+  expect(retry).not.toHaveBeenCalled();
+  unmount();
+  expect(release).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
 });

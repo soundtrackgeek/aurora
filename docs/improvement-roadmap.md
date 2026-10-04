@@ -83,6 +83,8 @@ Every online integration proposed below follows the pattern already used for Las
 
 ### 2. Push native events instead of polling; schedule sync in Rust
 
+**Implemented in 0.28.20.** Rust owns independent schedules for state publication, catalog detection, library retries, pending-tag reconciliation, playback advancement, and history revisions. React listens for changes, with an initial read and a 15-second playback recovery heartbeat. Automatic updates use startup, hourly focus eligibility, six-hour checks, and bounded exponential backoff. See [Native background events](native-events.md). Inbox filesystem watching remains improvement 17. The assessment below records the original baseline.
+
 **Today.** WebView timers drive most background refreshes:
 
 - playback snapshot every 2 s ([`playback.ts:349`](../src/playback.ts));

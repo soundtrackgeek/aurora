@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { previewAudioSnapshot, type ReplayGainMode } from "./audio";
+import { subscribeNativeEvent } from "./nativeEvents";
 import {
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
@@ -12,6 +13,7 @@ export type PlaybackStatus = "stopped" | "playing" | "paused" | "error";
 export type RepeatMode = "off" | "all" | "one";
 
 export interface PlaybackSnapshot {
+  eventSequence?: number;
   queue: Track[];
   currentIndex: number | null;
   currentTrack: Track | null;
@@ -323,6 +325,14 @@ export function usePlayback() {
   const activeCommandCountRef = useRef(0);
   const commandSequenceRef = useRef(0);
   const refreshInFlightRef = useRef(false);
+  const latestNativeSequenceRef = useRef(0);
+  const acceptSnapshot = useCallback((next: PlaybackSnapshot) => {
+    if (next.eventSequence !== undefined) {
+      if (next.eventSequence < latestNativeSequenceRef.current) return;
+      latestNativeSequenceRef.current = next.eventSequence;
+    }
+    setState(next);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (activeCommandCountRef.current > 0 || refreshInFlightRef.current) return;
@@ -333,7 +343,7 @@ export function usePlayback() {
       if (
         activeCommandCountRef.current === 0
         && commandSequenceRef.current === commandSequence
-      ) setState(next);
+      ) acceptSnapshot(next);
     } catch (error) {
       if (
         activeCommandCountRef.current === 0
@@ -342,16 +352,20 @@ export function usePlayback() {
     } finally {
       refreshInFlightRef.current = false;
     }
-  }, []);
+  }, [acceptSnapshot]);
 
   useEffect(() => {
-    const firstRefresh = window.setTimeout(() => void refresh(), 0);
-    const timer = window.setInterval(() => void refresh(), 2_000);
+    let firstRefresh: number | undefined;
+    const stop = subscribeNativeEvent<PlaybackSnapshot>("playback://state", acceptSnapshot, () => {
+      firstRefresh = window.setTimeout(() => void refresh(), 0);
+    });
+    const timer = window.setInterval(() => void refresh(), isTauriRuntime() ? 15_000 : 2_000);
     return () => {
       window.clearTimeout(firstRefresh);
+      stop();
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [acceptSnapshot, refresh]);
 
   const runCommand = useCallback(async <T,>(
     action: () => Promise<T>,
@@ -364,7 +378,7 @@ export function usePlayback() {
     setDismissedError(null);
     try {
       const next = await action();
-      if (commandSequenceRef.current === sequence) setState(snapshotFor(next));
+      if (commandSequenceRef.current === sequence) acceptSnapshot(snapshotFor(next));
       return next;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -374,7 +388,7 @@ export function usePlayback() {
       activeCommandCountRef.current = Math.max(0, activeCommandCountRef.current - 1);
       if (activeCommandCountRef.current === 0) setIsWorking(false);
     }
-  }, []);
+  }, [acceptSnapshot]);
   const run = useCallback(
     (action: () => Promise<PlaybackSnapshot>) => runCommand(action, (snapshot) => snapshot),
     [runCommand],
@@ -413,8 +427,8 @@ export function usePlayback() {
     commandSequenceRef.current += 1;
     setCommandError(null);
     setDismissedError(null);
-    setState(snapshot);
-  }, []);
+    acceptSnapshot(snapshot);
+  }, [acceptSnapshot]);
 
   const append = useCallback(
     (tracks: Track[]) => run(() => appendTrackQueue(tracks)),

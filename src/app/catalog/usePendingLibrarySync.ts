@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { subscribeNativeEvent } from "../../nativeEvents";
 import { formatCount } from "../../library";
 import {
   advanceCatalogProjectionToken,
   reconcilePendingTags,
+  loadLibrarySyncStatus,
   retryPendingLibrarySync,
   type CatalogSync,
   type CatalogTrackProjectionDecision,
   type TagReconciliationChange,
+  type TagReconciliationReport,
 } from "../../tags";
 import { catalogSyncNeedsRetry } from "./catalogSyncNotice";
-
-const retryIntervalMs = 5_000;
 
 export interface PendingLibrarySyncOptions {
   libraryReady: boolean;
@@ -24,7 +25,7 @@ export interface PendingLibrarySyncOptions {
   setSyncMessage: (message: string | null) => void;
 }
 
-/** Owns pending tag reconciliation, retry scheduling, and the settled sync notice. */
+/** Projects native tag/sync events and owns the settled sync notice. */
 export function usePendingLibrarySync({
   libraryReady,
   reloadToken,
@@ -35,12 +36,10 @@ export function usePendingLibrarySync({
   setSyncMessage,
 }: PendingLibrarySyncOptions) {
   const [catalogSyncNotice, setCatalogSyncNotice] = useState<CatalogSync | null>(null);
-  const [reconciliationHasMore, setReconciliationHasMore] = useState(false);
   const catalogSyncNoticeRef = useRef<CatalogSync | null>(null);
   const latestCatalogSyncTokenRef = useRef(0);
   const reconciliationRunningRef = useRef(false);
   const librarySyncRunningRef = useRef(false);
-  const appFocusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -81,38 +80,40 @@ export function usePendingLibrarySync({
     }
   }, [onChartsChanged, refreshCatalogIfChanged]);
 
+  const applyReconciliation = useCallback((report: TagReconciliationReport) => {
+    if (!mountedRef.current) return;
+    const projection = acceptTrackProjectionKeys(
+      report.changes.map((change) => change.trackKey),
+      report.projectionToken,
+    );
+    onReconciliationChanges(report.changes.filter((change) => (
+      projection.acceptedTrackKeys.has(change.trackKey)
+    )));
+    if (report.externalChanges > 0) {
+      setSyncMessage(`Refreshed ${formatCount(report.externalChanges)} external tag ${report.externalChanges === 1 ? "change" : "changes"}`);
+    } else if (report.issues.length > 0 || report.hasMore) {
+      setSyncMessage(report.issues.length === 1 && report.issues[0]?.message
+        ? report.issues[0].message
+        : `${formatCount(report.issues.length)} tag ${report.issues.length === 1 ? "item needs" : "items need"} attention`);
+    } else if (!catalogSyncNeedsRetry(catalogSyncNoticeRef.current)) {
+      setSyncMessage(null);
+    }
+  }, [acceptTrackProjectionKeys, onReconciliationChanges, setSyncMessage]);
+
   const refreshExternalTagChanges = useCallback(async () => {
     if (!mountedRef.current || reconciliationRunningRef.current) return;
     reconciliationRunningRef.current = true;
     try {
       const report = await reconcilePendingTags();
-      if (!mountedRef.current) return;
-      setReconciliationHasMore(report.hasMore);
-      const projection = acceptTrackProjectionKeys(
-        report.changes.map((change) => change.trackKey),
-        report.projectionToken,
-      );
-      onReconciliationChanges(report.changes.filter((change) => (
-        projection.acceptedTrackKeys.has(change.trackKey)
-      )));
-      if (report.externalChanges > 0) {
-        setSyncMessage(`Refreshed ${formatCount(report.externalChanges)} external tag ${report.externalChanges === 1 ? "change" : "changes"}`);
-      } else if (report.issues.length > 0 || report.hasMore) {
-        setSyncMessage(report.issues.length === 1 && report.issues[0]?.message
-          ? report.issues[0].message
-          : `${formatCount(report.issues.length)} tag ${report.issues.length === 1 ? "item needs" : "items need"} attention`);
-      } else if (!catalogSyncNeedsRetry(catalogSyncNoticeRef.current)) {
-        setSyncMessage(null);
-      }
+      applyReconciliation(report);
     } catch (error) {
       if (!mountedRef.current) return;
       console.warn("Aurora could not reconcile pending tags", error);
-      setReconciliationHasMore(true);
       setSyncMessage("Tag and Music Library refresh will retry automatically");
     } finally {
       reconciliationRunningRef.current = false;
     }
-  }, [acceptTrackProjectionKeys, onReconciliationChanges, setSyncMessage]);
+  }, [applyReconciliation, setSyncMessage]);
 
   const retryPendingLibrarySyncNow = useCallback(async () => {
     if (!mountedRef.current || librarySyncRunningRef.current) return;
@@ -128,41 +129,33 @@ export function usePendingLibrarySync({
 
   useEffect(() => {
     if (!libraryReady) return;
-    const initialRefresh = window.setTimeout(() => void refreshExternalTagChanges(), 0);
-    const refreshOnFocus = () => {
-      appFocusedRef.current = true;
-      void refreshExternalTagChanges();
-    };
-    const pauseOnBlur = () => { appFocusedRef.current = false; };
-    appFocusedRef.current = document.hasFocus();
+    let initial: number | undefined;
+    const stop = subscribeNativeEvent<TagReconciliationReport>("tags://reconciled", applyReconciliation, () => {
+      initial = window.setTimeout(() => void refreshExternalTagChanges(), 0);
+    });
+    const refreshOnFocus = () => void refreshExternalTagChanges();
     window.addEventListener("focus", refreshOnFocus);
-    window.addEventListener("blur", pauseOnBlur);
     return () => {
-      window.clearTimeout(initialRefresh);
+      stop();
+      window.clearTimeout(initial);
       window.removeEventListener("focus", refreshOnFocus);
-      window.removeEventListener("blur", pauseOnBlur);
     };
-  }, [libraryReady, reloadToken, refreshExternalTagChanges]);
-
-  useEffect(() => {
-    if (!libraryReady || !reconciliationHasMore) return;
-    const interval = window.setInterval(() => {
-      if (appFocusedRef.current) void refreshExternalTagChanges();
-    }, retryIntervalMs);
-    return () => window.clearInterval(interval);
-  }, [libraryReady, reconciliationHasMore, refreshExternalTagChanges]);
+  }, [libraryReady, reloadToken, applyReconciliation, refreshExternalTagChanges]);
 
   useEffect(() => {
     if (!libraryReady) return;
-    const initialRetry = window.setTimeout(() => void retryPendingLibrarySyncNow(), 0);
-    return () => window.clearTimeout(initialRetry);
-  }, [libraryReady, reloadToken, retryPendingLibrarySyncNow]);
-
-  useEffect(() => {
-    if (!libraryReady || !catalogSyncNeedsRetry(catalogSyncNotice)) return;
-    const interval = window.setInterval(() => { void retryPendingLibrarySyncNow(); }, retryIntervalMs);
-    return () => window.clearInterval(interval);
-  }, [catalogSyncNotice, libraryReady, retryPendingLibrarySyncNow]);
+    let initial: number | undefined;
+    const stop = subscribeNativeEvent<CatalogSync>("library-sync://status", (sync) => {
+      void handleCatalogSync(sync);
+    }, () => {
+      initial = window.setTimeout(() => {
+        void loadLibrarySyncStatus().then((sync) => handleCatalogSync(sync)).catch((error: unknown) => {
+          console.warn("Aurora could not load Music Library sync status", error);
+        });
+      }, 0);
+    });
+    return () => { stop(); window.clearTimeout(initial); };
+  }, [libraryReady, reloadToken, handleCatalogSync]);
 
   useEffect(() => {
     if (catalogSyncNotice?.status !== "synced") return;

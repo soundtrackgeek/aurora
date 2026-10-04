@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.28.20] - 2026-10-04
+
+### Changed
+- Implement roadmap improvement 2: independent Rust workers publish OneDrive state, detect catalog revisions, reconcile pending tags, retry durable Music Library work, advance playback, and detect history changes without WebView timers.
+- Replace native status polls with `sync://status`, `catalog://revision`, `library-sync://status`, `tags://reconciled`, `playback://state`, and `history://revision` listeners. Initial reads and existing projection guards remain; playback snapshots carry sequence numbers to reject delayed responses.
+- Reduce native playback polling to a 15-second recovery heartbeat, retaining the 250 ms local playhead clock. Publish transport, seek, queue, device, and automatic track transitions immediately.
+- Check updates at startup, after an hour on focus, and every six hours; retry failures after five minutes with exponential backoff capped at six hours. Keep manual checks and installation guards.
+- Include album-order revisions in Laptop Mode status so native sync merges refresh retained destinations.
+- Preload destination modules in navigation tests so cold module transformation cannot consume the DOM query timeout.
+
 ## [0.28.19] - 2026-10-04
 
 ### Fixed

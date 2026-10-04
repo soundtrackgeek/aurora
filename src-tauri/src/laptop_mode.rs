@@ -15,6 +15,7 @@ pub(crate) struct LaptopModeStatus {
     message: String,
     remote_path: String,
     last_synced_at_ms: Option<i64>,
+    album_order_revision: u64,
     mappings: Vec<PathMappingStatus>,
     setting_warning: Option<String>,
 }
@@ -22,6 +23,7 @@ pub(crate) struct LaptopModeStatus {
 pub(crate) struct LaptopModeRuntime {
     settings: DeviceModeStore,
     sync: StateSyncService,
+    mirror: StateMirrorStatus,
 }
 
 impl LaptopModeRuntime {
@@ -31,13 +33,28 @@ impl LaptopModeRuntime {
         remote_path: PathBuf,
         startup_outcome: StartupSyncOutcome,
     ) -> Result<Self, String> {
-        let sync = StateSyncService::new(store, remote_path, startup_outcome)?;
-        Ok(Self { settings, sync })
+        let sync = StateSyncService::new(store, remote_path.clone(), startup_outcome)?;
+        let mirror = StateMirrorStatus {
+            sync_state: "pending",
+            message: "Waiting for the native sync monitor.".to_owned(),
+            remote_path: remote_path.to_string_lossy().into_owned(),
+            last_synced_at_ms: None,
+            album_order_revision: 0,
+        };
+        Ok(Self {
+            settings,
+            sync,
+            mirror,
+        })
     }
 
     pub(crate) fn status(&mut self, bypass_throttle: bool) -> LaptopModeStatus {
-        let mirror = self.sync.sync_now(bypass_throttle);
-        self.combined_status(mirror)
+        self.mirror = self.sync.sync_now(bypass_throttle);
+        self.cached_status()
+    }
+
+    pub(crate) fn cached_status(&self) -> LaptopModeStatus {
+        self.combined_status(self.mirror.clone())
     }
 
     pub(crate) fn set_enabled(&mut self, enabled: bool) -> Result<LaptopModeStatus, String> {
@@ -64,6 +81,7 @@ impl LaptopModeRuntime {
             message: mirror.message,
             remote_path: mirror.remote_path,
             last_synced_at_ms: mirror.last_synced_at_ms,
+            album_order_revision: mirror.album_order_revision,
             mappings: device_mode::path_mapping_statuses(),
             setting_warning: self.settings.warning().map(str::to_owned),
         }

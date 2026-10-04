@@ -4,7 +4,9 @@ import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime } from "./library";
 
-const UPDATE_INTERVAL_MS = 60_000;
+const UPDATE_INTERVAL_MS = 6 * 60 * 60_000;
+const UPDATE_FOCUS_INTERVAL_MS = 60 * 60_000;
+const UPDATE_RETRY_BASE_MS = 5 * 60_000;
 
 export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
@@ -30,14 +32,21 @@ export function useAuroraUpdater() {
   const checkingRef = useRef(false);
   const installingRef = useRef(false);
   const promptedVersionsRef = useRef(new Set<string>());
+  const lastAttemptRef = useRef<number | null>(null);
+  const nextAttemptRef = useRef(0);
+  const failuresRef = useRef(0);
+  const scheduleRef = useRef<() => void>(() => undefined);
 
   const checkForUpdate = useCallback(async (manual = false) => {
     if (!isTauriRuntime() || import.meta.env.DEV || checkingRef.current || installingRef.current) return;
     checkingRef.current = true;
+    lastAttemptRef.current = Date.now();
     if (manual) setState({ ...initialState, phase: "checking", isPromptOpen: true });
 
     try {
       const update = await check({ timeout: 15_000 });
+      failuresRef.current = 0;
+      nextAttemptRef.current = Date.now() + UPDATE_INTERVAL_MS;
       if (!update) {
         if (updateRef.current) await updateRef.current.close();
         updateRef.current = null;
@@ -59,18 +68,39 @@ export function useAuroraUpdater() {
         isPromptOpen: manual || firstPrompt,
       });
     } catch (error) {
+      failuresRef.current += 1;
+      nextAttemptRef.current = Date.now() + Math.min(
+        UPDATE_INTERVAL_MS, UPDATE_RETRY_BASE_MS * 2 ** Math.min(failuresRef.current - 1, 10),
+      );
       console.warn("Aurora update check failed", error);
       if (manual) setState({ ...initialState, phase: "error", message: error instanceof Error ? error.message : String(error), isPromptOpen: true });
     } finally {
       checkingRef.current = false;
+      scheduleRef.current();
     }
   }, []);
 
   useEffect(() => {
+    if (!isTauriRuntime() || import.meta.env.DEV) return;
+    let timer: number | undefined;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void checkForUpdate(), Math.max(0, nextAttemptRef.current - Date.now()));
+    };
+    scheduleRef.current = schedule;
+    const onFocus = () => {
+      if (lastAttemptRef.current === null
+        || (Date.now() - lastAttemptRef.current >= UPDATE_FOCUS_INTERVAL_MS
+          && (failuresRef.current === 0 || Date.now() >= nextAttemptRef.current))) {
+        void checkForUpdate();
+      }
+    };
     void checkForUpdate();
-    const timer = window.setInterval(() => void checkForUpdate(), UPDATE_INTERVAL_MS);
+    window.addEventListener("focus", onFocus);
     return () => {
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+      scheduleRef.current = () => undefined;
       const update = updateRef.current;
       updateRef.current = null;
       if (update) void update.close();

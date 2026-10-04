@@ -3,6 +3,7 @@ import { loadCatalogChartRankings, type CatalogChartRankings } from "../../chart
 import type { ExplorerView } from "../../components/explorer/DeepExplorer";
 import type { GenreDetail } from "../../genres";
 import { loadTrackHistoryInsight, type TrackHistoryInsight } from "../../history";
+import { subscribeNativeEvent } from "../../nativeEvents";
 import type { AlbumSummary, LibrarySnapshot, Track } from "../../library";
 import type { YearAlbum } from "../../years";
 
@@ -67,11 +68,10 @@ export function useInspectorMetadata({
         })
         .catch(() => undefined);
     };
-    refresh();
-    const interval = window.setInterval(refresh, 15_000);
+    const stop = subscribeNativeEvent<string>("history://revision", refresh, refresh);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      stop();
     };
   }, [selectedTrack?.trackKey]);
 

@@ -72,9 +72,10 @@ impl RepeatMode {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PlaybackSnapshot {
+    pub(crate) event_sequence: u64,
     pub(crate) queue: Vec<TrackSummary>,
     pub(crate) current_index: Option<usize>,
     pub(crate) current_track: Option<TrackSummary>,
@@ -358,6 +359,7 @@ fn append_queue_entries(
 }
 
 pub(crate) struct PlaybackRuntime {
+    events: crate::native_events::PlaybackEvents,
     output: Option<MixerDeviceSink>,
     player: Option<Player>,
     queue: Vec<TrackSummary>,
@@ -440,6 +442,7 @@ impl PlaybackRuntime {
         let history_threshold_seconds = history.play_threshold_seconds()?;
         let persistence = PlaybackPersistence::new(history.clone(), store.clone())?;
         Ok(Self {
+            events: crate::native_events::PlaybackEvents::default(),
             output: None,
             player: None,
             queue,
@@ -480,6 +483,13 @@ impl PlaybackRuntime {
             last_saved_position_bucket: (position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS)
                 .floor() as u64,
         })
+    }
+
+    pub(crate) fn attach_events(
+        &mut self,
+        publish: impl Fn(&PlaybackSnapshot) + Send + Sync + 'static,
+    ) {
+        self.events.attach(Box::new(publish));
     }
 
     fn current_track(&self) -> Option<&TrackSummary> {
@@ -1042,7 +1052,8 @@ impl PlaybackRuntime {
         }
         timing.stage("build_snapshot");
         timing.finish(true);
-        PlaybackSnapshot {
+        let mut snapshot = PlaybackSnapshot {
+            event_sequence: 0,
             queue: self.queue.clone(),
             current_index: self.current_index,
             current_track: self.current_track().cloned(),
@@ -1066,7 +1077,9 @@ impl PlaybackRuntime {
             clipping_prevented: self.current_gain.clipping_prevented,
             audio_underrun_count: self.audio_underrun_count.load(Ordering::Relaxed),
             realtime_scheduling_denied: self.realtime_scheduling_denied.load(Ordering::Relaxed),
-        }
+        };
+        self.events.publish(&mut snapshot);
+        snapshot
     }
 
     pub(crate) fn replace_queue(
@@ -1417,6 +1430,7 @@ impl PlaybackRuntime {
         self.position_seconds = target;
         self.reset_history_position();
         self.persist()?;
+        self.events.force = true;
         Ok(self.snapshot())
     }
 

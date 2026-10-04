@@ -1,16 +1,42 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import * as library from "../../library";
+import * as events from "../../nativeEvents";
+import { invoke } from "@tauri-apps/api/core";
 import { rebindPlaybackCatalog, type PlaybackCatalogRebind } from "../../playback";
 import { useCatalogRevision } from "./useCatalogRevision";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((finish) => { resolve = finish; });
   return { promise, resolve };
 }
+
+it("acknowledges catalog events only after recovery from a failed refresh", async () => {
+  vi.useFakeTimers();
+  const input = { ...await options(), libraryReady: true };
+  vi.spyOn(library, "isTauriRuntime").mockReturnValue(true);
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  let receive!: (payload: unknown) => void;
+  vi.spyOn(events, "subscribeNativeEvent").mockImplementation((_name, callback, ready) => {
+    receive = callback;
+    ready?.();
+    return vi.fn();
+  });
+  vi.spyOn(library, "loadCatalogRevision").mockRejectedValueOnce(new Error("catalog busy")).mockResolvedValue("next");
+  vi.spyOn(library, "loadLibrarySnapshot").mockResolvedValue({ ...library.browserPreview, catalogRevision: "next" });
+  const { result } = renderHook(() => useCatalogRevision(input));
+  result.current.catalogRevisionRef.current = "previous";
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(invoke).not.toHaveBeenCalled();
+  await act(async () => { receive("next"); });
+  expect(input.onCatalogRefresh).toHaveBeenCalledOnce();
+  expect(invoke).toHaveBeenCalledWith("acknowledge_catalog_revision", { revision: "next" });
+});
 
 async function options() {
   const rebound = await rebindPlaybackCatalog();

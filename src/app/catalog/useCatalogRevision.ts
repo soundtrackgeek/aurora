@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   catalogRefreshIsConsistent,
   loadCatalogRevision,
   loadLibrarySnapshot,
+  isTauriRuntime,
   type LibrarySnapshot,
 } from "../../library";
 import type { PlaybackCatalogRebind, PlaybackSnapshot } from "../../playback";
+import { subscribeNativeEvent } from "../../nativeEvents";
 
 export interface CatalogRevisionOptions {
   libraryReady: boolean;
@@ -101,17 +104,23 @@ export function useCatalogRevision({
     if (!libraryReady) return;
     let cancelled = false;
     const refreshQuietly = () => {
-      void refreshCatalogIfChanged(() => !cancelled).catch((error: unknown) => {
+      void refreshCatalogIfChanged(() => !cancelled).then(() => {
+        if (!cancelled && isTauriRuntime() && catalogRevisionRef.current !== null) {
+          return invoke("acknowledge_catalog_revision", { revision: catalogRevisionRef.current });
+        }
+      }).catch((error: unknown) => {
         console.warn("Aurora could not check the Music Library catalog revision", error);
       });
     };
-    const initialRefresh = window.setTimeout(refreshQuietly, 0);
-    const interval = window.setInterval(refreshQuietly, 5_000);
+    let initialRefresh: number | undefined;
+    const stop = subscribeNativeEvent<string>("catalog://revision", refreshQuietly, () => {
+      initialRefresh = window.setTimeout(refreshQuietly, 0);
+    });
     window.addEventListener("focus", refreshQuietly);
     return () => {
       cancelled = true;
       window.clearTimeout(initialRefresh);
-      window.clearInterval(interval);
+      stop();
       window.removeEventListener("focus", refreshQuietly);
     };
   }, [libraryReady, refreshCatalogIfChanged]);

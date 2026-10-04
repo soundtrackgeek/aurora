@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { check } from "@tauri-apps/plugin-updater";
 import { saveWindowState } from "@tauri-apps/plugin-window-state";
@@ -9,7 +9,48 @@ vi.mock("./library", () => ({ isTauriRuntime: () => true }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-window-state", () => ({ saveWindowState: vi.fn(), StateFlags: { SIZE: 1, POSITION: 2, MAXIMIZED: 4 } }));
-afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
+
+it("checks at startup, on eligible focus, and after six hours without minute polling", async () => {
+  vi.stubEnv("DEV", false);
+  vi.useFakeTimers();
+  vi.mocked(check).mockResolvedValue(null);
+  const { unmount } = renderHook(useAuroraUpdater);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(check).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); window.dispatchEvent(new Event("focus")); });
+  expect(check).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(59 * 60_000); window.dispatchEvent(new Event("focus")); });
+  expect(check).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 60_000 - 1); });
+  expect(check).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(check).toHaveBeenCalledTimes(3);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("backs off failed checks exponentially while manual checks bypass the delay", async () => {
+  vi.stubEnv("DEV", false);
+  vi.useFakeTimers();
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.mocked(check).mockRejectedValue(new Error("offline"));
+  const { result, unmount } = renderHook(useAuroraUpdater);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000 - 1); window.dispatchEvent(new Event("focus")); });
+  expect(check).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(check).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000 - 1); });
+  expect(check).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(check).toHaveBeenCalledTimes(3);
+  await act(async () => { await result.current.checkForUpdate(true); });
+  expect(check).toHaveBeenCalledTimes(4);
+  expect(result.current.state.phase).toBe("error");
+  unmount();
+  vi.restoreAllMocks();
+});
 
 it("awaits the window checkpoint after downloading and before installer exit", async () => {
   vi.stubEnv("DEV", false);

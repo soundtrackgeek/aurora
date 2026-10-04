@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import App from "./App";
 import * as charts from "./charts";
 import * as library from "./library";
@@ -7,6 +7,19 @@ import * as ingest from "./ingest";
 import { defaultExplorerFilters, saveViewPreferences } from "./viewPreferences";
 
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
+
+// These tests cover navigation state, not Vite's cold module transform time.
+// Resolve destination modules before DOM queries use their normal budget.
+beforeAll(async () => {
+  await Promise.all([
+    import("./app/routes/LibraryRoute"), import("./app/routes/ChartsRoute"),
+    import("./app/routes/ArtistRoute"), import("./app/routes/GenresRoute"),
+    import("./app/routes/HistoryRoute"), import("./app/routes/ObservatoryRoute"),
+    import("./app/routes/PlaylistsRoute"), import("./app/routes/PublishersRoute"),
+    import("./app/routes/RatingsRoute"), import("./app/routes/YearsRoute"),
+    import("./components/history/ListeningReport"), import("./components/inbox/Inbox"),
+  ]);
+});
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
