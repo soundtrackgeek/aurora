@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.19 fixes the macOS release verification test's cold Library route race. Album transition tests now wait for the initial snapshot and lazy module loading before querying album covers, while retaining the check that local details commit before file reconciliation starts. Application behavior and test timeouts are unchanged.
+
 Aurora 0.28.18 splits the frontend into domain hooks and lazy destination containers. Explorer loading, workspace restoration, inspector selection, artist navigation, catalog synchronization, and destination data now have explicit module boundaries. A small app-scoped store shares selection, navigation, and catalog invalidation; pages load on demand while retaining their existing navigation state. See [Frontend domain architecture](docs/frontend-domains.md) for ownership and extension guidance.
 
 Aurora 0.28.17 adds [docs/improvement-roadmap.md](docs/improvement-roadmap.md): an assessment of the current codebase with 20 improvements to existing features, 20 proposed features, researched external services and libraries, and a suggested sequence. Application behavior is unchanged from 0.28.16.

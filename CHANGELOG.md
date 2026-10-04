@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.19] - 2026-10-04
+
+### Fixed
+- Synchronize album transition tests with initial snapshot readiness and lazy Library module loading, fixing the macOS release verification failure when a cold route takes longer than the DOM query timeout.
+- Preserve real route rendering and the local-detail-before-file-reconciliation assertion without increasing test timeouts or changing application behavior.
+
 ## [0.28.18] - 2026-10-04
 
 ### Changed

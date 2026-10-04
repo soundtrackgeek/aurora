@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as library from "./library";
@@ -12,6 +12,17 @@ afterEach(() => {
   localStorage.clear();
 });
 
+async function openAlbums() {
+  // The sidebar mounts before the snapshot that enables destination routes.
+  await screen.findByRole("region", { name: "Library overview" });
+  const primary = within(screen.getByRole("navigation", { name: "Primary" }));
+  fireEvent.click(primary.getByRole("button", { name: "Albums" }));
+  await act(async () => {
+    // Include cold route imports in act, before starting the DOM query timeout.
+    await vi.dynamicImportSettled();
+  });
+}
+
 it("commits local album details before starting file reconciliation", async () => {
   const load = library.loadAlbumDetail;
   const committedDetails: boolean[] = [];
@@ -22,7 +33,7 @@ it("commits local album details before starting file reconciliation", async () =
     return load(albumId, options);
   });
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Albums" }));
+  await openAlbums();
   fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
   await waitFor(() => expect(committedDetails).toEqual([true]));
   fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
@@ -43,7 +54,7 @@ it("reveals artist intelligence without waiting for the catalog summary", async 
 
 it("opens an album artist page and returns to the same Albums results", async () => {
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Albums" }));
+  await openAlbums();
   const cover = await screen.findByRole("button", { name: /^Viva la Vida cover/ });
   fireEvent.click(cover);
   const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
