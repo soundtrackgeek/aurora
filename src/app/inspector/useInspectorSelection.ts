@@ -29,7 +29,7 @@ export function useInspectorSelection({
 }: InspectorSelectionOptions) {
   const [inspectorView, setInspectorView] = useState(initialViewPreferences.inspectorView);
   const [tagSelectionKind, setTagSelectionKind] = useState(initialViewPreferences.tagSelectionKind);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(initialViewPreferences.selectedAlbumId);
+  const [selectedAlbumId, setSelectedAlbumIdState] = useState<string | null>(initialViewPreferences.selectedAlbumId);
   const [albumFileRefreshRequest, setAlbumFileRefreshRequest] = useState<{ albumId: string; requestId: number; } | null>(null);
   const [albumTracks, setAlbumTracks] = useState<Track[]>([]);
   const [albumTracksTruncated, setAlbumTracksTruncated] = useState(false);
@@ -39,11 +39,16 @@ export function useInspectorSelection({
   const previousPlaybackTrackKeyRef = useRef<string | null>(null);
   const selectedAlbumIdRef = useRef<string | null>(selectedAlbumId);
   const inspectorViewRef = useRef(inspectorView);
+  // Async completions must see navigation intent before its transition commits.
+  const setSelectedAlbumId = useCallback((next: SetStateAction<string | null>) => {
+    const albumId = typeof next === "function" ? next(selectedAlbumIdRef.current) : next;
+    selectedAlbumIdRef.current = albumId;
+    setSelectedAlbumIdState(albumId);
+  }, []);
   // Forward actions through the latest ports without restarting file readback effects.
   const portsRef = useRef({ artistRequestRef, setSelectedTrack, setExplorerAlbums, endGenreQueue, setSyncMessage, playback });
   useLayoutEffect(() => {
     selectedTrackRef.current = selectedTrack;
-    selectedAlbumIdRef.current = selectedAlbumId;
     inspectorViewRef.current = inspectorView;
     portsRef.current = { artistRequestRef, setSelectedTrack, setExplorerAlbums, endGenreQueue, setSyncMessage, playback };
   });
@@ -137,7 +142,7 @@ export function useInspectorSelection({
           setAlbumDetailState("error");
         });
     }, "album-detail");
-  }, []);
+  }, [setSelectedAlbumId]);
 
   async function playExplorerAlbum(album: ExplorerAlbum) {
     try {

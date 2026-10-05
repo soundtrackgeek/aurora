@@ -608,7 +608,7 @@ function App() {
   } = useTagMutations({
     snapshot, setSnapshot, selectedTrack, setSelectedTrack, activeNav, setSyncMessage,
     explorer: explorerWorkspace,
-    inspector: { selectedAlbumId, albumTracks, setAlbumTracks, setAlbumTracksTruncated, setAlbumDetailState, albumRequestRef },
+    inspector: { selectedAlbumId, selectedAlbumIdRef, albumTracks, setAlbumTracks, setAlbumTracksTruncated, setAlbumDetailState, albumRequestRef },
     workspace: workspaceRestoration,
     genres: { setGenreDetail, setGenreAtlasGenres, setGenreIndexReloadToken, setGenreDetailReloadToken },
     years: { yearAlbumTracks, setYearAlbumTracks },
@@ -1295,7 +1295,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.24</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.25</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

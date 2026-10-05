@@ -66,3 +66,23 @@ it("does not reopen an album after selection was cleared while its detail loaded
   expect(result.current.inspectorView).toBe("track");
   expect(result.current.albumDetailState).toBe("ready");
 });
+
+it("publishes album navigation intent before the selection state commits", () => {
+  const { result } = renderHook(() => {
+    const [selectedTrack, setSelectedTrack] = useState<library.Track | null>(null);
+    const artistRequestRef = useRef(0);
+    return useInspectorSelection({
+      initialViewPreferences: loadViewPreferences(), selectedTrack, setSelectedTrack,
+      artistRequestRef, setExplorerAlbums: () => undefined,
+      playback: { state: { currentTrack: null }, play: async () => null },
+      endGenreQueue: () => undefined, setSyncMessage: () => undefined,
+    });
+  });
+  act(() => {
+    result.current.setSelectedAlbumId("newer");
+    expect(result.current.selectedAlbumIdRef.current).toBe("newer");
+    result.current.setSelectedAlbumId((current) => current === "newer" ? null : current);
+    expect(result.current.selectedAlbumIdRef.current).toBeNull();
+  });
+  expect(result.current.selectedAlbumId).toBeNull();
+});

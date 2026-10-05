@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as library from "./library";
+import * as tags from "./tags";
 
 // Canvas playback rendering is unrelated to album request/commit ordering.
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
@@ -38,6 +39,37 @@ it("commits local album details before starting file reconciliation", async () =
   await waitFor(() => expect(committedDetails).toEqual([true]));
   fireEvent.click(screen.getByRole("button", { name: "Close album details" }));
   await waitFor(() => expect(screen.queryByRole("complementary", { name: "Viva la Vida album details" })).not.toBeInTheDocument());
+});
+
+it("keeps the new album's details and selected track when a pending rating save completes", async () => {
+  const older = await library.loadAlbumDetail("preview-viva");
+  const track = older.tracks[0];
+  const rating = track.rating === 3 ? 2 : 3;
+  let finish!: (value: tags.TrackTagSnapshot) => void;
+  const update = vi.spyOn(tags, "updateTrackTags").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  render(<App />);
+  await openAlbums();
+  fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
+  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+  fireEvent.click(within(details).getByRole("button", { name: `Rate ${track.title} ${rating.toFixed(1)} stars` }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+  expect(within(details).getByText("Pending tag import")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /^Hurry Up, We're Dreaming cover/ }));
+  const newerDetails = await screen.findByRole("complementary", { name: "Hurry Up, We're Dreaming album details" });
+  fireEvent.click(within(newerDetails).getByRole("row", { name: /Midnight City/ }));
+  expect(within(newerDetails).getByRole("row", { name: /Midnight City/ })).toHaveAttribute("aria-selected", "true");
+
+  await act(async () => {
+    finish({
+      track: { ...track, rating, tagSyncState: null },
+      tagState: { values: { ...tags.tagValuesForTrack(track), rating }, syncState: null, canUndo: false },
+      catalogSync: { status: "synced", pendingFolderCount: 0 },
+    });
+  });
+  const currentDetails = screen.getByRole("complementary", { name: "Hurry Up, We're Dreaming album details" });
+  expect(within(currentDetails).getByRole("row", { name: /Midnight City/ })).toHaveAttribute("aria-selected", "true");
+  expect(within(currentDetails).queryByRole("row", { name: /Strawberry Swing/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "Viva la Vida album details" })).not.toBeInTheDocument();
 });
 
 it("reveals artist intelligence without waiting for the catalog summary", async () => {

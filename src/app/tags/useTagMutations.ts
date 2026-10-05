@@ -28,7 +28,7 @@ export interface TagMutationOptions {
   setSyncMessage: Dispatch<SetStateAction<string | null>>;
   explorer: Pick<ExplorerWorkspace, "explorerTracks" | "explorerFilters" | "setExplorerTracks"
     | "setExplorerAlbums" | "setExplorerReloadToken" | "preserveExplorerOnReloadRef" | "pendingExplorerAlbumIdRef">;
-  inspector: Pick<InspectorSelection, "selectedAlbumId" | "albumTracks" | "setAlbumTracks"
+  inspector: Pick<InspectorSelection, "selectedAlbumId" | "selectedAlbumIdRef" | "albumTracks" | "setAlbumTracks"
     | "setAlbumTracksTruncated" | "setAlbumDetailState" | "albumRequestRef">;
   workspace: Pick<WorkspaceRestoration, "mainScrollRef" | "scrollPositionByDestinationRef" | "restoringScrollRef">;
   genres: Pick<ReturnType<typeof useGenresDomain>, "setGenreDetail" | "setGenreAtlasGenres"
@@ -70,7 +70,7 @@ export function useTagMutations({
 }: TagMutationOptions) {
   const { explorerTracks, explorerFilters, setExplorerTracks, setExplorerAlbums,
     setExplorerReloadToken, preserveExplorerOnReloadRef, pendingExplorerAlbumIdRef } = explorer;
-  const { selectedAlbumId, albumTracks, setAlbumTracks, setAlbumTracksTruncated,
+  const { selectedAlbumId, selectedAlbumIdRef, albumTracks, setAlbumTracks, setAlbumTracksTruncated,
     setAlbumDetailState, albumRequestRef } = inspector;
   const { mainScrollRef, scrollPositionByDestinationRef, restoringScrollRef } = workspace;
   const { setGenreDetail, setGenreAtlasGenres, setGenreIndexReloadToken, setGenreDetailReloadToken } = genres;
@@ -184,7 +184,9 @@ export function useTagMutations({
     // Verified file tags are available even when catalog import is still pending.
     setGenreIndexReloadToken((value) => value + 1);
     setGenreDetailReloadToken((value) => value + 1);
-    const albumId = selectedAlbumId;
+    // A save callback can outlive the selection that created it.
+    const albumId = selectedAlbumIdRef.current;
+    const selectionRequestId = albumRequestRef.current;
     if (albumId) pendingExplorerAlbumIdRef.current = albumId;
     const currentScroll = mainScrollRef.current?.scrollTop;
     if (typeof currentScroll === "number" && currentScroll > 0) {
@@ -193,12 +195,13 @@ export function useTagMutations({
     const catalogRefreshed = await handleCatalogSync(sync, true);
     if (catalogRefreshed || !albumId) return;
     if (pendingExplorerAlbumIdRef.current === albumId) pendingExplorerAlbumIdRef.current = null;
-    if (sync.status !== "synced") return;
+    if (sync.status !== "synced" || selectedAlbumIdRef.current !== albumId
+      || selectionRequestId !== albumRequestRef.current) return;
 
     const requestId = ++albumRequestRef.current;
     try {
       const detail = await loadAlbumDetail(albumId);
-      if (requestId !== albumRequestRef.current) return;
+      if (requestId !== albumRequestRef.current || selectedAlbumIdRef.current !== albumId) return;
       const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
       setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
       setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
@@ -305,12 +308,12 @@ export function useTagMutations({
         ...current,
         [track.trackKey]: (current[track.trackKey] ?? 0) + 1,
       }));
-      if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumId) {
+      if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumIdRef.current) {
         const albumId = snapshot.track.albumId;
         const requestId = ++albumRequestRef.current;
         try {
           const detail = await loadAlbumDetail(albumId);
-          if (requestId === albumRequestRef.current) {
+          if (requestId === albumRequestRef.current && selectedAlbumIdRef.current === albumId) {
             const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
             setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
             setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));

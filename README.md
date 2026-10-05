@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.25 keeps your current album and track selection when a rating or tag save finishes in the background. Save callbacks use the current album selection, and catalog refreshes preserve a newer selection or closed details instead of reopening the album selected when the update began.
+
 Aurora 0.28.24 refreshes Last.fm popularity for every displayed track selection with a direct `track.getInfo` lookup using the track artist and title. The Track sidebar shows the returned global play count, including counts of 1,000 or fewer and zero. Fresh results take precedence over saved catalog data; network or configuration failures retain saved evidence, and late responses cannot replace another track's count.
 
 Aurora 0.28.23 implements roadmap improvement 3: album, embedded, Inbox, and selected-cover requests use an asynchronous protocol with three decode workers and a bounded queue. Their derived WebP thumbnails share a 1 GiB disk-cache budget; startup cleanup and eviction on writes remove the least recently used thumbnails, with access ordering retained across restarts. Source artwork and MP3s are untouched, and a cache-write failure still returns a decoded image. See [Cover protocol and cache](docs/cover-cache.md) for limits and verification.

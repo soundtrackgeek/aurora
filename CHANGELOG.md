@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.25] - 2026-10-05
+
+### Fixed
+- Keep the current album and selected track when a pending rating or tag save completes after navigating to another album or closing details. Refresh only the current album and reject detail requests superseded by browsing.
+- Prevent a background catalog refresh from restoring the album captured before a newer selection or closed details. Refresh library rows without replacing the newer detail request or restoring its previous scroll position.
+- Add deterministic regression coverage for navigation during file saves, catalog synchronization, and explorer reloads; retain verified rating metrics when the edited album stays selected.
+
 ## [0.28.24] - 2026-10-05
 
 ### Fixed

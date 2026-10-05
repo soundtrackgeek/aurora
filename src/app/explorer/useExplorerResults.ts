@@ -143,7 +143,7 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     }
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
-    albumRequestRef.current += 1;
+    const selectionRequestId = ++albumRequestRef.current;
     const clearDetailTimer = window.setTimeout(() => {
       if (cancelled) return;
       setIsLoadingMore(false);
@@ -193,7 +193,11 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
               }
               restoringScrollRef.current = false;
             };
-            if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
+            // Browsing during a background reload owns its own detail request.
+            // Refresh the rows without restoring the album captured at reload start.
+            if (selectionRequestId !== albumRequestRef.current) {
+              restoringScrollRef.current = false;
+            } else if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
               const albumDetailRequestId = ++albumRequestRef.current;
               setSelectedAlbumId(restoredAlbumId);
               if (!preservingCurrentView) {
