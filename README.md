@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.24 refreshes Last.fm popularity for every displayed track selection with a direct `track.getInfo` lookup using the track artist and title. The Track sidebar shows the returned global play count, including counts of 1,000 or fewer and zero. Fresh results take precedence over saved catalog data; network or configuration failures retain saved evidence, and late responses cannot replace another track's count.
+
 Aurora 0.28.23 implements roadmap improvement 3: album, embedded, Inbox, and selected-cover requests use an asynchronous protocol with three decode workers and a bounded queue. Their derived WebP thumbnails share a 1 GiB disk-cache budget; startup cleanup and eviction on writes remove the least recently used thumbnails, with access ordering retained across restarts. Source artwork and MP3s are untouched, and a cache-write failure still returns a decoded image. See [Cover protocol and cache](docs/cover-cache.md) for limits and verification.
 
 Aurora 0.28.22 allows one running instance. Launching Aurora again brings the existing window forward, including when it is minimized or hidden, without starting another playback engine, state publisher, or database writer. Launch arguments and the launching directory are forwarded through `app://second-instance` for future file and deep-link handlers. See [Single-instance startup](docs/single-instance.md) for the native verification procedure.

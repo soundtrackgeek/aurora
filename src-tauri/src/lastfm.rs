@@ -49,6 +49,12 @@ pub(crate) struct AlbumPopularTrack {
     pub(crate) rank: u8,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrackPopularity {
+    pub(crate) play_count: Option<i64>,
+}
+
 #[derive(Clone, Debug)]
 struct PopularityRecord {
     track_key: String,
@@ -249,6 +255,7 @@ fn json_count(value: &serde_json::Value, key: &str) -> Option<i64> {
     value
         .get(key)
         .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .filter(|count| *count >= 0)
 }
 
 fn fetch_popularity(artist: &str, title: &str, api_key: &str) -> Result<PopularityRecord, String> {
@@ -268,6 +275,14 @@ fn fetch_popularity(artist: &str, title: &str, api_key: &str) -> Result<Populari
     let value: serde_json::Value = response
         .json()
         .map_err(|_| "Last.fm returned invalid track metadata.".to_owned())?;
+    parse_popularity(title, status, &value)
+}
+
+fn parse_popularity(
+    title: &str,
+    status: reqwest::StatusCode,
+    value: &serde_json::Value,
+) -> Result<PopularityRecord, String> {
     if value.get("error").and_then(serde_json::Value::as_i64) == Some(6) {
         return Ok(PopularityRecord {
             track_key: popularity_key(title),
@@ -302,6 +317,49 @@ fn fetch_popularity(artist: &str, title: &str, api_key: &str) -> Result<Populari
         play_count: json_count(track, "playcount"),
         available: true,
         fresh: true,
+    })
+}
+
+fn lookup_track_popularity(
+    artist: &str,
+    title: &str,
+    store: &crate::state_store::StateStore,
+    lookup: impl FnOnce(&str, &str) -> Result<PopularityRecord, String>,
+) -> Result<TrackPopularity, String> {
+    let artist = artist.trim();
+    let title = title.trim();
+    if artist.is_empty()
+        || title.is_empty()
+        || artist.chars().count() > MAX_ARTIST_CHARS
+        || title.chars().count() > 512
+    {
+        return Err("Choose a track with a valid artist and title.".to_owned());
+    }
+    // Always query the selected track, even when a catalog/cache entry is fresh or unavailable.
+    // Do not wait for the serialized album-ranking worker to finish its entire album.
+    let record = match lookup(artist, title) {
+        Ok(record) => {
+            save_record(artist, &record, store);
+            record
+        }
+        Err(error) => matching_record(&local_records(artist, store), title)
+            .cloned()
+            .or_else(|| matching_record(&catalog_records(artist), title).cloned())
+            .ok_or(error)?,
+    };
+    Ok(TrackPopularity {
+        play_count: record.available.then_some(record.play_count).flatten(),
+    })
+}
+
+pub(crate) fn refresh_track_popularity(
+    artist: &str,
+    title: &str,
+    store: &crate::state_store::StateStore,
+) -> Result<TrackPopularity, String> {
+    lookup_track_popularity(artist, title, store, |artist, title| {
+        let api_key = api_key().ok_or("Add Last.fm credentials in Settings → Metadata.")?;
+        fetch_popularity(artist, title, &api_key)
     })
 }
 
@@ -780,6 +838,98 @@ pub(crate) fn handle_artist_image_request<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn track_popularity_preserves_small_and_zero_counts_from_lastfm_json() {
+        for count in [0, 1, 999, 1_000] {
+            for value in [
+                serde_json::json!(count),
+                serde_json::json!(count.to_string()),
+            ] {
+                let record = parse_popularity(
+                    "Lying Here With You", reqwest::StatusCode::OK,
+                    &serde_json::json!({"track": {"name": "Lying Here With You", "listeners": "2", "playcount": value}}),
+                ).unwrap();
+                assert_eq!(record.play_count, Some(count));
+                assert!(record.available);
+            }
+        }
+        assert_eq!(
+            json_count(&serde_json::json!({"playcount": "invalid"}), "playcount"),
+            None
+        );
+        assert_eq!(
+            json_count(&serde_json::json!({"playcount": -1}), "playcount"),
+            None
+        );
+    }
+
+    #[test]
+    fn selected_track_always_refreshes_even_with_fresh_or_unavailable_cached_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            crate::state_store::StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let title = "Lying Here With You";
+        let mut record = parse_popularity(
+            title,
+            reqwest::StatusCode::OK,
+            &serde_json::json!({"error": 6, "message": "Track not found"}),
+        )
+        .unwrap();
+        save_record("10cc", &record, &store);
+        for count in [1_000, 999, 0] {
+            let result =
+                lookup_track_popularity(" 10cc ", title, &store, |artist, requested_title| {
+                    assert_eq!(artist, "10cc");
+                    assert_eq!(requested_title, title);
+                    record = parse_popularity(
+                        title,
+                        reqwest::StatusCode::OK,
+                        &serde_json::json!({"track": {"playcount": count.to_string()}}),
+                    )
+                    .unwrap();
+                    Ok(record.clone())
+                })
+                .unwrap();
+            assert_eq!(result.play_count, Some(count));
+            assert_eq!(
+                matching_record(&local_records("10cc", &store), title)
+                    .unwrap()
+                    .play_count,
+                Some(count)
+            );
+        }
+        let fallback =
+            lookup_track_popularity("10cc", title, &store, |_, _| Err("Offline".into())).unwrap();
+        assert_eq!(fallback.play_count, Some(0));
+        let missing = lookup_track_popularity("10cc", title, &store, |_, _| {
+            parse_popularity(
+                title,
+                reqwest::StatusCode::OK,
+                &serde_json::json!({"error": 6}),
+            )
+        })
+        .unwrap();
+        assert_eq!(missing.play_count, None);
+    }
+
+    #[test]
+    #[ignore = "requires configured Last.fm credentials and network access"]
+    fn live_selected_track_popularity() {
+        let _ = dotenvy::from_filename("../.env.local");
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            crate::state_store::StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let result = refresh_track_popularity("10cc", "Lying Here With You", &store).unwrap();
+        assert!(
+            result.play_count.is_some(),
+            "The supplied track must have a real Last.fm count"
+        );
+        println!(
+            "10cc — Lying Here With You: {} Last.fm plays",
+            result.play_count.unwrap()
+        );
+    }
 
     #[test]
     fn popularity_matching_handles_music_metadata_punctuation_without_guessing_ambiguously() {

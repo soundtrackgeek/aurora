@@ -42,6 +42,7 @@ import { explorerCountKey, explorerRequestKey } from "./app/explorer/explorerQue
 import { useExplorerResults } from "./app/explorer/useExplorerResults";
 import { useExplorerWorkspace } from "./app/explorer/useExplorerWorkspace";
 import { useInspectorMetadata } from "./app/inspector/useInspectorMetadata";
+import { useTrackPopularity } from "./app/inspector/useTrackPopularity";
 import { useInspectorSelection } from "./app/inspector/useInspectorSelection";
 import { useNavigationState, useWorkspaceNavigation } from "./app/navigation/useWorkspaceNavigation";
 import { useWorkspaceCheckpoint, useWorkspaceRestoration } from "./app/navigation/useWorkspaceRestoration";
@@ -1079,6 +1080,7 @@ function App() {
   const inspectorTrack = explorerAlbumInspectorContext
     ? explorerAlbumInspectorContext.track
     : selectedTrack;
+  const inspectorTrackPopularity = useTrackPopularity(inspectorTrack);
   const inspectorAlbumYear = inspectorTrack?.originalYear ?? inspectorTrack?.releaseYear;
   const inspectorAlbumLabel = inspectorTrack
     ? `${inspectorTrack.album}${inspectorAlbumYear ? ` (${inspectorAlbumYear})` : ""}`
@@ -1293,7 +1295,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.23</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.24</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1806,7 +1808,7 @@ function App() {
               <div className="track-album-metadata"><dt>Album</dt><dd>{inspectorTrack.albumId ? <button type="button" className="track-album-link" onClick={() => openTrackAlbum(inspectorTrack)} title={`Open ${inspectorTrack.album} in Albums`}>{inspectorAlbumLabel}</button> : <span>{inspectorAlbumLabel}</span>}</dd></div>
               <div className="publisher-metadata"><dt>Publisher</dt><dd>{inspectorTrack.publisher ?? "Unknown"}</dd></div>
               <div><dt>Genre</dt><dd>{inspectorTrack.genre ?? "Unknown"}</dd></div>
-              <div><dt>Last.fm popularity</dt><dd>{inspectorTrack.playCount === null ? "—" : formatCount(inspectorTrack.playCount)}</dd></div>
+              <div><dt>Last.fm popularity</dt><dd>{inspectorTrackPopularity === null ? "—" : formatCount(inspectorTrackPopularity)}</dd></div>
               <div><dt>Duration</dt><dd>{formatDuration(inspectorTrack.durationSeconds)}</dd></div>
               <div><dt>Your registered plays</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatCount(trackHistory.value.plays) : "—"}</dd></div>
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>

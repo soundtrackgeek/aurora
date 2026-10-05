@@ -334,6 +334,10 @@ export interface AlbumPopularity {
   tracks: Array<{ trackKey: string; rank: number }>;
 }
 
+export interface TrackPopularity {
+  playCount: number | null;
+}
+
 export function applyAlbumPopularity(tracks: readonly Track[], popularity: AlbumPopularity): Track[] {
   const ranks = new Map(popularity.tracks.map((track) => [track.trackKey, track.rank]));
   return tracks.map((track) => ({ ...track, lastFmAlbumRank: ranks.get(track.trackKey) ?? null }));
@@ -640,6 +644,14 @@ export async function loadAlbumDetail(albumId: string, options: { localOnly?: bo
 export async function loadAlbumPopularity(albumId: string): Promise<AlbumPopularity> {
   if (!isTauriRuntime()) return (await loadAlbumDetail(albumId)).popularity;
   return invoke<AlbumPopularity>("album_popularity", { albumId });
+}
+
+export async function loadTrackPopularity(artist: string, title: string): Promise<TrackPopularity> {
+  if (!isTauriRuntime()) {
+    const track = browserPreview.tracks.find((track) => displayTrackArtist(track) === artist && track.title === title);
+    return { playCount: track?.playCount ?? null };
+  }
+  return invoke<TrackPopularity>("track_popularity", { artist, title });
 }
 
 export async function deleteAlbumTracks(albumId: string, tracks: readonly Track[]): Promise<TrackDeletionResult> {

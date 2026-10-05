@@ -575,6 +575,19 @@ async fn album_popularity(app: AppHandle, album_id: String) -> Result<AlbumPopul
     .map_err(|error| format!("The Last.fm album worker stopped unexpectedly: {error}"))?
 }
 
+#[tauri::command]
+async fn track_popularity(
+    app: AppHandle,
+    artist: String,
+    title: String,
+) -> Result<lastfm::TrackPopularity, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        lastfm::refresh_track_popularity(&artist, &title, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|error| format!("The Last.fm track worker stopped unexpectedly: {error}"))?
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TrackDeletionResult {
@@ -1895,6 +1908,7 @@ pub fn run() {
             explore_artists,
             album_detail,
             album_popularity,
+            track_popularity,
             delete_album_track,
             artist_detail,
             artist_discovery,

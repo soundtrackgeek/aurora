@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.24] - 2026-10-05
+
+### Fixed
+- Retrieve Last.fm popularity directly for each displayed track selection instead of showing only the catalog's saved count. Use the track artist and title, refresh even previously cached or unavailable tracks, and show the returned global play count without a minimum threshold, including zero.
+- Keep track lookups independent of album ranking work, save fresh evidence for offline fallback, and ignore late responses after track selection or lookup metadata changes.
+- Add regression coverage for small and zero counts, repeated selection, stale responses, catalog projections, missing tracks, and offline fallback.
+
 ## [0.28.23] - 2026-10-04
 
 ### Changed

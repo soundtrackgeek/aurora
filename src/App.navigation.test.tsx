@@ -23,6 +23,16 @@ beforeAll(async () => {
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
+it.each([0, 999, 1000])("shows the freshly retrieved Last.fm count %s in the Track sidebar", async (playCount) => {
+  vi.spyOn(library, "loadTrackPopularity").mockResolvedValue({ playCount });
+  render(<App />);
+  await screen.findByRole("region", { name: "Library overview" });
+  await waitFor(() => {
+    const label = screen.getByText("Last.fm popularity");
+    expect(label.nextElementSibling).toHaveTextContent(library.formatCount(playCount));
+  });
+});
+
 async function navigate(name: string) {
   const primary = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(within(primary).getByRole("button", { name }));
