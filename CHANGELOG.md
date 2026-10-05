@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.26] - 2026-10-05
+
+### Fixed
+- Restore one-minute automatic update checks after successful requests, replacing the six-hour delay introduced in 0.28.20. New releases open the compact version-only prompt without a click or focus event; focus can catch up after one minute when a timer was delayed.
+- Preserve five-minute-to-six-hour failure backoff, manual checks, installation guards, and one prompt per available version. Keep an open prompt visible during repeated checks without reopening a dismissed version. Cover release discovery without interaction and catching up after a delayed timer.
+
 ## [0.28.25] - 2026-10-05
 
 ### Fixed

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.26 restores automatic update checks every minute, so a new release opens the compact update prompt without clicking or refocusing Aurora. Startup and manual checks remain available, and focus can catch up after a delayed timer. Failed requests retain exponential backoff from five minutes to six hours.
+
 Aurora 0.28.25 keeps your current album and track selection when a rating or tag save finishes in the background. Save callbacks use the current album selection, and catalog refreshes preserve a newer selection or closed details instead of reopening the album selected when the update began.
 
 Aurora 0.28.24 refreshes Last.fm popularity for every displayed track selection with a direct `track.getInfo` lookup using the track artist and title. The Track sidebar shows the returned global play count, including counts of 1,000 or fewer and zero. Fresh results take precedence over saved catalog data; network or configuration failures retain saved evidence, and late responses cannot replace another track's count.

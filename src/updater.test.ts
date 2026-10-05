@@ -11,21 +11,42 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-window-state", () => ({ saveWindowState: vi.fn(), StateFlags: { SIZE: 1, POSITION: 2, MAXIMIZED: 4 } }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
-it("checks at startup, on eligible focus, and after six hours without minute polling", async () => {
+it("automatically prompts for a release published after startup without focus or a click", async () => {
+  vi.stubEnv("DEV", false);
+  vi.useFakeTimers();
+  const update = { version: "1.0.0", body: "Release notes", download: vi.fn(), install: vi.fn(), close: vi.fn() };
+  vi.mocked(check).mockResolvedValueOnce(null).mockResolvedValue(update as unknown as Awaited<ReturnType<typeof check>>);
+  const { result, unmount } = renderHook(useAuroraUpdater);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(check).toHaveBeenCalledTimes(1);
+  expect(result.current.state.isPromptOpen).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000 - 1); });
+  expect(check).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(check).toHaveBeenCalledTimes(2);
+  expect(result.current.state).toMatchObject({ phase: "available", version: "1.0.0", message: null, isPromptOpen: true });
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(check).toHaveBeenCalledTimes(3);
+  expect(result.current.state.isPromptOpen).toBe(true);
+  act(() => result.current.dismiss());
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(check).toHaveBeenCalledTimes(4);
+  expect(result.current.state.isPromptOpen).toBe(false);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("checks on focus after a minute if the scheduled timer has not run", async () => {
   vi.stubEnv("DEV", false);
   vi.useFakeTimers();
   vi.mocked(check).mockResolvedValue(null);
   const { unmount } = renderHook(useAuroraUpdater);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
   expect(check).toHaveBeenCalledTimes(1);
-  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); window.dispatchEvent(new Event("focus")); });
-  expect(check).toHaveBeenCalledTimes(1);
-  await act(async () => { await vi.advanceTimersByTimeAsync(59 * 60_000); window.dispatchEvent(new Event("focus")); });
+  vi.setSystemTime(Date.now() + 60_000);
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
   expect(check).toHaveBeenCalledTimes(2);
-  await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 60_000 - 1); });
-  expect(check).toHaveBeenCalledTimes(2);
-  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-  expect(check).toHaveBeenCalledTimes(3);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
 });

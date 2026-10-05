@@ -4,9 +4,10 @@ import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime } from "./library";
 
-const UPDATE_INTERVAL_MS = 6 * 60 * 60_000;
-const UPDATE_FOCUS_INTERVAL_MS = 60 * 60_000;
+const UPDATE_INTERVAL_MS = 60_000;
+const UPDATE_FOCUS_INTERVAL_MS = 60_000;
 const UPDATE_RETRY_BASE_MS = 5 * 60_000;
+const UPDATE_RETRY_MAX_MS = 6 * 60 * 60_000;
 
 export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
@@ -60,17 +61,17 @@ export function useAuroraUpdater() {
       updateRef.current = update;
       const firstPrompt = !promptedVersionsRef.current.has(update.version);
       promptedVersionsRef.current.add(update.version);
-      setState({
+      setState((current) => ({
         phase: "available",
         version: update.version,
         progress: null,
         message: null,
-        isPromptOpen: manual || firstPrompt,
-      });
+        isPromptOpen: manual || firstPrompt || (current.isPromptOpen && current.version === update.version),
+      }));
     } catch (error) {
       failuresRef.current += 1;
       nextAttemptRef.current = Date.now() + Math.min(
-        UPDATE_INTERVAL_MS, UPDATE_RETRY_BASE_MS * 2 ** Math.min(failuresRef.current - 1, 10),
+        UPDATE_RETRY_MAX_MS, UPDATE_RETRY_BASE_MS * 2 ** Math.min(failuresRef.current - 1, 10),
       );
       console.warn("Aurora update check failed", error);
       if (manual) setState({ ...initialState, phase: "error", message: error instanceof Error ? error.message : String(error), isPromptOpen: true });
