@@ -5,7 +5,7 @@ import {
   applyAlbumPopularity, applyAlbumTrackMetricsProjection, loadAlbumDetail, loadAlbumPopularity,
   type AlbumSummary, type Track,
 } from "../../library";
-import { shouldFollowPlaybackTransition, type usePlayback } from "../../playback";
+import type { usePlayback } from "../../playback";
 import type { ViewPreferences } from "../../viewPreferences";
 
 export type InspectorSelectionOptions = {
@@ -36,7 +36,6 @@ export function useInspectorSelection({
   const [albumDetailState, setAlbumDetailState] = useState<ExplorerLoadState>("ready");
   const albumRequestRef = useRef(0);
   const selectedTrackRef = useRef<Track | null>(selectedTrack);
-  const previousPlaybackTrackKeyRef = useRef<string | null>(null);
   const selectedAlbumIdRef = useRef<string | null>(selectedAlbumId);
   const inspectorViewRef = useRef(inspectorView);
   // Async completions must see navigation intent before its transition commits.
@@ -52,20 +51,6 @@ export function useInspectorSelection({
     inspectorViewRef.current = inspectorView;
     portsRef.current = { artistRequestRef, setSelectedTrack, setExplorerAlbums, endGenreQueue, setSyncMessage, playback };
   });
-
-  useEffect(() => {
-    const currentTrack = playback.state.currentTrack;
-    const previousTrackKey = previousPlaybackTrackKeyRef.current;
-    previousPlaybackTrackKeyRef.current = currentTrack?.trackKey ?? null;
-    if (
-      !currentTrack
-      || currentTrack.trackKey === previousTrackKey
-      || !shouldFollowPlaybackTransition(previousTrackKey, selectedTrackRef.current?.trackKey ?? null, tagSelectionKind)
-    ) return;
-    portsRef.current.artistRequestRef.current += 1;
-    portsRef.current.setSelectedTrack(currentTrack);
-    setTagSelectionKind("track");
-  }, [playback.state.currentTrack, tagSelectionKind]);
 
   const refreshSelectedAlbumPopularity = useCallback((albumId: string, requestId: number) => {
     void loadAlbumPopularity(albumId).then((popularity) => {

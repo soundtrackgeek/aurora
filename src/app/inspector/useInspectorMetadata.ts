@@ -9,6 +9,7 @@ import type { YearAlbum } from "../../years";
 
 export type InspectorMetadataOptions = {
   selectedTrack: Track | null;
+  inspectorTrack: Track | null;
   setSelectedTrack: Dispatch<SetStateAction<Track | null>>;
   selectedAlbumId: string | null;
   albumTracks: Track[];
@@ -25,18 +26,20 @@ export type InspectorMetadataOptions = {
 
 /** Reconciles committed destination data without coupling their loading lifecycles. */
 export function useInspectorMetadata({
-  selectedTrack, setSelectedTrack, selectedAlbumId, albumTracks, explorerView,
+  selectedTrack, inspectorTrack, setSelectedTrack, selectedAlbumId, albumTracks, explorerView,
   explorerTracks, explorerAlbums, selectedYearAlbum, snapshot, yearAlbumTracks,
   ratingAlbumTracks, publisherAlbumTracks, genreDetail,
 }: InspectorMetadataOptions) {
   const [trackHistory, setTrackHistory] = useState<{ trackKey: string; value: TrackHistoryInsight; } | null>(null);
   const [catalogChartRanks, setCatalogChartRanks] = useState<CatalogChartRankings>({ tracks: {}, albums: {} });
+  const inspectorTrackId = inspectorTrack?.id;
 
   useEffect(() => {
     const visibleTracks = explorerView === "tracks" ? explorerTracks : albumTracks;
     const trackIds = [...new Set([
-      ...visibleTracks.map((track) => track.id),
+      ...(inspectorTrackId ? [inspectorTrackId] : []),
       ...(selectedTrack ? [selectedTrack.id] : []),
+      ...visibleTracks.map((track) => track.id),
     ])].slice(0, 100);
     const albumIds = [...new Set([
       ...explorerAlbums.map((album) => album.id),
@@ -55,10 +58,10 @@ export function useInspectorMetadata({
         console.warn("Aurora could not load Music Library chart rankings", error);
       });
     return () => { cancelled = true; };
-  }, [albumTracks, explorerAlbums, explorerTracks, explorerView, selectedAlbumId, selectedTrack, selectedYearAlbum]);
+  }, [albumTracks, explorerAlbums, explorerTracks, explorerView, inspectorTrackId, selectedAlbumId, selectedTrack, selectedYearAlbum]);
 
   useEffect(() => {
-    const trackKey = selectedTrack?.trackKey;
+    const trackKey = inspectorTrack?.trackKey;
     if (!trackKey) return;
     let cancelled = false;
     const refresh = () => {
@@ -73,7 +76,7 @@ export function useInspectorMetadata({
       cancelled = true;
       stop();
     };
-  }, [selectedTrack?.trackKey]);
+  }, [inspectorTrack?.trackKey]);
 
   useEffect(() => {
     const candidates = [

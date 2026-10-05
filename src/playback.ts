@@ -38,16 +38,6 @@ export interface PlaybackCatalogRebind {
   catalogRevision: string;
 }
 
-export function shouldFollowPlaybackTransition(
-  previousTrackKey: string | null,
-  selectedTrackKey: string | null,
-  tagSelectionKind: "track" | "album",
-): boolean {
-  return previousTrackKey !== null
-    && selectedTrackKey === previousTrackKey
-    && tagSelectionKind === "track";
-}
-
 const emptyPlayback: PlaybackSnapshot = {
   queue: [],
   currentIndex: null,

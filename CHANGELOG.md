@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.27] - 2026-10-05
+
+### Fixed
+- Make the Track sidebar read the current playback snapshot directly, following restored playback, automatic queue advances, Next/Previous, and paused tracks regardless of library selection or late album detail/file refreshes.
+- Keep selected chart songs from overriding playback in the Track tab. Load history and prioritize chart rankings for the displayed playback track; artwork, popularity, and track chart information use that same track.
+- Keep browsing and Tags selections independent of playback so queue transitions retain album context and unsaved tag drafts. Return to selected library or chart details when playback is cleared.
+- Add full-app regression coverage for restored playback, delayed album reconciliation, queue transitions, transport controls, chart selections, and tag drafts.
+
 ## [0.28.26] - 2026-10-05
 
 ### Fixed

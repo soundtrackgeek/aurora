@@ -520,12 +520,6 @@ function App() {
 
   useLayoutEffect(() => { activeNavRef.current = activeNav; }, [activeNav]);
 
-  const { trackHistory, catalogChartRanks } = useInspectorMetadata({
-    selectedTrack, setSelectedTrack, selectedAlbumId, albumTracks, explorerView,
-    explorerTracks, explorerAlbums, selectedYearAlbum, snapshot, yearAlbumTracks,
-    ratingAlbumTracks, publisherAlbumTracks, genreDetail,
-  });
-
   const libraryReady = snapshot !== null;
   const {
     latestTagProjectionTokenRef,
@@ -1077,9 +1071,16 @@ function App() {
   const explorerAlbumInspectorContext = artistPageName === null && explorerViewForDestination(activeNav) !== null && explorerView === "albums"
     ? resolveExplorerAlbumInspectorContext(explorerAlbums, selectedAlbumId, albumTracks, selectedTrack)
     : null;
-  const inspectorTrack = explorerAlbumInspectorContext
+  const selectedInspectorTrack = explorerAlbumInspectorContext
     ? explorerAlbumInspectorContext.track
     : selectedTrack;
+  // Playback is the Track tab's source of truth, independent of browsing and tags.
+  const inspectorTrack = playback.state.currentTrack ?? selectedInspectorTrack;
+  const { trackHistory, catalogChartRanks } = useInspectorMetadata({
+    selectedTrack, inspectorTrack, setSelectedTrack, selectedAlbumId, albumTracks, explorerView,
+    explorerTracks, explorerAlbums, selectedYearAlbum, snapshot, yearAlbumTracks,
+    ratingAlbumTracks, publisherAlbumTracks, genreDetail,
+  });
   const inspectorTrackPopularity = useTrackPopularity(inspectorTrack);
   const inspectorAlbumYear = inspectorTrack?.originalYear ?? inspectorTrack?.releaseYear;
   const inspectorAlbumLabel = inspectorTrack
@@ -1093,7 +1094,7 @@ function App() {
     || (activeNav === "Charts" && chartSelection?.kind === "albums"),
   );
   const inspectorArtistCandidate = explorerAlbumInspectorContext?.artistName
-    ?? (inspectorTrack ? displayTrackArtist(inspectorTrack) : null)
+    ?? (selectedInspectorTrack ? displayTrackArtist(selectedInspectorTrack) : null)
     ?? inspectorArtistName;
   const albumTagTarget = explorerAlbumInspectorContext
     ? { kind: "album" as const, albumId: explorerAlbumInspectorContext.album.id, label: explorerAlbumInspectorContext.album.title }
@@ -1138,8 +1139,8 @@ function App() {
     ? explorerTagTarget
     : tagSelectionKind === "album"
       ? albumTagTarget
-      : inspectorTrack
-        ? { kind: "track" as const, trackId: inspectorTrack.id, trackKey: inspectorTrack.trackKey, label: inspectorTrack.title }
+      : selectedInspectorTrack
+        ? { kind: "track" as const, trackId: selectedInspectorTrack.id, trackKey: selectedInspectorTrack.trackKey, label: selectedInspectorTrack.title }
         : null;
   const tagEditorKey = !tagEditorTarget
     ? "none"
@@ -1295,7 +1296,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.26</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.27</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1723,7 +1724,7 @@ function App() {
             disabled={!inspectorArtistCandidate}
             onClick={() => {
               const artistName = explorerAlbumInspectorContext?.artistName
-                ?? (inspectorTrack ? displayTrackArtist(inspectorTrack) : null)
+                ?? (selectedInspectorTrack ? displayTrackArtist(selectedInspectorTrack) : null)
                 ?? inspectorArtistName;
               if (artistName) openArtistInspector(artistName);
             }}
@@ -1739,7 +1740,7 @@ function App() {
               onCatalogSync={refreshTagEditorCatalogViews}
             />
           </div>
-        ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track") || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
+        ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track" && !playback.state.currentTrack) || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
           <div className="inspector-scroll">
             <ChartInspector
               selection={chartSelection}
@@ -1815,7 +1816,7 @@ function App() {
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
             <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
-            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit this MP3 or the selected album without leaving Aurora.</span></div>
+            <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit your library selection without leaving Aurora.</span></div>
           </div>
         ) : <EmptyInspector />}
       </aside>}
