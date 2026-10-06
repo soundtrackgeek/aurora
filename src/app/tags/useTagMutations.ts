@@ -69,7 +69,7 @@ export function useTagMutations({
   handleCatalogSync, playback,
 }: TagMutationOptions) {
   const { explorerTracks, explorerFilters, setExplorerTracks, setExplorerAlbums,
-    setExplorerReloadToken, preserveExplorerOnReloadRef, pendingExplorerAlbumIdRef } = explorer;
+    setExplorerReloadToken, preserveExplorerOnReloadRef } = explorer;
   const { selectedAlbumId, selectedAlbumIdRef, albumTracks, setAlbumTracks, setAlbumTracksTruncated,
     setAlbumDetailState, albumRequestRef } = inspector;
   const { mainScrollRef, scrollPositionByDestinationRef, restoringScrollRef } = workspace;
@@ -132,7 +132,6 @@ export function useTagMutations({
       }
       restoringScrollRef.current = true;
       preserveExplorerOnReloadRef.current = true;
-      if (selectedAlbumId) pendingExplorerAlbumIdRef.current = selectedAlbumId;
       setExplorerReloadToken((value) => value + 1);
     }
 
@@ -187,18 +186,16 @@ export function useTagMutations({
     // A save callback can outlive the selection that created it.
     const albumId = selectedAlbumIdRef.current;
     const selectionRequestId = albumRequestRef.current;
-    if (albumId) pendingExplorerAlbumIdRef.current = albumId;
     const currentScroll = mainScrollRef.current?.scrollTop;
     if (typeof currentScroll === "number" && currentScroll > 0) {
       scrollPositionByDestinationRef.current[activeNav] = currentScroll;
     }
     const catalogRefreshed = await handleCatalogSync(sync, true);
     if (catalogRefreshed || !albumId) return;
-    if (pendingExplorerAlbumIdRef.current === albumId) pendingExplorerAlbumIdRef.current = null;
     if (sync.status !== "synced" || selectedAlbumIdRef.current !== albumId
       || selectionRequestId !== albumRequestRef.current) return;
 
-    const requestId = ++albumRequestRef.current;
+    const requestId = selectionRequestId;
     try {
       const detail = await loadAlbumDetail(albumId);
       if (requestId !== albumRequestRef.current || selectedAlbumIdRef.current !== albumId) return;
@@ -310,7 +307,7 @@ export function useTagMutations({
       }));
       if (snapshot.track.albumId && snapshot.track.albumId === selectedAlbumIdRef.current) {
         const albumId = snapshot.track.albumId;
-        const requestId = ++albumRequestRef.current;
+        const requestId = albumRequestRef.current;
         try {
           const detail = await loadAlbumDetail(albumId);
           if (requestId === albumRequestRef.current && selectedAlbumIdRef.current === albumId) {

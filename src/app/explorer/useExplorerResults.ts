@@ -128,7 +128,11 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     const requestKey = explorerRequestKey(explorerView, explorerFilters, explorerReloadToken);
     if (shouldReuseExplorerPage(loadedExplorerRequestKeyRef.current, requestKey, preservingCurrentView)) return;
     const restoringStoredView = explorerRestorationPendingRef.current;
-    const handoffAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
+    const pendingAlbumId = explorerView === "albums" ? pendingExplorerAlbumIdRef.current : null;
+    // Handoffs belong to explicit navigation. A retained-view refresh must use
+    // current selection, including a click/close made before this effect starts.
+    const handoffAlbumId = !preservingCurrentView && pendingAlbumId === selectedAlbumIdRef.current
+      ? pendingAlbumId : null;
     const restoredAlbumId = handoffAlbumId
       ?? (preservingCurrentView && explorerView === "albums" ? selectedAlbumIdRef.current : null)
       ?? (restoringStoredView && explorerView === "albums" ? initialSelectedAlbumId : null);
@@ -143,11 +147,11 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     }
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
-    const selectionRequestId = ++albumRequestRef.current;
+    const selectionRequestId = preservingCurrentView ? albumRequestRef.current : ++albumRequestRef.current;
     const clearDetailTimer = window.setTimeout(() => {
       if (cancelled) return;
       setIsLoadingMore(false);
-      if (!preservingCurrentView) {
+      if (!preservingCurrentView && selectionRequestId === albumRequestRef.current) {
         if (!restoredAlbumId) setSelectedAlbumId(null);
         setAlbumTracks([]);
         setAlbumTracksTruncated(false);
@@ -195,32 +199,42 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
             };
             // Browsing during a background reload owns its own detail request.
             // Refresh the rows without restoring the album captured at reload start.
-            if (selectionRequestId !== albumRequestRef.current) {
+            if (selectionRequestId !== albumRequestRef.current
+              || (preservingCurrentView && restoredAlbumId !== selectedAlbumIdRef.current)) {
               restoringScrollRef.current = false;
             } else if (restoredAlbumId && (handoffAlbumId || preservingCurrentView || page.albums.some((album) => album.id === restoredAlbumId))) {
-              const albumDetailRequestId = ++albumRequestRef.current;
-              setSelectedAlbumId(restoredAlbumId);
+              const albumDetailRequestId = preservingCurrentView ? selectionRequestId : ++albumRequestRef.current;
               if (!preservingCurrentView) {
+                setSelectedAlbumId(restoredAlbumId);
                 setAlbumDetailState("loading");
               }
               void loadAlbumDetail(restoredAlbumId, { localOnly: true })
                 .then((detail) => {
                   transitionContent(() => {
-                    if (albumDetailRequestId !== albumRequestRef.current) return;
+                    if (albumDetailRequestId !== albumRequestRef.current
+                      || selectedAlbumIdRef.current !== restoredAlbumId) return;
                     const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
                     setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
                       ? current.map((album) => album.id === detail.album.id ? projectedAlbum : album)
                       : [projectedAlbum, ...current]);
                     setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
                     setAlbumTracksTruncated(detail.tracksTruncated);
-                    setSelectedTrack(detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null);
+                    setSelectedTrack((current) => {
+                      if (preservingCurrentView) {
+                        return current?.albumId === restoredAlbumId
+                          ? detail.tracks.find((track) => track.trackKey === current.trackKey) ?? current
+                          : current;
+                      }
+                      return detail.tracks.find((track) => track.trackKey === restoredTrackKey) ?? detail.tracks[0] ?? null;
+                    });
                     setAlbumDetailState("ready");
                     setAlbumFileRefreshRequest({ albumId: restoredAlbumId, requestId: albumDetailRequestId });
                     restoreScrollIfPreserved();
                   }, "album-detail", !preservingCurrentView);
                 })
                 .catch((error: unknown) => {
-                  if (albumDetailRequestId !== albumRequestRef.current) return;
+                  if (albumDetailRequestId !== albumRequestRef.current
+                    || selectedAlbumIdRef.current !== restoredAlbumId) return;
                   console.warn("Aurora could not restore album details", error);
                   setAlbumDetailState("error");
                   restoreScrollIfPreserved();
@@ -231,7 +245,7 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
               }
               restoreScrollIfPreserved();
             }
-            if (handoffAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
+            if (pendingAlbumId === pendingExplorerAlbumIdRef.current) pendingExplorerAlbumIdRef.current = null;
             explorerRestorationPendingRef.current = false;
             if (localOnly) refreshExplorerFiles(explorerView, explorerFilters,
               Math.max(preservingCurrentView ? preservedLoaded : 0, page.tracks.length + page.albums.length + page.artists.length),

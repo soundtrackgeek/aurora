@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.30] - 2026-10-06
+
+### Fixed
+- Keep the latest album selection when delayed genre writes and catalog imports finish, including navigation before the background refresh begins and closing album details.
+- Reserve album handoffs for explicit navigation; saved tag projections and catalog updates no longer reopen the album captured by an earlier callback.
+- Let local album details finish opening independently of background catalog refreshes, and preserve a track selected while refreshed details were loading.
+- Add deterministic regressions for obsolete handoffs, delayed genre projections and catalog sync, in-flight album clicks, and explicit album navigation.
+
 ## [0.28.29] - 2026-10-06
 
 ### Fixed

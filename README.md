@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.30 keeps the current album, track, and closed details in place when a pending genre save or Music Library import finishes. Background catalog refreshes use the current selection and no longer cancel an album click while its local details are loading. Explicit album navigation from other pages still opens the requested album.
+
 Aurora 0.28.29 speeds up Deep Catalog startup searches and album details. Verified rating and genre projections start from changed albums and tracks, avoiding full-catalog scans for a small correction set. Album searches evaluate their matching IDs once for the count and page, and `scores` exclusions inspect candidate albums. The saved search, result ordering, counts, pagination, and file-correction behavior are preserved. See [Deep Catalog performance](docs/search.md#deep-catalog-performance) for the native benchmark and verification limits.
 
 Aurora 0.28.28 recovers state snapshots that reached OneDrive before their local acknowledgement completed. A durable device-local publication receipt identifies the exact snapshot and verifies its SHA-256 before acknowledging it on retry or restart; edits made afterward remain pending and are published next. Independently changed peer snapshots retain normal conflict protection. State-sync status changes and errors are retained in bounded local `aurora-state.sync.jsonl` diagnostics. See [State publication recovery](docs/laptop-mode-contract.md#interrupted-publication-recovery).

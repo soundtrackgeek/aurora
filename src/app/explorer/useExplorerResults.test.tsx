@@ -7,6 +7,8 @@ import { useWorkspaceRestoration } from "../navigation/useWorkspaceRestoration";
 import { defaultViewPreferences, type ViewPreferences } from "../../viewPreferences";
 import * as library from "../../library";
 import type { Track } from "../../library";
+import { useRef, useState } from "react";
+import { useInspectorSelection } from "../inspector/useInspectorSelection";
 
 const track: Track = {
   id: "first", trackKey: "first", albumId: "album", title: "First", artist: "Artist", album: "Album",
@@ -105,4 +107,97 @@ it.each(["another album", "closed details"])("preserves navigation to %s during 
   expect(result.current.explorerAlbums).toEqual(albums);
   expect(result.current.explorerLoadState).toBe("ready");
   expect(result.current.pendingExplorerAlbumIdRef.current).toBeNull();
+});
+
+it.each(["another album", "closed details"])("ignores an obsolete handoff when %s was chosen before the refresh starts", async (destination) => {
+  const albums = (await library.exploreAlbums({ pageSize: 2 })).items;
+  const details = await Promise.all(albums.map((album) => library.loadAlbumDetail(album.id)));
+  vi.useFakeTimers();
+  vi.spyOn(queries, "loadExplorerPage").mockResolvedValue({ tracks: [], artists: [], albums, totalCount: 2, nextCursor: null });
+  const loadDetail = vi.spyOn(library, "loadAlbumDetail").mockImplementation(async (id) => details.find((detail) => detail.album.id === id)!);
+  const selection = selectionPort();
+  const { result } = renderHook(() => useResults(selection, {
+    ...defaultViewPreferences, activeNav: "Albums", explorerView: "albums",
+  }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  result.current.pendingExplorerAlbumIdRef.current = albums[0].id;
+  selection.selectedAlbumIdRef.current = destination === "another album" ? albums[1].id : null;
+  selection.albumRequestRef.current += 1;
+  result.current.preserveExplorerOnReloadRef.current = true;
+  act(() => result.current.setExplorerReloadToken((value) => value + 1));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(loadDetail.mock.calls.some(([id]) => id === albums[0].id)).toBe(false);
+  expect(selection.setSelectedAlbumId).not.toHaveBeenCalledWith(albums[0].id);
+  expect(result.current.pendingExplorerAlbumIdRef.current).toBeNull();
+});
+
+it("lets the clicked album finish opening before a slower background catalog refresh", async () => {
+  const albums = (await library.exploreAlbums({ pageSize: 2 })).items;
+  const detail = await library.loadAlbumDetail(albums[1].id);
+  const refreshed = { tracks: [], artists: [], albums, totalCount: 2, nextCursor: null };
+  vi.useFakeTimers();
+  const loadPage = vi.spyOn(queries, "loadExplorerPage").mockResolvedValue(refreshed);
+  vi.spyOn(library, "loadAlbumPopularity").mockResolvedValue(detail.popularity);
+  let finishOpening!: (value: library.AlbumDetail) => void;
+  const loadDetail = vi.spyOn(library, "loadAlbumDetail").mockResolvedValue(detail)
+    .mockImplementationOnce(() => new Promise((resolve) => { finishOpening = resolve; }));
+  const { result } = renderHook(() => {
+    const preferences = { ...defaultViewPreferences, activeNav: "Albums" as const, explorerView: "albums" as const };
+    const explorer = useExplorerWorkspace(preferences);
+    const workspace = useWorkspaceRestoration();
+    const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+    const artistRequestRef = useRef(0);
+    const selection = useInspectorSelection({
+      initialViewPreferences: preferences, selectedTrack, setSelectedTrack, artistRequestRef,
+      setExplorerAlbums: explorer.setExplorerAlbums,
+      playback: { state: { currentTrack: null }, play: async () => null },
+      endGenreQueue: () => undefined, setSyncMessage: () => undefined,
+    });
+    useExplorerResults({ explorer, workspace, selection: { ...selection, setSelectedTrack },
+      activeNav: "Albums", artistPageName: null, libraryReady: true, initialSelectedAlbumId: null });
+    return { ...explorer, ...selection, selectedTrack };
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  act(() => result.current.selectAlbum(albums[1]));
+  const openingRequest = result.current.albumRequestRef.current;
+  let finishRefresh!: (value: queries.ExplorerResult) => void;
+  loadPage.mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }));
+  result.current.preserveExplorerOnReloadRef.current = true;
+  act(() => result.current.setExplorerReloadToken((value) => value + 1));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(result.current.albumRequestRef.current).toBe(openingRequest);
+  await act(async () => { finishOpening(detail); });
+  expect(result.current.albumDetailState).toBe("ready");
+  expect(result.current.albumTracks).toEqual(library.applyAlbumPopularity(detail.tracks, detail.popularity));
+  expect(result.current.selectedAlbumId).toBe(detail.album.id);
+  // Track selection made after refresh start must also survive its late detail.
+  act(() => result.current.selectTrack(detail.tracks[1]));
+  await act(async () => { finishRefresh(refreshed); });
+  expect(result.current.selectedTrack?.trackKey).toBe(detail.tracks[1].trackKey);
+  expect(result.current.selectedAlbumId).toBe(detail.album.id);
+  expect(result.current.albumRequestRef.current).toBe(openingRequest);
+  expect(loadDetail).toHaveBeenCalledWith(detail.album.id, { localOnly: true });
+});
+
+it("still opens an explicit album handoff outside the first result page", async () => {
+  const albums = (await library.exploreAlbums({ pageSize: 2 })).items;
+  const detail = await library.loadAlbumDetail(albums[1].id);
+  vi.useFakeTimers();
+  vi.spyOn(queries, "loadExplorerPage").mockImplementation(async (_view, _filters, _cursor, localOnly) => ({
+    tracks: [], artists: [], albums: localOnly ? [albums[0]] : albums, totalCount: 2, nextCursor: null,
+  }));
+  const loadDetail = vi.spyOn(library, "loadAlbumDetail").mockResolvedValue(detail);
+  const selection = selectionPort();
+  const { result } = renderHook(() => useResults(selection, {
+    ...defaultViewPreferences, activeNav: "Albums", explorerView: "albums",
+  }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  selection.selectedAlbumIdRef.current = detail.album.id;
+  result.current.pendingExplorerAlbumIdRef.current = detail.album.id;
+  act(() => result.current.setExplorerReloadToken((value) => value + 1));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(loadDetail).toHaveBeenCalledWith(detail.album.id, { localOnly: true });
+  expect(selection.setSelectedAlbumId).toHaveBeenCalledWith(detail.album.id);
+  expect(selection.setAlbumTracks).toHaveBeenCalledWith(library.applyAlbumPopularity(detail.tracks, detail.popularity));
+  expect(result.current.explorerAlbums.some((album) => album.id === detail.album.id)).toBe(true);
 });

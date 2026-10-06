@@ -543,7 +543,6 @@ function App() {
     }
     restoringScrollRef.current = true;
     preserveExplorerOnReloadRef.current = true;
-    if (selectedAlbumIdRef.current) pendingExplorerAlbumIdRef.current = selectedAlbumIdRef.current;
     setExplorerReloadToken((value) => value + 1);
     setReviewReloadToken((value) => value + 1);
     setHistoryReloadToken((value) => value + 1);
@@ -557,7 +556,7 @@ function App() {
     if (inspectorViewRef.current === "artist" && artistName) {
       openArtistInspectorRef.current(artistName);
     }
-  }, [inspectorArtistNameRef, inspectorViewRef, mainScrollRef, openArtistInspectorRef, pendingExplorerAlbumIdRef, preserveExplorerOnReloadRef, restoringScrollRef, scrollPositionByDestinationRef, selectedAlbumIdRef, selectedTrackRef, setChartReloadToken, setExplorerReloadToken, setGenreDetailReloadToken, setGenreIndexReloadToken, setHistoryReloadToken, setPublisherReloadToken, setReviewReloadToken, setSelectedTrack, setYearReloadToken]);
+  }, [inspectorArtistNameRef, inspectorViewRef, mainScrollRef, openArtistInspectorRef, preserveExplorerOnReloadRef, restoringScrollRef, scrollPositionByDestinationRef, selectedTrackRef, setChartReloadToken, setExplorerReloadToken, setGenreDetailReloadToken, setGenreIndexReloadToken, setHistoryReloadToken, setPublisherReloadToken, setReviewReloadToken, setSelectedTrack, setYearReloadToken]);
 
   const { catalogRevisionRef, refreshCatalogIfChanged } = useCatalogRevision({
     libraryReady,
@@ -1296,7 +1295,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.29</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.28.30</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

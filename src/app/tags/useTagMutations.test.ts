@@ -169,7 +169,7 @@ it.each([
   expect(result.current.inlineSavingKeys.size).toBe(0);
 });
 
-it("does not refresh a former album when navigation changes during tag-editor catalog sync", async () => {
+it.each([false, true])("does not retain a former album when navigation changes during tag-editor catalog sync (refreshed: %s)", async (catalogRefreshed) => {
   const fixture = options();
   const selectedAlbumIdRef = { current: fixture.track.albumId };
   Object.assign(fixture.input.inspector, { selectedAlbumId: fixture.track.albumId, selectedAlbumIdRef });
@@ -182,10 +182,11 @@ it("does not refresh a former album when navigation changes during tag-editor ca
   selectedAlbumIdRef.current = "preview-viva";
   fixture.input.inspector.albumRequestRef.current += 1;
   const currentRequestId = fixture.input.inspector.albumRequestRef.current;
-  await act(async () => { finish(false); await refreshing; });
+  await act(async () => { finish(catalogRefreshed); await refreshing; });
   expect(load).not.toHaveBeenCalled();
   expect(fixture.input.inspector.albumRequestRef.current).toBe(currentRequestId);
   expect(fixture.input.inspector.setAlbumTracks).not.toHaveBeenCalled();
+  expect(fixture.input.explorer.pendingExplorerAlbumIdRef.current).toBeNull();
 });
 
 it("uses the current album for a tag-editor callback captured before navigation", async () => {
@@ -200,8 +201,22 @@ it("uses the current album for a tag-editor callback captured before navigation"
   vi.mocked(fixture.input.handleCatalogSync).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   let refreshing!: Promise<void>;
   act(() => { refreshing = refresh({ status: "synced", pendingFolderCount: 0 }); });
-  expect(fixture.input.explorer.pendingExplorerAlbumIdRef.current).toBe("preview-viva");
+  expect(fixture.input.explorer.pendingExplorerAlbumIdRef.current).toBeNull();
   await act(async () => { finish(true); await refreshing; });
+});
+
+it("does not turn a delayed genre projection into navigation to its captured album", () => {
+  const fixture = options();
+  Object.assign(fixture.input.inspector, { selectedAlbumId: fixture.track.albumId });
+  fixture.input.explorer.explorerFilters = { ...defaultExplorerFilters, query: "year:1980..1989 AND CR:1..99 NOT genre:soundtrack OR scores" };
+  const { result } = renderHook(() => useTagMutations(fixture.input));
+  const apply = result.current.applyTrackChanges;
+  fixture.input.inspector.selectedAlbumIdRef.current = "preview-viva";
+  act(() => { apply([{ ...fixture.track, genre: "Post-Punk" }], { status: "pending", pendingFolderCount: 1 }); });
+  expect(fixture.input.explorer.setExplorerReloadToken).toHaveBeenCalled();
+  expect(fixture.input.explorer.preserveExplorerOnReloadRef.current).toBe(true);
+  expect(fixture.input.explorer.pendingExplorerAlbumIdRef.current).toBeNull();
+  expect(fixture.explorerTracks.value[0].genre).toBe("Post-Punk");
 });
 
 it("refreshes verified rating metrics while the edited album remains selected", async () => {
