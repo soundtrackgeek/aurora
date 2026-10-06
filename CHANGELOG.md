@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.28] - 2026-10-06
+
+### Fixed
+- Save a durable local publication receipt before replacing a OneDrive state snapshot, then recover its missing acknowledgement on retry or startup without replacing newer local queue, rating, or tag edits.
+- Verify the pending snapshot's full metadata and SHA-256, retain independently advanced peers as conflicts, and make completed receipt cleanup idempotent. Incomplete or altered recovery evidence never authorizes replacement.
+- Retain state-sync status changes and failures in local `aurora-state.sync.jsonl` and its previous rotation, each limited to about 1 MiB.
+- Cover interrupted publication, later local edits, restart and running recovery, changed peers and snapshot bytes, unfinished installation, corrupt receipts, and diagnostic rotation with deterministic regression tests.
+
 ## [0.28.27] - 2026-10-05
 
 ### Fixed

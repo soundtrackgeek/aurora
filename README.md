@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.28 recovers state snapshots that reached OneDrive before their local acknowledgement completed. A durable device-local publication receipt identifies the exact snapshot and verifies its SHA-256 before acknowledging it on retry or restart; edits made afterward remain pending and are published next. Independently changed peer snapshots retain normal conflict protection. State-sync status changes and errors are retained in bounded local `aurora-state.sync.jsonl` diagnostics. See [State publication recovery](docs/laptop-mode-contract.md#interrupted-publication-recovery).
+
 Aurora 0.28.27 makes the Track sidebar follow the current playback track, including restored sessions, automatic queue advances, Next/Previous, and paused playback. Browsing another track or album, late album refreshes, and chart selections no longer replace the playing track's details. History, popularity, artwork, and chart information follow playback; Album, Artist, and Tags retain their browsing context and tag drafts. When the playback queue is cleared, Track returns to the selected library or chart song.
 
 Aurora 0.28.26 restores automatic update checks every minute, so a new release opens the compact update prompt without clicking or refocusing Aurora. Startup and manual checks remain available, and focus can catch up after a delayed timer. Failed requests retain exponential backoff from five minutes to six hours.

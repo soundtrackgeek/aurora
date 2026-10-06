@@ -1,12 +1,14 @@
 use crate::state_store::{SCHEMA_VERSION, StateStore};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 #[cfg(windows)]
 use std::ffi::c_void;
 use std::{
     collections::HashSet,
     env,
     fs::{self, File},
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -24,7 +26,8 @@ pub(crate) enum StartupSyncOutcome {
     Unavailable(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SyncMetadata {
     lineage_id: String,
     snapshot_id: String,
@@ -32,6 +35,19 @@ struct SyncMetadata {
     content_revision: i64,
     mirrored_revision: i64,
     last_synced_at_ms: Option<i64>,
+}
+
+/// Device-local evidence written before installing a remote snapshot. It must
+/// never be included in the shared database or used to acknowledge a peer write.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PendingPublication {
+    version: u8,
+    remote_path: PathBuf,
+    parent: SyncMetadata,
+    snapshot: SyncMetadata,
+    sha256: String,
+    expected_remote_snapshot: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -67,6 +83,9 @@ pub(crate) fn prepare_state_before_open(
 ) -> StartupSyncOutcome {
     if !remote_path.is_file() {
         return StartupSyncOutcome::None;
+    }
+    if let Err(message) = recover_pending_publication(local_path, remote_path) {
+        return StartupSyncOutcome::Unavailable(message);
     }
     let snapshot = match crate::snapshot_io::LocalSnapshot::new(remote_path) {
         Ok(snapshot) => snapshot,
@@ -132,6 +151,7 @@ pub(crate) struct StateSyncService {
     allow_legacy_replace: bool,
     album_order_revision: u64,
     last_album_merge_snapshot: Option<String>,
+    last_diagnostic: Option<StateMirrorStatus>,
 }
 
 impl StateSyncService {
@@ -150,22 +170,29 @@ impl StateSyncService {
             allow_legacy_replace,
             album_order_revision: 0,
             last_album_merge_snapshot: None,
+            last_diagnostic: None,
         })
     }
 
     pub(crate) fn sync_now(&mut self, bypass_throttle: bool) -> StateMirrorStatus {
-        if self.remote_path.as_os_str().is_empty() {
-            return self.status(
+        let status = if self.remote_path.as_os_str().is_empty() {
+            self.status(
                 "disabled",
                 "Sync is off. Choose a sync folder in Settings → Connections and restart Aurora."
                     .to_owned(),
                 None,
-            );
+            )
+        } else {
+            match self.try_sync(bypass_throttle) {
+                Ok(status) => status,
+                Err(error) => self.status("unavailable", error, None),
+            }
+        };
+        if self.last_diagnostic.as_ref() != Some(&status) {
+            let _ = record_sync_diagnostic(self.store.path(), &status);
+            self.last_diagnostic = Some(status.clone());
         }
-        match self.try_sync(bypass_throttle) {
-            Ok(status) => status,
-            Err(error) => self.status("unavailable", error, None),
-        }
+        status
     }
 
     fn try_sync(&mut self, bypass_throttle: bool) -> Result<StateMirrorStatus, String> {
@@ -191,6 +218,7 @@ impl StateSyncService {
             ));
         }
 
+        recover_pending_publication(self.store.path(), &self.remote_path)?;
         let local = read_required_metadata(self.store.path())?;
         let remote_exists = self.remote_path.is_file();
         let remote = if remote_exists {
@@ -586,6 +614,22 @@ fn publish_snapshot(
     local_before: &SyncMetadata,
     expected_remote_snapshot: Option<&str>,
 ) -> Result<SyncMetadata, String> {
+    publish_snapshot_with_acknowledgement(
+        store,
+        remote_path,
+        local_before,
+        expected_remote_snapshot,
+        acknowledge_publication,
+    )
+}
+
+fn publish_snapshot_with_acknowledgement(
+    store: &StateStore,
+    remote_path: &Path,
+    local_before: &SyncMetadata,
+    expected_remote_snapshot: Option<&str>,
+    acknowledge: impl FnOnce(&Path, &PendingPublication) -> Result<(), String>,
+) -> Result<SyncMetadata, String> {
     let remote_parent = remote_path
         .parent()
         .ok_or_else(|| "Aurora's OneDrive state path has no parent directory.".to_owned())?;
@@ -622,10 +666,13 @@ fn publish_snapshot(
     validate_database(&temporary)?
         .ok_or_else(|| "Aurora's staged snapshot is missing sync metadata.".to_owned())?;
 
+    let (sealed_metadata, sealed_sha256) = read_snapshot_fingerprint(&temporary)?;
     let uploaded = crate::snapshot_io::upload(&temporary, remote_parent)?;
     let temporary: &Path = uploaded.as_ref();
-    validate_database(temporary)?
-        .ok_or_else(|| "The uploaded snapshot is missing sync metadata.".to_owned())?;
+    let (uploaded_metadata, uploaded_sha256) = read_snapshot_fingerprint(temporary)?;
+    if uploaded_metadata != sealed_metadata || uploaded_sha256 != sealed_sha256 {
+        return Err("Aurora's uploaded snapshot differs from its verified local copy; the previous snapshot was left untouched.".to_owned());
+    }
     let remote_now = if remote_path.is_file() {
         validate_database(remote_path)?
     } else {
@@ -644,6 +691,16 @@ fn publish_snapshot(
         );
     }
 
+    let receipt = PendingPublication {
+        version: 1,
+        remote_path: remote_path.to_owned(),
+        parent: local_before.clone(),
+        snapshot: sealed_metadata,
+        sha256: sealed_sha256,
+        expected_remote_snapshot: expected_remote_snapshot.map(str::to_owned),
+    };
+    persist_publication_receipt(store.path(), &receipt)?;
+
     if remote_path.is_file() {
         preserve_previous_remote(remote_path)?;
         replace_file_atomic(remote_path, temporary)?;
@@ -652,8 +709,179 @@ fn publish_snapshot(
             format!("Could not publish Aurora's OneDrive state snapshot: {error}")
         })?;
     }
-    let snapshot = read_required_metadata(remote_path)?;
-    let connection = store.open()?;
+    acknowledge(store.path(), &receipt)?;
+    remove_publication_receipt(store.path())?;
+    Ok(receipt.snapshot)
+}
+
+fn publication_receipt_path(local_path: &Path) -> PathBuf {
+    local_path.with_extension("publish.json")
+}
+
+fn persist_publication_receipt(
+    local_path: &Path,
+    receipt: &PendingPublication,
+) -> Result<(), String> {
+    let path = publication_receipt_path(local_path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Aurora's publication receipt has no parent folder.".to_owned())?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec(receipt).map_err(|e| e.to_string())?;
+    temporary.write_all(&bytes).map_err(|e| e.to_string())?;
+    crate::snapshot_io::sync_file(temporary.as_file()).map_err(|e| e.to_string())?;
+    let temporary = temporary.into_temp_path();
+    if path.is_file() {
+        replace_file_atomic(&path, &temporary)
+    } else {
+        fs::rename(&temporary, &path).map_err(|e| e.to_string())
+    }
+    .map_err(|e| format!("Could not save Aurora's publication recovery receipt: {e}"))
+}
+
+fn read_publication_receipt(local_path: &Path) -> Result<Option<PendingPublication>, String> {
+    let path = publication_receipt_path(local_path);
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not read Aurora's publication receipt: {error}"
+            ));
+        }
+    };
+    let mut bytes = Vec::new();
+    file.take(64 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > 64 * 1024 {
+        return Err("Aurora's publication receipt exceeds its size limit.".to_owned());
+    }
+    let receipt: PendingPublication = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Aurora's publication recovery receipt is unreadable: {e}"))?;
+    if receipt.version != 1
+        || receipt.parent.lineage_id != receipt.snapshot.lineage_id
+        || receipt.parent.generation.checked_add(1) != Some(receipt.snapshot.generation)
+        || receipt.snapshot.content_revision < receipt.parent.content_revision
+        || receipt.snapshot.content_revision != receipt.snapshot.mirrored_revision
+        || receipt.sha256.len() != 64
+        || !receipt.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("Aurora's publication recovery receipt is invalid.".to_owned());
+    }
+    Ok(Some(receipt))
+}
+
+fn remove_publication_receipt(local_path: &Path) -> Result<(), String> {
+    match fs::remove_file(publication_receipt_path(local_path)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Could not finish Aurora's publication recovery: {error}"
+        )),
+    }
+}
+
+fn snapshot_sha256(path: &Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let length = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if length == 0 {
+            break;
+        }
+        hash.update(&buffer[..length]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+fn read_snapshot_fingerprint(path: &Path) -> Result<(SyncMetadata, String), String> {
+    // Preserve the existing bounded Mac SMB download path. Hashing a mounted
+    // file directly could otherwise block the sync worker indefinitely.
+    let snapshot = crate::snapshot_io::LocalSnapshot::new(path)?;
+    Ok((
+        read_required_metadata(&snapshot.path)?,
+        snapshot_sha256(&snapshot.path)?,
+    ))
+}
+
+fn publication_was_acknowledged(local: &SyncMetadata, receipt: &PendingPublication) -> bool {
+    local.lineage_id == receipt.snapshot.lineage_id
+        && local.generation >= receipt.snapshot.generation
+        && local.mirrored_revision >= receipt.snapshot.mirrored_revision
+        && (local.generation > receipt.snapshot.generation
+            || local.snapshot_id == receipt.snapshot.snapshot_id)
+}
+
+fn recover_pending_publication(local_path: &Path, remote_path: &Path) -> Result<(), String> {
+    let Some(receipt) = read_publication_receipt(local_path)? else {
+        return Ok(());
+    };
+    // A receipt belongs to this installation and this exact sync destination.
+    if !local_path.is_file() || receipt.remote_path != remote_path {
+        return Ok(());
+    }
+    let local = read_required_metadata(local_path)?;
+    if publication_was_acknowledged(&local, &receipt) {
+        return remove_publication_receipt(local_path);
+    }
+    if local.lineage_id != receipt.parent.lineage_id
+        || local.snapshot_id != receipt.parent.snapshot_id
+        || local.generation != receipt.parent.generation
+    {
+        return Ok(());
+    }
+    let remote = if remote_path.is_file() {
+        validate_database(remote_path)?
+    } else {
+        None
+    };
+    if remote.as_ref() == Some(&receipt.snapshot) {
+        let (metadata, sha256) = read_snapshot_fingerprint(remote_path)?;
+        if metadata != receipt.snapshot || sha256 != receipt.sha256 {
+            return Err("Aurora's pending snapshot changed after publication; its recovery receipt was retained without acknowledging it.".to_owned());
+        }
+        acknowledge_publication(local_path, &receipt)?;
+        let _ = record_sync_diagnostic(
+            local_path,
+            &StateMirrorStatus {
+                sync_state: "recovered",
+                message: format!(
+                    "Recovered publication {} without replacing local content; only captured revision {} was acknowledged.",
+                    receipt.snapshot.snapshot_id, receipt.snapshot.content_revision,
+                ),
+                remote_path: remote_path.to_string_lossy().into_owned(),
+                last_synced_at_ms: receipt.snapshot.last_synced_at_ms,
+                album_order_revision: 0,
+            },
+        );
+        return remove_publication_receipt(local_path);
+    }
+    if remote.as_ref().map(|metadata| &metadata.snapshot_id)
+        == receipt.expected_remote_snapshot.as_ref()
+    {
+        // The remote was never installed. Retrying will capture all current
+        // local edits and write a fresh receipt before attempting replacement.
+        remove_publication_receipt(local_path)?;
+    }
+    // An independently advanced remote keeps the normal conflict safeguards.
+    Ok(())
+}
+
+fn acknowledge_publication(local_path: &Path, receipt: &PendingPublication) -> Result<(), String> {
+    let (metadata, sha256) = read_snapshot_fingerprint(&receipt.remote_path)?;
+    if metadata != receipt.snapshot || sha256 != receipt.sha256 {
+        return Err("Aurora's published snapshot changed before acknowledgement; local edits and the recovery receipt were retained.".to_owned());
+    }
+    let connection = Connection::open_with_flags(
+        local_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| e.to_string())?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
     let updated = connection
         .execute(
             r#"
@@ -662,25 +890,53 @@ fn publish_snapshot(
               last_synced_at_ms = ?4
             WHERE singleton = 1 AND lineage_id = ?5
               AND snapshot_id = ?6 AND generation = ?7
+              AND content_revision >= ?3 AND mirrored_revision = ?8
             "#,
             params![
-                snapshot.snapshot_id,
-                snapshot.generation,
-                snapshot.mirrored_revision,
-                snapshot.last_synced_at_ms,
-                local_before.lineage_id,
-                local_before.snapshot_id,
-                local_before.generation,
+                receipt.snapshot.snapshot_id,
+                receipt.snapshot.generation,
+                receipt.snapshot.mirrored_revision,
+                receipt.snapshot.last_synced_at_ms,
+                receipt.parent.lineage_id,
+                receipt.parent.snapshot_id,
+                receipt.parent.generation,
+                receipt.parent.mirrored_revision,
             ],
         )
         .map_err(|error| format!("Could not checkpoint Aurora's published snapshot: {error}"))?;
     if updated != 1 {
         return Err(
-            "Aurora published a valid OneDrive snapshot, but local sync metadata changed concurrently. Restart Aurora to reconcile it."
+            "Aurora published a valid snapshot, but its local acknowledgement is pending. The saved recovery receipt will retry without discarding newer local edits."
                 .to_owned(),
         );
     }
-    Ok(snapshot)
+    Ok(())
+}
+
+fn record_sync_diagnostic(local_path: &Path, status: &StateMirrorStatus) -> std::io::Result<()> {
+    let path = local_path.with_extension("sync.jsonl");
+    let previous = local_path.with_extension("sync.previous.jsonl");
+    let event = serde_json::json!({
+        "timestampMs": now_ms(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "processId": std::process::id(),
+        "status": status,
+    });
+    let mut bytes = serde_json::to_vec(&event)?;
+    bytes.push(b'\n');
+    if fs::metadata(&path).is_ok_and(|meta| meta.len() + bytes.len() as u64 > 1024 * 1024) {
+        match fs::remove_file(&previous) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
+        }
+        fs::rename(&path, previous)?;
+    }
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?
+        .write_all(&bytes)
 }
 
 fn preserve_previous_remote(remote_path: &Path) -> Result<(), String> {
@@ -1014,6 +1270,339 @@ mod tests {
             volume,
             ..StoredPlaybackState::default()
         }
+    }
+
+    fn interrupt_after_remote_install(store: &StateStore, remote: &Path) -> PendingPublication {
+        let parent = read_required_metadata(store.path()).unwrap();
+        let remote_id = read_required_metadata(remote).unwrap().snapshot_id;
+        let result = publish_snapshot_with_acknowledgement(
+            store,
+            remote,
+            &parent,
+            Some(&remote_id),
+            |_, _| Err("simulated interruption after remote installation".to_owned()),
+        );
+        assert!(result.is_err());
+        let receipt = read_publication_receipt(store.path()).unwrap().unwrap();
+        assert_eq!(read_required_metadata(store.path()).unwrap(), parent);
+        assert_eq!(read_required_metadata(remote).unwrap(), receipt.snapshot);
+        receipt
+    }
+
+    #[test]
+    fn first_publication_interruption_recovers_without_prior_remote_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let parent = read_required_metadata(store.path()).unwrap();
+        assert!(
+            publish_snapshot_with_acknowledgement(&store, &remote, &parent, None, |_, _| Err(
+                "simulated first-publication interruption".into()
+            ),)
+            .is_err()
+        );
+        store.save(&playback(0.82)).unwrap();
+        assert_eq!(
+            prepare_state_before_open(store.path(), &remote),
+            StartupSyncOutcome::None
+        );
+        assert_eq!(store.load().unwrap().volume, 0.82);
+        let recovered = read_required_metadata(store.path()).unwrap();
+        assert_eq!(recovered.generation, parent.generation + 1);
+        assert!(recovered.content_revision > recovered.mirrored_revision);
+    }
+
+    #[test]
+    fn writes_after_snapshot_capture_remain_dirty_when_acknowledgement_succeeds() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let parent = read_required_metadata(store.path()).unwrap();
+        let snapshot = publish_snapshot_with_acknowledgement(
+            &store,
+            &remote,
+            &parent,
+            None,
+            |path, receipt| {
+                store.save(&playback(0.82))?;
+                acknowledge_publication(path, receipt)
+            },
+        )
+        .unwrap();
+        let local = read_required_metadata(store.path()).unwrap();
+        assert_eq!(local.mirrored_revision, snapshot.content_revision);
+        assert!(local.content_revision > local.mirrored_revision);
+        assert_eq!(store.load().unwrap().volume, 0.82);
+        assert!(!publication_receipt_path(store.path()).exists());
+    }
+
+    #[test]
+    fn inability_to_store_a_receipt_never_installs_the_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        fs::create_dir(publication_receipt_path(store.path())).unwrap();
+        store.save(&playback(0.82)).unwrap();
+        let before = read_required_metadata(store.path()).unwrap();
+        let remote_before = snapshot_sha256(&remote).unwrap();
+        assert!(publish_snapshot(&store, &remote, &before, Some(&before.snapshot_id)).is_err());
+        assert_eq!(read_required_metadata(store.path()).unwrap(), before);
+        assert_eq!(snapshot_sha256(&remote).unwrap(), remote_before);
+    }
+
+    #[test]
+    fn restart_recovers_an_interrupted_publication_without_replacing_later_local_edits() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        let receipt = interrupt_after_remote_install(&store, &remote);
+        store.save(&playback(0.77)).unwrap();
+        store
+            .upsert_overlay(
+                "track-key",
+                r"D:\MUSIC",
+                "Track.mp3",
+                &TagValues {
+                    rating: None,
+                    love_state: LoveState::Neutral,
+                    release_year: None,
+                },
+                &TagValues {
+                    rating: Some(5.0),
+                    love_state: LoveState::Loved,
+                    release_year: None,
+                },
+                1,
+                None,
+            )
+            .unwrap();
+        let later = read_required_metadata(store.path()).unwrap();
+        assert_eq!(
+            prepare_state_before_open(store.path(), &remote),
+            StartupSyncOutcome::None
+        );
+        let recovered = read_required_metadata(store.path()).unwrap();
+        assert_eq!(recovered.snapshot_id, receipt.snapshot.snapshot_id);
+        assert_eq!(recovered.content_revision, later.content_revision);
+        assert_eq!(
+            recovered.mirrored_revision,
+            receipt.snapshot.content_revision
+        );
+        assert!(recovered.content_revision > recovered.mirrored_revision);
+        assert_eq!(store.load().unwrap().volume, 0.77);
+        assert!(!publication_receipt_path(store.path()).exists());
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        let snapshot =
+            Connection::open_with_flags(&remote, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        assert_eq!(
+            snapshot
+                .query_row(
+                    "SELECT rating FROM tag_overlays WHERE track_key='track-key'",
+                    [],
+                    |row| row.get::<_, f64>(0)
+                )
+                .unwrap(),
+            5.0
+        );
+        assert_eq!(
+            snapshot
+                .query_row("SELECT volume FROM playback_state", [], |row| row
+                    .get::<_, f32>(0))
+                .unwrap(),
+            0.77
+        );
+        assert_eq!(
+            read_required_metadata(&remote).unwrap().generation,
+            receipt.snapshot.generation + 1
+        );
+    }
+
+    #[test]
+    fn running_retry_recovers_the_receipt_and_publishes_newer_local_content() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        let receipt = interrupt_after_remote_install(&store, &remote);
+        store.save(&playback(0.81)).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        let recovered = read_required_metadata(store.path()).unwrap();
+        assert_eq!(recovered.generation, receipt.snapshot.generation + 1);
+        assert_eq!(recovered.content_revision, recovered.mirrored_revision);
+        assert_eq!(store.load().unwrap().volume, 0.81);
+        assert!(!publication_receipt_path(store.path()).exists());
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        assert_eq!(read_required_metadata(store.path()).unwrap(), recovered);
+    }
+
+    #[test]
+    fn receipt_does_not_acknowledge_an_independently_advanced_peer() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        let receipt = interrupt_after_remote_install(&store, &remote);
+        let peer_path = root.path().join("peer.sqlite3");
+        consistent_copy(&remote, &peer_path).unwrap();
+        let peer = StateStore::new(peer_path).unwrap();
+        peer.save(&playback(0.25)).unwrap();
+        let mut peer_sync =
+            StateSyncService::new(peer, remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(peer_sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.81)).unwrap();
+        let local_before = read_required_metadata(store.path()).unwrap();
+        let remote_before = snapshot_sha256(&remote).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "conflict");
+        assert_eq!(read_required_metadata(store.path()).unwrap(), local_before);
+        assert_eq!(snapshot_sha256(&remote).unwrap(), remote_before);
+        assert_eq!(
+            read_publication_receipt(store.path())
+                .unwrap()
+                .unwrap()
+                .snapshot,
+            receipt.snapshot
+        );
+    }
+
+    #[test]
+    fn receipt_rejects_changed_snapshot_bytes_even_when_identity_matches() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        let receipt = interrupt_after_remote_install(&store, &remote);
+        let snapshot = Connection::open(&remote).unwrap();
+        snapshot
+            .execute("UPDATE playback_state SET volume=0.1", [])
+            .unwrap();
+        snapshot
+            .execute(
+                "UPDATE state_sync_meta SET content_revision=?1",
+                [receipt.snapshot.content_revision],
+            )
+            .unwrap();
+        drop(snapshot);
+        assert_eq!(read_required_metadata(&remote).unwrap(), receipt.snapshot);
+        let before = read_required_metadata(store.path()).unwrap();
+        let status = sync.sync_now(true);
+        assert_eq!(status.sync_state, "unavailable");
+        assert!(status.message.contains("changed after publication"));
+        assert_eq!(read_required_metadata(store.path()).unwrap(), before);
+        assert!(publication_receipt_path(store.path()).exists());
+    }
+
+    #[test]
+    fn receipt_before_remote_install_is_discarded_and_retried_from_current_content() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        interrupt_after_remote_install(&store, &remote);
+        fs::copy(root.path().join("aurora-state.previous.sqlite3"), &remote).unwrap();
+        store.save(&playback(0.81)).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        assert_eq!(
+            read_required_metadata(store.path()).unwrap().snapshot_id,
+            read_required_metadata(&remote).unwrap().snapshot_id
+        );
+        assert!(!publication_receipt_path(store.path()).exists());
+        assert_eq!(store.load().unwrap().volume, 0.81);
+    }
+
+    #[test]
+    fn completed_acknowledgement_with_leftover_receipt_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        let receipt = interrupt_after_remote_install(&store, &remote);
+        acknowledge_publication(store.path(), &receipt).unwrap();
+        let before = read_required_metadata(store.path()).unwrap();
+        recover_pending_publication(store.path(), &remote).unwrap();
+        recover_pending_publication(store.path(), &remote).unwrap();
+        assert_eq!(read_required_metadata(store.path()).unwrap(), before);
+        assert!(!publication_receipt_path(store.path()).exists());
+    }
+
+    #[test]
+    fn receipt_cannot_acknowledge_an_identical_snapshot_at_a_different_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        store.save(&playback(0.42)).unwrap();
+        interrupt_after_remote_install(&store, &remote);
+        let other_destination = root.path().join("another-sync.sqlite3");
+        fs::copy(&remote, &other_destination).unwrap();
+        let before = read_required_metadata(store.path()).unwrap();
+        let remote_before = snapshot_sha256(&other_destination).unwrap();
+        recover_pending_publication(store.path(), &other_destination).unwrap();
+        assert_eq!(read_required_metadata(store.path()).unwrap(), before);
+        assert_eq!(snapshot_sha256(&other_destination).unwrap(), remote_before);
+        assert!(publication_receipt_path(store.path()).exists());
+    }
+
+    #[test]
+    fn corrupt_receipt_preserves_both_databases_and_logs_a_bounded_diagnostic() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("local.sqlite3")).unwrap();
+        let remote = root.path().join("aurora-state.sqlite3");
+        let mut sync =
+            StateSyncService::new(store.clone(), remote.clone(), StartupSyncOutcome::None).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        assert_eq!(sync.sync_now(true).sync_state, "synced");
+        let log = store.path().with_extension("sync.jsonl");
+        assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
+        fs::write(&log, vec![b'x'; 1024 * 1024]).unwrap();
+        fs::write(publication_receipt_path(store.path()), b"{broken").unwrap();
+        let before = read_required_metadata(store.path()).unwrap();
+        let remote_before = snapshot_sha256(&remote).unwrap();
+        assert_eq!(sync.sync_now(true).sync_state, "unavailable");
+        assert_eq!(read_required_metadata(store.path()).unwrap(), before);
+        assert_eq!(snapshot_sha256(&remote).unwrap(), remote_before);
+        assert_eq!(
+            fs::read(publication_receipt_path(store.path())).unwrap(),
+            b"{broken"
+        );
+        let diagnostic: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&log).unwrap().trim()).unwrap();
+        assert!(
+            diagnostic["status"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("unreadable")
+        );
+        assert_eq!(
+            fs::metadata(store.path().with_extension("sync.previous.jsonl"))
+                .unwrap()
+                .len(),
+            1024 * 1024
+        );
     }
 
     #[test]
