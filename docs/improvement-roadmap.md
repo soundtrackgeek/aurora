@@ -66,7 +66,7 @@ Every online integration proposed below follows the pattern already used for Las
 | 19 | Engineering | Make tests deterministic and match CI to release platforms | M | Med–High |
 | 20 | Documentation | Restructure the README and app brief | S–M | Medium |
 
-### 1. Split `App.tsx` into domain modules
+### 1. Split `App.tsx` into domain modules - DONE
 
 **Implemented in 0.28.18.** Explorer/workspace, inspector/artist, catalog sync, tag mutations, settings, and destination data now live in typed domain hooks under `src/app/`. An app-scoped `useSyncExternalStore` store shares navigation, track selection, and catalog invalidation; lazy route containers retain the existing `RememberedPage` boundaries. Scroll restoration also waits for lazy route content. See [Frontend domain architecture](frontend-domains.md) for module ownership and regression contracts. The assessment below records the original baseline.
 
@@ -81,7 +81,7 @@ Every online integration proposed below follows the pattern already used for Las
 - Give each destination its own route container (`<LibraryRoute>`, `<ChartsRoute>`, and so on). `RememberedPage` already provides the mount and retention boundary. Lazy-load these containers (Charts, Ratings, Genres, Years, Publishers, Observatory, Playlists) to shrink the entry chunk.
 - Migrate one hook per change, using the existing App tests as the regression net.
 
-### 2. Push native events instead of polling; schedule sync in Rust
+### 2. Push native events instead of polling; schedule sync in Rust - DONE
 
 **Implemented in 0.28.20.** Rust owns independent schedules for state publication, catalog detection, library retries, pending-tag reconciliation, playback advancement, and history revisions. React listens for changes, with an initial read and a 15-second playback recovery heartbeat. Automatic updates use startup, hourly focus eligibility, six-hour checks, and bounded exponential backoff. See [Native background events](native-events.md). Inbox filesystem watching remains improvement 17. The assessment below records the original baseline.
 
