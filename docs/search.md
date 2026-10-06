@@ -2,6 +2,22 @@
 
 Aurora has one persistent search box at the top of the window, but the search behavior follows the destination you are viewing. Songs, Albums, and Artists use Aurora's full catalog query language. Genres, Publishers, History, and Observatory use focused text search for that destination.
 
+## Deep Catalog performance
+
+Deep Catalog reads the local catalog plus saved Aurora corrections before checking pending music files in the background. The rating and genre projections use the small set of changed albums/tracks to drive indexed lookups. This is especially important for temporary correction tables without catalog statistics; an unrestricted join could otherwise scan every track even for an empty correction set. SQLite documents this control of join order in its [query optimizer overview](https://www.sqlite.org/optoverview.html#manual_control_of_query_plans_using_cross_join).
+
+Album searches build one temporary matching-ID set for the count and result page. Display metadata joins and keyset sorting then read that set, and `scores` checks use the candidate album's tracks. Restoring a saved list still loads its complete pagination and keeps its selection and scroll position.
+
+The opt-in native benchmark uses the catalog read-only and consistent disposable copies of Aurora state, observations, and popularity cache:
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml benchmark_deep_catalog_startup -- --ignored --nocapture --test-threads=1
+```
+
+It measures library initialization, correction preparation, the first page for `year:1980..1989 AND CR:1..99 NOT genre:soundtrack OR scores`, complete result restoration, and local album detail including cached popularity. It compares all matching IDs and their order with the previous score predicate. Timings depend on catalog size, disk cache, and other activity; these are native data-path measurements, not installed-app startup or WebView rendering measurements. Run `cargo clean` from `src-tauri` afterward.
+
+On the local 1.1-million-track / 72,600-album catalog, the October 6 benchmark found the same 534 matches in the same order. Warm first-page preparation and retrieval fell from roughly 3.4–4.1 seconds to 0.28–0.29 seconds. Sampled local album details fell from 0.47–0.62 seconds to 0.011–0.022 seconds, including cached popularity in the final run. Restoring every matching album across 11 pages took 3.4–3.6 seconds. The first search after compilation still took about 8 seconds, and library initialization took 2.7 seconds; warm measurements do not imply immediate results after uncached disk reads.
+
 ## Quick start
 
 - Press `Ctrl+K` to focus the top search box.

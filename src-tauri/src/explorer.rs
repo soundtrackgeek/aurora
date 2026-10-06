@@ -866,11 +866,11 @@ fn album_page_from_connection(
     let live_genre = crate::live_genres::album_sql("a");
     let live_total_tracks = live_album_total_tracks_sql("a");
     let live_rated_tracks = live_album_rated_tracks_sql("a");
-    let mut sql = format!(
+    let display_sql = format!(
         "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
-    sql.push_str(" WHERE 1 = 1");
+    let mut sql = String::from(" WHERE 1 = 1");
     if let Some(match_query) = plain_match_query {
         sql.push_str(" AND a.id IN (SELECT album_id FROM album_search_fts WHERE album_search_fts MATCH ? AND album_id NOT IN (SELECT album_id FROM temp.aurora_live_album_genres) UNION ALL SELECT album_id FROM temp.aurora_live_album_genre_fts WHERE aurora_live_album_genre_fts MATCH ?)");
         params.push(Value::Text(match_query.clone()));
@@ -902,7 +902,13 @@ fn album_page_from_connection(
     if let Some(artist) = artist {
         push_exact_filter(&mut sql, &mut params, "a.album_artist_display", artist);
     }
-    let total_count = filtered_row_count(connection, &sql, &params, "album")?;
+    // Count and page share one connection-local matching set. Display joins and
+    // sorting must not repeat a potentially expensive full-text search.
+    let filtered_sql = format!("SELECT a.id FROM albums AS a{sql}");
+    let total_count = prepare_album_page_matches(connection, &filtered_sql, &params)?;
+    params.clear();
+    sql = display_sql;
+    sql.push_str(" WHERE a.id IN (SELECT album_id FROM temp.aurora_album_page_matches)");
     push_keyset(
         &mut sql,
         &mut params,
@@ -947,6 +953,35 @@ fn album_page_from_connection(
         next_cursor,
         total_count,
     })
+}
+
+fn prepare_album_page_matches(
+    connection: &Connection,
+    filtered_sql: &str,
+    params: &[Value],
+) -> Result<u64, String> {
+    let query_only: bool = connection
+        .pragma_query_value(None, "query_only", |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    connection
+        .pragma_update(None, "query_only", false)
+        .map_err(|error| error.to_string())?;
+    let result = (|| -> rusqlite::Result<usize> {
+        connection.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS aurora_album_page_matches (album_id TEXT PRIMARY KEY) WITHOUT ROWID;
+             DELETE FROM temp.aurora_album_page_matches;",
+        )?;
+        connection.execute(
+            &format!("INSERT INTO temp.aurora_album_page_matches {filtered_sql}"),
+            params_from_iter(params.iter()),
+        )
+    })();
+    connection
+        .pragma_update(None, "query_only", query_only)
+        .map_err(|error| error.to_string())?;
+    result
+        .map(|count| count as u64)
+        .map_err(|error| format!("Could not find matching albums: {error}"))
 }
 
 fn artist_page_from_connection(
@@ -1640,6 +1675,200 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(&before).unwrap(),
                 serde_json::to_value(&after).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn album_matching_set_is_evaluated_once_and_restores_read_only_guard() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let connection = fixture();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&probes);
+        connection
+            .create_scalar_function(
+                "matches_album",
+                1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                move |_| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    Ok(true)
+                },
+            )
+            .unwrap();
+        connection.pragma_update(None, "query_only", true).unwrap();
+        let count = prepare_album_page_matches(
+            &connection,
+            "SELECT a.id FROM albums a WHERE matches_album(a.id)",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(count, 3);
+        let page_count: i64 = connection.query_row("SELECT COUNT(*) FROM albums WHERE id IN (SELECT album_id FROM temp.aurora_album_page_matches)", [], |row| row.get(0)).unwrap();
+        assert_eq!(page_count, 3);
+        assert_eq!(probes.load(Ordering::Relaxed), 3);
+        assert_eq!(
+            prepare_album_page_matches(&connection, "SELECT id FROM albums WHERE 0", &[]).unwrap(),
+            0
+        );
+        assert!(
+            prepare_album_page_matches(&connection, "SELECT missing_column FROM albums", &[])
+                .is_err()
+        );
+        assert!(
+            connection
+                .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(
+            connection
+                .execute("UPDATE albums SET album='write'", [])
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in read-only timing of the installed local catalog and saved corrections"]
+    fn benchmark_deep_catalog_startup() {
+        let directory = std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("com.soundtrackgeek.aurora");
+        let temporary = tempfile::tempdir().unwrap();
+        for file in [
+            "aurora-state.sqlite3",
+            "aurora-file-observations.sqlite3",
+            "aurora-lastfm-cache.sqlite3",
+        ] {
+            let source = Connection::open_with_flags(
+                directory.join(file),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            source
+                .execute(
+                    "VACUUM INTO ?1",
+                    [temporary.path().join(file).to_string_lossy().as_ref()],
+                )
+                .unwrap();
+        }
+        let store = StateStore::new(temporary.path().join("aurora-state.sqlite3")).unwrap();
+        let search = "year:1980..1989 AND CR:1..99 NOT genre:soundtrack OR scores";
+        let started = std::time::Instant::now();
+        let snapshot_connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+        let snapshot = crate::catalog::query_snapshot(
+            &snapshot_connection,
+            "read-only benchmark".into(),
+            Some(&store),
+        )
+        .unwrap();
+        eprintln!(
+            "Library snapshot: {:?}; tracks={}; albums={}",
+            started.elapsed(),
+            snapshot.summary.songs,
+            snapshot.summary.albums
+        );
+        for _ in 0..3 {
+            let started = std::time::Instant::now();
+            let connection = open_catalog(&default_catalog_path().unwrap()).unwrap();
+            connection
+                .execute(
+                    "ATTACH DATABASE ?1 AS aurora_state",
+                    [store.path().to_string_lossy().as_ref()],
+                )
+                .unwrap();
+            crate::file_observations::load(&connection, &store).unwrap();
+            eprintln!("Saved corrections: {:?}", started.elapsed());
+            let started = std::time::Instant::now();
+            crate::catalog::project_live_album_ratings(&connection, false).unwrap();
+            eprintln!("Live ratings: {:?}", started.elapsed());
+            let started = std::time::Instant::now();
+            crate::live_genres::prepare_cached(&connection).unwrap();
+            eprintln!("Live genres: {:?}", started.elapsed());
+            let started = std::time::Instant::now();
+            let page = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(search.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            eprintln!(
+                "Saved startup count + page: {:?}; total={}; page={}",
+                started.elapsed(),
+                page.total_count,
+                page.items.len()
+            );
+            // Compare every matching ID and its order to the previous set-based
+            // score predicate, including negation and the saved corrections.
+            let mut reference_sql = "SELECT a.id FROM albums a WHERE 1=1".to_owned();
+            let mut reference_params = Vec::new();
+            push_album_search_predicates(
+                &mut reference_sql,
+                &mut reference_params,
+                &parse_catalog_search(search).unwrap(),
+            );
+            reference_sql = reference_sql.replace(
+                "EXISTS (SELECT 1 FROM tracks AS score_track WHERE score_track.album_id = a.id AND ",
+                "a.id IN (SELECT score_track.album_id FROM tracks AS score_track WHERE score_track.album_id IS NOT NULL AND ",
+            );
+            push_order_by(&mut reference_sql, album_sort(AlbumSort::YearDesc), "a.id");
+            let expected = connection
+                .prepare(&reference_sql)
+                .unwrap()
+                .query_map(params_from_iter(reference_params), |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(page.total_count, expected.len() as u64);
+            assert_eq!(
+                page.items.iter().map(|album| &album.id).collect::<Vec<_>>(),
+                expected.iter().take(page.items.len()).collect::<Vec<_>>()
+            );
+            for album in page.items.iter().take(3) {
+                let started = std::time::Instant::now();
+                let mut detail = load_local_album_detail(album.id.clone(), &store).unwrap();
+                detail.popularity = crate::lastfm::cached_album_popularity(
+                    &detail.album.artist,
+                    &detail.tracks,
+                    &store,
+                );
+                eprintln!(
+                    "Local detail {}: {:?}; tracks={}",
+                    album.id,
+                    started.elapsed(),
+                    detail.tracks.len()
+                );
+            }
+            let started = std::time::Instant::now();
+            let mut restored_ids = Vec::new();
+            let mut cursor = None;
+            loop {
+                let restored_page = load_album_page(
+                    AlbumPageRequest {
+                        search: Some(search.into()),
+                        cursor,
+                        ..Default::default()
+                    },
+                    &store,
+                    true,
+                )
+                .unwrap();
+                restored_ids.extend(restored_page.items.into_iter().map(|album| album.id));
+                cursor = restored_page.next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+            assert_eq!(restored_ids, expected);
+            eprintln!(
+                "Restore all {} matching albums: {:?}",
+                restored_ids.len(),
+                started.elapsed()
             );
         }
     }

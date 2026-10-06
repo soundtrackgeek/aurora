@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.29] - 2026-10-06
+
+### Fixed
+- Start live rating and verified-genre projections from the small set of corrected albums/tracks, avoiding repeated scans of the complete catalog during searches and local album opening.
+- Reuse one connection-local matching-album set for the result count and page; keep display joins and keyset sorting separate from search evaluation.
+- Check `scores` against candidate albums' indexed tracks while retaining year-range matching, negation, mixed genres, and saved file corrections.
+- Add deterministic SQLite work limits, read-only guard checks, and an opt-in native benchmark for the reported saved search, complete result ordering, pagination restoration, and album details using disposable state snapshots.
+
 ## [0.28.28] - 2026-10-06
 
 ### Fixed

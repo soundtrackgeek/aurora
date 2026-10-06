@@ -185,23 +185,31 @@ fn prepare_scope(connection: &Connection, album_id: Option<&str>) -> Result<(), 
     result.map_err(|e| format!("Could not project pending file genres: {e}"))
 }
 
-fn build_search_projection(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(r#"
+const SEARCH_PROJECTION_SQL: &str = r#"
           INSERT INTO temp.aurora_live_genre_fts
           SELECT t.id, t.album_id, t.title, t.display_artist, t.album, t.album_artist_display,
                  live.genre, t.publisher, t.file_path, t.filename
-          FROM temp.aurora_live_track_genres live JOIN tracks t ON t.id = live.track_id;
+          FROM temp.aurora_live_track_genres live CROSS JOIN tracks t ON t.id = live.track_id;
           INSERT INTO temp.aurora_live_album_genres
           SELECT t.album_id, MIN(CASE WHEN live.track_id IS NOT NULL THEN live.genre ELSE t.canonical_genre END)
-          FROM tracks t LEFT JOIN temp.aurora_live_track_genres live ON live.track_id = t.id
-          WHERE t.album_id IN (SELECT album_id FROM temp.aurora_live_track_genres)
-            AND t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)
+          FROM (SELECT DISTINCT album_id FROM temp.aurora_live_track_genres WHERE album_id IS NOT NULL) affected
+          CROSS JOIN tracks t ON t.album_id = affected.album_id
+          LEFT JOIN temp.aurora_live_track_genres live ON live.track_id = t.id
+          WHERE t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)
           GROUP BY t.album_id
           HAVING COUNT(DISTINCT COALESCE(CASE WHEN live.track_id IS NOT NULL THEN live.genre ELSE t.canonical_genre END, '')) = 1;
           INSERT INTO temp.aurora_live_album_genre_fts
           SELECT a.id, a.album, a.album_artist_display, live.genre, a.publisher
-          FROM temp.aurora_live_album_genres live JOIN albums a ON a.id = live.album_id;
-        "#)
+          FROM temp.aurora_live_album_genres live CROSS JOIN albums a ON a.id = live.album_id;
+        "#;
+
+const CACHED_TRACK_GENRES_SQL: &str =
+    "INSERT INTO temp.aurora_live_track_genres SELECT t.id, t.album_id, o.genre
+          FROM temp.aurora_verified_files o CROSS JOIN tracks t ON t.id=o.track_id
+          WHERE o.missing=0 AND o.genre_known=1 AND o.genre IS NOT t.canonical_genre;";
+
+fn build_search_projection(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(SEARCH_PROJECTION_SQL)
 }
 
 pub(crate) fn prepare_cached(connection: &Connection) -> Result<(), String> {
@@ -213,10 +221,8 @@ pub(crate) fn prepare_cached(connection: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let result = (|| -> rusqlite::Result<()> {
         connection.execute_batch(SCHEMA)?;
-        connection.execute_batch("DELETE FROM temp.aurora_live_track_genres; DELETE FROM temp.aurora_live_album_genres; DELETE FROM temp.aurora_live_genre_fts; DELETE FROM temp.aurora_live_album_genre_fts;
-          INSERT INTO temp.aurora_live_track_genres SELECT t.id, t.album_id, o.genre
-          FROM temp.aurora_verified_files o JOIN tracks t ON t.id=o.track_id
-          WHERE o.missing=0 AND o.genre_known=1 AND o.genre IS NOT t.canonical_genre;")?;
+        connection.execute_batch("DELETE FROM temp.aurora_live_track_genres; DELETE FROM temp.aurora_live_album_genres; DELETE FROM temp.aurora_live_genre_fts; DELETE FROM temp.aurora_live_album_genre_fts;")?;
+        connection.execute_batch(CACHED_TRACK_GENRES_SQL)?;
         build_search_projection(connection)
     })();
     connection
@@ -274,6 +280,69 @@ pub(crate) fn fts_matches(column: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_genre_projections_are_bounded_and_preserve_mixed_albums() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id TEXT, canonical_genre TEXT, title TEXT,
+               display_artist TEXT, album TEXT, album_artist_display TEXT, publisher TEXT, file_path TEXT, filename TEXT);
+             CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+             CREATE TABLE albums (id TEXT PRIMARY KEY, album TEXT, album_artist_display TEXT, publisher TEXT);
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
+             INSERT INTO albums SELECT CAST(x AS TEXT), 'Album', 'Artist', NULL FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
+             INSERT INTO tracks SELECT x, CAST((x-1)/10+1 AS TEXT), 'House', 'Song', 'Artist', 'Album', 'Artist', NULL, 'Music', CAST(x AS TEXT) FROM n;
+             ANALYZE;",
+        ).unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        for corrected in [0, 1, 10] {
+            db.execute_batch(
+                "DELETE FROM temp.aurora_verified_files; DELETE FROM temp.aurora_live_track_genres;
+                DELETE FROM temp.aurora_live_album_genres; DELETE FROM temp.aurora_live_genre_fts;
+                DELETE FROM temp.aurora_live_album_genre_fts;",
+            )
+            .unwrap();
+            db.execute("INSERT INTO temp.aurora_verified_files SELECT id, 0, 1, 'Classical' FROM tracks WHERE id<=?", [corrected]).unwrap();
+            let mut steps = 0;
+            for sql in [CACHED_TRACK_GENRES_SQL, SEARCH_PROJECTION_SQL]
+                .into_iter()
+                .flat_map(|sql| sql.split(';'))
+                .filter(|sql| !sql.trim().is_empty())
+            {
+                let mut statement = db.prepare(sql).unwrap();
+                statement.execute([]).unwrap();
+                steps += statement.get_status(rusqlite::StatementStatus::VmStep);
+            }
+            assert!(
+                steps < 20_000,
+                "{corrected} corrected tracks used {steps} steps across unrelated albums"
+            );
+            let track_count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM temp.aurora_live_track_genres",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let album_count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM temp.aurora_live_album_genres",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(track_count, corrected);
+            assert_eq!(album_count, i64::from(corrected == 10));
+            db.pragma_update(None, "query_only", true).unwrap();
+            prepare_cached(&db).unwrap();
+            assert!(
+                db.pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+                    .unwrap()
+            );
+            db.pragma_update(None, "query_only", false).unwrap();
+        }
+    }
 
     #[test]
     fn genre_reader_matches_id3_with_large_artwork_and_empty_genres() {

@@ -239,10 +239,7 @@ pub(crate) fn refresh_live_album_rating_projection(connection: &Connection) -> R
     project_live_album_ratings(connection, true)
 }
 
-pub(crate) fn project_live_album_ratings(
-    connection: &Connection,
-    refresh_files: bool,
-) -> Result<(), String> {
+fn live_album_rating_projection_sql(refresh_files: bool) -> String {
     let missing_file = if refresh_files {
         "aurora_file_missing(track.file_path, track.filename) = 1"
     } else {
@@ -253,21 +250,8 @@ pub(crate) fn project_live_album_ratings(
     } else {
         ""
     };
-    let query_only = connection
-        .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
-        .map_err(|error| format!("Could not inspect the catalog read-only guard: {error}"))?;
-    if query_only {
-        connection
-            .pragma_update(None, "query_only", false)
-            .map_err(|error| {
-                format!("Could not prepare Aurora's temporary album projection: {error}")
-            })?;
-    }
-    let projection = connection
-        .execute_batch(crate::live_genres::SCHEMA)
-        .and_then(|()| {
-            connection.execute_batch(&format!(
-                r#"
+    format!(
+        r#"
             DROP TABLE IF EXISTS temp.aurora_live_album_rating_state;
             CREATE TEMP TABLE aurora_live_album_rating_state (
               album_id TEXT PRIMARY KEY,
@@ -320,8 +304,9 @@ pub(crate) fn project_live_album_ratings(
                    MAX(0, album.rated_tracks
                      + COALESCE(overlay_delta.rated_delta, 0)
                      - COALESCE(deleted.rated_deleted, 0))
-            FROM albums AS album
-            JOIN affected ON affected.album_id = album.id
+            -- The small changed-album set must drive indexed catalog lookups.
+            FROM affected
+            CROSS JOIN albums AS album ON affected.album_id = album.id
             LEFT JOIN overlay_delta ON overlay_delta.album_id = album.id
             LEFT JOIN deleted ON deleted.album_id = album.id;
 
@@ -334,8 +319,9 @@ pub(crate) fn project_live_album_ratings(
                      CASE WHEN overlay.track_key IS NOT NULL THEN overlay.love_state = 'loved'
                           ELSE COALESCE(track.love = 'L', 0) END AS loved,
                      MAX(0, COALESCE(track.time_seconds, 0)) AS seconds
+              -- Unanalyzed temporary tables otherwise encourage a full track scan.
               FROM temp.aurora_live_album_rating_state affected
-              JOIN tracks track ON track.album_id = affected.album_id
+              CROSS JOIN tracks track ON track.album_id = affected.album_id
               LEFT JOIN aurora_state.tag_overlays overlay
                 ON track.file_path = overlay.directory AND track.filename = overlay.filename
               WHERE NOT ({missing_file})
@@ -355,9 +341,27 @@ pub(crate) fn project_live_album_ratings(
             FROM metrics;
             CREATE UNIQUE INDEX temp.aurora_live_album_metrics_id ON aurora_live_album_metrics(album_id);
             "#,
-                track_rating = crate::ratings::TRACK_RATING_SQL,
-            ))
-        });
+        track_rating = crate::ratings::TRACK_RATING_SQL,
+    )
+}
+
+pub(crate) fn project_live_album_ratings(
+    connection: &Connection,
+    refresh_files: bool,
+) -> Result<(), String> {
+    let query_only = connection
+        .pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+        .map_err(|error| format!("Could not inspect the catalog read-only guard: {error}"))?;
+    if query_only {
+        connection
+            .pragma_update(None, "query_only", false)
+            .map_err(|error| {
+                format!("Could not prepare Aurora's temporary album projection: {error}")
+            })?;
+    }
+    let projection = connection
+        .execute_batch(crate::live_genres::SCHEMA)
+        .and_then(|()| connection.execute_batch(&live_album_rating_projection_sql(refresh_files)));
     let restore = query_only.then(|| connection.pragma_update(None, "query_only", true));
     if let Some(Err(error)) = restore {
         return Err(format!(
@@ -1873,6 +1877,9 @@ pub(crate) fn push_album_search_predicates(
         let track_predicates = group
             .alternatives
             .iter()
+            .filter(|alternative| {
+                !matches!(alternative.matcher, CatalogSearchMatch::ScoreGenreGroup)
+            })
             .filter_map(|alternative| non_prefix_predicate("search_track", alternative, params))
             .collect::<Vec<_>>();
         if !track_predicates.is_empty() {
@@ -1883,6 +1890,17 @@ pub(crate) fn push_album_search_predicates(
                 "a.id IN (SELECT search_track.album_id FROM tracks AS search_track WHERE search_track.album_id IS NOT NULL AND ({}))",
                 track_predicates.join(" OR ")
             ));
+        }
+        // Scores have no selective catalog genre index. Probe the candidate
+        // album's tracks instead of reading every track for this exclusion.
+        for alternative in &group.alternatives {
+            if matches!(alternative.matcher, CatalogSearchMatch::ScoreGenreGroup)
+                && let Some(predicate) = non_prefix_predicate("score_track", alternative, params)
+            {
+                alternatives.push(format!(
+                    "EXISTS (SELECT 1 FROM tracks AS score_track WHERE score_track.album_id = a.id AND {predicate})"
+                ));
+            }
         }
         alternatives.extend(
             group
@@ -3144,6 +3162,112 @@ mod tests {
             lookup_track_by_stable_key(&connection, r"h:\music\artist\track.mp3"),
             Err(StableTrackLookupError::Failure(_))
         ));
+    }
+
+    #[test]
+    fn cached_album_metrics_only_scan_changed_albums() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE albums (id TEXT PRIMARY KEY, total_tracks INTEGER, rated_tracks INTEGER);
+             CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id TEXT, file_path TEXT, filename TEXT,
+               normalized_rating INTEGER, rating_raw TEXT, love TEXT, time_seconds INTEGER);
+             CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+             CREATE INDEX idx_tracks_file ON tracks(file_path, filename);
+             ATTACH DATABASE ':memory:' AS aurora_state;
+             CREATE TABLE aurora_state.tag_overlays (track_key TEXT PRIMARY KEY, directory TEXT,
+               filename TEXT, rating REAL, catalog_rating REAL, love_state TEXT);
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
+             INSERT INTO albums SELECT CAST(x AS TEXT), 10, 0 FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
+             INSERT INTO tracks SELECT x, CAST((x-1)/10+1 AS TEXT), 'Music', CAST(x AS TEXT), NULL, '', NULL, 180 FROM n;
+             ANALYZE;",
+        ).unwrap();
+        db.execute_batch(crate::live_genres::SCHEMA).unwrap();
+        for edited in [false, true] {
+            if edited {
+                db.execute_batch("INSERT INTO aurora_state.tag_overlays VALUES ('one', 'Music', '1', 5, NULL, 'loved');").unwrap();
+            }
+            let mut steps = 0;
+            for sql in live_album_rating_projection_sql(false)
+                .split(';')
+                .filter(|sql| !sql.trim().is_empty())
+            {
+                let mut statement = db.prepare(sql).unwrap();
+                statement.execute([]).unwrap();
+                steps += statement.get_status(rusqlite::StatementStatus::VmStep);
+            }
+            assert!(
+                steps < 20_000,
+                "edited={edited}: {steps} steps scanned unrelated catalog rows"
+            );
+            let count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM temp.aurora_live_album_metrics",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, i64::from(edited));
+            if edited {
+                let metrics: (i64, i64, f64) = db.query_row(
+                    "SELECT state.total_tracks, state.rated_tracks, metrics.rating FROM temp.aurora_live_album_rating_state state JOIN temp.aurora_live_album_metrics metrics USING(album_id)",
+                    [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                ).unwrap();
+                assert_eq!(metrics, (10, 1, 100.0));
+            }
+            db.pragma_update(None, "query_only", true).unwrap();
+            project_live_album_ratings(&db, false).unwrap();
+            assert!(
+                db.pragma_query_value(None, "query_only", |row| row.get::<_, bool>(0))
+                    .unwrap()
+            );
+            db.pragma_update(None, "query_only", false).unwrap();
+        }
+    }
+
+    #[test]
+    fn score_genre_search_probes_only_candidate_album_tracks() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE albums (id TEXT PRIMARY KEY);
+             CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id TEXT, canonical_genre TEXT);
+             CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+             INSERT INTO tracks SELECT x, 'other', 'Drama' FROM n;
+             INSERT INTO albums VALUES ('selected'), ('empty');
+             INSERT INTO tracks VALUES (10001, 'selected', 'House'), (10002, NULL, 'Action');
+             ANALYZE;",
+        )
+        .unwrap();
+        db.execute_batch(crate::live_genres::SCHEMA).unwrap();
+        for genre in ["House", "  dRaMa  "] {
+            db.execute(
+                "UPDATE tracks SET canonical_genre=? WHERE id=10001",
+                [genre],
+            )
+            .unwrap();
+            for query in ["genre:scores", "NOT genre:scores"] {
+                let mut sql = "SELECT COUNT(*) FROM albums a WHERE a.id='selected'".to_owned();
+                let mut params = Vec::new();
+                push_album_search_predicates(
+                    &mut sql,
+                    &mut params,
+                    &parse_catalog_search(query).unwrap(),
+                );
+                let mut statement = db.prepare(&sql).unwrap();
+                let count: i64 = statement
+                    .query_row(params_from_iter(params), |row| row.get(0))
+                    .unwrap();
+                assert_eq!(
+                    count,
+                    i64::from(
+                        (genre.trim().eq_ignore_ascii_case("drama")) != query.starts_with("NOT")
+                    )
+                );
+                let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+                assert!(steps < 1000, "{query}: {steps} steps scanned other albums");
+            }
+        }
     }
 
     #[test]
