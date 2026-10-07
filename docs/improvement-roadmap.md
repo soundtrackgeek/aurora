@@ -371,6 +371,13 @@ macOS Network Mode, by contrast, already has a settings-backed connections model
 
 ### 6. "More like this" sonic radio
 
+**First slice shipped in 0.29.0 with Music Library 0.178.0:** shared local MP3
+analysis, Windows idle/time-window scheduling, resumable per-track checkpoints,
+partial coverage searches (`sonic:yes/no`), nearest tracks, saved companion
+playlists, and bounded persistent sonic radio. See
+[sonic analysis and radio](sonic-analysis.md). Album similarity, sonic paths,
+indexed retrieval and cross-PC analysis snapshots remain later stages.
+
 **What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 
 **How it fits.** [`bliss-audio`](https://github.com/Polochon-street/bliss-rs), using its Symphonia decoder so no FFmpeg is needed, computes a short feature vector per track (tempo, timbre, loudness, chroma). Store the vectors in a device-local analysis database, with [`sqlite-vec`](https://alexgarcia.xyz/sqlite-vec/rust.html) for nearest-neighbor search if needed. Analyzing 1.1M tracks takes days of CPU time, so do it incrementally: played, loved, and 5★ tracks first, then an idle background worker with a CPU cap. This complements Genre Radio, which is based on metadata, with continuity based on sound.

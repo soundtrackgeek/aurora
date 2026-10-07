@@ -38,6 +38,7 @@ mod replay_gain;
 mod shortcuts;
 mod single_instance;
 mod snapshot_io;
+mod sonic;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -805,6 +806,29 @@ async fn genre_queue_tracks(
     })
     .await
     .map_err(|error| format!("The genre-queue worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn sonic_matches(
+    app: AppHandle,
+    request: sonic::SonicRequest,
+) -> Result<sonic::SonicResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || sonic::query(request, &app.state::<StateStore>()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sonic_analyze_seed(
+    app: AppHandle,
+    track_key: String,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        coordinator.serialize_bridge_work(|| library_bridge::analyze_sonic_seed(&app, &track_key))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1889,6 +1913,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            sonic_matches,
+            sonic_analyze_seed,
             tonehavn_status,
             tonehavn_login,
             tonehavn_logout,

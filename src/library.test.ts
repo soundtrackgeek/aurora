@@ -23,6 +23,14 @@ const tracks: Track[] = [
   { id: "2", trackKey: "c:/music/m83/hurry up/midnight city.mp3", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 243, genre: "Electronic", playCount: 42 },
 ];
 
+it("filters partial sonic coverage with boolean search syntax", () => {
+  const partial = [{ ...tracks[0], sonicAnalyzed: true }, { ...tracks[1], sonicAnalyzed: false }];
+  expect(filterTracks(partial, "sonic:yes", null)).toEqual([partial[0]]);
+  expect(filterTracks(partial, "sonic=no", null)).toEqual([partial[1]]);
+  expect(filterTracks(partial, "NOT sonic:yes", null)).toEqual([partial[1]]);
+  expect(() => filterTracks(partial, "sonic:maybe", null)).toThrow(/sonic:yes/);
+});
+
 const similarlyNamedArtists: Track[] = [
   { ...tracks[0], id: "3", trackKey: "c:/music/kiss/strutter.mp3", albumId: "album-3", title: "Strutter", artist: "Kiss", displayArtist: "Kiss", album: "Kiss", originalYear: 1974, releaseYear: 1974, genre: "Rock" },
   { ...tracks[1], id: "4", trackKey: "c:/music/kissing-the-pink/certain-things.mp3", albumId: "album-4", title: "Certain Things Are Likely", artist: "Kissing the Pink", album: "Certain Things Are Likely", releaseYear: 1986, genre: "Synth-pop" },

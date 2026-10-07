@@ -422,6 +422,18 @@ pub async fn library_bridge_capabilities(
     .map_err(|error| format!("The Music Library bridge worker stopped unexpectedly: {error}"))?
 }
 
+pub(crate) fn analyze_sonic_seed(
+    app: &AppHandle,
+    track_key: &str,
+) -> Result<serde_json::Value, String> {
+    invoke_bridge(
+        app,
+        "sonicAnalyze",
+        serde_json::json!({"trackKey":track_key}),
+        Duration::from_secs(210),
+    )
+}
+
 #[tauri::command]
 pub async fn preview_library_intake_batch(
     app: AppHandle,
@@ -1169,7 +1181,7 @@ where
     TRequest: Serialize,
     TResponse: DeserializeOwned,
 {
-    if !matches!(operation, "capabilities") {
+    if !matches!(operation, "capabilities" | "sonicAnalyze") {
         crate::connections::require_music_writes()?;
     }
     let plan_id = serde_json::to_value(&payload)

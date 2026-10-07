@@ -1,0 +1,33 @@
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { sonicMatches } from "../../sonic";
+import { browserPreview } from "../../library";
+import { useSonicRadio } from "./useSonicRadio";
+vi.mock("../../sonic", () => ({ sonicMatches: vi.fn() }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); localStorage.clear(); });
+it("ignores a stopped station's late response", async () => {
+  let resolve!: (result: Awaited<ReturnType<typeof sonicMatches>>) => void;
+  vi.mocked(sonicMatches).mockReturnValue(new Promise(r => { resolve = r; }));
+  const play = vi.fn().mockResolvedValue({});
+  const { result } = renderHook(() => useSonicRadio({ play, append: vi.fn(), state: { queue: [], currentIndex: null } }));
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.start(browserPreview.tracks[0], 4, true); });
+  act(() => result.current.stop());
+  await act(async () => { resolve({ analyzed: 10, total: 100, seedReady: true, tracks: [browserPreview.tracks[1]] }); await pending; });
+  expect(play).not.toHaveBeenCalled(); expect(result.current.session).toBeNull();
+  expect(localStorage.getItem("aurora:sonic-radio:v1")).toBeNull();
+});
+it("persists queued identities and restores them for refill exclusion", async () => {
+  const seed = browserPreview.tracks[0], next = browserPreview.tracks[1];
+  vi.mocked(sonicMatches).mockResolvedValue({ analyzed: 10, total: 100, seedReady: true, tracks: [next] });
+  const playback = { play: vi.fn().mockResolvedValue({}), append: vi.fn().mockResolvedValue({}), state: { queue: [], currentIndex: null } };
+  const first = renderHook(() => useSonicRadio(playback));
+  await act(() => first.result.current.start(seed, null, false));
+  expect(first.result.current.session?.played).toEqual([seed.trackKey, next.trackKey]);
+  first.unmount();
+  vi.mocked(sonicMatches).mockResolvedValue({ analyzed: 10, total: 100, seedReady: true, tracks: [] });
+  const restored = renderHook(() => useSonicRadio({ ...playback, state: { queue: [next], currentIndex: 0 } }));
+  await waitFor(() => expect(sonicMatches).toHaveBeenLastCalledWith(expect.objectContaining({ seedKey: seed.trackKey, excludeKeys: [seed.trackKey, next.trackKey] })));
+  await waitFor(() => expect(restored.result.current.message).toMatch(/end of the eligible/));
+  expect(playback.append).not.toHaveBeenCalled();
+});

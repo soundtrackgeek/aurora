@@ -61,6 +61,8 @@ jobs:
           key: ${{ matrix.platform }}-release
       - run: npm ci
       - run: npm run check:version
+      - name: Verify shared sonic contract
+        run: npm run check:sonic
       - name: Verify updater signing configuration
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

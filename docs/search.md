@@ -60,6 +60,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `title:` | Track title | `title:"Running Up That Hill"` |
 | `cr:` | Album rating-completeness percentage or range | `cr:50..80` |
 | `love:` | Loved-track count or range for the album | `love:1..3` |
+| `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
 
@@ -72,6 +73,13 @@ Artist links open a fresh Albums search such as `aartist:"Bunny X"`, replacing t
 `love:1` includes an album when at least one of its tracks is marked Love, preserving the original shorthand. `love:0` includes albums with no loved tracks. Use a range to filter the album's loved-track count: `love:1..3` means one through three loved tracks, inclusive. These are album-wide filters even though they use the same conventional separator as text fields.
 
 There are no `rating:` or `unrated:` search fields. Those remain Aurora collection filters and handoffs rather than query-language keywords.
+
+`sonic:yes` selects current catalog paths with saved compatible audio analysis;
+`sonic:no` selects paths without it. These work during a partial Music Library
+analysis and combine with other fields/boolean operators. Albums and Artists
+qualify through matching tracks, so partly analyzed albums can match either
+value. `sonic=` is accepted too. Searches report saved coverage; similarity
+validates shortlisted files before using them. See [sonic analysis](sonic-analysis.md).
 
 ### Artist lifespans
 

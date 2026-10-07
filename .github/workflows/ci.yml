@@ -35,6 +35,8 @@ jobs:
         run: npm ci
       - name: Verify aligned versions
         run: npm run check:version
+      - name: Verify shared sonic contract
+        run: npm run check:sonic
       - name: Lint frontend
         run: npm run lint
       - name: Test frontend

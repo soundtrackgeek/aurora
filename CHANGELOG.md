@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.29.0] - 2026-10-07
+
+### Added
+- More like this track similarity and resumable sonic radio using Music Library’s partial local audio analysis. Includes rating/genre filters and `sonic:yes` / `sonic:no` searches.
+
+
 ## [0.28.32] - 2026-10-07
 
 ### Changed

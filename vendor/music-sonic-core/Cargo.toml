@@ -1,0 +1,9 @@
+[package]
+name = "music-sonic-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Versioned sonic result contract and generic weighted distance math"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

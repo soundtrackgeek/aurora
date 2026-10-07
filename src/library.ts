@@ -23,6 +23,8 @@ export interface Artist {
 }
 
 export interface Track {
+  /** Browser demonstration coverage; native searches evaluate the saved store. */
+  sonicAnalyzed?: boolean;
   id: string;
   trackKey: string;
   albumId: string | null;
@@ -382,10 +384,10 @@ export const browserPreview: LibrarySnapshot = {
     { id: "preview-the-xx", name: "The xx", trackCount: 53, albumCount: 4, playCount: 1_755, lastPlayedAtMs: Date.now() - 120 * 24 * 60 * 60_000 },
   ],
   tracks: [
-    previewTrack({ id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", originCountryCode: "FR", originCountryName: "France", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186, trackNumber: 2, trackTotal: 11, discNumber: 1, discTotal: 2 }),
-    previewTrack({ id: "preview-8", albumId: "preview-hurry-up", title: "Wait", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: false, durationSeconds: 343, genre: "Electronic", playCount: 174, trackNumber: 5, trackTotal: 11, discNumber: 1, discTotal: 2 }),
-    previewTrack({ id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", displayArtist: "College; Electric Youth", album: "Drive", originalYear: 2011, releaseYear: 2011, publisher: "Lakeshore Records", originCountryCode: "FR", originCountryName: "France", rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
-    previewTrack({ id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, publisher: "Record Makers", originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
+    previewTrack({ sonicAnalyzed: true, id: "preview-1", albumId: "preview-hurry-up", title: "Midnight City", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", originCountryCode: "FR", originCountryName: "France", rating: 5, loved: true, durationSeconds: 243, genre: "Electronic", playCount: 186, trackNumber: 2, trackTotal: 11, discNumber: 1, discTotal: 2 }),
+    previewTrack({ sonicAnalyzed: true, id: "preview-8", albumId: "preview-hurry-up", title: "Wait", artist: "M83", displayArtist: "M83", album: "Hurry Up, We're Dreaming", originalYear: 2011, releaseYear: null, publisher: "Mute Records", originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: false, durationSeconds: 343, genre: "Electronic", playCount: 174, trackNumber: 5, trackTotal: 11, discNumber: 1, discTotal: 2 }),
+    previewTrack({ sonicAnalyzed: true, id: "preview-2", albumId: "preview-drive", title: "A Real Hero", artist: "College", displayArtist: "College; Electric Youth", album: "Drive", originalYear: 2011, releaseYear: 2011, publisher: "Lakeshore Records", originCountryCode: "FR", originCountryName: "France", rating: 4, loved: false, durationSeconds: 267, genre: "Soundtrack", playCount: 141 }),
+    previewTrack({ sonicAnalyzed: true, id: "preview-3", albumId: "preview-outrun", title: "Nightcall", artist: "Kavinsky", album: "OutRun", originalYear: 2013, releaseYear: 2013, publisher: "Record Makers", originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: true, durationSeconds: 258, genre: "Synthwave", playCount: 137 }),
     previewTrack({ id: "preview-4", albumId: "preview-xx", title: "Intro", artist: "The xx", album: "xx", originalYear: 2009, releaseYear: 2009, publisher: "Young", originCountryCode: "GB", originCountryName: "United Kingdom", rating: 4, loved: false, durationSeconds: 127, genre: "Indie Rock", playCount: 129 }),
     previewTrack({ id: "preview-5", albumId: "preview-discovery", title: "Digital Love", artist: "Daft Punk", album: "Discovery", originalYear: 2001, releaseYear: 2001, publisher: "Virgin Records", originCountryCode: "FR", originCountryName: "France", rating: 5, loved: true, durationSeconds: 301, genre: "House", playCount: 122 }),
     previewTrack({ id: "preview-6", albumId: "preview-plastic-beach", title: "On Melancholy Hill", artist: "Gorillaz", album: "Plastic Beach", originalYear: 2010, releaseYear: 2010, publisher: "Parlophone", originCountryCode: "GB", originCountryName: "United Kingdom", rating: 4.5, loved: true, durationSeconds: 233, genre: "Alternative", playCount: 116 }),
@@ -506,7 +508,7 @@ function matchesArtistName(name: string, artist: string): boolean {
 }
 
 function usesAdvancedLibrarySearch(search?: string): boolean {
-  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
+  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love|sonic)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
 function compareText(left: string, right: string, descending = false): number {
@@ -702,7 +704,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "sonic";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -722,7 +724,7 @@ interface LibrarySearchGroup {
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
 const librarySearchFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love",
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "sonic",
 ]);
 
 const scoreGenreGroup = new Set([
@@ -913,6 +915,8 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
       } else if (field === "cr" || field === "love") {
         ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
+      } else if (field === "sonic") {
+        if (!["yes", "no"].includes((exact ?? value).toLowerCase())) throw new Error("Use sonic:yes or sonic:no to filter audio analysis coverage.");
       } else if (exact === null) {
         termCount += searchTerms(value).length;
         if (termCount > 32) throw new Error("Search can contain at most 32 words.");
@@ -966,6 +970,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "country": return [track.originCountryName ?? "", track.originCountryCode ?? ""];
     case "title": return [track.title];
     case "cr":
+    case "sonic":
     case "love": return [];
     case "year":
     case "ryear": return [];
@@ -1004,6 +1009,7 @@ function matchesLibrarySearchAlternative(
   alternative: LibrarySearchAlternative,
   albumStats: ReadonlyMap<string, AlbumSearchStats>,
 ): boolean {
+  if (alternative.field === "sonic") return Boolean(track.sonicAnalyzed) === (alternative.value.toLowerCase() === "yes");
   if (alternative.field === "year" || alternative.field === "ryear") {
     const year = alternative.field === "year" ? track.originalYear : track.releaseYear;
     if (year === null || year === undefined) return false;

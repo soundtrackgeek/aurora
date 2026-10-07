@@ -1,3 +1,5 @@
+import { SonicPanel } from "./components/SonicPanel";
+import { useSonicRadio } from "./app/domains/useSonicRadio";
 import {
   Activity,
   Album,
@@ -180,7 +182,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   History: "history",
 };
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), and love (album loved-track count). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, and love:1..3; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 (one or more), and love:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), love (album loved-track count), and sonic (saved audio analysis: yes/no). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, and love:1..3; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 (one or more), and love:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 function historyDateLabel(timestamp: number | null): string {
   if (timestamp === null) return "Never";
   return new Intl.DateTimeFormat(undefined, {
@@ -333,8 +335,8 @@ function App() {
     genreQueueBusy,
     genreQueueMessage,
     genreRadioSession,
-    endGenreQueue,
-    startGenreQueue,
+    endGenreQueue: endGenreOnly,
+    startGenreQueue: startGenreOnly,
   } = useGenresDomain({
     activeNav,
     loadedPageRequestsRef,
@@ -342,6 +344,9 @@ function App() {
     appendPlayback,
     libraryReady: snapshot !== null,
   });
+  const sonicRadio = useSonicRadio(playback);
+  function endGenreQueue() { endGenreOnly(); sonicRadio.stop(); }
+  function startGenreQueue(...args: Parameters<typeof startGenreOnly>) { sonicRadio.stop(); return startGenreOnly(...args); }
 
   const {
     savedPlaylists,
@@ -1295,7 +1300,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.28.32</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.29.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1815,6 +1820,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
+            <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
             <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit your library selection without leaving Aurora.</span></div>
           </div>

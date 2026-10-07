@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora 0.29.0 adds **More like this** and sonic radio in the Track sidebar,
+using Music Library 0.178.0's saved local MP3 analysis. You can use partial
+results immediately; analyze albums/favorites and set idle or overnight hours
+in Music Library. Search `sonic:yes` for analyzed tracks or `sonic:no` for
+unanalyzed tracks. See [sonic analysis and radio](docs/sonic-analysis.md).
+
 Aurora 0.28.32 shows both **Last.fm listeners** (distinct people) and **Last.fm plays** (total scrobbles) in the Track sidebar. Album 🔥 badges rank tracks by listeners, with plays as a tiebreaker, so a track with fewer plays but more listeners can carry the flame while another shows a higher play count.
 
 Aurora 0.28.31 fixes Chart info in the track inspector for collaborations that charts print differently from the library credit (for example `Andy Gibb with Olivia Newton-John` against `Andy Gibb & Olivia Newton-John`): peak lookups now fall back to the chart's lead performer, exactly like the tracklist badges.

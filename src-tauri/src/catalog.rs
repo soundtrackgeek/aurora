@@ -160,6 +160,7 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open_with_flags(path, flags)
         .map_err(|error| format!("Could not open the music catalog read-only: {error}"))?;
     register_catalog_functions(&connection)?;
+    crate::sonic::prepare_search(&connection, path)?;
     connection
         .busy_timeout(Duration::from_secs(2))
         .map_err(|error| format!("Could not configure the read-only catalog: {error}"))?;
@@ -819,6 +820,7 @@ enum CatalogSearchField {
     Title,
     Completeness,
     Love,
+    Sonic,
     Extended(ExtendedSearchField),
 }
 
@@ -831,6 +833,7 @@ impl CatalogSearchField {
             | Self::Country
             | Self::Completeness
             | Self::Love
+            | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -849,6 +852,7 @@ impl CatalogSearchField {
             | Self::Country
             | Self::Completeness
             | Self::Love
+            | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -862,6 +866,7 @@ impl CatalogSearchField {
 
 #[derive(Clone, Debug, PartialEq)]
 enum CatalogSearchMatch {
+    Analyzed(bool),
     Extended {
         field: ExtendedSearchField,
         from: Option<f64>,
@@ -929,6 +934,7 @@ impl CatalogSearch {
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
+            CatalogSearchMatch::Analyzed(_) => None,
         }
     }
 
@@ -1052,6 +1058,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "country" => Some(CatalogSearchField::Country),
         "title" => Some(CatalogSearchField::Title),
         "cr" => Some(CatalogSearchField::Completeness),
+        "sonic" => Some(CatalogSearchField::Sonic),
         "love" => Some(CatalogSearchField::Love),
         _ => None,
     }
@@ -1499,6 +1506,23 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                             parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
                         CatalogSearchMatch::LovedTracksRange { from, to }
                     }
+                    CatalogSearchField::Sonic => {
+                        match exact
+                            .as_deref()
+                            .unwrap_or(value)
+                            .to_ascii_lowercase()
+                            .as_str()
+                        {
+                            "yes" => CatalogSearchMatch::Analyzed(true),
+                            "no" => CatalogSearchMatch::Analyzed(false),
+                            _ => {
+                                return Err(
+                                    "Use sonic:yes or sonic:no to filter audio analysis coverage."
+                                        .into(),
+                                );
+                            }
+                        }
+                    }
                     _ => match exact {
                         Some(value) => CatalogSearchMatch::Exact(value),
                         None => CatalogSearchMatch::Prefix(build_fts_prefix_query(
@@ -1635,6 +1659,10 @@ fn non_prefix_predicate(
     params: &mut Vec<Value>,
 ) -> Option<String> {
     match &alternative.matcher {
+        CatalogSearchMatch::Analyzed(yes) => Some(format!(
+            "({alias}.file_path,{alias}.filename) {}IN (SELECT file_path,filename FROM temp.aurora_sonic_paths)",
+            if *yes { "" } else { "NOT " }
+        )),
         CatalogSearchMatch::Prefix(_) => None,
         CatalogSearchMatch::Exact(value) => Some(exact_text_predicate(
             alias,
@@ -1801,6 +1829,7 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
+            CatalogSearchMatch::Analyzed(_) => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
