@@ -34,6 +34,98 @@ fn published_identity_keys(connection: &Connection) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Keys that start with "<performer> ": a range seek, since "!" follows " ".
+fn credit_prefix(performer: &str) -> (String, String) {
+    (format!("{performer} "), format!("{performer}!"))
+}
+
+/// Last resort for differently printed collaborations, like the track badges:
+/// the chart's lead is a main performer of the library credit ("Andy Gibb with
+/// Olivia Newton-John" vs a chart printing "Andy Gibb & Olivia Newton-John").
+fn lead_credit_peak(
+    connection: &Connection,
+    table: &str,
+    performers: &[String],
+    titles: &[String],
+) -> Result<Option<i64>, String> {
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT artist_key, MIN(rank) FROM {table}
+             WHERE artist_key >= ?1 AND artist_key < ?2 AND title_key = ?3 AND rank > 0
+             GROUP BY artist_key"
+        ))
+        .map_err(|e| format!("Could not read track chart peaks: {e}"))?;
+    for performer in performers {
+        let (from, to) = credit_prefix(performer);
+        for title in titles {
+            let rows = statement
+                .query_map([&from, &to, title], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            let peak = rows
+                .into_iter()
+                .filter(|(key, _)| main_performers(key).first() == Some(performer))
+                .map(|(_, peak)| peak)
+                .min();
+            if peak.is_some() {
+                return Ok(peak);
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Published-book counterpart of `lead_credit_peak`, one peak per chart.
+fn lead_credit_book_peaks(
+    connection: &Connection,
+    performers: &[String],
+    titles: &[String],
+) -> Result<Vec<TrackChartPeak>, String> {
+    let mut statement = connection.prepare(
+        "SELECT b.chart, e.artist, MIN(CASE WHEN CAST(e.peak_position AS INTEGER) > 0 THEN MIN(e.position, CAST(e.peak_position AS INTEGER)) ELSE e.position END)
+         FROM published_chart_entries e JOIN published_chart_books b ON b.id = e.book_id
+         WHERE e.artist_group_key >= ?1 AND e.artist_group_key < ?2 AND e.title_key = ?3 AND e.position > 0
+         GROUP BY b.chart, e.artist",
+    ).map_err(|e| e.to_string())?;
+    for performer in performers {
+        let (from, to) = credit_prefix(performer);
+        for title in titles {
+            let mut charts = std::collections::BTreeMap::<String, i64>::new();
+            let rows = statement
+                .query_map([&from, &to, title], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for (chart, printed, peak) in rows {
+                if main_performers(&printed).first() == Some(performer) {
+                    let best = charts.entry(chart).or_insert(peak);
+                    *best = (*best).min(peak);
+                }
+            }
+            if !charts.is_empty() {
+                return Ok(charts
+                    .into_iter()
+                    .map(|(label, peak)| TrackChartPeak {
+                        label,
+                        peak,
+                        country: "US",
+                    })
+                    .collect());
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
 fn query(
     connection: &Connection,
     artist: &str,
@@ -62,6 +154,7 @@ fn query(
                 .filter(|performer| *performer != artist_key),
         )
         .collect::<Vec<_>>();
+    let performers = main_performers(artist);
     let mut peaks = Vec::new();
     for source in detail_sources(ChartKind::Singles) {
         let table = table_for(ChartKind::Singles, *source)?;
@@ -79,6 +172,9 @@ fn query(
                     break 'lookup;
                 }
             }
+        }
+        if peak.is_none() {
+            peak = lead_credit_peak(connection, table, &performers, &titles)?;
         }
         if let Some(peak) = peak {
             peaks.push(TrackChartPeak {
@@ -128,6 +224,7 @@ fn query(
              WHERE {identity} AND e.position > 0
              GROUP BY b.chart ORDER BY b.chart COLLATE NOCASE"
         )).map_err(|e| e.to_string())?;
+        let mut found = false;
         for (artist, title) in attempts {
             let rows = statement
                 .query_map([artist, title], |r| {
@@ -142,8 +239,12 @@ fn query(
                 .map_err(|e| e.to_string())?;
             if !rows.is_empty() {
                 peaks.extend(rows);
+                found = true;
                 break;
             }
+        }
+        if keyed && !found {
+            peaks.extend(lead_credit_book_peaks(connection, &performers, &titles)?);
         }
     }
     Ok(peaks)
@@ -297,6 +398,41 @@ mod tests {
         assert_eq!(peaks[0].peak, 54);
         let peaks = query(&connection, "John Lennon & Yoko Ono", "Imagine").unwrap();
         assert_eq!(peaks[0].peak, 1);
+    }
+
+    #[test]
+    fn guest_credits_match_charts_printing_the_guest_as_a_co_lead() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE billboard_single_chart_entries (artist_key TEXT, title_key TEXT, rank INTEGER);
+            INSERT INTO billboard_single_chart_entries VALUES ('andy gibb and olivia newton john','i can t help it',143),('andy gibbons','i can t help it',1),('olivia newton john and andy gibb','i can t help it',2);
+            CREATE TABLE published_chart_books (id INTEGER, chart TEXT);
+            INSERT INTO published_chart_books VALUES (1,'Adult Contemporary');
+            CREATE TABLE published_chart_identity (id INTEGER PRIMARY KEY, key_version INTEGER);
+            INSERT INTO published_chart_identity VALUES (1, 1);
+            CREATE TABLE published_chart_entries (book_id INTEGER, artist TEXT, title TEXT, position INTEGER, peak_position TEXT, artist_group_key TEXT, title_key TEXT);
+            INSERT INTO published_chart_entries VALUES (1,'Andy Gibb & Olivia Newton-John','I Can''t Help It',30,'',  'andy gibb olivia newton john','i can t help it'),(1,'Andy Gibbons','I Can''t Help It',1,'','andy gibbons','i can t help it');").unwrap();
+        let peaks = query(
+            &connection,
+            "Andy Gibb with Olivia Newton\u{2010}John",
+            "I Can't Help It",
+        )
+        .unwrap();
+        assert_eq!(
+            peaks
+                .iter()
+                .map(|p| (p.label.as_str(), p.peak, p.country))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Billboard annual", 143, "US"),
+                ("Adult Contemporary", 30, "US")
+            ]
+        );
+        // A different artist who merely shares a name prefix never matches.
+        assert!(
+            query(&connection, "Andy Gib", "I Can't Help It")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

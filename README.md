@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.31 fixes Chart info in the track inspector for collaborations that charts print differently from the library credit (for example `Andy Gibb with Olivia Newton-John` against `Andy Gibb & Olivia Newton-John`): peak lookups now fall back to the chart's lead performer, exactly like the tracklist badges.
+
 Aurora 0.28.30 keeps the current album, track, and closed details in place when a pending genre save or Music Library import finishes. Background catalog refreshes use the current selection and no longer cancel an album click while its local details are loading. Explicit album navigation from other pages still opens the requested album.
 
 Aurora 0.28.29 speeds up Deep Catalog startup searches and album details. Verified rating and genre projections start from changed albums and tracks, avoiding full-catalog scans for a small correction set. Album searches evaluate their matching IDs once for the count and page, and `scores` exclusions inspect candidate albums. The saved search, result ordering, counts, pagination, and file-correction behavior are preserved. See [Deep Catalog performance](docs/search.md#deep-catalog-performance) for the native benchmark and verification limits.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.31] - 2026-10-07
+
+### Fixed
+- Chart info in the track inspector no longer says "No chart appearances found" for tracks whose chart badge comes from a collaboration printed differently by the chart. A library credit such as `Andy Gibb with Olivia Newton-John` now finds chart rows printed `Andy Gibb & Olivia Newton-John`, because the chart's lead performer is compared with the credit's main performers as a last resort, like the tracklist badges. This applies to the annual and weekly singles charts and to keyed published chart books.
+- Add a regression test covering the guest-versus-co-lead credit and a look-alike artist sharing a name prefix.
+
 ## [0.28.30] - 2026-10-06
 
 ### Fixed
