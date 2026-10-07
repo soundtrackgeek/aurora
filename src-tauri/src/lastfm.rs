@@ -52,6 +52,7 @@ pub(crate) struct AlbumPopularTrack {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TrackPopularity {
+    pub(crate) listeners: Option<i64>,
     pub(crate) play_count: Option<i64>,
 }
 
@@ -348,6 +349,7 @@ fn lookup_track_popularity(
             .ok_or(error)?,
     };
     Ok(TrackPopularity {
+        listeners: record.available.then_some(record.listeners).flatten(),
         play_count: record.available.then_some(record.play_count).flatten(),
     })
 }
@@ -885,13 +887,14 @@ mod tests {
                     record = parse_popularity(
                         title,
                         reqwest::StatusCode::OK,
-                        &serde_json::json!({"track": {"playcount": count.to_string()}}),
+                        &serde_json::json!({"track": {"listeners": "7", "playcount": count.to_string()}}),
                     )
                     .unwrap();
                     Ok(record.clone())
                 })
                 .unwrap();
             assert_eq!(result.play_count, Some(count));
+            assert_eq!(result.listeners, Some(7));
             assert_eq!(
                 matching_record(&local_records("10cc", &store), title)
                     .unwrap()
@@ -911,6 +914,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(missing.play_count, None);
+        assert_eq!(missing.listeners, None);
     }
 
     #[test]

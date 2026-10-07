@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.32] - 2026-10-07
+
+### Changed
+- The Track sidebar now shows both **Last.fm listeners** (distinct people) and **Last.fm plays** (total scrobbles) instead of one ambiguous "Last.fm popularity" figure. The album 🔥 badges rank tracks by listeners, so the sidebar now explains why a track with fewer plays can carry the flame.
+- `track_popularity` returns the listener count alongside the play count; both stay unknown when Last.fm has no data for the track.
+
 ## [0.28.31] - 2026-10-07
 
 ### Fixed

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora 0.28.32 shows both **Last.fm listeners** (distinct people) and **Last.fm plays** (total scrobbles) in the Track sidebar. Album 🔥 badges rank tracks by listeners, with plays as a tiebreaker, so a track with fewer plays but more listeners can carry the flame while another shows a higher play count.
+
 Aurora 0.28.31 fixes Chart info in the track inspector for collaborations that charts print differently from the library credit (for example `Andy Gibb with Olivia Newton-John` against `Andy Gibb & Olivia Newton-John`): peak lookups now fall back to the chart's lead performer, exactly like the tracklist badges.
 
 Aurora 0.28.30 keeps the current album, track, and closed details in place when a pending genre save or Music Library import finishes. Background catalog refreshes use the current selection and no longer cancel an album click while its local details are loading. Explicit album navigation from other pages still opens the requested album.

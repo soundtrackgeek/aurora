@@ -335,6 +335,9 @@ export interface AlbumPopularity {
 }
 
 export interface TrackPopularity {
+  /** Distinct Last.fm listeners; ranks the album 🔥 tracks. */
+  listeners?: number | null;
+  /** Total Last.fm scrobbles. */
   playCount: number | null;
 }
 
@@ -649,7 +652,7 @@ export async function loadAlbumPopularity(albumId: string): Promise<AlbumPopular
 export async function loadTrackPopularity(artist: string, title: string): Promise<TrackPopularity> {
   if (!isTauriRuntime()) {
     const track = browserPreview.tracks.find((track) => displayTrackArtist(track) === artist && track.title === title);
-    return { playCount: track?.playCount ?? null };
+    return { listeners: null, playCount: track?.playCount ?? null };
   }
   return invoke<TrackPopularity>("track_popularity", { artist, title });
 }
