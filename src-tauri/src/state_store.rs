@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub(crate) const SCHEMA_VERSION: i64 = 16;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -487,7 +487,9 @@ impl StateStore {
             transaction.execute("UPDATE pending_library_folder_sync SET attempt_count=0, next_attempt_at_ms=0 WHERE last_error LIKE '%exact MP3 identity set%'", [])
                 .map_err(|error| format!("Could not reopen verified deletion sync: {error}"))?;
         }
+        transaction.execute_batch("CREATE TABLE IF NOT EXISTS saved_views(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,view TEXT NOT NULL,filters_json TEXT NOT NULL);").map_err(|e| e.to_string())?;
         let synchronized_tables = [
+            "saved_views",
             "playback_queue",
             "playback_state",
             "tag_overlays",
@@ -533,6 +535,13 @@ impl StateStore {
         transaction
             .execute_batch(
                 r#"
+                CREATE TRIGGER IF NOT EXISTS state_sync_saved_views_update
+                AFTER UPDATE ON saved_views
+                WHEN NOT (OLD.name IS NEW.name AND OLD.view IS NEW.view AND OLD.filters_json IS NEW.filters_json)
+                BEGIN
+                  UPDATE state_sync_meta SET content_revision = content_revision + 1 WHERE singleton = 1;
+                END;
+
                 CREATE TRIGGER IF NOT EXISTS state_sync_playback_queue_update
                 AFTER UPDATE ON playback_queue
                 WHEN NOT (

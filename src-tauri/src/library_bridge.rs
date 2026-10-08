@@ -70,6 +70,8 @@ pub struct LibraryCategoryCapability {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryBridgeSupports {
     #[serde(default)]
+    pub smart_playlist_authoring: bool,
+    #[serde(default)]
     pub selected_album_batch: bool,
     pub single_album: bool,
     pub batch_folders: bool,
@@ -439,6 +441,20 @@ pub(crate) fn save_sonic_journey(
     input: crate::sonic_journey::SaveJourneyRequest,
 ) -> Result<serde_json::Value, String> {
     invoke_bridge(app, "sonicSaveJourney", input, Duration::from_secs(60))
+}
+
+pub(crate) fn playlist_operation(
+    app: &AppHandle,
+    operation: &'static str,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let capabilities: LibraryBridgeCapabilities =
+        invoke_bridge(app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT)?;
+    if !capabilities.supports.smart_playlist_authoring {
+        return Err("Update Music Library to use shared playlist authoring.".into());
+    }
+    app.state::<LibrarySyncCoordinator>()
+        .serialize_bridge_work(|| invoke_bridge(app, operation, input, Duration::from_secs(120)))
 }
 
 #[tauri::command]
@@ -1697,6 +1713,7 @@ mod tests {
             bridge_version: PROTOCOL_VERSION,
             categories: Vec::new(),
             supports: LibraryBridgeSupports {
+                smart_playlist_authoring: false,
                 selected_album_batch: true,
                 single_album: true,
                 batch_folders: true,

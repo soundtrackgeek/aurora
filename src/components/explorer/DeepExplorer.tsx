@@ -142,6 +142,8 @@ export interface DeepExplorerProps {
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
+  onCreatePlaylist?: (selection: ExplorerSelection, smart: boolean) => void;
+  savedViewControl?: ReactNode;
 }
 
 const EMPTY_BUSY_TRACK_KEYS: ReadonlySet<string> = new Set();
@@ -1173,6 +1175,11 @@ export function DeepExplorer(props: DeepExplorerProps) {
       </div>
 
       <div className="deep-explorer-filters" aria-label="Explorer filters">
+        {props.savedViewControl}
+        {props.onCreatePlaylist && view !== "artists" && <>
+          <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: tracks.filter(t => selectedTrackKeys.has(t.trackKey)) } : { kind: "albums", albums: albums.filter(a => selectedAlbumIds.has(a.id)) }, false)} disabled={loadState !== "ready" || (view === "tracks" ? selectedTrackKeys.size === 0 : selectedAlbumIds.size === 0)}>Create playlist</button>
+          <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: [] } : { kind: "albums", albums: [] }, true)}>Create Smart playlist</button>
+        </>}
         <SortControl
           view={view}
           current={filters.sort}

@@ -613,3 +613,21 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .saved-playlists__empty { padding: 16px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); }
 .saved-playlists__more { margin-top: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(128,76,178,.13); color: #eee4f9; cursor: pointer; }
 @media (max-width: 900px) { .saved-playlists__layout { grid-template-columns: 1fr; } .saved-playlists__list { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); } }
+.playlist-composer { width: min(720px, calc(100vw - 40px)); max-height: calc(100vh - 48px); padding: 24px; color: var(--text); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 14px; }
+.playlist-composer::backdrop { background: rgba(0,0,0,.68); }
+.playlist-rule-editor { padding: 18px; margin: 0 0 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); }
+.playlist-rule-editor fieldset { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding: 0; border: 0; }
+.playlist-text-rule { display: grid; gap: 6px; min-width: 0; }
+.playlist-rule-editor label,.save-view-control label { display: grid; gap: 6px; font-size: 13px; }
+.playlist-rule-editor input,.playlist-rule-editor select,.save-view-control input,.save-view-control select { min-width: 0; width: 100%; padding: 8px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.playlist-rule-editor input[type=checkbox] { width: auto; }
+.playlist-rule-editor p { color: var(--muted); }
+.playlist-rule-editor button,.save-view-control button,.saved-playlists__actions button { padding: 8px 12px; background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.saved-playlists__actions { flex-wrap: wrap; }
+.save-view-control { position: relative; }
+.save-view-control form { position: absolute; top: 38px; left: 0; z-index: 12; width: min(330px,calc(100vw - 36px)); padding: 16px; display: grid; gap: 10px; background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+.deep-explorer-filters { flex-wrap: wrap; }
+.curation-message { position: fixed; bottom: 94px; left: 50%; transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 30px); padding: 12px 18px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; }
+.curation-message button { margin-left: 14px; }
+.saved-views-nav { max-height: 25vh; overflow-y: auto; overflow-x: hidden; }
+@media(max-width:600px) { .playlist-rule-editor fieldset { grid-template-columns: minmax(0,1fr); } }

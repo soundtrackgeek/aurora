@@ -1,5 +1,18 @@
 # Aurora
 
+Aurora 0.33.0 adds **shared Smart playlists and saved views**. In Songs or Albums,
+select rows and choose **Create playlist** to save their order in Music Library,
+or choose **Create Smart playlist** to save reusable library rules. Album rules
+include all songs from matching albums, in album and disc/track order. Shared rules
+can also be created and edited in Music Library 0.185.0. Both apps use the same
+saved playlists, filters, sort, song limit, and automatic/manual refresh policy.
+Aurora uses the versioned bridge for writes; Music Library remains the catalog writer.
+
+**Save view** preserves the current explorer query, filters and sort, pins it in
+the sidebar, and stores it in Aurora's synced state database. Saved views can be
+renamed, updated and deleted. See [Shared playlists and saved views](docs/shared-playlists.md)
+for compatibility, paging, and device limits.
+
 The ["More like this" sonic radio roadmap item](docs/improvement-roadmap.md#6-more-like-this-sonic-radio---done)
 is complete through Aurora 0.32.0 and Music Library 0.184.0, including the shared
 index and scale benchmarks. See the [sonic guide](docs/sonic-analysis.md) for use.

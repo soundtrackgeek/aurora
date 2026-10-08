@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.33.0] - 2026-10-08
+
+### Added
+- Shared Smart playlist creation and rule editing through Music Library, with song/album filters, deterministic order, song limits and automatic/manual refresh. Existing Music Library Smart recipes remain readable and editable.
+- Create ordered static playlists from selected Songs or Albums without leaving the current view. Music Library resolves complete albums and validates current song file identities before committing.
+- Saved explorer views pinned in the sidebar, including query, filters and sort, durable state snapshots, rename/update/delete, and guarded navigation.
+
+### Changed
+- Playlist display and playback use 100-song cursor pages with bounded queue refills, full-playlist shuffle, and revision guards against mixing two playlist versions.
+
 ## [0.32.1] - 2026-10-08
 
 ### Changed

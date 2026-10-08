@@ -21,6 +21,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { LeftSidebarMode } from "../../layoutPreferences";
 import type { SavedPlaylistSummary } from "../../playlists";
+import type { SavedView } from "../../savedViews";
 
 export type SidebarDestination =
   | "Universe"
@@ -56,6 +57,8 @@ type SidebarNavigationProps = {
   onPlaylistsExpandedChange: (expanded: boolean) => void;
   onNavigate: (destination: SidebarDestination) => void;
   onSelectPlaylist: (id: number) => void;
+  savedViews?: SavedView[];
+  onSelectSavedView?: (view: SavedView) => void;
 };
 
 const primaryItems: readonly NavigationItem[] = [
@@ -92,6 +95,8 @@ export function SidebarNavigation({
   onPlaylistsExpandedChange,
   onNavigate,
   onSelectPlaylist,
+  savedViews = [],
+  onSelectSavedView,
 }: SidebarNavigationProps) {
   const [openFlyout, setOpenFlyout] = useState<"library" | "playlists" | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
@@ -147,6 +152,9 @@ export function SidebarNavigation({
 
   return (
     <nav ref={navigationRef} className="primary-nav" aria-label="Primary">
+      {savedViews.length > 0 && <div className="nav-group saved-views-nav" aria-label="Saved views">
+        {savedViews.map(view => <button key={view.id} className="nav-group__trigger" type="button" title={`${view.name} · ${view.view === "tracks" ? "Songs" : view.view === "albums" ? "Albums" : "Artists"}`} aria-label={`Open saved view ${view.name}`} onClick={() => { setOpenFlyout(null); onSelectSavedView?.(view); }}><Star aria-hidden="true" /><span>{view.name}</span></button>)}
+      </div>}
       {primaryItems.map(({ label, icon: Icon }) => (
         <button
           type="button"
@@ -235,7 +243,7 @@ export function SidebarNavigation({
             {playlists.map((playlist) => (
               <button type="button" key={playlist.id} title={playlist.name} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} aria-current={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "page" : undefined} onClick={() => selectPlaylist(playlist.id)}>
                 <ListMusic aria-hidden="true" />
-                <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
+                <span><strong>{playlist.name}</strong><small>{playlist.smart ? "Smart · " : ""}{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>
             ))}
             {playlistsLoading && playlists.length === 0 && <small className="nav-flyout__note">Loading playlists…</small>}
@@ -251,7 +259,7 @@ export function SidebarNavigation({
             {playlists.map((playlist) => (
               <button type="button" key={playlist.id} title={playlist.name} className={activeDestination === "Playlists" && selectedPlaylistId === playlist.id ? "is-active" : undefined} onClick={() => selectPlaylist(playlist.id)}>
                 <ListMusic aria-hidden="true" />
-                <span><strong>{playlist.name}</strong><small>{playlist.trackCount.toLocaleString()} songs</small></span>
+                <span><strong>{playlist.name}</strong><small>{playlist.smart ? "Smart · " : ""}{playlist.trackCount.toLocaleString()} songs</small></span>
               </button>
             ))}
             {playlistsLoading && playlists.length === 0 && <small className="nav-flyout__note">Loading playlists…</small>}

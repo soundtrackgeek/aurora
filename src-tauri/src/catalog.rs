@@ -2238,7 +2238,10 @@ fn canonical_catalog_identity(directory: &str, filename: &str) -> Option<(String
     Some((canonical_directory, canonical_filename))
 }
 
-fn load_catalog_track_by_id(track_id: &str, track_key: &str) -> Result<TrackSummary, String> {
+pub(crate) fn load_catalog_track_by_id(
+    track_id: &str,
+    track_key: &str,
+) -> Result<TrackSummary, String> {
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
     let by_id = parse_track_id(track_id)

@@ -486,6 +486,7 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
     }
 
     for (table, columns) in [
+        ("saved_views", "id, name, view, filters_json"),
         ("playback_queue", "position, track_key, directory, filename"),
         (
             "playback_state",
@@ -513,7 +514,7 @@ fn semantic_state_matches(local_path: &Path, remote_path: &Path) -> Result<bool,
             "album_id, destination_path, import_run_id, added_at_ms",
         ),
     ] {
-        if table == "album_additions"
+        if matches!(table, "album_additions" | "saved_views")
             && (table_columns(&connection, "main", table)?.is_empty()
                 || table_columns(&connection, "remote_state", table)?.is_empty())
         {

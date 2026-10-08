@@ -33,6 +33,8 @@ import {
 } from "lucide-react";
 import { lazy, Activity as ReactActivity, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
+import { listSavedViews, type SavedView } from "./savedViews";
+import { PlaylistComposer, SaveViewControl, type PlaylistDraft } from "./components/playlists/ExplorerCuration";
 import { AppStoreProvider } from "./app/AppStoreProvider";
 import { useArtistNavigation } from "./app/artist/useArtistNavigation";
 import { EmptyInspector } from "./app/components/EmptyInspector";
@@ -200,6 +202,11 @@ function historyDateLabel(timestamp: number | null): string {
 }
 
 function App() {
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [playlistDraft, setPlaylistDraft] = useState<PlaylistDraft | null>(null);
+  const [playlistSaveMessage, setPlaylistSaveMessage] = useState<string | null>(null);
+  const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
+  useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
   const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
   const explorerWorkspace = useExplorerWorkspace(initialViewPreferences);
@@ -361,10 +368,12 @@ function App() {
     playlistsError,
     setPlaylistsReloadToken,
     startPlaylistQueue,
+    playlistPlaybackError,
   } = usePlaylistsDomain({
     playback,
     appendPlayback,
     libraryReady: snapshot !== null,
+    catalogRevision: snapshot?.catalogRevision,
     endGenreQueue,
     selectTrack,
   });
@@ -939,7 +948,7 @@ function App() {
     if (view !== "albums") setSelectedAlbumId(null);
   }
 
-  const { rememberCurrentView, goBack, setActiveNav, navigate } = useWorkspaceNavigation({
+  const { rememberCurrentView, goBack, setActiveNav, navigate, openSavedExplorerView } = useWorkspaceNavigation({
     navigation: navigationState, workspace: workspaceRestoration, explorer: explorerWorkspace, activeNav, setActiveNavState,
     setHistoryLoadingMore, setReviewLoadingMore, changeExplorerView, expandLibraryNavigation,
     selection: {
@@ -1297,6 +1306,8 @@ function App() {
       data-text-size={displayPreferences.global.textSize}
       data-cover-size={displayPreferences.global.coverSize}
     >
+      {playlistDraft && <PlaylistComposer draft={playlistDraft} onClose={() => setPlaylistDraft(null)} onSaved={() => { setPlaylistDraft(null); setPlaylistsReloadToken(v=>v+1); setPlaylistSaveMessage("Playlist saved in Music Library and Aurora."); }} />}
+      {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
           <div className="brand__mark"><AudioLines aria-hidden="true" /></div>
@@ -1324,11 +1335,13 @@ function App() {
           }))}
           onNavigate={navigate}
           onSelectPlaylist={(id) => { setSelectedPlaylistId(id); navigate("Playlists"); }}
+          savedViews={savedViews}
+          onSelectSavedView={(view) => openSavedExplorerView(view.view,view.filters)}
         />
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.32.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.33.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1520,6 +1533,7 @@ function App() {
                   onSelect={setSelectedPlaylistId}
                   onRefresh={() => setPlaylistsReloadToken((value) => value + 1)}
                   onPlay={startPlaylistQueue}
+                  playbackError={playlistPlaybackError}
                 />
               </RememberedPage>
               <RememberedPage active={!artistPageName && activeNav === "History"}>
@@ -1693,6 +1707,8 @@ function App() {
                       pageInfo={{ loaded: explorerLoaded, hasMore: explorerCursor !== null, isLoadingMore }}
                       busyTrackKeys={inlineSavingKeys}
                       onViewChange={changeExplorerView}
+                      savedViewControl={<SaveViewControl view={explorerView} filters={explorerFilters} views={savedViews} onChanged={refreshSavedViews} />}
+                      onCreatePlaylist={(selection, smart) => setPlaylistDraft({ kind: smart ? "smart" : "static", selection, view: explorerView, filters: { ...explorerFilters } })}
                       onFiltersChange={(filters) => {
                         setExplorerSelection(null);
                         setExplorerFilters(filters);

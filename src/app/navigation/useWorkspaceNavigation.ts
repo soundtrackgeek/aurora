@@ -290,5 +290,21 @@ export function useWorkspaceNavigation({
     }, "page");
   }
 
-  return { rememberCurrentView, restoreNavigationView, goBack, setActiveNav, navigate };
+  function openSavedExplorerView(view: ExplorerView, filters: ExplorerFilters) {
+    transitionContent(() => {
+      rememberCurrentView(true);
+      const label = view === "tracks" ? "Songs" : view === "albums" ? "Albums" : "Artists";
+      setNavigationRevision(value=>value+1);
+      setArtistPageName(null);
+      setActiveNavState(label);
+      explorer.setExplorerView(view);
+      setExplorerFilters({ ...filters });
+      setSelectedAlbumId(null);
+      setExplorerSelection(null);
+      setExplorerCursor(null);
+      setExplorerLoadState("loading");
+      expandLibraryNavigation();
+    }, "page");
+  }
+  return { rememberCurrentView, restoreNavigationView, goBack, setActiveNav, navigate, openSavedExplorerView };
 }

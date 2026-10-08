@@ -7,6 +7,7 @@ import { useWorkspaceRestoration } from "./useWorkspaceRestoration";
 import { useNavigationState, useWorkspaceNavigation, type NavigationSelectionPort } from "./useWorkspaceNavigation";
 import { defaultViewPreferences } from "../../viewPreferences";
 import type { SidebarDestination } from "../../components/navigation/SidebarNavigation";
+import { defaultExplorerFilters } from "../../viewPreferences";
 
 function selectionPort(): NavigationSelectionPort {
   return {
@@ -33,6 +34,20 @@ function useNavigation(selection: NavigationSelectionPort) {
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+
+it("opens a pinned view without letting retained explorer filters override it",()=>{
+  const selection=selectionPort();
+  const {result}=renderHook(()=>useNavigation(selection));
+  act(()=>result.current.explorer.setExplorerFilters(f=>({...f,query:"old query"})));
+  act(()=>result.current.navigate("Charts"));
+  act(()=>result.current.openSavedExplorerView("albums",{...defaultExplorerFilters,query:"genre:synthwave",sort:"yearDesc"}));
+  expect(result.current.activeNav).toBe("Albums");
+  expect(result.current.explorer.explorerView).toBe("albums");
+  expect(result.current.explorer.explorerFilters.query).toBe("genre:synthwave");
+  expect(result.current.explorer.explorerFilters.sort).toBe("yearDesc");
+  expect(result.current.explorer.explorerCursor).toBeNull();
+  expect(selection.setSelectedAlbumId).toHaveBeenLastCalledWith(null);
+});
 
 it("restores the retained view and requests refresh when its catalog revision changed", () => {
   const selection = selectionPort();

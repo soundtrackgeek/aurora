@@ -35,6 +35,7 @@ mod publishers;
 mod ratings;
 mod remote_affinity;
 mod replay_gain;
+mod saved_views;
 mod shortcuts;
 mod single_instance;
 mod snapshot_io;
@@ -461,10 +462,19 @@ async fn list_music_library_playlists() -> Result<Vec<playlists::SavedPlaylistSu
 async fn music_library_playlist(
     app: AppHandle,
     id: i64,
+    after: Option<i64>,
+    expected_revision: Option<String>,
+    shuffle_seed: Option<i64>,
 ) -> Result<playlists::SavedPlaylistDetail, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        playlists::detail(id, &store)
+        playlists::detail(
+            id,
+            &store,
+            after,
+            expected_revision.as_deref(),
+            shuffle_seed,
+        )
     })
     .await
     .map_err(|error| format!("The playlist worker stopped unexpectedly: {error}"))?
@@ -1984,6 +1994,12 @@ pub fn run() {
             acknowledge_catalog_revision,
             list_music_library_playlists,
             music_library_playlist,
+            saved_views::list_saved_views,
+            saved_views::save_explorer_view,
+            saved_views::delete_saved_view,
+            playlists::save_playlist_selection,
+            playlists::save_smart_playlist,
+            playlists::refresh_smart_playlist,
             artist_tracks,
             search_tracks,
             explore_tracks,

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { type Track } from "../../library";
 import { usePlayback, type PlaybackSnapshot } from "../../playback";
 import { shufflePlaylistTracks } from "../../playlistOrder";
-import { listMusicLibraryPlaylists, loadSelectedPlaylistId, saveSelectedPlaylistId, type SavedPlaylistSummary } from "../../playlists";
+import { listMusicLibraryPlaylists, loadMusicLibraryPlaylist, loadSelectedPlaylistId, saveSelectedPlaylistId, type SavedPlaylistSummary, type PlaylistPageContext } from "../../playlists";
 
 interface PlaylistsDomainOptions {
   playback: Pick<ReturnType<typeof usePlayback>, "play" | "setShuffle"> & { state: Pick<PlaybackSnapshot, "queue" | "currentIndex" | "shuffle">; };
   appendPlayback: ReturnType<typeof usePlayback>["append"];
   libraryReady: boolean;
+  catalogRevision?: string;
   endGenreQueue: () => void;
   selectTrack: (track: Track) => void;
 }
@@ -17,6 +18,7 @@ export function usePlaylistsDomain({
   playback,
   appendPlayback,
   libraryReady,
+  catalogRevision,
   endGenreQueue,
   selectTrack,
 }: PlaylistsDomainOptions) {
@@ -25,7 +27,8 @@ export function usePlaylistsDomain({
   const [playlistsLoading, setPlaylistsLoading] = useState(false);
   const [playlistsError, setPlaylistsError] = useState<string | null>(null);
   const [playlistsReloadToken, setPlaylistsReloadToken] = useState(0);
-  const playlistQueueSessionRef = useRef<{ tracks: Track[]; nextIndex: number; queueKeys: string[]; } | null>(null);
+  const playlistQueueSessionRef = useRef<{ tracks: Track[]; nextIndex: number; queueKeys: string[]; context?: PlaylistPageContext } | null>(null);
+  const [playlistPlaybackError, setPlaylistPlaybackError] = useState<string|null>(null);
   const playlistRefillRunningRef = useRef(false);
   const playlistRefillPromiseRef = useRef<Promise<unknown> | null>(null);
 
@@ -37,18 +40,32 @@ export function usePlaylistsDomain({
       playlistQueueSessionRef.current = null;
       return;
     }
-    if (session.nextIndex >= session.tracks.length) return;
+    if (session.nextIndex >= session.tracks.length && session.context?.cursor == null) return;
     if (playback.state.queue.length - playback.state.currentIndex - 1 >= 20) return;
     const nextTracks = session.tracks.slice(session.nextIndex, session.nextIndex + 100);
     playlistRefillRunningRef.current = true;
-    const refill = appendPlayback(nextTracks);
+    const refill = (async () => {
+      let pageContext = session.context;
+      let batch = nextTracks;
+      if (batch.length === 0 && pageContext?.cursor != null) {
+        const page = await loadMusicLibraryPlaylist(pageContext.id, pageContext.cursor, pageContext.revision, pageContext.shuffleSeed);
+        batch = page.tracks;
+        pageContext = { ...pageContext, cursor: page.nextCursor ?? null };
+      }
+      if (playlistQueueSessionRef.current !== session) return null;
+      const next = await appendPlayback(batch);
+      if (next && playlistQueueSessionRef.current === session) {
+        session.nextIndex += nextTracks.length;
+        session.context = pageContext;
+        session.queueKeys = next.queue.map(track=>track.trackKey);
+      }
+      return next;
+    })();
     playlistRefillPromiseRef.current = refill;
     void refill.then((next) => {
       if (playlistQueueSessionRef.current !== session) return;
       if (!next) { playlistQueueSessionRef.current = null; return; }
-      session.nextIndex += nextTracks.length;
-      session.queueKeys = next.queue.map((track) => track.trackKey);
-    }).finally(() => {
+    }).catch((error:unknown)=>{ if(playlistQueueSessionRef.current===session) { playlistQueueSessionRef.current=null; setPlaylistPlaybackError(String(error)); } }).finally(() => {
       playlistRefillRunningRef.current = false;
       if (playlistRefillPromiseRef.current === refill) playlistRefillPromiseRef.current = null;
     });
@@ -72,7 +89,13 @@ export function usePlaylistsDomain({
       });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [libraryReady, playlistsReloadToken]);
+  }, [libraryReady, catalogRevision, playlistsReloadToken]);
+
+  useEffect(() => {
+    const refresh = () => setPlaylistsReloadToken(token => token + 1);
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
 
   useEffect(() => {
     if (selectedPlaylistId !== null && savedPlaylists.some((item) => item.id === selectedPlaylistId)) {
@@ -80,12 +103,13 @@ export function usePlaylistsDomain({
     }
   }, [savedPlaylists, selectedPlaylistId]);
 
-  async function startPlaylistQueue(tracks: Track[], index: number, shuffle = false): Promise<boolean> {
+  async function startPlaylistQueue(tracks: Track[], index: number, shuffle = false, context?: PlaylistPageContext): Promise<boolean> {
     const remaining = shuffle ? shufflePlaylistTracks(tracks) : tracks.slice(index);
     const first = remaining.slice(0, 100);
     if (first.length === 0) return false;
     playlistQueueSessionRef.current = null;
-    if (playlistRefillPromiseRef.current) await playlistRefillPromiseRef.current;
+    setPlaylistPlaybackError(null);
+    if (playlistRefillPromiseRef.current) await playlistRefillPromiseRef.current.catch(()=>null);
     endGenreQueue();
     if (playback.state.shuffle && !await playback.setShuffle(false)) return false;
     selectTrack(first[0]);
@@ -95,6 +119,7 @@ export function usePlaylistsDomain({
       tracks: remaining,
       nextIndex: first.length,
       queueKeys: next.queue.map((track) => track.trackKey),
+      context,
     };
     return true;
   }
@@ -107,5 +132,6 @@ export function usePlaylistsDomain({
     playlistsError,
     setPlaylistsReloadToken,
     startPlaylistQueue,
+    playlistPlaybackError,
   };
 }

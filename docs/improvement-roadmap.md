@@ -335,7 +335,16 @@ macOS Network Mode, by contrast, already has a settings-backed connections model
 | 19 | Personal album notes and listening journal | Aurora state DB | S–M |
 | 20 | Local read-only MCP server | Existing bounded commands, `rmcp` | M |
 
-### 1. Smart playlists and saved views
+### 1. Smart playlists and saved views - DONE
+
+**Implemented in Aurora 0.33.0 and Music Library 0.185.0.** Both apps share Music
+Library's native Smart recipes, with song/album rules, sorting, song limits and
+automatic/manual refresh. Aurora authors through the versioned bridge, creates
+ordered static selections from Songs and Albums, pages playback with revision
+guards, and pins saved explorer views in its synced state database. See
+[Shared playlists and saved views](shared-playlists.md) for compatibility and device
+limits. Personal listening-history conditions still depend on Improvement 11;
+Aurora-specific search semantics can always be preserved as a saved view.
 
 **What.** Live, rule-based playlists such as "5★ synthwave from 1984–1988 not played in six months", plus saved explorer views pinned in the sidebar.
 
