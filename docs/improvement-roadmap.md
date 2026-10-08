@@ -369,7 +369,12 @@ macOS Network Mode, by contrast, already has a settings-backed connections model
 
 **Guardrails.** Nothing is ever written automatically, and the rule behind each suggestion is visible. Suggestions also order the Rating Sprint queue, so the user confirms likely favorites first.
 
-### 6. "More like this" sonic radio
+### 6. "More like this" sonic radio - DONE
+
+**Completed 2026-10-08 in Aurora 0.32.0 and Music Library 0.184.0.** The scoped
+feature includes track and album similarity, persistent sonic radio, multi-stop
+journeys, partial-coverage search, companion Discovery integration, scheduled
+analysis controls, portable backups, and the shared persistent similarity index.
 
 **First slice shipped in 0.29.0 with Music Library 0.178.0:** shared local MP3
 analysis, Windows idle/time-window scheduling, resumable per-track checkpoints,
@@ -379,18 +384,29 @@ playlists, and bounded persistent sonic radio. See
 radio shipped in 0.30.0 with Music Library 0.179.0, including visible partial
 coverage and 50%, 80%, or complete-album thresholds. Multi-stop sonic journey
 playlists shipped in Aurora 0.31.0 and Music Library 0.180.0. The first measured
-performance pass ships in Aurora 0.31.1 and Music Library 0.180.1, reducing
+performance pass shipped in Aurora 0.31.1 and Music Library 0.180.1, reducing
 album coverage scans and candidate metadata work; see [the snapshot proof](sonic-performance.md).
-Safe analysis backups and cross-PC reuse ship in Music Library 0.181.0, with
+Safe analysis backups and cross-PC reuse shipped in Music Library 0.181.0, with
 guidance in Aurora 0.31.2: OneDrive archives, guarded feature merges and a
 scheduled local fingerprint verification scan. Discovery integration shipped in
 Music Library 0.183.0, including similar unrated albums and blended sound
-neighbors. A persistent exact weighted tree index ships in Aurora 0.32.0 and
+neighbors. A persistent exact weighted tree index shipped in Aurora 0.32.0 and
 Music Library 0.184.0; see [index and scale proof](sonic-index-performance.md).
 
-**What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
+**What it does.** Builds a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 
-**How it fits.** [`bliss-audio`](https://github.com/Polochon-street/bliss-rs), using its Symphonia decoder so no FFmpeg is needed, computes a short feature vector per track (tempo, timbre, loudness, chroma). Store the vectors in a device-local analysis database, with [`sqlite-vec`](https://alexgarcia.xyz/sqlite-vec/rust.html) for nearest-neighbor search if needed. Analyzing 1.1M tracks takes days of CPU time, so do it incrementally: played, loved, and 5★ tracks first, then an idle background worker with a CPU cap. This complements Genre Radio, which is based on metadata, with continuity based on sound.
+**Implemented approach.** Music Library's standalone GPL-3.0 Bliss analyzer uses
+Symphonia to decode MP3s and saves features in a local SQLite analysis database.
+Aurora reuses completed analysis through the shared exact weighted tree index,
+with background rebuilding and a streamed fallback. Idle/hour scheduling lives
+in Music Library's Tools; pause/resume/cancel controls live in its Activity Center. Partial
+results are immediately usable in Aurora and complement metadata-based Genre Radio.
+
+**Validation.** The real catalog with partial analysis and a synthetic fixture
+with 1.1 million analyzed tracks passed complete-response comparisons against
+the baseline. A separate release-profile benchmark covers 1.1 million vectors.
+These measurements do not represent a completed analysis of all real MP3s;
+measurement scope and reproduction are recorded in the linked scale proof.
 
 ### 7. Natural-language search
 

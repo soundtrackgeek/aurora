@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.1] - 2026-10-08
+
+### Changed
+- Mark the "More like this" sonic radio roadmap item complete, documenting the shipped implementation and the scope of the real-catalog and synthetic full-scale benchmarks.
+
 ## [0.32.0] - 2026-10-08
 
 ### Added

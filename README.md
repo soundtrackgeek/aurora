@@ -1,5 +1,9 @@
 # Aurora
 
+The ["More like this" sonic radio roadmap item](docs/improvement-roadmap.md#6-more-like-this-sonic-radio---done)
+is complete through Aurora 0.32.0 and Music Library 0.184.0, including the shared
+index and scale benchmarks. See the [sonic guide](docs/sonic-analysis.md) for use.
+
 Aurora 0.32.0 uses a persistent sonic similarity index shared by both apps.
 The current 23-dimensional weighted metric keeps exact nearest-neighbor ranking.
 Recent analysis and relevant catalog edits are searched alongside the saved tree;
