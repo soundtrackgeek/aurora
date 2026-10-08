@@ -377,8 +377,9 @@ partial coverage searches (`sonic:yes/no`), nearest tracks, saved companion
 playlists, and bounded persistent sonic radio. See
 [sonic analysis and radio](sonic-analysis.md). Album similarity and album-seeded
 radio shipped in 0.30.0 with Music Library 0.179.0, including visible partial
-coverage and 50%, 80%, or complete-album thresholds. Sonic paths, indexed
-retrieval and cross-PC analysis snapshots remain later stages.
+coverage and 50%, 80%, or complete-album thresholds. Multi-stop sonic journey
+playlists shipped in Aurora 0.31.0 and Music Library 0.180.0. Indexed retrieval
+and cross-PC analysis snapshots remain later stages.
 
 **What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 

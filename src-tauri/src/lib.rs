@@ -40,6 +40,7 @@ mod single_instance;
 mod snapshot_io;
 mod sonic;
 mod sonic_albums;
+mod sonic_journey;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -826,6 +827,42 @@ async fn sonic_album_matches(
 ) -> Result<sonic_albums::SonicAlbumMatches, String> {
     tauri::async_runtime::spawn_blocking(move || {
         sonic::album_query(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sonic_journey(
+    app: AppHandle,
+    request: sonic_journey::JourneyRequest,
+) -> Result<sonic_journey::JourneyResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic::journey_query(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn sonic_journey_search(
+    app: AppHandle,
+    text: String,
+) -> Result<Vec<sonic_journey::JourneyTrack>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic::journey_search(&text, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn sonic_save_journey(
+    app: AppHandle,
+    input: sonic_journey::SaveJourneyRequest,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic::validate_journey_save(&input, &app.state::<StateStore>())?;
+        app.state::<LibrarySyncCoordinator>()
+            .serialize_bridge_work(|| library_bridge::save_sonic_journey(&app, input))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1928,6 +1965,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sonic_matches,
             sonic_album_matches,
+            sonic_journey,
+            sonic_journey_search,
+            sonic_save_journey,
             sonic_analyze_seed,
             tonehavn_status,
             tonehavn_login,

@@ -434,6 +434,13 @@ pub(crate) fn analyze_sonic_seed(
     )
 }
 
+pub(crate) fn save_sonic_journey(
+    app: &AppHandle,
+    input: crate::sonic_journey::SaveJourneyRequest,
+) -> Result<serde_json::Value, String> {
+    invoke_bridge(app, "sonicSaveJourney", input, Duration::from_secs(60))
+}
+
 #[tauri::command]
 pub async fn preview_library_intake_batch(
     app: AppHandle,

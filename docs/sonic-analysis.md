@@ -62,8 +62,45 @@ radio. The album ID and coverage threshold persist across restarts; old saved
 track stations remain compatible. Refills include any further completed analysis
 of the seed, so its mean can evolve while analysis progresses.
 
+## Sonic journey playlists
+
+Music Library **Playlist Builder → Sonic journey** and Aurora **Track sidebar →
+Sonic journey** connect **2–10 ordered track stops**. Search analyzed tracks by
+artist/title; Aurora can also add the currently selected track while you browse.
+Add, remove, or reorder stops, then choose **1–10 connecting tracks between each
+pair**. Five stops and three connectors per leg produce 17 tracks. Every chosen
+stop remains in its original position relative to the other stops; tracks never
+repeat across the journey. The maximum is 100 tracks.
+
+Minimum rating and **first stop's genre** apply to connecting tracks. Explicitly
+chosen stops can have other ratings/genres, but every stop and connector must
+have compatible current MP3 analysis and must not be banned. Partial-library
+analysis is enough; missing stop analysis and insufficient eligible connectors
+are reported separately. The builder returns a complete journey or no playlist,
+so it never silently drops a stop or reduces the requested length.
+
+The shared math interpolates sound-feature waypoints between each stop, streams
+analyzed candidates into bounded shortlists, and uses a bounded beam search to
+balance adjacent sound changes and waypoint proximity. It is an approximation,
+not a global shortest path or a promise of matched BPM/key or seamless mixing.
+Only stops and shortlisted files are checked for freshness, keeping memory and
+filesystem work bounded as the library grows. No decoding or full reanalysis is
+required. Browser previews use sample analysis rather than real music files.
+
+Review the complete numbered playlist, name it, and choose **Save journey
+playlist**. The exact reviewed sequence is revalidated and saved as an ordinary
+Music Library playlist, not regenerated at save time. Changed/missing/banned
+tracks require a new preview. Aurora honors pending Ban/rating edits when
+building and revalidating; the companion also checks its catalog on save, so
+pending changes may need to finish syncing first. Aurora can **Play journey**
+with shuffle disabled and radio stopped. Its draft survives track selection
+changes in the running app. Music Library 0.180.0 is required for Aurora's save
+bridge; Aurora 0.31.0 adds the journey controls.
+
 This release ranks tracks/albums with bounded streaming candidate lists.
-A-to-B sonic paths, approximate indexing, discovery blending,
+Saved journeys preserve the reviewed sequence; Smart refresh is unavailable
+because rebuilding from ordinary filters would lose the chosen stops and order.
+Approximate indexing, discovery blending,
 and coordinated cross-PC analysis snapshots remain future work. Radio follows
 the original seed's sound throughout the station.
 

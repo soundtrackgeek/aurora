@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.31.0] - 2026-10-08
+
+### Added
+- Sonic journey in the Track sidebar: assemble 2–10 stops while browsing, or search analyzed tracks; choose connector counts and filters, preview the complete order, and play with shuffle disabled.
+- Save the exact reviewed journey in Music Library Playlists through the companion bridge, with current Ban/rating and file-freshness checks. Shared journey selection avoids repeated tracks across all legs.
+
 ## [0.30.0] - 2026-10-08
 
 ### Added

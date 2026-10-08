@@ -1,4 +1,7 @@
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
+import { SonicJourneyPanel } from "./components/SonicJourneyPanel";
+import { useSonicJourney } from "./useSonicJourney";
+import { journeyPlaybackTracks } from "./sonicJourney";
 import type { SonicAlbum } from "./sonic";
 import { SonicPanel } from "./components/SonicPanel";
 import { useSonicRadio } from "./app/domains/useSonicRadio";
@@ -365,6 +368,7 @@ function App() {
     endGenreQueue,
     selectTrack,
   });
+  const sonicJourney = useSonicJourney(() => setPlaylistsReloadToken(t => t + 1));
 
   const {
     publisherOverview,
@@ -1324,7 +1328,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.30.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.31.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1849,6 +1853,7 @@ function App() {
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
             <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
+            <SonicJourneyPanel journey={sonicJourney} currentTrack={{ trackKey: inspectorTrack.trackKey, title: inspectorTrack.title, artist: displayTrackArtist(inspectorTrack) }} onPlay={async tracks => { if (!await startPlaylistQueue(journeyPlaybackTracks(tracks), 0)) throw new Error("Could not start the journey. Check the playback error and try again."); }} />
             <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit your library selection without leaving Aurora.</span></div>
           </div>

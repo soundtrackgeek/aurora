@@ -123,11 +123,17 @@ impl Metric {
         })
     }
     pub fn distance(&self, candidate: &[f32]) -> Option<f64> {
-        if candidate.len() != DIMENSIONS || candidate.iter().any(|v| !v.is_finite()) {
+        self.between(&self.seed, candidate)
+    }
+    pub fn between(&self, a: &[f32], b: &[f32]) -> Option<f64> {
+        if a.len() != DIMENSIONS
+            || b.len() != DIMENSIONS
+            || a.iter().chain(b).any(|v| !v.is_finite())
+        {
             return None;
         }
         let mut delta = [0.0; DIMENSIONS];
-        for (i, (a, b)) in self.seed.iter().zip(candidate).enumerate() {
+        for (i, (a, b)) in a.iter().zip(b).enumerate() {
             delta[i] = f64::from(*a) - f64::from(*b);
         }
         let mut squared = 0.0;
@@ -135,6 +141,185 @@ impl Metric {
             squared += delta[i] * w * delta[j];
         }
         (squared.is_finite() && squared >= -1e-6).then(|| squared.max(0.0).sqrt())
+    }
+}
+
+/// A chosen stop in an ordered sonic journey. Payloads belong to the caller.
+#[derive(Clone)]
+pub struct JourneyStop<T> {
+    pub key: String,
+    pub features: Vec<f32>,
+    pub data: T,
+}
+struct JourneyCandidate<T> {
+    stop: JourneyStop<T>,
+    target_squared: f64,
+}
+/// Bounded approximation: retain neighbors per interpolated waypoint, then
+/// use a 32-wide beam to balance adjacent jumps and waypoint proximity. This
+/// is not an all-library shortest-path graph, nor a beat/key mixing guarantee.
+pub struct JourneyBuilder<T> {
+    stops: Vec<JourneyStop<T>>,
+    metric: Metric,
+    per_leg: usize,
+    layers: Vec<Vec<JourneyCandidate<T>>>,
+    leg_squared: Vec<f64>,
+    candidate_limit: usize,
+}
+impl<T: Clone> JourneyBuilder<T> {
+    pub fn new(analysis: &Analysis, stops: Vec<JourneyStop<T>>, per_leg: usize) -> Option<Self> {
+        if !(2..=10).contains(&stops.len()) || !(1..=10).contains(&per_leg) {
+            return None;
+        }
+        let metric = Metric::new(analysis)?;
+        let mut keys = std::collections::HashSet::new();
+        for stop in &stops {
+            if stop.key.is_empty()
+                || !keys.insert(&stop.key)
+                || metric.distance(&stop.features).is_none()
+            {
+                return None;
+            }
+        }
+        let leg_squared = stops
+            .windows(2)
+            .map(|pair| {
+                metric
+                    .between(&pair[0].features, &pair[1].features)
+                    .map(|d| d * d)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let layers = (0..(stops.len() - 1) * per_leg)
+            .map(|_| Vec::new())
+            .collect();
+        let candidate_limit = 32.max((stops.len() - 1) * per_leg + 16);
+        Some(Self {
+            stops,
+            metric,
+            per_leg,
+            layers,
+            leg_squared,
+            candidate_limit,
+        })
+    }
+    pub fn offer(&mut self, key: &str, features: &[f32], data: T) {
+        if self.stops.iter().any(|s| s.key == key) {
+            return;
+        }
+        let Some(distances) = self
+            .stops
+            .iter()
+            .map(|s| self.metric.between(&s.features, features).map(|d| d * d))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        for (index, layer) in self.layers.iter_mut().enumerate() {
+            let leg = index / self.per_leg;
+            let t = (index % self.per_leg + 1) as f64 / (self.per_leg + 1) as f64;
+            // Quadratic interpolation needs only one distance per chosen stop,
+            // rather than a full metric calculation for every waypoint.
+            let target_squared = ((1. - t) * distances[leg] + t * distances[leg + 1]
+                - t * (1. - t) * self.leg_squared[leg])
+                .max(0.);
+            if layer.len() >= self.candidate_limit
+                && layer.last().is_some_and(|c| {
+                    target_squared > c.target_squared
+                        || target_squared == c.target_squared && key > c.stop.key.as_str()
+                })
+            {
+                continue;
+            }
+            if layer.iter().any(|candidate| candidate.stop.key == key) {
+                continue;
+            }
+            layer.push(JourneyCandidate {
+                stop: JourneyStop {
+                    key: key.into(),
+                    features: features.into(),
+                    data: data.clone(),
+                },
+                target_squared,
+            });
+            layer.sort_by(|a, b| {
+                a.target_squared
+                    .total_cmp(&b.target_squared)
+                    .then(a.stop.key.cmp(&b.stop.key))
+            });
+            layer.truncate(self.candidate_limit);
+        }
+    }
+    /// Freshness is checked once per retained identity; no catalog-sized cache.
+    pub fn finish(self, mut usable: impl FnMut(&T) -> bool) -> Option<Vec<T>> {
+        let mut checked = std::collections::HashMap::new();
+        let layers = self
+            .layers
+            .iter()
+            .map(|layer| {
+                layer
+                    .iter()
+                    .filter(|c| {
+                        *checked
+                            .entry(c.stop.key.clone())
+                            .or_insert_with(|| usable(&c.stop.data))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        struct Beam<'a, T> {
+            points: Vec<&'a JourneyStop<T>>,
+            cost: f64,
+        }
+        let mut beams = vec![Beam {
+            points: vec![&self.stops[0]],
+            cost: 0.,
+        }];
+        for (index, layer) in layers.iter().enumerate() {
+            let mut next = Vec::new();
+            for beam in &beams {
+                for candidate in layer {
+                    if beam.points.iter().any(|s| s.key == candidate.stop.key) {
+                        continue;
+                    }
+                    let mut points = beam.points.clone();
+                    let jump = self
+                        .metric
+                        .between(&points.last()?.features, &candidate.stop.features)?;
+                    let mut cost = beam.cost + jump * jump + candidate.target_squared * 0.25;
+                    points.push(&candidate.stop);
+                    if (index + 1) % self.per_leg == 0 {
+                        let stop = &self.stops[index / self.per_leg + 1];
+                        let jump = self
+                            .metric
+                            .between(&candidate.stop.features, &stop.features)?;
+                        cost += jump * jump;
+                        points.push(stop);
+                    }
+                    next.push(Beam { points, cost });
+                }
+            }
+            next.sort_by(|a, b| {
+                a.cost.total_cmp(&b.cost).then_with(|| {
+                    a.points
+                        .iter()
+                        .map(|p| &p.key)
+                        .cmp(b.points.iter().map(|p| &p.key))
+                })
+            });
+            next.truncate(32);
+            if next.is_empty() {
+                return None;
+            }
+            beams = next;
+        }
+        Some(
+            beams
+                .first()?
+                .points
+                .iter()
+                .map(|p| p.data.clone())
+                .collect(),
+        )
     }
 }
 
@@ -211,6 +396,119 @@ pub fn audio_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn journey_analysis() -> Analysis {
+        let mut weights = vec![0.; DIMENSIONS * DIMENSIONS];
+        weights[0] = 4.;
+        weights[DIMENSIONS + 1] = 1.;
+        Analysis {
+            profile: PROFILE.into(),
+            features: vec![0.; DIMENSIONS],
+            weights,
+        }
+    }
+    fn journey_stop(key: &str, value: f32) -> JourneyStop<String> {
+        let mut features = vec![0.; DIMENSIONS];
+        features[0] = value;
+        JourneyStop {
+            key: key.into(),
+            features,
+            data: key.into(),
+        }
+    }
+    #[test]
+    fn journey_preserves_five_stops_and_connects_in_order() {
+        let stops = (0..5)
+            .map(|i| journey_stop(&format!("stop{i}"), (i * 3) as f32))
+            .collect();
+        let mut builder = JourneyBuilder::new(&journey_analysis(), stops, 2).unwrap();
+        for i in (1..12).rev().filter(|i| i % 3 != 0) {
+            let s = journey_stop(&format!("bridge{i}"), i as f32);
+            builder.offer(&s.key, &s.features, s.data.clone());
+        }
+        let result = builder.finish(|_| true).unwrap();
+        assert_eq!(
+            result,
+            [
+                "stop0", "bridge1", "bridge2", "stop1", "bridge4", "bridge5", "stop2", "bridge7",
+                "bridge8", "stop3", "bridge10", "bridge11", "stop4"
+            ]
+        );
+    }
+    #[test]
+    fn journey_handles_equal_sounds_and_never_repeats_a_track() {
+        let mut builder = JourneyBuilder::new(
+            &journey_analysis(),
+            vec![
+                journey_stop("a", 0.),
+                journey_stop("b", 0.),
+                journey_stop("c", 0.),
+            ],
+            2,
+        )
+        .unwrap();
+        for key in ["c", "b", "a", "1", "2", "3", "4", "5"] {
+            let s = journey_stop(key, 0.);
+            builder.offer(key, &s.features, s.data.clone());
+            builder.offer(key, &s.features, s.data);
+        }
+        let mut checked = 0;
+        let result = builder
+            .finish(|key| {
+                checked += 1;
+                key != "1"
+            })
+            .unwrap();
+        assert_eq!(checked, 5);
+        assert_eq!(result.len(), 7);
+        assert_eq!(
+            result
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            7
+        );
+        assert!(!result.contains(&"1".into()));
+        assert_eq!(result[0], "a");
+        assert_eq!(result[3], "b");
+        assert_eq!(result[6], "c");
+    }
+    #[test]
+    fn journey_rejects_invalid_stops_and_insufficient_fresh_bridges() {
+        let stops = vec![journey_stop("a", 0.), journey_stop("b", 10.)];
+        assert!(JourneyBuilder::new(&journey_analysis(), stops.clone(), 11).is_none());
+        assert!(JourneyBuilder::new(
+            &journey_analysis(),
+            vec![stops[0].clone(), stops[0].clone()],
+            1
+        )
+        .is_none());
+        let mut builder = JourneyBuilder::new(&journey_analysis(), stops, 2).unwrap();
+        let s = journey_stop("middle", 5.);
+        builder.offer(&s.key, &s.features, s.data.clone());
+        builder.offer("invalid", &[f32::NAN; DIMENSIONS], "invalid".into());
+        assert!(builder.finish(|_| true).is_none());
+    }
+    #[test]
+    fn long_equal_sound_journeys_have_a_bounded_pool_large_enough_for_no_repeats() {
+        let stops = (0..10)
+            .map(|i| journey_stop(&format!("stop{i}"), 0.))
+            .collect();
+        let mut builder = JourneyBuilder::new(&journey_analysis(), stops, 10).unwrap();
+        for i in 0..150 {
+            let s = journey_stop(&format!("candidate{i:03}"), 0.);
+            builder.offer(&s.key, &s.features, s.data.clone());
+        }
+        assert!(builder.layers.iter().all(|layer| layer.len() <= 106));
+        let result = builder.finish(|_| true).unwrap();
+        assert_eq!(result.len(), 100);
+        assert_eq!(
+            result
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            100
+        );
+    }
     #[test]
     fn album_mean_and_partial_coverage_are_reproducible() {
         let mut album = AlbumAccumulator::default();

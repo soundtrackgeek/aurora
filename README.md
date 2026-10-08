@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora 0.31.0 adds **Sonic journey** in the Track sidebar. Add the selected
+track or search analyzed tracks for 2–10 ordered stops, choose connectors and
+filters, preview and play the journey in order, or save it in Music Library
+Playlists through Music Library 0.180.0.
+
 Aurora 0.30.0 adds **More like this album** in the Album sidebar: find, open,
 and play similar albums, or start sonic radio from an album. Choose 50%, 80%,
 or complete analysis coverage; results show partial and complete counts.

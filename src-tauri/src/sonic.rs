@@ -27,6 +27,63 @@ fn default_coverage() -> u32 {
     50
 }
 
+fn journey_overrides(store: &StateStore) -> Result<crate::sonic_journey::Overrides, String> {
+    Ok(store
+        .all_overlays()?
+        .into_iter()
+        .map(|o| {
+            (
+                o.track_key,
+                (
+                    o.values.love_state == LoveState::Banned,
+                    o.values.rating.map(|v| (v * 20.).round() as i32),
+                ),
+            )
+        })
+        .collect())
+}
+fn journey_catalog() -> Result<(Connection, bool), String> {
+    let path = catalog::default_catalog_path()?;
+    let c = catalog::open_catalog(&path)?;
+    let has = path
+        .parent()
+        .ok_or("Catalog directory missing")?
+        .join("music-analysis.sqlite3")
+        .is_file();
+    Ok((c, has))
+}
+pub(crate) fn journey_query(
+    request: crate::sonic_journey::JourneyRequest,
+    store: &StateStore,
+) -> Result<crate::sonic_journey::JourneyResponse, String> {
+    let (c, has) = journey_catalog()?;
+    crate::sonic_journey::query(&c, has, &request, &journey_overrides(store)?)
+}
+pub(crate) fn journey_search(
+    text: &str,
+    store: &StateStore,
+) -> Result<Vec<crate::sonic_journey::JourneyTrack>, String> {
+    let (c, has) = journey_catalog()?;
+    crate::sonic_journey::search(&c, has, text, &journey_overrides(store)?)
+}
+pub(crate) fn validate_journey_save(
+    input: &crate::sonic_journey::SaveJourneyRequest,
+    store: &StateStore,
+) -> Result<(), String> {
+    let (c, has) = journey_catalog()?;
+    if !has {
+        return Err("Analyze your chosen stops and more music in Music Library first.".into());
+    }
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    crate::sonic_journey::reviewed(
+        &tx,
+        &input.journey,
+        &input.track_keys,
+        &journey_overrides(store)?,
+    )?;
+    Ok(())
+}
+
 fn ban_overrides(
     store: Option<&StateStore>,
 ) -> Result<std::collections::HashMap<String, bool>, String> {
