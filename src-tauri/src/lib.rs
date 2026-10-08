@@ -41,6 +41,8 @@ mod snapshot_io;
 mod sonic;
 mod sonic_albums;
 mod sonic_journey;
+#[cfg(test)]
+mod sonic_performance;
 mod state_store;
 mod state_sync;
 mod tag_model;

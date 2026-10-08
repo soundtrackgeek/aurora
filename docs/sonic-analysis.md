@@ -98,6 +98,10 @@ changes in the running app. Music Library 0.180.0 is required for Aurora's save
 bridge; Aurora 0.31.0 adds the journey controls.
 
 This release ranks tracks/albums with bounded streaming candidate lists.
+Aurora 0.31.1 counts complete album coverage only in albums with analyzed
+paths, moves track/radio metadata through overlay batches, skips per-track
+genre-sync checks when no edits are pending, and clones journey metadata only
+for shortlisted candidates. See [the native performance proof](sonic-performance.md).
 Saved journeys preserve the reviewed sequence; Smart refresh is unavailable
 because rebuilding from ordinary filters would lose the chosen stops and order.
 Approximate indexing, discovery blending,

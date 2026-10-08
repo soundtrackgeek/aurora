@@ -1,11 +1,11 @@
 {
   "repository": "https://github.com/soundtrackgeek/music_backup_v5",
-  "revision": "feaeed0a781af9ff3409a7d113815ba22b256ed9",
+  "revision": "f34616ba9cf4ce4fa79487c73445e8aa9e2b3b41",
   "directory": "crates/sonic-core",
   "normalization": "UTF-8 with LF line endings",
   "sha256": {
     "Cargo.toml": "cc082ea579693d77732c90f76cc85d87f4de0634454157551256f2276373cd94",
-    "src/lib.rs": "1da086c9e4dc3d8ddaff9edee57ed5808b48936e3786d77356d1e821fb8cbb70",
+    "src/lib.rs": "9a9937fa09952415729154b8dac0f0c6873c7cfcfe0632f23e9788a3fc7f47aa",
     "LICENSE": "75739b1437876daeb2fdf80a3b20914be194ad557e358744b6c7859f36445930"
   }
 }

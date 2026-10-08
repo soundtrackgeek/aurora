@@ -204,7 +204,7 @@ pub(crate) fn query(
         {
             continue;
         }
-        builder.offer(&entry.track.track_key, &entry.features, entry.clone());
+        builder.offer_ref(&entry.track.track_key, &entry.features, &entry);
     }
     if let Some(entries) = builder.finish(fresh) {
         // Recheck chosen stops too, in case files changed while candidates streamed.

@@ -93,15 +93,23 @@ fn scan(
             LEFT JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile
             WHERE t.album_id=?2 AND lower(t.filename) LIKE '%.mp3' ORDER BY t.id")
     } else {
-        // Count coverage in SQL; only decode/stream rows with saved features.
-        // The catalog index serves counts, without retaining catalog vectors.
-        format!("WITH totals AS MATERIALIZED (
-            SELECT album_id,COUNT(*) AS total FROM tracks WHERE lower(filename) LIKE '%.mp3' GROUP BY album_id)
+        // Start from analyzed paths, then count ALL MP3s in those albums.
+        // CROSS JOIN keeps SQLite from driving this scan with the full catalog.
+        format!(
+            "WITH candidate_albums AS MATERIALIZED (
+            SELECT DISTINCT t.album_id FROM sonic.sonic_tracks s
+            CROSS JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename
+            WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3'),
+            totals AS MATERIALIZED (
+            SELECT album_id,(SELECT COUNT(*) FROM tracks coverage
+                WHERE coverage.album_id=candidate_albums.album_id
+                AND lower(coverage.filename) LIKE '%.mp3') AS total FROM candidate_albums)
             SELECT {columns},totals.total FROM sonic.sonic_tracks s
-            JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename
+            CROSS JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename
             JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile
             JOIN totals ON totals.album_id=t.album_id
-            WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3' ORDER BY t.album_id,t.id")
+            WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3' ORDER BY t.album_id,t.id"
+        )
     };
     let mut values = vec![Value::Text(PROFILE.into())];
     if let Some(id) = id {
@@ -345,6 +353,42 @@ mod tests {
             limit: 20,
             minimum_coverage,
         }
+    }
+    #[test]
+    fn sparse_analysis_counts_full_candidate_coverage_without_scanning_unrelated_albums() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let (_dir, c) = fixture();
+        c.execute_batch("CREATE INDEX album_tracks ON tracks(album_id);
+            CREATE INDEX track_files ON tracks(file_path,filename);
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO tracks(album_id,filename) SELECT 'unanalysed-'||x,'song.mp3' FROM n;
+            INSERT INTO tracks(album_id,filename) VALUES('partial','extra.MP3'),('partial','extra.flac');").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        c.create_scalar_function(
+            "lower",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |ctx| {
+                counter.fetch_add(1, Ordering::Relaxed);
+                Ok(ctx.get::<String>(0)?.to_ascii_lowercase())
+            },
+        )
+        .unwrap();
+        let mut albums = Vec::new();
+        scan(&c, None, false, &HashMap::new(), |r| albums.push(r.album)).unwrap();
+        let partial = albums.iter().find(|a| a.album_id == "partial").unwrap();
+        assert_eq!(partial.total_tracks, 7);
+        assert_eq!(partial.analyzed_tracks, 3);
+        assert!(!albums.iter().any(|a| a.album_id.starts_with("unanalysed-")));
+        assert!(
+            calls.load(Ordering::Relaxed) < 500,
+            "coverage visited unrelated catalog filenames"
+        );
     }
     #[test]
     fn album_ranking_preserves_identity_and_partial_coverage() {

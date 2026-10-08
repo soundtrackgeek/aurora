@@ -203,6 +203,10 @@ impl<T: Clone> JourneyBuilder<T> {
         })
     }
     pub fn offer(&mut self, key: &str, features: &[f32], data: T) {
+        self.offer_ref(key, features, &data);
+    }
+    /// Clone metadata only when a candidate enters a bounded waypoint shortlist.
+    pub fn offer_ref(&mut self, key: &str, features: &[f32], data: &T) {
         if self.stops.iter().any(|s| s.key == key) {
             return;
         }
@@ -414,6 +418,43 @@ mod tests {
             features,
             data: key.into(),
         }
+    }
+    #[test]
+    fn rejected_journey_candidates_do_not_clone_metadata() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct Metadata(Arc<AtomicUsize>);
+        impl Clone for Metadata {
+            fn clone(&self) -> Self {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Self(self.0.clone())
+            }
+        }
+        let clones = Arc::new(AtomicUsize::new(0));
+        let stops = ["a", "b"]
+            .into_iter()
+            .map(|key| JourneyStop {
+                key: key.into(),
+                features: vec![0.; DIMENSIONS],
+                data: Metadata(clones.clone()),
+            })
+            .collect();
+        let mut builder = JourneyBuilder::new(&journey_analysis(), stops, 1).unwrap();
+        let metadata = Metadata(clones.clone());
+        for i in 0..32 {
+            builder.offer_ref(&format!("near{i:02}"), &[0.; DIMENSIONS], &metadata);
+        }
+        assert_eq!(clones.load(Ordering::Relaxed), 32);
+        builder.offer_ref("a", &[0.; DIMENSIONS], &metadata);
+        builder.offer_ref("near00", &[0.; DIMENSIONS], &metadata);
+        builder.offer_ref("invalid", &[f32::NAN; DIMENSIONS], &metadata);
+        for i in 0..1000 {
+            builder.offer_ref(&format!("far{i}"), &[10.; DIMENSIONS], &metadata);
+        }
+        assert_eq!(clones.load(Ordering::Relaxed), 32);
+        assert!(builder.finish(|_| true).is_some());
     }
     #[test]
     fn journey_preserves_five_stops_and_connects_in_order() {

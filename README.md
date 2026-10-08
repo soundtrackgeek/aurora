@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora 0.31.1 speeds up sonic album matching in partially analyzed libraries,
+removes redundant metadata copies in track/radio batches, and reduces journey
+allocations and empty genre-sync checks. Existing analysis is reused; see the
+[native snapshot performance proof](docs/sonic-performance.md).
+
 Aurora 0.31.0 adds **Sonic journey** in the Track sidebar. Add the selected
 track or search analyzed tracks for 2–10 ordered stops, choose connectors and
 filters, preview and play the journey in order, or save it in Music Library

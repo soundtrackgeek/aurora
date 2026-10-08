@@ -140,7 +140,7 @@ pub(crate) fn prepare_search(c: &Connection, catalog_path: &std::path::Path) -> 
     Ok(())
 }
 
-fn run(
+pub(crate) fn run(
     c: &Connection,
     request: &SonicRequest,
     store: Option<&StateStore>,
@@ -229,12 +229,12 @@ fn run(
     let mut rank_batch =
         |batch: &mut Vec<(TrackSummary, String, u64, String)>| -> Result<(), String> {
             let entries = std::mem::take(batch);
-            let mut tracks = entries
-                .iter()
-                .map(|(t, _, _, _)| t.clone())
-                .collect::<Vec<_>>();
+            let (mut tracks, observations): (Vec<_>, Vec<_>) = entries
+                .into_iter()
+                .map(|(track, features, size, modified)| (track, (features, size, modified)))
+                .unzip();
             catalog::apply_overlays(&mut tracks, store)?;
-            for (track, (_, features, size, modified)) in tracks.into_iter().zip(entries) {
+            for (track, (features, size, modified)) in tracks.into_iter().zip(observations) {
                 response.analyzed += 1;
                 if excluded.contains(track.track_key.as_str())
                     || request

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1] - 2026-10-08
+
+### Changed
+- Sonic album matching counts complete MP3 coverage only for albums with analyzed paths, avoiding unrelated catalog albums through existing indexes.
+- Track/radio overlay batches move metadata instead of cloning every candidate and skip individual genre-sync queries when no edits are pending. The queue is rechecked each batch so later edits remain visible.
+- Sonic journeys clone metadata only for shortlisted candidates using the shared Music Library math. Added an opt-in native snapshot benchmark and complete-response comparison tool.
+
 ## [0.31.0] - 2026-10-08
 
 ### Added

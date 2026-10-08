@@ -233,6 +233,18 @@ pub(crate) fn prepare_cached(connection: &Connection) -> Result<(), String> {
 
 pub(crate) fn apply(tracks: &mut [TrackSummary], store: &StateStore) -> Result<(), String> {
     let connection = store.open()?;
+    // Recheck each batch: an empty queue should not cost one query per track,
+    // and a later edit must be visible on the next application.
+    let has_pending: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pending_library_folder_sync)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !has_pending {
+        return Ok(());
+    }
     let mut statement = connection.prepare("SELECT EXISTS(SELECT 1 FROM pending_library_folder_sync WHERE directory = ?1 AND (filename IS NULL OR filename = ?2))").map_err(|e| e.to_string())?;
     for track in tracks {
         let pending: bool = statement
@@ -280,6 +292,35 @@ pub(crate) fn fts_matches(column: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_sync_queue_does_not_hide_later_pending_genre_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::new(dir.path().join("state.sqlite3")).unwrap();
+        let path = dir.path().join("song.mp3");
+        std::fs::write(&path, []).unwrap();
+        let mut tag = id3::Tag::new();
+        tag.set_genre("Soundtrack");
+        tag.write_to_path(&path, id3::Version::Id3v24).unwrap();
+        let mut track: TrackSummary = serde_json::from_value(serde_json::json!({
+            "id":"1", "trackKey":"song", "title":"Song", "artist":"Artist", "album":"Album",
+            "loved":false, "loveState":"neutral", "canUndoTagEdit":false, "genre":"House"
+        }))
+        .unwrap();
+        track.directory = dir.path().to_string_lossy().into_owned();
+        track.filename = "song.mp3".into();
+        apply(std::slice::from_mut(&mut track), &store).unwrap();
+        assert_eq!(track.genre.as_deref(), Some("House"));
+        store
+            .queue_library_file_syncs(&[(track.directory.clone(), track.filename.clone())])
+            .unwrap();
+        apply(std::slice::from_mut(&mut track), &store).unwrap();
+        assert_eq!(track.genre.as_deref(), Some("Soundtrack"));
+        assert_eq!(
+            track.tag_sync_state,
+            Some(crate::tag_model::TagSyncState::PendingImport)
+        );
+    }
 
     #[test]
     fn cached_genre_projections_are_bounded_and_preserve_mixed_albums() {
