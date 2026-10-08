@@ -5,6 +5,19 @@ import { browserPreview } from "../../library";
 import { useSonicRadio } from "./useSonicRadio";
 vi.mock("../../sonic", () => ({ sonicMatches: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); localStorage.clear(); });
+it("persists an album seed and its coverage for radio refills", async () => {
+  const next = browserPreview.tracks[1];
+  vi.mocked(sonicMatches).mockResolvedValue({ analyzed: 10, total: 100, seedReady: true, tracks: [next] });
+  const playback = { play: vi.fn().mockResolvedValue({}), append: vi.fn().mockResolvedValue({}), state: { queue: [], currentIndex: null } };
+  const first = renderHook(() => useSonicRadio(playback));
+  await act(() => first.result.current.startAlbum({ albumId: "album-seed", title: "Album seed", albumArtist: "Singer", genre: "Pop", totalTracks: 6, analyzedTracks: 5, distance: null }, 4, true, 80));
+  expect(sonicMatches).toHaveBeenCalledWith(expect.objectContaining({ seedKey: "", seedAlbumId: "album-seed", minimumCoverage: 80, minimumRating: 4, sameGenre: true }));
+  expect(first.result.current.session?.played).toEqual([next.trackKey]);
+  first.unmount();
+  vi.mocked(sonicMatches).mockResolvedValue({ analyzed: 10, total: 100, seedReady: true, tracks: [] });
+  renderHook(() => useSonicRadio({ ...playback, state: { queue: [next], currentIndex: 0 } }));
+  await waitFor(() => expect(sonicMatches).toHaveBeenLastCalledWith(expect.objectContaining({ seedAlbumId: "album-seed", minimumCoverage: 80, excludeKeys: [next.trackKey] })));
+});
 it("ignores a stopped station's late response", async () => {
   let resolve!: (result: Awaited<ReturnType<typeof sonicMatches>>) => void;
   vi.mocked(sonicMatches).mockReturnValue(new Promise(r => { resolve = r; }));

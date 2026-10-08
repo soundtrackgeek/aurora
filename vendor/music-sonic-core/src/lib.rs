@@ -4,6 +4,47 @@ use serde::{Deserialize, Serialize};
 pub const PROFILE: &str = "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3";
 pub const DIMENSIONS: usize = 23;
 
+/// Equal weight per usable track: long songs and multi-disc albums do not
+/// dominate other albums. Accumulate in f64 without retaining track vectors.
+#[derive(Default)]
+pub struct AlbumAccumulator {
+    sum: [f64; DIMENSIONS],
+    count: usize,
+}
+impl AlbumAccumulator {
+    pub fn add(&mut self, features: &[f32]) -> bool {
+        if features.len() != DIMENSIONS || features.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        for (sum, value) in self.sum.iter_mut().zip(features) {
+            *sum += f64::from(*value);
+        }
+        self.count += 1;
+        true
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
+    pub fn mean(&self) -> Option<Vec<f32>> {
+        (self.count > 0).then(|| {
+            self.sum
+                .iter()
+                .map(|v| (v / self.count as f64) as f32)
+                .collect()
+        })
+    }
+}
+
+/// Partial albums need at least three usable tracks (or all of a shorter
+/// album), as well as the requested percentage of the catalog's MP3 tracks.
+pub fn album_ready(analyzed: usize, total: usize, minimum_percent: u32) -> bool {
+    (50..=100).contains(&minimum_percent)
+        && total > 0
+        && analyzed <= total
+        && analyzed >= total.min(3)
+        && (analyzed as u128) * 100 >= (total as u128) * u128::from(minimum_percent)
+}
+
 /// File observations are a cheap freshness guard, not an audio identity.
 pub fn file_signature(path: &std::path::Path) -> std::io::Result<(u64, String)> {
     let metadata = std::fs::metadata(path)?;
@@ -170,6 +211,27 @@ pub fn audio_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn album_mean_and_partial_coverage_are_reproducible() {
+        let mut album = AlbumAccumulator::default();
+        assert!(album.mean().is_none());
+        assert!(!album.add(&[0.]));
+        assert!(!album.add(&[f32::NAN; DIMENSIONS]));
+        assert!(album.add(&[1.; DIMENSIONS]));
+        assert!(album.add(&[3.; DIMENSIONS]));
+        assert_eq!(album.mean().unwrap(), vec![2.; DIMENSIONS]);
+        assert_eq!(album.count(), 2);
+        assert!(!album_ready(2, 4, 50));
+        assert!(album_ready(3, 6, 50));
+        assert!(!album_ready(3, 6, 80));
+        assert!(album_ready(5, 6, 80));
+        assert!(!album_ready(5, 6, 100));
+        assert!(album_ready(2, 2, 50));
+        assert!(album_ready(1, 1, 100));
+        assert!(!album_ready(0, 0, 50));
+        assert!(!album_ready(3, 2, 50));
+        assert!(!album_ready(3, 6, 49));
+    }
     #[test]
     fn weighted_distance_and_invalid_profiles() {
         let mut seed = Analysis {

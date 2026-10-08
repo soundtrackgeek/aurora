@@ -34,8 +34,36 @@ the isolated GPL-3.0 analyzer. Profile identifiers pin Bliss 0.13.0, Symphonia
 resolve current catalog IDs by path and preserve Track Artist versus Album
 Artist. Existing tag-only edits can reuse audio features after reanalysis.
 
-This first release ranks tracks with a bounded streaming candidate list.
-Album vectors, A-to-B sonic paths, approximate indexing, discovery blending,
+## Album similarity
+
+Aurora 0.30.0 adds **Album sidebar → More like this album → Find similar albums**.
+Open a result in Albums or play its album queue. Music Library 0.179.0 offers the
+same comparisons under **Albums → Sounds like this album**. Existing compatible
+track analysis is reused without decoding again.
+
+Albums are compared by the equally weighted mean of their usable track features
+with the same profile-specific distance matrix. Choose **50%**, **80%**, or
+**Complete albums only**. Both seed and matches need three usable tracks, or all
+tracks for shorter releases, plus that percentage of their cataloged MP3 tracks.
+Results show usable counts and label partial analysis. Banned tracks, including
+pending Aurora Ban edits, do not contribute. Album IDs preserve separate editions
+and namesakes; tracks across discs sharing one album ID are aggregated together.
+
+Rollups are computed from a consistent catalog/results read snapshot on each
+request. Ranking streams albums and retains a bounded shortlist; the seed and
+all contributing files in shortlisted albums are checked for freshness and their
+means recomputed. Missing/changed/incompatible results cannot contribute. The
+pool count describes saved analysis before shortlist freshness checks.
+
+After finding albums, **Start album sonic radio** ranks individual tracks against
+the selected album's mean and excludes all tracks from that seed album. Rating,
+same-genre, Ban filtering, diversity caps and bounded refills work as for track
+radio. The album ID and coverage threshold persist across restarts; old saved
+track stations remain compatible. Refills include any further completed analysis
+of the seed, so its mean can evolve while analysis progresses.
+
+This release ranks tracks/albums with bounded streaming candidate lists.
+A-to-B sonic paths, approximate indexing, discovery blending,
 and coordinated cross-PC analysis snapshots remain future work. Radio follows
 the original seed's sound throughout the station.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.30.0] - 2026-10-08
+
+### Added
+- More like this album in the Album sidebar: find, open, and play similar local albums with visible analysis coverage and 50%, 80%, or complete-album thresholds.
+- Sonic radio can start from an album’s average sound, excludes tracks from the seed album, honors current Ban/rating edits, and restores its album seed and coverage setting across restarts.
+
 ## [0.29.0] - 2026-10-07
 
 ### Added

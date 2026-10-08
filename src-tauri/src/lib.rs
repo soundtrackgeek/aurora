@@ -39,6 +39,7 @@ mod shortcuts;
 mod single_instance;
 mod snapshot_io;
 mod sonic;
+mod sonic_albums;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -816,6 +817,18 @@ async fn sonic_matches(
     tauri::async_runtime::spawn_blocking(move || sonic::query(request, &app.state::<StateStore>()))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sonic_album_matches(
+    app: AppHandle,
+    request: sonic_albums::SonicAlbumRequest,
+) -> Result<sonic_albums::SonicAlbumMatches, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic::album_query(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1914,6 +1927,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             sonic_matches,
+            sonic_album_matches,
             sonic_analyze_seed,
             tonehavn_status,
             tonehavn_login,

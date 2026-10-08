@@ -1,3 +1,5 @@
+import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
+import type { SonicAlbum } from "./sonic";
 import { SonicPanel } from "./components/SonicPanel";
 import { useSonicRadio } from "./app/domains/useSonicRadio";
 import {
@@ -859,6 +861,28 @@ function App() {
     }, "page");
   }
 
+  function openSonicAlbum(album: SonicAlbum) {
+    transitionContent(() => {
+      pendingExplorerAlbumIdRef.current = album.albumId;
+      setSelectedAlbumId(album.albumId);
+      setInspectorView("album"); setTagSelectionKind("album");
+      setActiveNav("Albums"); expandLibraryNavigation(); setExplorerView("albums");
+      setExplorerFilters({ ...defaultExplorerFilters, query: chartAlbumSearchQuery({ title: album.title, matchedAlbumTitle: null }), sort: "yearDesc" });
+    }, "page");
+  }
+  async function playSonicAlbum(album: SonicAlbum) {
+    const detail = await loadAlbumDetail(album.albumId);
+    const tracks = detail.tracks.filter(track => track.loveState !== "banned");
+    if (!tracks.length) throw new Error("This album has no eligible playable tracks.");
+    endGenreQueue();
+    await playback.play(tracks, tracks[0].id);
+  }
+  function albumSonicPanel(albumId: string) {
+    return <SonicAlbumPanel key={albumId} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlayAlbum={playSonicAlbum}
+      radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop}
+      onRadio={(album, rating, genre, coverage) => { endGenreQueue(); void sonicRadio.startAlbum(album, rating, genre, coverage); }} />;
+  }
+
   function openTrackAlbum(track: Track) {
     if (!track.albumId) return;
     transitionContent(() => {
@@ -1300,7 +1324,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.29.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.30.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1768,19 +1792,23 @@ function App() {
               chartRanks={catalogChartRanks.albums[explorerAlbumInspectorContext.album.id]}
               ratingDigits={2}
             />
+            {albumSonicPanel(explorerAlbumInspectorContext.album.id)}
             <RemoveAlbumButton disabled={albumMoveRequest !== null} onRequest={() => setAlbumMoveRequest((current) => current ?? { album: explorerAlbumInspectorContext.album, mode: "remove" })} />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
           <div className="inspector-scroll">
             <ContentTransition type="collection"><PublisherAlbumInspector album={selectedPublisherAlbum} busy={publisherAlbumBusy} onPlay={(album) => void playPublisherAlbum(album)} onOpenArtistAlbums={openArtistAlbums} /></ContentTransition>
+            {albumSonicPanel(selectedPublisherAlbum.id)}
           </div>
         ) : inspectorView === "album" && activeNav === "Ratings" && selectedRatingAlbum ? (
           <div className="inspector-scroll">
             <ContentTransition type="collection"><RatingAlbumInspector album={selectedRatingAlbum} busy={ratingsQueueBusy} onPlay={(album) => void playRatingAlbumUnrated(album)} onOpenArtistAlbums={openArtistAlbums} /></ContentTransition>
+            {albumSonicPanel(selectedRatingAlbum.id)}
           </div>
         ) : inspectorView === "album" && activeNav === "Years" && selectedYearAlbum ? (
           <div className="inspector-scroll">
             <ContentTransition type="collection"><YearAlbumInspector album={selectedYearAlbum} busy={yearAlbumBusy} onPlay={(album) => void playYearAlbum(album)} onOpenArtistAlbums={openArtistAlbums} chartRanks={catalogChartRanks.albums[selectedYearAlbum.id]} /></ContentTransition>
+            {albumSonicPanel(selectedYearAlbum.id)}
           </div>
         ) : inspectorView === "artist" && inspectorArtistName ? (
           <div className="inspector-scroll">

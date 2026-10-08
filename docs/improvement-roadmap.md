@@ -375,8 +375,10 @@ macOS Network Mode, by contrast, already has a settings-backed connections model
 analysis, Windows idle/time-window scheduling, resumable per-track checkpoints,
 partial coverage searches (`sonic:yes/no`), nearest tracks, saved companion
 playlists, and bounded persistent sonic radio. See
-[sonic analysis and radio](sonic-analysis.md). Album similarity, sonic paths,
-indexed retrieval and cross-PC analysis snapshots remain later stages.
+[sonic analysis and radio](sonic-analysis.md). Album similarity and album-seeded
+radio shipped in 0.30.0 with Music Library 0.179.0, including visible partial
+coverage and 50%, 80%, or complete-album thresholds. Sonic paths, indexed
+retrieval and cross-PC analysis snapshots remain later stages.
 
 **What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 

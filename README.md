@@ -1,6 +1,9 @@
 # Aurora
 
-Aurora 0.29.0 adds **More like this** and sonic radio in the Track sidebar,
+Aurora 0.30.0 adds **More like this album** in the Album sidebar: find, open,
+and play similar albums, or start sonic radio from an album. Choose 50%, 80%,
+or complete analysis coverage; results show partial and complete counts.
+**More like this** and sonic radio are also available in the Track sidebar,
 using Music Library 0.178.0's saved local MP3 analysis. You can use partial
 results immediately; analyze albums/favorites and set idle or overnight hours
 in Music Library. Search `sonic:yes` for analyzed tracks or `sonic:no` for
