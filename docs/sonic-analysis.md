@@ -104,9 +104,39 @@ genre-sync checks when no edits are pending, and clones journey metadata only
 for shortlisted candidates. See [the native performance proof](sonic-performance.md).
 Saved journeys preserve the reviewed sequence; Smart refresh is unavailable
 because rebuilding from ordinary filters would lose the chosen stops and order.
-Approximate indexing, discovery blending,
-and coordinated cross-PC analysis snapshots remain future work. Radio follows
+Approximate indexing and discovery blending remain future work. Radio follows
 the original seed's sound throughout the station.
+
+## Backup and cross-PC reuse
+
+Music Library 0.181.0 owns **Tools → Audio analysis → Backup and cross-PC reuse**.
+Aurora 0.31.2 includes these directions under **Track → More like this**.
+Backups default to **OneDrive\\_musicbackup\\sonic-analysis**, beside the shared
+state/history backups. Choose a synced folder manually if OneDrive is not detected.
+
+On the source computer, use **Back up analysis** while the analyzer can continue
+running. Wait for OneDrive to finish uploading. On the receiving computer, make
+the catalog and MP3s available at Music Library's local cataloged paths, download
+the archive, and use **Choose backup to restore**. Review the date/count, pause
+any running analysis, then **Merge this backup**. A local safety archive is saved
+before merging existing features; conflicting or corrupt data aborts the merge.
+
+Run **Verify reused analysis**, or resume normal analysis. The verification job
+obeys the receiving computer's idle/hours schedule, supports pause/resume/cancel,
+and reads audio fingerprints without decoding files that have no cached result.
+Different local paths, timestamps, numeric IDs and tag-only differences do not
+require extraction again when audio payloads match. Imported file observations
+are never trusted: each binding is checked against local audio and current
+catalog membership. Files with no match remain unanalyzed.
+
+Aurora continues reading the local analysis store beside the catalog. Each
+verified checkpoint becomes usable for `sonic:yes`, track/album similarity,
+radio and journeys; refresh the search or request new matches as coverage grows.
+Archives include only compatible hashes, features and weights, with versions,
+checksum and integrity checks. They exclude music, catalog, machine settings,
+jobs and queues. Large verification scans still incur disk/network I/O. These
+manual backups replace unsafe live SQLite/WAL copying; a successful local save
+does not itself confirm OneDrive upload or a physical second-PC transfer.
 
 Aurora vendors the small MIT contract/math crate from Music Library at the
 immutable revision recorded in `vendor/music-sonic-core/SOURCE.json`. File

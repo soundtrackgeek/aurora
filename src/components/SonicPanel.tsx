@@ -29,6 +29,7 @@ export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, on
     {response && <p>{response.analyzed.toLocaleString()} of {response.total.toLocaleString()} tracks analyzed. Matches cover analyzed music.</p>}
     {response && !response.seedReady && <div><p>This track needs audio analysis.</p><button type="button" disabled={busy} onClick={() => void load(true)}>Analyze this track</button><p>Analyze more music in Music Library → Tools → Audio analysis.</p></div>}
     {response?.seedReady && !response.tracks.length && <p>No eligible matches yet. Analyze more music or change the filters.</p>}
+    <details><summary>Reuse analysis from another computer</summary><p>In Music Library → Tools → Audio analysis → Backup and cross-PC reuse, back up completed results to OneDrive’s _musicbackup/sonic-analysis folder. On this computer, merge the backup and run Verify reused analysis. Aurora can use each verified track immediately for sonic:yes, similarity, radio and journeys.</p></details>
     {response?.tracks.map(candidate => <button className="sonic-match" type="button" key={candidate.trackKey} onClick={() => onPlay(candidate, response.tracks)}><strong>{candidate.title}</strong><span>{displayTrackArtist(candidate)} · {candidate.album}</span></button>)}
     {error && <p role="alert">{error}</p>}{radioMessage && <p role="status">{radioMessage}</p>}
   </section>;

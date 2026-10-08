@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.2] - 2026-10-08
+
+### Added
+- Track sidebar guidance for Music Library 0.181.0's safe audio analysis backups and cross-PC reuse. Completed features are archived beside existing OneDrive backups; receiving computers merge and fingerprint local files before Aurora consumes verified results.
+
 ## [0.31.1] - 2026-10-08
 
 ### Changed

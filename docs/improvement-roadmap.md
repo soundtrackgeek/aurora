@@ -381,7 +381,10 @@ coverage and 50%, 80%, or complete-album thresholds. Multi-stop sonic journey
 playlists shipped in Aurora 0.31.0 and Music Library 0.180.0. The first measured
 performance pass ships in Aurora 0.31.1 and Music Library 0.180.1, reducing
 album coverage scans and candidate metadata work; see [the snapshot proof](sonic-performance.md).
-Approximate vector indexing and cross-PC analysis snapshots remain later stages.
+Safe analysis backups and cross-PC reuse ship in Music Library 0.181.0, with
+guidance in Aurora 0.31.2: OneDrive archives, guarded feature merges and a
+scheduled local fingerprint verification scan. Approximate vector indexing and
+Discovery integration remain later stages.
 
 **What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 

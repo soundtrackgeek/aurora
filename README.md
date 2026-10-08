@@ -1,5 +1,12 @@
 # Aurora
 
+Aurora 0.31.2 adds cross-PC reuse guidance in **Track → More like this**.
+Music Library 0.181.0 can back up completed audio features to
+**OneDrive\\_musicbackup\\sonic-analysis**, merge them on another computer and
+verify local MP3 fingerprints without decoding again. Aurora uses each verified
+result immediately for `sonic:yes`, similarity, radio and sonic journeys.
+See [analysis backup and reuse](docs/sonic-analysis.md#backup-and-cross-pc-reuse).
+
 Aurora 0.31.1 speeds up sonic album matching in partially analyzed libraries,
 removes redundant metadata copies in track/radio batches, and reduces journey
 allocations and empty genre-sync checks. Existing analysis is reused; see the
