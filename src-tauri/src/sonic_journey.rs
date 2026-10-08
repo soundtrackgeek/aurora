@@ -151,6 +151,15 @@ pub(crate) fn query(
     request: &JourneyRequest,
     overrides: &Overrides,
 ) -> Result<JourneyResponse, String> {
+    query_indexed(c, has_analysis, request, overrides, true)
+}
+pub(crate) fn query_indexed(
+    c: &Connection,
+    has_analysis: bool,
+    request: &JourneyRequest,
+    overrides: &Overrides,
+    indexed: bool,
+) -> Result<JourneyResponse, String> {
     request.validate()?;
     let mut response = JourneyResponse {
         stops_ready: vec![false; request.stop_keys.len()],
@@ -184,14 +193,49 @@ pub(crate) fn query(
         analysis(&tx, stops[0].features.clone())?.ok_or("Incompatible analysis profile")?;
     let mut builder = JourneyBuilder::new(&weights, stops, request.connecting_tracks)
         .ok_or("Invalid sonic journey")?;
+    let candidates = if indexed {
+        crate::sonic_index::candidates(
+            &tx,
+            &weights,
+            &builder.targets(),
+            false,
+            1024,
+            None,
+            &Default::default(),
+        )
+    } else {
+        None
+    };
+    let selection = candidates
+        .as_ref()
+        .map(|_| " AND s.track_key IN (SELECT value FROM json_each(?2))")
+        .unwrap_or("");
+    let mut values = vec![rusqlite::types::Value::Text(PROFILE.into())];
+    if let Some(candidates) = &candidates {
+        values.push(rusqlite::types::Value::Text(candidates.keys.clone()));
+        response.analyzed = crate::sonic_index::count(
+            &tx,
+            "journey",
+            &format!(
+                "SELECT COUNT(*) {JOIN} WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3'"
+            ),
+            true,
+        )
+        .map_err(|e| e.to_string())? as usize;
+    }
     let mut q = tx
         .prepare(&format!(
-            "SELECT {SELECT} {JOIN} WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3'"
+            "SELECT {SELECT} {JOIN} WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3'{selection}"
         ))
         .map_err(|e| e.to_string())?;
-    for entry in q.query_map([PROFILE], row).map_err(|e| e.to_string())? {
+    for entry in q
+        .query_map(rusqlite::params_from_iter(values), row)
+        .map_err(|e| e.to_string())?
+    {
         let mut entry = entry.map_err(|e| e.to_string())?;
-        response.analyzed += 1;
+        if candidates.is_none() {
+            response.analyzed += 1;
+        }
         apply(&mut entry, overrides);
         if entry.banned
             || request
@@ -206,12 +250,27 @@ pub(crate) fn query(
         }
         builder.offer_ref(&entry.track.track_key, &entry.features, &entry);
     }
+    if candidates
+        .as_ref()
+        .is_some_and(|c| !builder.covered(&c.frontiers))
+    {
+        drop(q);
+        drop(tx);
+        crate::sonic_index::fallback();
+        return query_indexed(c, has_analysis, request, overrides, false);
+    }
     if let Some(entries) = builder.finish(fresh) {
         // Recheck chosen stops too, in case files changed while candidates streamed.
         if entries.iter().all(fresh) {
             response.tracks = entries.into_iter().map(|e| e.track).collect();
             response.complete = true;
         }
+    }
+    if candidates.is_some() && !response.complete {
+        crate::sonic_index::fallback();
+        drop(q);
+        drop(tx);
+        return query_indexed(c, has_analysis, request, overrides, false);
     }
     Ok(response)
 }

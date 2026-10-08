@@ -139,8 +139,13 @@ manual backups replace unsafe live SQLite/WAL copying; a successful local save
 does not itself confirm OneDrive upload or a physical second-PC transfer.
 
 Aurora vendors the small MIT contract/math crate from Music Library at the
-immutable revision recorded in `vendor/music-sonic-core/SOURCE.json`. File
-checksums are verified by `npm run check:sonic` and CI. This keeps builds
+immutable revision recorded in `vendor/music-sonic-core/SOURCE.json`. Aurora
+0.32.0 and Music Library 0.184.0 also share a local persistent index of completed
+vectors and album means, with background rebuilding, current-data validation and
+a streamed fallback. Receiving PCs rebuild this disposable cache after analysis
+reuse; it is excluded from portable backups. See [index and scale proof](sonic-index-performance.md).
+
+Shared source checksums are verified by `npm run check:sonic` and CI. This keeps builds
 independent of a companion checkout or Music Library's large Git history.
 Update that snapshot from the canonical `crates/sonic-core` source when changing
 the shared profile; do not fork its implementation.

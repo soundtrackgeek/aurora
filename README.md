@@ -1,5 +1,14 @@
 # Aurora
 
+Aurora 0.32.0 uses a persistent sonic similarity index shared by both apps.
+The current 23-dimensional weighted metric keeps exact nearest-neighbor ranking.
+Recent analysis and relevant catalog edits are searched alongside the saved tree;
+background rebuilds and a full-scan fallback keep partial libraries usable.
+Open Music Library 0.184.0 once to initialize existing analysis stores, then use similarity as usual.
+The local `sonic-index.bin` cache is disposable and is rebuilt on receiving PCs;
+it is not included in portable analysis backups. See the
+[index and scale proof](docs/sonic-index-performance.md) for timings and reproduction.
+
 Aurora 0.31.2 adds cross-PC reuse guidance in **Track → More like this**.
 Music Library 0.181.0 can back up completed audio features to
 **OneDrive\\_musicbackup\\sonic-analysis**, merge them on another computer and

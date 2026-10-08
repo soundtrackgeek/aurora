@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.31.2"
+version = "0.32.0"
 description = "A fast, local-first explorer for a personal music universe"
 authors = ["Jørn Tillnes"]
 edition = "2024"
@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 music-sonic-core = { path = "../vendor/music-sonic-core" }
 unicode-normalization = "0.1"
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2.10.1"

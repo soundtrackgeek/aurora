@@ -94,11 +94,12 @@ It opens the snapshots read-only. It writes only its requested JSON output;
 Aurora's equivalent also creates a temporary local state store. Run heavy builds
 sequentially and keep background load comparable when measuring.
 
-## Remaining scale work
+## Persistent index and full-scale follow-up
 
-These queries still stream every compatible analyzed vector. Memory is bounded,
-but work grows with analyzed coverage. This proof does **not** establish latency
-at 1.1 million analyzed tracks. A persistent approximate nearest-neighbor index
-remains a separate milestone: measure near-full coverage, preserve profile and
-catalog generation guards, and validate recall, freshness, bans, filters and
-radio diversity against the exact baseline before switching retrieval.
+The measurements above document the earlier streamed implementation at partial
+analysis coverage. Music Library 0.184.0 and Aurora 0.32.0 add a persistent exact
+weighted tree index, a bounded current-data delta, background rebuilds and a
+streamed fallback. The [index and scale proof](sonic-index-performance.md)
+compares both native implementations on a newer real snapshot and a synthetic
+1.1-million-analyzed-track fixture, plus a release-profile core stress benchmark.
+It distinguishes these fixtures from a fully analyzed real million-file library.

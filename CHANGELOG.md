@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.32.0] - 2026-10-08
+
+### Added
+- A persistent shared sonic tree index accelerates similarity without changing the analysis profile or sacrificing nearest-neighbor recall. Track and album matching, radios, and journey waypoints resolve shortlisted identities against current metadata and file observations.
+- Reproducible native snapshot comparisons and a separate 1.1-million-vector release benchmark, including exact rank agreement and sparse-filter stress cases. See `docs/sonic-index-performance.md` for measured results and limits.
+
+### Changed
+- Catalog and analysis generations, filesystem incarnation guards, and bounded change journals keep recent edits and completed analysis usable alongside a saved tree. Rebuilds run in the background with a cross-process lock and atomic checksummed publication; missing, corrupt, incompatible, or excessively stale indexes use the streamed baseline.
+- Exact coverage counts persist with the index and are reused after restart while source generations match; analysis-only checkpoints do not invalidate catalog MP3 totals. The index is a disposable local cache and is rebuilt after cross-PC analysis reuse; audio analysis backups continue exporting completed analysis only.
+
 ## [0.31.2] - 2026-10-08
 
 ### Added

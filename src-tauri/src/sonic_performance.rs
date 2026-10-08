@@ -7,17 +7,18 @@ fn sonic_performance_proof() {
     let config: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("seeds.json")).unwrap()).unwrap();
     let stops: Vec<String> = serde_json::from_value(config["stops"].clone()).unwrap();
+    let indexed = std::env::var("MUSIC_SONIC_BENCH_MODE").as_deref() != Ok("exact");
     let state_dir = tempfile::tempdir().unwrap();
     let store =
         crate::state_store::StateStore::new(state_dir.path().join("state.sqlite3")).unwrap();
     let mut records = Vec::new();
-    for iteration in 0..3 {
+    for iteration in 0..5 {
         for task in ["tracks", "radio", "albums", "journey"] {
             let start = Instant::now();
             let c = crate::catalog::open_catalog(&dir.join("music-library.sqlite3")).unwrap();
             let value = if task == "tracks" || task == "radio" {
                 serde_json::to_value(
-                    crate::sonic::run(
+                    crate::sonic::run_indexed(
                         &c,
                         &crate::sonic::SonicRequest {
                             seed_key: stops[0].clone(),
@@ -30,13 +31,14 @@ fn sonic_performance_proof() {
                             radio: task == "radio",
                         },
                         Some(&store),
+                        indexed,
                     )
                     .unwrap(),
                 )
                 .unwrap()
             } else if task == "albums" {
                 serde_json::to_value(
-                    crate::sonic_albums::query(
+                    crate::sonic_albums::query_indexed(
                         &c,
                         true,
                         &crate::sonic_albums::SonicAlbumRequest {
@@ -45,13 +47,14 @@ fn sonic_performance_proof() {
                             minimum_coverage: 50,
                         },
                         &HashMap::new(),
+                        indexed,
                     )
                     .unwrap(),
                 )
                 .unwrap()
             } else {
                 serde_json::to_value(
-                    crate::sonic_journey::query(
+                    crate::sonic_journey::query_indexed(
                         &c,
                         true,
                         &crate::sonic_journey::JourneyRequest {
@@ -61,6 +64,7 @@ fn sonic_performance_proof() {
                             same_genre: false,
                         },
                         &HashMap::new(),
+                        indexed,
                     )
                     .unwrap(),
                 )
@@ -90,7 +94,7 @@ fn sonic_performance_proof() {
     }
     std::fs::write(
         std::env::var_os("MUSIC_SONIC_BENCH_OUTPUT").unwrap(),
-        serde_json::to_vec_pretty(&records).unwrap(),
+        serde_json::to_vec_pretty(&serde_json::json!({"indexed":indexed,"indexStats":crate::sonic_index::proof_stats(),"records":records})).unwrap(),
     )
     .unwrap();
 }

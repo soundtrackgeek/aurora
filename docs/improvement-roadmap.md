@@ -383,8 +383,10 @@ performance pass ships in Aurora 0.31.1 and Music Library 0.180.1, reducing
 album coverage scans and candidate metadata work; see [the snapshot proof](sonic-performance.md).
 Safe analysis backups and cross-PC reuse ship in Music Library 0.181.0, with
 guidance in Aurora 0.31.2: OneDrive archives, guarded feature merges and a
-scheduled local fingerprint verification scan. Approximate vector indexing and
-Discovery integration remain later stages.
+scheduled local fingerprint verification scan. Discovery integration shipped in
+Music Library 0.183.0, including similar unrated albums and blended sound
+neighbors. A persistent exact weighted tree index ships in Aurora 0.32.0 and
+Music Library 0.184.0; see [index and scale proof](sonic-index-performance.md).
 
 **What.** Build a queue of tracks that *sound* similar to a seed track, album, or the currently playing track, filtered by Ban and optionally by rating or genre.
 

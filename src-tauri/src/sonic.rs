@@ -145,6 +145,14 @@ pub(crate) fn run(
     request: &SonicRequest,
     store: Option<&StateStore>,
 ) -> Result<SonicResponse, String> {
+    run_indexed(c, request, store, true)
+}
+pub(crate) fn run_indexed(
+    c: &Connection,
+    request: &SonicRequest,
+    store: Option<&StateStore>,
+    indexed: bool,
+) -> Result<SonicResponse, String> {
     if !(1..=100).contains(&request.limit)
         || request.seed_key.len() > 4096
         || request
@@ -160,23 +168,25 @@ pub(crate) fn run(
     {
         return Err("Invalid or oversized sonic request".into());
     }
-    let total = c
-        .query_row(
-            "SELECT count(*) FROM tracks WHERE lower(filename) LIKE '%.mp3'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let source = c;
+    let transaction = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    let c = &*transaction;
+    let total = crate::sonic_index::count(
+        c,
+        "mp3-total",
+        "SELECT count(*) FROM tracks WHERE lower(filename) LIKE '%.mp3'",
+        indexed,
+    )
+    .map_err(|e| e.to_string())?;
     let mut response = SonicResponse {
         analyzed: 0,
         total,
         seed_ready: false,
         tracks: vec![],
     };
-    let (metric, seed_genre) = if let Some(album_id) = &request.seed_album_id {
-        let transaction = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    let (metric, seed_genre, analysis) = if let Some(album_id) = &request.seed_album_id {
         let (album, analysis) = crate::sonic_albums::seed(
-            &transaction,
+            c,
             album_id,
             request.minimum_coverage,
             &ban_overrides(store)?,
@@ -185,7 +195,7 @@ pub(crate) fn run(
             return Ok(response);
         };
         let metric = Metric::new(&analysis).ok_or("Incompatible album analysis profile")?;
-        (metric, album.and_then(|a| a.genre))
+        (metric, album.and_then(|a| a.genre), analysis)
     } else {
         let seed=c.query_row(&format!("SELECT {SELECT},a.features,p.weights,s.size,s.modified FROM sonic.sonic_tracks s JOIN sonic.sonic_audio a USING(audio_hash,profile) JOIN sonic.sonic_profiles p USING(profile) JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename WHERE s.track_key=?1 AND s.profile=?2"),params![request.seed_key,PROFILE],|r|Ok((catalog::map_track_row(r)?,r.get::<_,String>(17)?,r.get::<_,String>(18)?,r.get::<_,i64>(19)? as u64,r.get::<_,String>(20)?))).optional().map_err(|e|e.to_string())?;
         let Some((mut seed_track, features, weights, size, modified)) = seed else {
@@ -203,12 +213,34 @@ pub(crate) fn run(
         let metric = Metric::new(&seed).ok_or(
             "Incompatible sonic analysis profile. Update Music Library and reanalyze the seed.",
         )?;
-        (metric, seed_track.genre)
+        (metric, seed_track.genre, seed)
     };
     response.seed_ready = true;
-    let mut q=c.prepare(&format!("SELECT {SELECT},a.features,s.size,s.modified FROM tracks t JOIN sonic.sonic_tracks s ON s.directory=t.file_path AND s.filename=t.filename JOIN sonic.sonic_audio a USING(audio_hash,profile) WHERE s.profile=?1")).map_err(|e|e.to_string())?;
+    let candidates = if indexed {
+        crate::sonic_index::candidates(
+            c,
+            &analysis,
+            std::slice::from_ref(&analysis.features),
+            false,
+            4096,
+            None,
+            &Default::default(),
+        )
+    } else {
+        None
+    };
+    let selection = candidates
+        .as_ref()
+        .map(|_| " AND s.track_key IN (SELECT value FROM json_each(?2))")
+        .unwrap_or("");
+    let mut values = vec![rusqlite::types::Value::Text(PROFILE.into())];
+    if let Some(candidates) = &candidates {
+        values.push(rusqlite::types::Value::Text(candidates.keys.clone()));
+        response.analyzed=crate::sonic_index::count(c,"tracks-all","SELECT COUNT(*) FROM sonic.sonic_tracks s CROSS JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename JOIN sonic.sonic_audio a USING(audio_hash,profile) WHERE s.profile=?1",true).map_err(|e|e.to_string())?;
+    }
+    let mut q=c.prepare(&format!("SELECT {SELECT},a.features,s.size,s.modified FROM sonic.sonic_tracks s CROSS JOIN tracks t ON s.directory=t.file_path AND s.filename=t.filename JOIN sonic.sonic_audio a USING(audio_hash,profile) WHERE s.profile=?1{selection}")).map_err(|e|e.to_string())?;
     let rows = q
-        .query_map([PROFILE], |r| {
+        .query_map(rusqlite::params_from_iter(values), |r| {
             Ok((
                 catalog::map_track_row(r)?,
                 r.get::<_, String>(17)?,
@@ -235,7 +267,9 @@ pub(crate) fn run(
                 .unzip();
             catalog::apply_overlays(&mut tracks, store)?;
             for (track, (features, size, modified)) in tracks.into_iter().zip(observations) {
-                response.analyzed += 1;
+                if candidates.is_none() {
+                    response.analyzed += 1;
+                }
                 if excluded.contains(track.track_key.as_str())
                     || request
                         .seed_album_id
@@ -304,6 +338,12 @@ pub(crate) fn run(
         if response.tracks.len() == request.limit {
             break;
         }
+    }
+    if candidates.is_some() && response.tracks.len() < request.limit {
+        crate::sonic_index::fallback();
+        drop(q);
+        drop(transaction);
+        return run_indexed(source, request, store, false);
     }
     Ok(response)
 }
@@ -531,5 +571,60 @@ mod tests {
             0
         );
         assert!(!dir.path().join("music-analysis.sqlite3").exists());
+    }
+    #[test]
+    fn indexed_tracks_and_radio_match_exact_with_filters_overlays_and_stale_files() {
+        let (dir, c, _) = crate::sonic_index::tests::fixture();
+        let store = StateStore::new(dir.path().join("state.sqlite3")).unwrap();
+        let mut request = SonicRequest {
+            seed_key: track_key(&dir.path().to_string_lossy(), "00000.mp3"),
+            seed_album_id: None,
+            minimum_coverage: 50,
+            exclude_keys: vec![],
+            limit: 50,
+            minimum_rating: None,
+            same_genre: false,
+            radio: false,
+        };
+        let compare = |request: &SonicRequest| {
+            let exact = run_indexed(&c, request, Some(&store), false).unwrap();
+            let indexed = run_indexed(&c, request, Some(&store), true).unwrap();
+            assert_eq!(
+                serde_json::to_value(exact).unwrap(),
+                serde_json::to_value(indexed).unwrap()
+            );
+        };
+        compare(&request);
+        request.radio = true;
+        compare(&request);
+        let key = track_key(&dir.path().to_string_lossy(), "00001.mp3");
+        let before = crate::tag_model::TagValues {
+            rating: Some(4.),
+            love_state: LoveState::Neutral,
+            release_year: Some(2000),
+        };
+        let desired = crate::tag_model::TagValues {
+            love_state: LoveState::Banned,
+            ..before.clone()
+        };
+        store
+            .upsert_overlay(
+                &key,
+                &dir.path().to_string_lossy(),
+                "00001.mp3",
+                &before,
+                &desired,
+                1,
+                Some(2),
+            )
+            .unwrap();
+        c.execute("UPDATE tracks SET id=id+10000 WHERE id>100", [])
+            .unwrap();
+        std::fs::write(dir.path().join("00002.mp3"), [9; 257]).unwrap();
+        request.minimum_rating = Some(3.5);
+        request.same_genre = true;
+        compare(&request);
+        request.minimum_rating = Some(5.);
+        compare(&request);
     }
 }

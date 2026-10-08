@@ -40,6 +40,7 @@ mod single_instance;
 mod snapshot_io;
 mod sonic;
 mod sonic_albums;
+mod sonic_index;
 mod sonic_journey;
 #[cfg(test)]
 mod sonic_performance;

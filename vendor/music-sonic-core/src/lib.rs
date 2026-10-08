@@ -1,5 +1,6 @@
 //! App-independent result contract. No decoder, SQLite, or Bliss dependency.
 use serde::{Deserialize, Serialize};
+pub mod index;
 
 pub const PROFILE: &str = "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3";
 pub const DIMENSIONS: usize = 23;
@@ -204,6 +205,33 @@ impl<T: Clone> JourneyBuilder<T> {
     }
     pub fn offer(&mut self, key: &str, features: &[f32], data: T) {
         self.offer_ref(key, features, &data);
+    }
+    /// Interpolated feature positions used to retrieve a candidate prefix.
+    pub fn targets(&self) -> Vec<Vec<f32>> {
+        (0..self.layers.len())
+            .map(|index| {
+                let leg = index / self.per_leg;
+                let t = (index % self.per_leg + 1) as f64 / (self.per_leg + 1) as f64;
+                self.stops[leg]
+                    .features
+                    .iter()
+                    .zip(&self.stops[leg + 1].features)
+                    .map(|(a, b)| ((1. - t) * f64::from(*a) + t * f64::from(*b)) as f32)
+                    .collect()
+            })
+            .collect()
+    }
+    /// A filtered prefix is safe only if every waypoint pool fits strictly
+    /// inside its retrieval frontier. Otherwise the caller uses the exact scan.
+    pub fn covered(&self, frontiers: &[f64]) -> bool {
+        frontiers.len() == self.layers.len()
+            && self.layers.iter().zip(frontiers).all(|(layer, frontier)| {
+                frontier.is_infinite()
+                    || layer.len() >= self.candidate_limit
+                        && layer.last().is_some_and(|c| {
+                            c.target_squared + 1e-5 * (1. + c.target_squared) < frontier * frontier
+                        })
+            })
     }
     /// Clone metadata only when a candidate enters a bounded waypoint shortlist.
     pub fn offer_ref(&mut self, key: &str, features: &[f32], data: &T) {

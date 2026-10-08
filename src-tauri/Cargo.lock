@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.31.2"
+version = "0.32.0"
 dependencies = [
  "cpal",
  "dotenvy",
@@ -326,6 +326,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "unicode-normalization",
+ "url",
  "uuid",
  "windows 0.61.3",
 ]

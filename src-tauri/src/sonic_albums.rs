@@ -82,12 +82,22 @@ fn scan(
     id: Option<&str>,
     fresh: bool,
     overrides: &HashMap<String, bool>,
+    visit: impl FnMut(Rollup),
+) -> Result<(), String> {
+    scan_selected(c, id, fresh, overrides, None, visit)
+}
+fn scan_selected(
+    c: &Connection,
+    id: Option<&str>,
+    fresh: bool,
+    overrides: &HashMap<String, bool>,
+    selection: Option<&str>,
     mut visit: impl FnMut(Rollup),
 ) -> Result<(), String> {
     let columns =
         "t.album_id,COALESCE(t.album,''),COALESCE(t.album_artist_display,''),t.canonical_genre,
         a.features,t.file_path,t.filename,s.size,s.modified,COALESCE(t.love,'')";
-    let sql = if id.is_some() {
+    let mut sql = if id.is_some() {
         format!("SELECT {columns},0 FROM tracks t
             LEFT JOIN sonic.sonic_tracks s ON s.directory=t.file_path AND s.filename=t.filename AND s.profile=?1
             LEFT JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile
@@ -111,9 +121,17 @@ fn scan(
             WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3' ORDER BY t.album_id,t.id"
         )
     };
+    if selection.is_some() && id.is_none() {
+        sql=format!("SELECT {columns},0 FROM tracks t
+            LEFT JOIN sonic.sonic_tracks s ON s.directory=t.file_path AND s.filename=t.filename AND s.profile=?1
+            LEFT JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile
+            WHERE t.album_id IN (SELECT value FROM json_each(?2)) AND lower(t.filename) LIKE '%.mp3' ORDER BY t.album_id,t.id");
+    }
     let mut values = vec![Value::Text(PROFILE.into())];
     if let Some(id) = id {
         values.push(Value::Text(id.into()));
+    } else if let Some(selection) = selection {
+        values.push(Value::Text(selection.into()));
     }
     let mut statement = c.prepare(&sql).map_err(|e| e.to_string())?;
     let entries = statement
@@ -156,6 +174,17 @@ fn scan(
         visit(rollup);
     }
     Ok(())
+}
+pub(crate) fn index_coverage(
+    c: &Connection,
+    id: &str,
+    overrides: &HashMap<String, bool>,
+) -> Result<(usize, usize), String> {
+    let mut counts = (0, 0);
+    scan(c, Some(id), false, overrides, |r| {
+        counts = (r.album.analyzed_tracks, r.album.total_tracks)
+    })?;
+    Ok(counts)
 }
 pub(crate) fn seed(
     c: &Connection,
@@ -200,11 +229,21 @@ fn compare(a: &SonicAlbum, b: &SonicAlbum) -> std::cmp::Ordering {
         .total_cmp(&b.distance.unwrap_or(f64::MAX))
         .then(a.album_id.cmp(&b.album_id))
 }
+
 pub(crate) fn query(
     c: &Connection,
     has_analysis: bool,
     request: &SonicAlbumRequest,
     overrides: &HashMap<String, bool>,
+) -> Result<SonicAlbumMatches, String> {
+    query_indexed(c, has_analysis, request, overrides, true)
+}
+pub(crate) fn query_indexed(
+    c: &Connection,
+    has_analysis: bool,
+    request: &SonicAlbumRequest,
+    overrides: &HashMap<String, bool>,
+    indexed: bool,
 ) -> Result<SonicAlbumMatches, String> {
     if request.album_id.is_empty()
         || request.album_id.len() > 4096
@@ -221,6 +260,7 @@ pub(crate) fn query(
     };
     // One read transaction gives rollups a consistent catalog/results snapshot.
     let transaction = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    let source = c;
     let c = &*transaction;
     if !has_analysis {
         response.seed = c.query_row("SELECT album_id,COALESCE(MIN(album),''),COALESCE(MIN(album_artist_display),''),MIN(canonical_genre),COUNT(*)
@@ -235,29 +275,61 @@ pub(crate) fn query(
         return Ok(response);
     };
     response.seed_ready = true;
+    let extra_dirty = crate::sonic_index::override_albums(c, overrides.keys().cloned());
+    let candidates = if indexed {
+        analysis.as_ref().and_then(|analysis| {
+            crate::sonic_index::candidates(
+                c,
+                analysis,
+                std::slice::from_ref(&analysis.features),
+                true,
+                (request.limit * 16).max(256),
+                None,
+                &extra_dirty,
+            )
+        })
+    } else {
+        None
+    };
     let mut ranked = vec![];
-    scan(c, None, false, overrides, |mut r| {
-        if !album_ready(
-            r.album.analyzed_tracks,
-            r.album.total_tracks,
-            request.minimum_coverage,
-        ) {
-            return;
+    scan_selected(
+        c,
+        None,
+        false,
+        overrides,
+        candidates.as_ref().map(|c| c.keys.as_str()),
+        |mut r| {
+            if !album_ready(
+                r.album.analyzed_tracks,
+                r.album.total_tracks,
+                request.minimum_coverage,
+            ) {
+                return;
+            }
+            response.analyzed_albums += 1;
+            if r.album.album_id == request.album_id {
+                return;
+            }
+            r.album.distance = metric.distance(&r.features.mean().unwrap());
+            if r.album.distance.is_none() {
+                return;
+            }
+            ranked.push(r.album);
+            if ranked.len() > request.limit * 16 {
+                ranked.sort_by(compare);
+                ranked.truncate(request.limit * 8);
+            }
+        },
+    )?;
+    if candidates.is_some() {
+        response.analyzed_albums =
+            crate::sonic_index::album_count(c, request.minimum_coverage, overrides)
+                .unwrap_or(response.analyzed_albums);
+        if ranked.len() < request.limit * 8 {
+            drop(transaction);
+            return query_indexed(source, has_analysis, request, overrides, false);
         }
-        response.analyzed_albums += 1;
-        if r.album.album_id == request.album_id {
-            return;
-        }
-        r.album.distance = metric.distance(&r.features.mean().unwrap());
-        if r.album.distance.is_none() {
-            return;
-        }
-        ranked.push(r.album);
-        if ranked.len() > request.limit * 16 {
-            ranked.sort_by(compare);
-            ranked.truncate(request.limit * 8);
-        }
-    })?;
+    }
     ranked.sort_by(compare);
     ranked.truncate(request.limit * 8);
     // Verify every contributing file in shortlisted albums and recompute means.
@@ -273,6 +345,10 @@ pub(crate) fn query(
     }
     response.albums.sort_by(compare);
     response.albums.truncate(request.limit);
+    if candidates.is_some() && response.albums.len() < request.limit {
+        drop(transaction);
+        return query_indexed(source, has_analysis, request, overrides, false);
+    }
     Ok(response)
 }
 

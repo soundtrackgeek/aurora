@@ -1,0 +1,322 @@
+{
+  "schemaVersion": 1,
+  "measuredDate": "2026-10-08",
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X, 6 cores",
+    "ramGB": 32,
+    "os": "Windows x64"
+  },
+  "native": [
+    {
+      "app": "ml",
+      "fixture": "real",
+      "buildProfile": "test-unoptimized",
+      "cases": [
+        {
+          "task": "tracks",
+          "samples": 5,
+          "exactWarmMedianMs": 1161.512,
+          "indexWarmMedianMs": 82.892,
+          "speedup": 14.012,
+          "exactFirstPassMs": 14076.733,
+          "indexFirstPassMs": 516.767,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "albums",
+          "samples": 5,
+          "exactWarmMedianMs": 1565.672,
+          "indexWarmMedianMs": 278.314,
+          "speedup": 5.626,
+          "exactFirstPassMs": 8146.663,
+          "indexFirstPassMs": 365.754,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "discovery",
+          "samples": 5,
+          "exactWarmMedianMs": 1654.101,
+          "indexWarmMedianMs": 516.084,
+          "speedup": 3.205,
+          "exactFirstPassMs": 3523.584,
+          "indexFirstPassMs": 2371.567,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "journey",
+          "samples": 5,
+          "exactWarmMedianMs": 1675.428,
+          "indexWarmMedianMs": 425.137,
+          "speedup": 3.941,
+          "exactFirstPassMs": 7690.085,
+          "indexFirstPassMs": 555.012,
+          "completeResponsesEqual": true
+        }
+      ],
+      "indexStats": {
+        "exactFallbacks": 0,
+        "indexedCandidateRequests": 20
+      },
+      "exactPeakWorkingSetBytes": 36585472,
+      "indexPeakWorkingSetBytes": 43540480
+    },
+    {
+      "app": "ml",
+      "fixture": "scale",
+      "buildProfile": "test-unoptimized",
+      "cases": [
+        {
+          "task": "tracks",
+          "samples": 5,
+          "exactWarmMedianMs": 16750.506,
+          "indexWarmMedianMs": 94.577,
+          "speedup": 177.109,
+          "exactFirstPassMs": 17503.629,
+          "indexFirstPassMs": 6455.27,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "albums",
+          "samples": 5,
+          "exactWarmMedianMs": 23893.672,
+          "indexWarmMedianMs": 298.854,
+          "speedup": 79.951,
+          "exactFirstPassMs": 24971.234,
+          "indexFirstPassMs": 1229.015,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "discovery",
+          "samples": 5,
+          "exactWarmMedianMs": 24203.056,
+          "indexWarmMedianMs": 649.262,
+          "speedup": 37.278,
+          "exactFirstPassMs": 24307.614,
+          "indexFirstPassMs": 1032.242,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "journey",
+          "samples": 5,
+          "exactWarmMedianMs": 24769.985,
+          "indexWarmMedianMs": 1102.059,
+          "speedup": 22.476,
+          "exactFirstPassMs": 24810.076,
+          "indexFirstPassMs": 1720.143,
+          "completeResponsesEqual": true
+        }
+      ],
+      "indexStats": {
+        "exactFallbacks": 0,
+        "indexedCandidateRequests": 20
+      },
+      "exactPeakWorkingSetBytes": 38330368,
+      "indexPeakWorkingSetBytes": 320151552
+    },
+    {
+      "app": "aurora",
+      "fixture": "real",
+      "buildProfile": "test-opt1-dependencies-opt3",
+      "cases": [
+        {
+          "task": "tracks",
+          "samples": 5,
+          "exactWarmMedianMs": 1548.091,
+          "indexWarmMedianMs": 173.706,
+          "speedup": 8.912,
+          "exactFirstPassMs": 1743.028,
+          "indexFirstPassMs": 221.616,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "radio",
+          "samples": 5,
+          "exactWarmMedianMs": 1485.537,
+          "indexWarmMedianMs": 174.705,
+          "speedup": 8.503,
+          "exactFirstPassMs": 1680.791,
+          "indexFirstPassMs": 162.927,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "albums",
+          "samples": 5,
+          "exactWarmMedianMs": 840.99,
+          "indexWarmMedianMs": 151.705,
+          "speedup": 5.544,
+          "exactFirstPassMs": 987.734,
+          "indexFirstPassMs": 149.268,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "journey",
+          "samples": 5,
+          "exactWarmMedianMs": 554.706,
+          "indexWarmMedianMs": 120.547,
+          "speedup": 4.602,
+          "exactFirstPassMs": 616.069,
+          "indexFirstPassMs": 121.066,
+          "completeResponsesEqual": true
+        }
+      ],
+      "indexStats": {
+        "exactFallbacks": 0,
+        "indexedCandidateRequests": 20
+      },
+      "exactPeakWorkingSetBytes": 32251904,
+      "indexPeakWorkingSetBytes": 42717184
+    },
+    {
+      "app": "aurora",
+      "fixture": "scale",
+      "buildProfile": "test-opt1-dependencies-opt3",
+      "cases": [
+        {
+          "task": "tracks",
+          "samples": 5,
+          "exactWarmMedianMs": 24072.933,
+          "indexWarmMedianMs": 130.734,
+          "speedup": 184.136,
+          "exactFirstPassMs": 24602.42,
+          "indexFirstPassMs": 649.769,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "radio",
+          "samples": 5,
+          "exactWarmMedianMs": 24315.006,
+          "indexWarmMedianMs": 136.557,
+          "speedup": 178.057,
+          "exactFirstPassMs": 24785.531,
+          "indexFirstPassMs": 143.681,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "albums",
+          "samples": 5,
+          "exactWarmMedianMs": 9542.685,
+          "indexWarmMedianMs": 124.799,
+          "speedup": 76.464,
+          "exactFirstPassMs": 9463.244,
+          "indexFirstPassMs": 172.307,
+          "completeResponsesEqual": true
+        },
+        {
+          "task": "journey",
+          "samples": 5,
+          "exactWarmMedianMs": 4737.129,
+          "indexWarmMedianMs": 197.404,
+          "speedup": 23.997,
+          "exactFirstPassMs": 4632.929,
+          "indexFirstPassMs": 207.832,
+          "completeResponsesEqual": true
+        }
+      ],
+      "indexStats": {
+        "exactFallbacks": 0,
+        "indexedCandidateRequests": 20
+      },
+      "exactPeakWorkingSetBytes": 37105664,
+      "indexPeakWorkingSetBytes": 322789376
+    }
+  ],
+  "indexBuilds": [
+    {
+      "albums": 4974,
+      "buildMs": 38581.190200000005,
+      "bytes": 11236726,
+      "loadMs": 338.76509999999996,
+      "profile": "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3",
+      "tracks": 56619,
+      "fixture": "real",
+      "peakWorkingSetBytes": 32403456
+    },
+    {
+      "albums": 68750,
+      "buildMs": 99687.5273,
+      "bytes": 238153004,
+      "loadMs": 6418.5133,
+      "profile": "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3",
+      "tracks": 1100000,
+      "fixture": "scale",
+      "synthetic": true,
+      "peakWorkingSetBytes": 433889280
+    }
+  ],
+  "core": {
+    "buildProfile": "release",
+    "threads": 1,
+    "distributions": [
+      {
+        "distribution": "resampled-real-with-jitter",
+        "synthetic": true,
+        "vectors": 1100000,
+        "sourceVectors": 56427,
+        "buildMs": 670.5965,
+        "writeMs": 258.7527,
+        "loadMs": 151.6387,
+        "bytes": 126500196,
+        "cases": [
+          {
+            "filter": "all",
+            "samples": 16,
+            "exactMedianMs": 67.669,
+            "indexMedianMs": 0.939,
+            "visitedMedianPercent": 3.267,
+            "orderedIdsEqual": true,
+            "recallAt50": 1
+          },
+          {
+            "filter": "one-percent-eligible",
+            "samples": 8,
+            "exactMedianMs": 6.344,
+            "indexMedianMs": 3.513,
+            "visitedMedianPercent": 19.883,
+            "orderedIdsEqual": true,
+            "recallAt50": 1
+          }
+        ]
+      },
+      {
+        "distribution": "uniform-23d",
+        "synthetic": true,
+        "vectors": 1100000,
+        "sourceVectors": 56427,
+        "buildMs": 615.0991,
+        "writeMs": 255.722,
+        "loadMs": 163.46169999999998,
+        "bytes": 126500196,
+        "cases": [
+          {
+            "filter": "all",
+            "samples": 16,
+            "exactMedianMs": 77.487,
+            "indexMedianMs": 16.326,
+            "visitedMedianPercent": 29.058,
+            "orderedIdsEqual": true,
+            "recallAt50": 1
+          },
+          {
+            "filter": "one-percent-eligible",
+            "samples": 8,
+            "exactMedianMs": 6.76,
+            "indexMedianMs": 11.746,
+            "visitedMedianPercent": 63.833,
+            "orderedIdsEqual": true,
+            "recallAt50": 1
+          }
+        ]
+      }
+    ],
+    "peakWorkingSetBytes": 444932096
+  },
+  "limitations": [
+    "Native timings use Cargo test profiles, not installed release builds.",
+    "The real catalog has partial analysis coverage; the million-analyzed-track database is synthetic.",
+    "Only native benchmark shortlists have fixture files, containing one byte.",
+    "Native measurements use one fixed seed set and five passes; warm medians use four passes.",
+    "Uniform and 1-percent-filtered core queries are stress distributions.",
+    "Process memory records peak working set sampled every 200 ms, including baseline, index and SQLite work.",
+    "Aurora uses an empty temporary pending-edit store."
+  ]
+}
