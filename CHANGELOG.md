@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.35.1] - 2026-10-09
+
+### Fixed
+- Stabilize the macOS release verification's Tags Albums navigation test with controlled loading timers and scoped queries. Cover delayed album responses in all five library destinations while preserving Album details, inspector switching and removal assertions under the normal test timeout.
+- Preload the lazy album operation panel alongside navigation routes before exercising its preview error state.
+
 ## [0.35.0] - 2026-10-09
 
 ### Added

@@ -18,6 +18,7 @@ beforeAll(async () => {
     import("./app/routes/PlaylistsRoute"), import("./app/routes/PublishersRoute"),
     import("./app/routes/RatingsRoute"), import("./app/routes/YearsRoute"),
     import("./components/history/ListeningReport"), import("./components/inbox/Inbox"),
+    import("./components/explorer/AlbumMoveOperation"),
   ]);
 });
 
@@ -39,13 +40,28 @@ async function navigate(name: string) {
 }
 
 it.each(["Universe", "Songs", "Albums", "Artists", "Tags"])("keeps Album details and removal available in the %s Albums view", async (destination) => {
+  vi.useFakeTimers();
+  const exploreAlbums = library.exploreAlbums;
+  vi.spyOn(library, "exploreAlbums").mockImplementation(async (...args) => {
+    // Model a response slower than findByRole's default polling budget.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1500));
+    return exploreAlbums(...args);
+  });
   const preview = vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockRejectedValue(new Error("Native preview required"));
-  render(<App />);
-  await screen.findByRole("region", { name: "Library overview" });
-  if (destination !== "Universe") await navigate(destination);
-  fireEvent.click(within(await screen.findByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
-  fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
-  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+  await act(async () => { render(<App />); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  const main = within(screen.getByRole("main"));
+  expect(main.getByRole("region", { name: "Library overview" })).toBeVisible();
+  const primary = within(screen.getByRole("navigation", { name: "Primary" }));
+  if (destination !== "Universe") {
+    await act(async () => { fireEvent.click(primary.getByRole("button", { name: destination })); });
+  }
+  expect(primary.getByRole("button", { name: destination })).toHaveAttribute("aria-current", "page");
+  fireEvent.click(within(main.getByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+  expect(within(main.getByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" })).toHaveAttribute("aria-selected", "true");
+  await act(async () => { fireEvent.click(main.getByRole("button", { name: /^Viva la Vida cover/ })); });
+  const details = main.getByRole("complementary", { name: "Viva la Vida album details" });
   const tabs = within(screen.getByRole("tablist", { name: "Library details" }));
   expect(tabs.getByRole("tab", { name: "Album" })).toBeEnabled();
   fireEvent.click(tabs.getByRole("tab", { name: "Track" }));
@@ -53,9 +69,9 @@ it.each(["Universe", "Songs", "Albums", "Artists", "Tags"])("keeps Album details
   expect(tabs.getByRole("tab", { name: "Album" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getAllByRole("button", { name: "Remove Album" }).length).toBeGreaterThan(0);
   fireEvent.click(tabs.getByRole("tab", { name: "Track" }));
-  fireEvent.click(within(details).getByRole("button", { name: "Remove Album" }));
-  await waitFor(() => expect(preview).toHaveBeenCalledWith("preview-viva"));
-  expect(await screen.findByRole("alert", { name: "Remove Album: Viva la Vida" })).toHaveTextContent("Native preview required");
+  await act(async () => { fireEvent.click(within(details).getByRole("button", { name: "Remove Album" })); });
+  expect(preview).toHaveBeenCalledWith("preview-viva");
+  expect(screen.getByRole("alert", { name: "Remove Album: Viva la Vida" })).toHaveTextContent("Native preview required");
 });
 
 it.each([

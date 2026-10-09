@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora 0.35.1 makes the Albums navigation verification deterministic across
+release runners. The tests control loading timers, exercise delayed album
+responses in Universe, Songs, Albums, Artists and Tags, and retain the Album
+details and removal checks under the normal test timeout.
+
 Aurora 0.35.0 adds context menus for library songs, albums and artists, matched
 chart entries, history, playlist songs and queue rows. Right-click or press
 Shift+F10 / the Menu key for Play, Play next, Add to queue, Add to playlist,
