@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, ListMusic, Trash2, X } from "lucide-react";
 import { Artwork } from "./Artwork";
 import type { PlaybackSnapshot } from "../playback";
+import { AddToPlaylistButton } from "./playlists/PlaylistAuthoring";
 
 export function QueuePanel({
   playback,
@@ -9,6 +10,7 @@ export function QueuePanel({
   onMove,
   onRemove,
   onClear,
+  onSave,
 }: {
   playback: PlaybackSnapshot;
   onClose: () => void;
@@ -16,6 +18,7 @@ export function QueuePanel({
   onMove: (from: number, to: number) => void;
   onRemove: (index: number) => void;
   onClear: () => void;
+  onSave?: () => void;
 }) {
   return (
     <aside className="queue-panel" aria-labelledby="queue-title">
@@ -43,6 +46,7 @@ export function QueuePanel({
                   <span className="queue-copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span>
                 </button>
                 <span className="queue-actions">
+                  <AddToPlaylistButton track={track} label={track.title} />
                   <button type="button" aria-label={`Move ${track.title} up`} disabled={index === 0} onClick={() => onMove(index, index - 1)}><ArrowUp aria-hidden="true" /></button>
                   <button type="button" aria-label={`Move ${track.title} down`} disabled={index === playback.queue.length - 1} onClick={() => onMove(index, index + 1)}><ArrowDown aria-hidden="true" /></button>
                   <button type="button" aria-label={`Remove ${track.title} from queue`} onClick={() => onRemove(index)}><X aria-hidden="true" /></button>
@@ -55,6 +59,7 @@ export function QueuePanel({
         <div className="queue-empty"><ListMusic aria-hidden="true" /><h3>Your queue is empty</h3><p>Double-click a song to begin listening.</p></div>
       )}
       <div className="queue-panel__footer">
+        {onSave&&<button type="button" disabled={!playback.queue.length} onClick={onSave}>Save queue as playlist</button>}
         <span>Queue changes are saved automatically.</span>
         <button type="button" disabled={!playback.queue.length} onClick={onClear}><Trash2 aria-hidden="true" /> Clear</button>
       </div>

@@ -1,3 +1,4 @@
+import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
 import { useAlbumCoverUrl } from "../../albumArtwork";
 import {
   Album,
@@ -304,7 +305,7 @@ function GenreAlbums({ detail }: { detail: GenreDetail }) {
   return (
     <section className="genre-panel genre-albums" aria-labelledby="genre-albums-title">
       <header><div><span>Representative releases</span><h3 id="genre-albums-title">Albums in orbit</h3></div><Album aria-hidden="true" /></header>
-      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><small>{album.publisher ?? "Publisher unknown"} · {album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
+      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><AddToPlaylistButton albumId={album.id} label={album.title} /><small>{album.publisher ?? "Publisher unknown"} · {album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
     </section>
   );
 }
@@ -331,7 +332,7 @@ function GenreHighlights({
   return (
     <section className="genre-panel genre-highlights" aria-labelledby="genre-highlights-title">
       <header><div><span>Your strongest signals</span><h3 id="genre-highlights-title">Highlights</h3></div><Music2 aria-hidden="true" /></header>
-      {detail.highlights.length ? <ol>{detail.highlights.map((track, index) => <li key={track.trackKey} onClick={() => onSelectTrack(track)} onDoubleClick={() => onPlayTrack(track)}><button type="button" className="genre-highlight__play" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); onPlayTrack(track); }}><Play aria-hidden="true" /></button><span className="genre-highlight__rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span className="genre-highlight__copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="genre-highlight__time">{formatDuration(track.durationSeconds)}</span><InlineRatingControl title={track.title} rating={track.rating} busy={busyKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><InlineLoveControl title={track.title} loveState={track.loveState} busy={busyKeys.has(track.trackKey)} onLoveChange={(loveState) => onLoveChange(track, loveState)} /></li>)}</ol> : <p className="genre-panel__empty">No rated or representative tracks are available.</p>}
+      {detail.highlights.length ? <ol>{detail.highlights.map((track, index) => <li key={track.trackKey} onClick={() => onSelectTrack(track)} onDoubleClick={() => onPlayTrack(track)}><button type="button" className="genre-highlight__play" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); onPlayTrack(track); }}><Play aria-hidden="true" /></button><span className="genre-highlight__rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span className="genre-highlight__copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="genre-highlight__time">{formatDuration(track.durationSeconds)}</span><AddToPlaylistButton track={track} label={track.title} /><InlineRatingControl title={track.title} rating={track.rating} busy={busyKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><InlineLoveControl title={track.title} loveState={track.loveState} busy={busyKeys.has(track.trackKey)} onLoveChange={(loveState) => onLoveChange(track, loveState)} /></li>)}</ol> : <p className="genre-panel__empty">No rated or representative tracks are available.</p>}
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { transitionContent } from "../../contentTransition";
 import {
   ChevronRight,
@@ -262,11 +263,11 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
           <span>Try another filter, or Refresh after your ratings change.</span>
         </div>
       </div> : <div className="completion-shelf" aria-label={`${formatCount(page.total)} ${completionTabs.find((tab) => tab.kind === page.kind)?.label.toLocaleLowerCase()} albums`}>
-        {page.albums.map((album) => <button type="button" className={selectedAlbum?.id === album.id ? "is-selected" : undefined} aria-pressed={selectedAlbum?.id === album.id} onClick={() => props.onSelectAlbum(album)} key={album.id}>
+        {page.albums.map((album) => <PlaylistRow key={album.id} selection={{albumIds:[album.id],label:album.title}}><button type="button" className={selectedAlbum?.id === album.id ? "is-selected" : undefined} aria-pressed={selectedAlbum?.id === album.id} onClick={() => props.onSelectAlbum(album)} key={album.id}>
           <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
           <strong>{album.title}</strong><span>{album.artist}</span>
           <small>{album.remainingTracks} {album.remainingTracks === 1 ? "rating" : "ratings"} left</small>
-        </button>)}
+        </button></PlaylistRow>)}
       </div>}
       {selectedAlbum ? <div className="completion-detail">
         <div className="completion-detail__album">
@@ -285,7 +286,7 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
             <span>{index + 1}</span><span className="completion-track__title"><strong>{track.title}</strong><small>[{displayTrackArtist(track)}]</small></span>
             <InlineRatingControl title={track.title} rating={track.rating} busy={props.busyTrackKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => props.onRatingChange(track, rating)} />
             <InlineLoveControl title={track.title} loveState={track.loveState} busy={props.busyTrackKeys.has(track.trackKey)} onLoveChange={(state) => props.onLoveChange(track, state)} />
-            <small>{formatDuration(track.durationSeconds)}</small>
+            <small>{formatDuration(track.durationSeconds)} <AddToPlaylistButton track={track} label={track.title} /></small>
           </div>)}
         </div>
       </div> : null}

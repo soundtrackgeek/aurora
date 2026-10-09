@@ -8,6 +8,7 @@ export interface SavedPlaylistSummary {
   trackCount: number;
   updatedAt: string;
   smart?: boolean;
+  editable?: boolean;
 }
 
 export interface SavedPlaylistDetail extends Omit<SavedPlaylistSummary, "updatedAt"> {
@@ -17,6 +18,8 @@ export interface SavedPlaylistDetail extends Omit<SavedPlaylistSummary, "updated
   smartSettings?: SmartPlaylistSettings | null;
   nextCursor?: number | null;
   revision?: string;
+  positions?: number[];
+  editable?: boolean;
 }
 
 export interface SharedPlaylistRequest {
@@ -29,6 +32,21 @@ export interface SharedPlaylistRequest {
 }
 export interface SmartPlaylistSettings { trackLimit: number; refreshPolicy: "library" | "manual"; }
 export interface PlaylistPageContext { id: number; cursor: number | null; revision: string; shuffleSeed?: number; }
+
+export interface PlaylistImportPreview { path: string; fingerprint: string; name: string; trackCount: number; samples: string[]; }
+export interface PlaylistEdit {
+  action: "create" | "rename" | "delete" | "append" | "move" | "remove";
+  id?: number; expectedUpdatedAt?: string; name?: string; from?: number; to?: number;
+  tracks?: readonly Track[]; albumIds?: readonly string[];
+}
+function requireDesktop() { if (!isTauriRuntime()) throw new Error("Shared playlist authoring requires Aurora desktop and an updated Music Library."); }
+export async function authorPlaylist(input: PlaylistEdit): Promise<{ id: number }> {
+  requireDesktop();
+  return invoke("author_music_library_playlist", { input: { ...input, tracks: input.tracks?.map(({id,trackKey})=>({id,trackKey})) ?? [] } });
+}
+export async function previewPlaylistImport(): Promise<PlaylistImportPreview | null> { requireDesktop(); return invoke("preview_playlist_import"); }
+export async function savePlaylistImport(preview: PlaylistImportPreview, name: string): Promise<{ id: number }> { requireDesktop(); return invoke("save_playlist_import", {path: preview.path, fingerprint: preview.fingerprint, name}); }
+export async function exportPlaylist(id: number, revision: string): Promise<boolean> { requireDesktop(); return invoke("export_music_library_playlist", {id,revision}); }
 
 export async function saveSmartPlaylist(input: { id: number | null; expectedUpdatedAt?: string; name: string; request: SharedPlaylistRequest; settings: SmartPlaylistSettings }): Promise<{ id: number }> {
   if (!isTauriRuntime()) throw new Error("Shared playlists are saved by Music Library in the desktop app.");

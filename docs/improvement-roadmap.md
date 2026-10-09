@@ -352,7 +352,13 @@ Aurora-specific search semantics can always be preserved as a saved view.
 
 **How it fits.** Store each definition (name, query, sort, limit, refresh policy) in `aurora-state.sqlite3`, so it syncs between devices through the existing snapshots. Evaluate definitions with keyset pages and play them through bounded queue refills. Add them to the Playlists flyout.
 
-### 2. Playlist authoring
+### 2. Playlist authoring - DONE
+
+**Implemented in Aurora 0.34.0 and Music Library 0.186.1.** Shared regular playlist
+creation, rename/delete, song reorder/remove, Add to playlist from catalog rows and
+selected Songs/Albums, Save queue with repeated songs, and reviewed M3U8 import /
+atomic export use Music Library's capability-gated bridge. See
+[Shared playlists](shared-playlists.md) for bounds and device requirements.
 
 **What.** Create, rename, reorder, and delete playlists; **Add to playlist** from any row; **Save queue as playlist**; import and export M3U8.
 

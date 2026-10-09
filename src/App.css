@@ -631,3 +631,27 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .curation-message button { margin-left: 14px; }
 .saved-views-nav { max-height: 25vh; overflow-y: auto; overflow-x: hidden; }
 @media(max-width:600px) { .playlist-rule-editor fieldset { grid-template-columns: minmax(0,1fr); } }
+
+/* Shared playlist authoring actions stay outside each row's primary button. */
+.add-to-playlist { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 30px; height: 30px; padding: 5px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); background: var(--surface); cursor: pointer; vertical-align: middle; }
+.add-to-playlist svg { width: 16px; height: 16px; }
+.add-to-playlist:hover, .add-to-playlist:focus-visible { color: var(--text); border-color: var(--violet); }
+.playlist-song-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.saved-playlists__tracks > li { display: flex; align-items: center; gap: 5px; }
+.saved-playlists__tracks > li > button { flex: 1; width: auto; }
+.saved-playlists__tracks .playlist-song-actions > button { width: 30px; min-width: 30px; justify-content: center; padding: 5px; }
+.playlist-album-row { position: relative; min-width: 0; }
+.playlist-album-row > .deep-explorer-album { width: 100%; }
+.playlist-album-row > .add-to-playlist { position: absolute; top: 8px; right: 8px; }
+.playlist-album-row .deep-explorer-album > svg { visibility: hidden; }
+.playlist-track-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.playlist-track-row > button:first-child { flex: 1; min-width: 0; }
+.history-row:has(.add-to-playlist) { grid-template-columns: minmax(220px,1fr) 94px 120px 92px 64px; }
+.playlist-rule-editor fieldset { min-width: 0; }
+.deep-explorer-table__playlist { width: 38px; }
+.deep-explorer-filters > button { padding: 8px 11px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-raised); color: var(--text); cursor: pointer; }
+.deep-explorer-filters > button:disabled { opacity: .5; cursor: default; }
+@media (max-width: 760px) {
+  .saved-playlists__tracks .saved-playlists__duration, .saved-playlists__tracks .saved-playlists__row-play { display: none; }
+  .history-row:has(.add-to-playlist) { grid-template-columns: minmax(120px,1fr) 70px 64px; }
+}

@@ -1,5 +1,16 @@
 # Aurora
 
+Aurora 0.34.0 adds **playlist authoring**: create empty regular playlists, rename or
+delete shared playlists, and move or remove songs in their saved order. **Add to
+playlist** is available on catalog song/album rows and selected Songs/Albums;
+**Save queue as playlist** captures the current queue, including repeated songs.
+Album cards in Artists, Years, Publishers and Ratings also support right-click or
+Shift+F10 to add their songs. **Import M3U8** previews exact catalog paths before
+saving; **Export M3U8** retains the full saved order, repeats and unavailable paths.
+Update Music Library to **0.186.1 or newer** first. The companion remains the only
+catalog writer, and both apps reject stale playlist edits. Smart rules and mixtape
+sides retain their own ordering. See [Shared playlists](docs/shared-playlists.md).
+
 Aurora 0.33.0 adds **shared Smart playlists and saved views**. In Songs or Albums,
 select rows and choose **Create playlist** to save their order in Music Library,
 or choose **Create Smart playlist** to save reusable library rules. Album rules

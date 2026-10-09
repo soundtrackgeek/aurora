@@ -24,6 +24,7 @@ import {
   type MouseEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -41,6 +42,8 @@ import { CountryFlag } from "../CountryFlag";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import { ContentTransition } from "../ContentTransition";
 import "./DeepExplorer.css";
+import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
+import { PlaylistAuthoringContext } from "../playlists/playlistAuthoringContext";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
 export type ExplorerRatingFilter = "all" | "unrated" | 0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 3.5 | 4 | 4.5 | 5;
@@ -461,6 +464,7 @@ function TrackTable({
             <th className="is-numeric">Plays</th>
             <th>Rating</th>
             <th aria-label="Love" />
+            <th className="deep-explorer-table__playlist" aria-label="Add to playlist" />
             {onDeleteTrack ? <th className="deep-explorer-table__delete-heading" aria-label="Delete" /> : null}
           </tr>
         </thead>
@@ -551,6 +555,7 @@ function TrackTable({
                     <Heart className={track.loved ? "is-loved" : undefined} aria-label={track.loved ? "Loved" : "Not loved"} />
                   )}
                 </td>
+                <td className="deep-explorer-table__playlist"><AddToPlaylistButton track={track} label={track.title} /></td>
                 {onDeleteTrack ? (
                   <td className="deep-explorer-table__delete">
                     <button
@@ -680,7 +685,7 @@ function AlbumGrid({
             const selected = selectedAlbumIds ? selectedAlbumIds.has(album.id) : selectedAlbumId === album.id;
             const expanded = selectedAlbumId === album.id;
             return (
-              <button
+              <div className="playlist-album-row" key={album.id}><button
                 type="button"
                 className={`deep-explorer-album${selected ? " is-selected" : ""}`}
                 aria-pressed={selected}
@@ -692,7 +697,6 @@ function AlbumGrid({
                   }) ?? true;
                   onSelectAlbum(remainsSelected ? album : null);
                 }}
-                key={album.id}
               >
                 <AlbumArtwork album={album} />
                 <span className="deep-explorer-album__copy">
@@ -718,6 +722,7 @@ function AlbumGrid({
                 </span>
                 <ChevronRight aria-hidden="true" />
               </button>
+              <AddToPlaylistButton albumId={album.id} label={album.title} /></div>
             );
           })}
           {row.some((album) => album.id === detailAlbumId) ? detail : null}
@@ -996,6 +1001,7 @@ function resultCountForView(view: ExplorerView, props: Pick<DeepExplorerProps, "
 }
 
 export function DeepExplorer(props: DeepExplorerProps) {
+  const addToPlaylist=useContext(PlaylistAuthoringContext);
   const {
     view,
     filters,
@@ -1177,6 +1183,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
       <div className="deep-explorer-filters" aria-label="Explorer filters">
         {props.savedViewControl}
         {props.onCreatePlaylist && view !== "artists" && <>
+          {addToPlaylist&&<button type="button" disabled={loadState!=="ready"||(view==="tracks"?selectedTrackKeys.size===0:selectedAlbumIds.size===0)} onClick={()=>addToPlaylist(view==="tracks"?{tracks:tracks.filter(t=>selectedTrackKeys.has(t.trackKey)),label:"Selected songs"}:{albumIds:albums.filter(a=>selectedAlbumIds.has(a.id)).map(a=>a.id),label:"Selected albums"})}>Add to playlist</button>}
           <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: tracks.filter(t => selectedTrackKeys.has(t.trackKey)) } : { kind: "albums", albums: albums.filter(a => selectedAlbumIds.has(a.id)) }, false)} disabled={loadState !== "ready" || (view === "tracks" ? selectedTrackKeys.size === 0 : selectedAlbumIds.size === 0)}>Create playlist</button>
           <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: [] } : { kind: "albums", albums: [] }, true)}>Create Smart playlist</button>
         </>}

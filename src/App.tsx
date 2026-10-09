@@ -35,6 +35,8 @@ import { lazy, Activity as ReactActivity, Suspense, useCallback, useEffect, useL
 import "./App.css";
 import { listSavedViews, type SavedView } from "./savedViews";
 import { PlaylistComposer, SaveViewControl, type PlaylistDraft } from "./components/playlists/ExplorerCuration";
+import { PlaylistAuthoringDialog } from "./components/playlists/PlaylistAuthoring";
+import { PlaylistAuthoringContext, type PlaylistSelection } from "./components/playlists/playlistAuthoringContext";
 import { AppStoreProvider } from "./app/AppStoreProvider";
 import { useArtistNavigation } from "./app/artist/useArtistNavigation";
 import { EmptyInspector } from "./app/components/EmptyInspector";
@@ -204,6 +206,7 @@ function historyDateLabel(timestamp: number | null): string {
 function App() {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [playlistDraft, setPlaylistDraft] = useState<PlaylistDraft | null>(null);
+  const [playlistSelection, setPlaylistSelection] = useState<PlaylistSelection | null>(null);
   const [playlistSaveMessage, setPlaylistSaveMessage] = useState<string | null>(null);
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
   useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
@@ -1298,6 +1301,7 @@ function App() {
   const catalogNoticeMessage = catalogSyncNotice ? catalogSyncMessage(catalogSyncNotice) : null;
 
   return (
+    <PlaylistAuthoringContext value={setPlaylistSelection}>
     <div
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
@@ -1307,6 +1311,7 @@ function App() {
       data-cover-size={displayPreferences.global.coverSize}
     >
       {playlistDraft && <PlaylistComposer draft={playlistDraft} onClose={() => setPlaylistDraft(null)} onSaved={() => { setPlaylistDraft(null); setPlaylistsReloadToken(v=>v+1); setPlaylistSaveMessage("Playlist saved in Music Library and Aurora."); }} />}
+      {playlistSelection && <PlaylistAuthoringDialog selection={playlistSelection} onClose={()=>setPlaylistSelection(null)} onSaved={()=>{setPlaylistSelection(null);setPlaylistsReloadToken(v=>v+1);setPlaylistSaveMessage("Playlist saved in Music Library and Aurora.");}} />}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
@@ -1341,7 +1346,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.33.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.34.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1882,6 +1887,7 @@ function App() {
         <QueuePanel
           playback={playback.state}
           onClose={() => setQueueOpen(false)}
+          onSave={()=>setPlaylistSelection({tracks:[...playback.state.queue],label:`Current queue · ${playback.state.queue.length} songs`})}
           onPlay={(trackId) => void playback.play(playback.state.queue, trackId)}
           onMove={(from, to) => void playback.move(from, to)}
           onRemove={(index) => void playback.remove(index)}
@@ -1959,6 +1965,7 @@ function App() {
         </div>
       )}
     </div>
+    </PlaylistAuthoringContext>
   );
 }
 

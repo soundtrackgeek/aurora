@@ -1,3 +1,4 @@
+import { PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { transitionContent } from "../../contentTransition";
 import {
   CalendarRange,
@@ -277,7 +278,7 @@ function EditionShelf({ detail, selectedAlbumId, onSelectAlbum }: Pick<YearsExpl
       {groups.map((group) => <section className="years-edition-group" aria-label={group.label} key={group.key}>
         <header><strong>{group.label}</strong><span>{formatCount(group.albums.length)} shown</span></header>
         <div>
-          {group.albums.slice(0, 4).map((album) => <button
+          {group.albums.slice(0, 4).map((album) => <PlaylistRow key={album.id} selection={{albumIds:[album.id],label:album.title}}><button
             type="button"
             className={selectedAlbumId === album.id ? "is-selected" : undefined}
             aria-pressed={selectedAlbumId === album.id}
@@ -286,7 +287,7 @@ function EditionShelf({ detail, selectedAlbumId, onSelectAlbum }: Pick<YearsExpl
           >
             <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
             <span><strong>{album.title}</strong><small>{album.artist}</small><em>{album.publisher ?? "Publisher unknown"} · Original {album.originalYear ?? "—"} · Release {album.releaseYear ?? "—"}</em></span>
-          </button>)}
+          </button></PlaylistRow>)}
         </div>
       </section>)}
     </div> : <div className="years-empty"><Disc3 aria-hidden="true" /><strong>No representative albums were found.</strong><span>The selected clock still remains distinct in Music Library.</span></div>}

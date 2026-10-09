@@ -15,6 +15,7 @@ pub(crate) struct SavedPlaylistSummary {
     track_count: i64,
     updated_at: String,
     smart: bool,
+    editable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,6 +31,8 @@ pub(crate) struct SavedPlaylistDetail {
     smart_settings: Option<serde_json::Value>,
     next_cursor: Option<i64>,
     revision: String,
+    positions: Vec<i64>,
+    editable: bool,
 }
 
 fn has_playlists(connection: &Connection) -> Result<bool, String> {
@@ -44,10 +47,7 @@ fn has_playlists(connection: &Connection) -> Result<bool, String> {
         .map_err(|error| format!("Could not inspect Music Library playlists: {error}"))
 }
 
-fn list_on(connection: &Connection) -> Result<Vec<SavedPlaylistSummary>, String> {
-    if !has_playlists(connection)? {
-        return Ok(Vec::new());
-    }
+fn smart_expression(connection: &Connection) -> Result<&'static str, String> {
     let has_automation: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='playlist_automations')",
@@ -55,16 +55,23 @@ fn list_on(connection: &Connection) -> Result<Vec<SavedPlaylistSummary>, String>
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    let smart = if has_automation {
+    Ok(if has_automation {
         "COALESCE((SELECT smart FROM playlist_automations WHERE saved_playlist_id=saved_playlists.id),0)"
     } else {
         "0"
-    };
+    })
+}
+
+fn list_on(connection: &Connection) -> Result<Vec<SavedPlaylistSummary>, String> {
+    if !has_playlists(connection)? {
+        return Ok(Vec::new());
+    }
+    let smart = smart_expression(connection)?;
     let mut statement = connection
         .prepare(&format!(
             "SELECT id, name, COALESCE(json_extract(playlist_json, '$.description'), ''),
                 COALESCE(json_array_length(playlist_json, '$.tracks'), 0), updated_at
-                , {smart} FROM saved_playlists ORDER BY updated_at DESC, id DESC"
+                , {smart}, json_extract(playlist_json, '$.mixtape') IS NULL FROM saved_playlists ORDER BY updated_at DESC, id DESC"
         ))
         .map_err(|error| format!("Could not prepare Music Library playlists: {error}"))?;
     statement
@@ -76,6 +83,7 @@ fn list_on(connection: &Connection) -> Result<Vec<SavedPlaylistSummary>, String>
                 track_count: row.get(3)?,
                 updated_at: row.get(4)?,
                 smart: row.get(5)?,
+                editable: row.get::<_, bool>(6)? && !row.get::<_, bool>(5)?,
             })
         })
         .map_err(|error| format!("Could not read Music Library playlists: {error}"))?
@@ -177,10 +185,16 @@ fn detail_on(
     } else {
         None
     };
+    let positions = rows.iter().map(|r| r.1).collect();
     let mut tracks = rows.into_iter().map(|r| r.0).collect::<Vec<_>>();
     catalog::apply_overlays(&mut tracks, store)?;
     let available: i64 = connection.query_row("SELECT COUNT(*) FROM saved_playlists p JOIN json_each(p.playlist_json,'$.tracks') item WHERE p.id=?1 AND EXISTS(SELECT 1 FROM tracks t WHERE t.file_path=json_extract(item.value,'$.filePath') AND t.filename=json_extract(item.value,'$.filename'))", [id], |r| r.get(0)).map_err(|e| e.to_string())?;
     let missing_count = track_count.saturating_sub(available);
+    let smart = smart_expression(connection)?;
+    let editable = connection.query_row(
+        &format!("SELECT json_extract(playlist_json,'$.mixtape') IS NULL AND {smart}=0 FROM saved_playlists WHERE id=?1"),
+        [id], |row| row.get(0),
+    ).map_err(|e| format!("Could not read playlist editing permissions: {e}"))?;
     Ok(SavedPlaylistDetail {
         id,
         name,
@@ -198,6 +212,8 @@ fn detail_on(
             .map_err(|e| e.to_string())?,
         next_cursor,
         revision,
+        positions,
+        editable,
     })
 }
 

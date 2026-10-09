@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.34.0] - 2026-10-09
+
+### Added
+- Shared regular playlist authoring: empty creation, rename, confirmed deletion, song reordering and removal through Music Library's new capability-gated bridge.
+- Add to playlist from catalog rows, selected Songs/Albums and the queue; Save queue preserves the current order and repeated songs. Album cards support keyboard/right-click context access.
+- Reviewed UTF-8 M3U8 import using exact catalog file identities, and atomic M3U8 export retaining saved order, duplicates and unavailable paths.
+
+### Changed
+- Playlist edits reject stale revisions, preserve unavailable entries and future recipe fields, and protect Smart rules and mixtape side order. Import rejects unresolved or ambiguous paths without a partial save.
+
 ## [0.33.0] - 2026-10-08
 
 ### Added

@@ -1,3 +1,4 @@
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { ArrowLeft, ArrowUpRight, AudioLines, BookOpen, Disc3, Globe2, Headphones, ListMusic, LoaderCircle, Play, RefreshCw, Shuffle, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAlbumCoverUrl } from "../../albumArtwork";
@@ -29,7 +30,7 @@ function Panel({ title, icon, children, action, className = "" }: { title: strin
 function AlbumTile({ album, onOpen }: { album: AlbumSummary; onOpen: () => void }) {
   const cover = useAlbumCoverUrl(album.id, 256);
   const [failed, setFailed] = useState(false);
-  return <button className="artist-album" onClick={onOpen} aria-label={`Open ${album.title}`}><span className="artist-album__cover">{cover && !failed ? <img src={cover} alt="" loading="lazy" onError={() => setFailed(true)} /> : <Disc3 aria-hidden="true" />}<span className="artist-album__open"><ArrowUpRight /></span></span><strong>{album.title}</strong><small>{album.originalYear ?? album.releaseYear ?? "Year unknown"}</small></button>;
+  return <PlaylistRow selection={{albumIds:[album.id],label:album.title}}><button className="artist-album" onClick={onOpen} aria-label={`Open ${album.title}`}><span className="artist-album__cover">{cover && !failed ? <img src={cover} alt="" loading="lazy" onError={() => setFailed(true)} /> : <Disc3 aria-hidden="true" />}<span className="artist-album__open"><ArrowUpRight /></span></span><strong>{album.title}</strong><small>{album.originalYear ?? album.releaseYear ?? "Year unknown"}</small></button></PlaylistRow>;
 }
 
 function Loading({ children = "Loading…" }: { children?: ReactNode }) { return <p className="artist-empty" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" />{children}</p>; }
@@ -198,7 +199,7 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
         {tab === "Similar artists" && similar}
         {tab === "Tags" && <Panel title="Artist tags" icon={<ListMusic />}><p className="artist-section-caption">Last.fm tags and genres from your library</p><div className="artist-tag-cloud">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div>{!tags.length && <p className="artist-empty">No tags are available yet.</p>}</Panel>}
         {tab === "Tracks" && <Panel title="Tracks in your library" icon={<ListMusic />} action={<small>{tracks ? `${formatCount(tracks.items.length)} of ${formatCount(tracks.totalCount)}` : ""}</small>}>
-          {!tracks && !errors.Tracks ? <Loading>Loading tracks…</Loading> : tracks?.items.length ? <div className="artist-track-list">{tracks.items.map((track, index) => <button key={track.trackKey} disabled={Boolean(busy)} onClick={() => void play([track, ...tracks.items.filter((t) => t.trackKey !== track.trackKey)])}><span className="artist-rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span><strong>{track.title}</strong><small>{track.album}</small></span><span>{formatDuration(track.durationSeconds)}</span><Play aria-hidden="true" /></button>)}</div> : <p className="artist-empty">No local tracks are available for this artist.</p>}
+          {!tracks && !errors.Tracks ? <Loading>Loading tracks…</Loading> : tracks?.items.length ? <div className="artist-track-list">{tracks.items.map((track, index) => <div className="playlist-track-row" key={track.trackKey}><button disabled={Boolean(busy)} onClick={() => void play([track, ...tracks.items.filter((t) => t.trackKey !== track.trackKey)])}><span className="artist-rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span><strong>{track.title}</strong><small>{track.album}</small></span><span>{formatDuration(track.durationSeconds)}</span><Play aria-hidden="true" /></button><AddToPlaylistButton track={track} label={track.title} /></div>)}</div> : <p className="artist-empty">No local tracks are available for this artist.</p>}
           {tracks?.nextCursor && <button className="button" disabled={Boolean(busy)} onClick={() => void moreTracks()}>{busy === "tracks" ? "Loading…" : "Load more tracks"}</button>}
         </Panel>}
       </div>

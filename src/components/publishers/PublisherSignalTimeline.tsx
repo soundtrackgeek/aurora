@@ -1,3 +1,4 @@
+import { PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { transitionContent } from "../../contentTransition";
 import {
   BadgeCheck,
@@ -299,13 +300,13 @@ function PublisherSelection({
         <h3>Release highlights by decade</h3>
         <div>
           {highlights.map(([decade, album]) => (
-            <button type="button" aria-pressed={selectedAlbumId === album.id} className={selectedAlbumId === album.id ? "is-selected" : undefined} onClick={() => onSelectAlbum(album)} key={`${decade}:${album.id}`}>
+            <PlaylistRow key={`${decade}:${album.id}`} selection={{albumIds:[album.id],label:album.title}}><button type="button" aria-pressed={selectedAlbumId === album.id} className={selectedAlbumId === album.id ? "is-selected" : undefined} onClick={() => onSelectAlbum(album)} key={`${decade}:${album.id}`}>
               <span>{decade}s</span>
               <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
               <strong>{album.title}</strong>
               <small>{album.artist}</small>
               <em>{album.releaseYear ?? album.originalYear ?? "Year unknown"}</em>
-            </button>
+            </button></PlaylistRow>
           ))}
         </div>
       </div>

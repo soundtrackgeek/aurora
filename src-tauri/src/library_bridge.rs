@@ -70,6 +70,8 @@ pub struct LibraryCategoryCapability {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryBridgeSupports {
     #[serde(default)]
+    pub playlist_authoring: bool,
+    #[serde(default)]
     pub smart_playlist_authoring: bool,
     #[serde(default)]
     pub selected_album_batch: bool,
@@ -450,7 +452,11 @@ pub(crate) fn playlist_operation(
 ) -> Result<serde_json::Value, String> {
     let capabilities: LibraryBridgeCapabilities =
         invoke_bridge(app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT)?;
-    if !capabilities.supports.smart_playlist_authoring {
+    if !(if operation == "playlistAuthor" {
+        capabilities.supports.playlist_authoring
+    } else {
+        capabilities.supports.smart_playlist_authoring
+    }) {
         return Err("Update Music Library to use shared playlist authoring.".into());
     }
     app.state::<LibrarySyncCoordinator>()
@@ -1714,6 +1720,7 @@ mod tests {
             categories: Vec::new(),
             supports: LibraryBridgeSupports {
                 smart_playlist_authoring: false,
+                playlist_authoring: false,
                 selected_album_batch: true,
                 single_album: true,
                 batch_folders: true,

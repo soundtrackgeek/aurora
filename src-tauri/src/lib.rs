@@ -30,6 +30,7 @@ mod native_events;
 mod pcm_buffer;
 mod playback;
 mod playback_persistence;
+mod playlist_authoring;
 mod playlists;
 mod publishers;
 mod ratings;
@@ -2000,6 +2001,10 @@ pub fn run() {
             playlists::save_playlist_selection,
             playlists::save_smart_playlist,
             playlists::refresh_smart_playlist,
+            playlist_authoring::author_music_library_playlist,
+            playlist_authoring::preview_playlist_import,
+            playlist_authoring::save_playlist_import,
+            playlist_authoring::export_music_library_playlist,
             artist_tracks,
             search_tracks,
             explore_tracks,

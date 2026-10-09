@@ -1,3 +1,4 @@
+import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
 import { TrackChartInfo } from "./TrackChartInfo";
 import { PublishedChartPicker } from "./PublishedChartPicker";
 import {
@@ -444,7 +445,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
               <span>{page.request.scope === "week" ? entry.previousPosition ?? "—" : entry.weeksAtNumberOne}</span>
               <span>{entry.peakPosition ?? "—"}</span>
               <span>{formatCount(page.request.scope === "week" || page.request.source === "publishedUs" ? entry.appearances : entry.totalPoints)}</span>
-              <span className="chart-row__actions">{entry.matchedTrackId || entry.matchedAlbumId ? <CheckCircle2 aria-label="In your library" /> : <span aria-label="Not matched">—</span>}{entry.loved ? <Heart className="is-loved" aria-label="Loved" /> : null}{entry.matchedTrackId ? <button type="button" aria-label={`Play ${entry.title}`} onClick={(event) => { event.stopPropagation(); void loadChartEntryTrack(entry.matchedTrackId!).then((track) => callbacksRef.current.onPlayQueue([track])); }}><Play aria-hidden="true" /></button> : null}</span>
+              <span className="chart-row__actions">{entry.matchedAlbumId&&page.request.kind==="albums"?<AddToPlaylistButton albumId={entry.matchedAlbumId} label={entry.title} />:entry.matchedTrackId?<AddToPlaylistButton label={entry.title} loadTrack={()=>loadChartEntryTrack(entry.matchedTrackId!)} />:null}{entry.matchedTrackId || entry.matchedAlbumId ? <CheckCircle2 aria-label="In your library" /> : <span aria-label="Not matched">—</span>}{entry.loved ? <Heart className="is-loved" aria-label="Loved" /> : null}{entry.matchedTrackId ? <button type="button" aria-label={`Play ${entry.title}`} onClick={(event) => { event.stopPropagation(); void loadChartEntryTrack(entry.matchedTrackId!).then((track) => callbacksRef.current.onPlayQueue([track])); }}><Play aria-hidden="true" /></button> : null}</span>
             </div>;
           })}
         </div>
