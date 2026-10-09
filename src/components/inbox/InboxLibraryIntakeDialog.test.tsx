@@ -81,6 +81,37 @@ it("keeps replacement confirmation required for the combined batch", async () =>
   await waitFor(() => expect(apply).toHaveBeenCalledExactlyOnceWith({ planId: "batch-1", sessionId: 1 }));
 });
 
+it("explains identical MP3s and different incoming files before replacement confirmation", async () => {
+  vi.spyOn(libraryIntakeAdapter, "previewSelection").mockImplementation(async (request) => {
+    const result = preview(request);
+    result.albums[4] = { ...result.albums[4], action: "replace", identicalTrackFiles: true };
+    result.albums[5] = { ...result.albums[5], action: "replace", identicalTrackFiles: false };
+    return result;
+  });
+  const apply = vi.spyOn(libraryIntakeAdapter, "apply");
+  await review();
+  expect(await screen.findByText("Already in library — all MP3 files are identical.")).toBeVisible();
+  expect(screen.getByText("Incoming MP3 files differ from the existing release.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add 6 albums" })).toBeDisabled();
+  expect(apply).not.toHaveBeenCalled();
+});
+
+it("requires review again when identical MP3s become different during a stale-plan retry", async () => {
+  let session = 0;
+  vi.spyOn(libraryIntakeAdapter, "previewSelection").mockImplementation(async (request) => {
+    const result = preview(request, ++session);
+    result.albums[5] = { ...result.albums[5], action: "replace", identicalTrackFiles: session === 1 };
+    return result;
+  });
+  const apply = vi.spyOn(libraryIntakeAdapter, "apply").mockRejectedValue(new Error("Catalog changed (stalePlan)"));
+  await review();
+  const add = await screen.findByRole("button", { name: "Add 6 albums" });
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed these replacements/ }));
+  fireEvent.click(add);
+  expect(await screen.findByText(/Album 5 changed after review/)).toBeVisible();
+  expect(apply).toHaveBeenCalledTimes(1);
+});
+
 it("does not fall back to individual imports when the helper needs updating", async () => {
   vi.spyOn(libraryIntakeAdapter, "previewSelection").mockRejectedValue(new Error("Update Music Library for batch intake."));
   const individual = vi.spyOn(libraryIntakeAdapter, "preview");

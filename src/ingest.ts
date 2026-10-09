@@ -47,6 +47,14 @@ export interface LibraryIntakeAlbumPreview {
   matchedTrackCount: number;
   existingRatedTrackCount: number;
   existingLovedTrackCount: number;
+  identicalTrackFiles?: boolean;
+}
+
+export function intakeReplacementMessage(album: LibraryIntakeAlbumPreview): string | null {
+  if (album.action !== "replace") return null;
+  if (album.identicalTrackFiles === true) return "Already in library — all MP3 files are identical.";
+  if (album.identicalTrackFiles === false) return "Incoming MP3 files differ from the existing release.";
+  return null;
 }
 
 export interface LibraryIntakePreview {

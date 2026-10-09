@@ -80,4 +80,14 @@ catalog revision refresh + Inbox rescan
 
 The Inbox toolbar's **Move selected (N)** action opens this same reviewed intake dialog with one target per selected album folder. Ctrl-click toggles individual albums and Shift-click selects a range; selections in All folders may span monitored roots. **Destination for all albums** sets every target's destination in one step and remains above the scrolling list. Individual targets can override that choice; differing destinations show a mixed state in the shared selector. Any destination change clears the previous preview and replacement confirmation. Each selected album receives its own readiness check. Unselected sibling albums are not submitted to the bridge and do not block preview. Each preview must contain exactly the selected album source path, preventing recursive scans from including extra nested albums. With no selection, the action is disabled. Folder-wide intake remains available separately.
 
+Music Library 0.186.2 supplies `identicalTrackFiles` on intake preview albums.
+Aurora 0.34.1 labels a replacement **Already in library** only when every MP3's
+relative filename, byte size, and SHA-256 digest matches the existing release.
+Sidecars are compared separately by the mover and do not change this music-file
+label. Different MP3 files are identified explicitly; older bridge responses
+omit the label. Both cases still require replacement confirmation and preserve
+the old release in recovery. A changed equality result during a stale-plan retry
+requires another review. Replacing files may leave the catalog's album summary
+unchanged, so the validated replacement count and the changed-album delta can differ.
+
 The readiness gate prevents promotion while required identity, numbering, organization, or embedded-artwork issues remain. Music Library remains the only component that moves folders and writes the shared catalog.

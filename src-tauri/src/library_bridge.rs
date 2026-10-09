@@ -162,6 +162,8 @@ pub struct LibraryIntakePreviewAlbum {
     pub matched_track_count: u64,
     pub existing_rated_track_count: u64,
     pub existing_loved_track_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identical_track_files: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1673,6 +1675,12 @@ mod tests {
         assert_eq!(preview.session_id, 42);
         assert_eq!(preview.category.id, LibraryCategoryId::Scores);
         assert_eq!(preview.albums[0].track_count, 12);
+        assert_eq!(preview.albums[0].identical_track_files, None);
+        let mut updated = serde_json::to_value(&preview).expect("serialize preview");
+        updated["albums"][0]["identicalTrackFiles"] = serde_json::json!(true);
+        let updated: LibraryIntakePreview =
+            serde_json::from_value(updated).expect("file equality preview");
+        assert_eq!(updated.albums[0].identical_track_files, Some(true));
     }
 
     #[test]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.34.1] - 2026-10-09
+
+### Fixed
+- Intake previews distinguish identical existing MP3 files from different incoming files, using Music Library 0.186.2's verified file comparison. Replacement confirmation and recovery remain required.
+- Require a fresh review if file equality changes while retrying a stale intake plan. Older companion previews retain their existing replacement review without claiming file equality.
+
 ## [0.34.0] - 2026-10-09
 
 ### Added

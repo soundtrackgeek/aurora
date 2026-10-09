@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   libraryIntakeAdapter,
   libraryIntakeCategories,
+  intakeReplacementMessage,
   type LibraryBridgeCapabilities,
   type LibraryIntakeAdapter,
   type LibraryIntakeApplyResult,
@@ -357,7 +358,7 @@ export function AddFolderDialog({
               >
                 {preview.albums.map((album) => (
                   <li key={`${album.sourcePath}\n${album.destinationPath}`}>
-                    <span><strong>{album.album}{album.action === "replace" ? " · REPLACE" : ""}</strong><small>{album.artist} · {album.year || "Year unknown"} · {album.trackCount} tracks{album.action === "replace" ? ` · ${album.existingTrackCount} existing · ${album.matchedTrackCount} matched · ${album.existingRatedTrackCount} rated · ${album.existingLovedTrackCount} loved` : ""}</small></span>
+                    <span><strong>{album.album}{album.action === "replace" ? " · REPLACE" : ""}</strong>{intakeReplacementMessage(album) ? <small>{intakeReplacementMessage(album)}</small> : null}<small>{album.artist} · {album.year || "Year unknown"} · {album.trackCount} tracks{album.action === "replace" ? ` · ${album.existingTrackCount} existing · ${album.matchedTrackCount} matched · ${album.existingRatedTrackCount} rated · ${album.existingLovedTrackCount} loved` : ""}</small></span>
                     <span className="intake-album-paths"><code title={album.sourcePath}>{album.sourcePath}</code><ArrowRight aria-label="moves to" /><code title={album.destinationPath}>{album.destinationPath}</code></span>
                   </li>
                 ))}

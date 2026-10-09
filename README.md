@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.34.1**, with Music Library **0.186.2 or newer**, explains existing
+albums during intake preview: identical MP3 files are labeled **Already in
+library**, and different incoming files are identified before replacement.
+Unchanged album metadata no longer blocks a valid replacement preview. Replacements
+still require confirmation and preserve the old release in its recovery folder.
+
 Aurora 0.34.0 adds **playlist authoring**: create empty regular playlists, rename or
 delete shared playlists, and move or remove songs in their saved order. **Add to
 playlist** is available on catalog song/album rows and selected Songs/Albums;

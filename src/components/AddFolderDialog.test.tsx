@@ -207,7 +207,7 @@ describe("AddFolderDialog", () => {
     expect(screen.getAllByText("removed")).toHaveLength(2);
   });
 
-  it("requires explicit confirmation before replacing an existing release", async () => {
+  it.each([true, false])("explains file equality (%s) and requires confirmation before replacing a release", async (identicalTrackFiles) => {
     const replacementPreview: LibraryIntakePreview = {
       ...preview,
       albumCount: 1,
@@ -215,6 +215,7 @@ describe("AddFolderDialog", () => {
       albums: [{
         ...preview.albums[0],
         action: "replace",
+        identicalTrackFiles,
         existingTrackCount: 8,
         matchedTrackCount: 7,
         existingRatedTrackCount: 3,
@@ -228,6 +229,9 @@ describe("AddFolderDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Movie \/ TV \/ game music/ }));
     fireEvent.click(screen.getByRole("button", { name: "Preview batch" }));
     await screen.findByText(/REPLACE/);
+    expect(screen.getByText(identicalTrackFiles
+      ? "Already in library — all MP3 files are identical."
+      : "Incoming MP3 files differ from the existing release.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Review apply" }));
 
     const replaceButton = screen.getByRole("button", { name: "Replace and catalog" });

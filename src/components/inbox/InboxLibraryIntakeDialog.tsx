@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import {
   libraryIntakeAdapter,
   intakeCompletionMessage,
+  intakeReplacementMessage,
   libraryIntakeCategories,
   type LibraryIntakeCategoryId,
   type LibraryIntakePreview,
@@ -126,7 +127,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
         {replacements.length ? <section className="inbox-intake-dialog__replacements" role="alert">
           <AlertTriangle />
           <div><strong>{replacements.length} existing {replacements.length === 1 ? "release" : "releases"} will be replaced</strong>
-            {replacements.map((album) => <p key={album.destinationPath}><span>{album.artist} — {album.album} ({album.year})</span><small>{album.existingTrackCount} existing → {album.trackCount} new tracks · {album.matchedTrackCount} matched · {album.existingRatedTrackCount} rated · {album.existingLovedTrackCount} loved</small></p>)}
+            {replacements.map((album) => <p key={album.destinationPath}><span>{album.artist} — {album.album} ({album.year})</span>{intakeReplacementMessage(album) ? <small>{intakeReplacementMessage(album)}</small> : null}<small>{album.existingTrackCount} existing → {album.trackCount} incoming tracks · {album.matchedTrackCount} matched · {album.existingRatedTrackCount} rated · {album.existingLovedTrackCount} loved</small></p>)}
             <label><input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /> I reviewed these replacements. Preserve each old release in the recovery folder.</label>
           </div>
         </section> : null}
@@ -247,6 +248,7 @@ function sameReviewedIntake(reviewed: LibraryIntakePreview, fresh: LibraryIntake
         && album.existingTrackCount === candidate.existingTrackCount
         && album.matchedTrackCount === candidate.matchedTrackCount
         && album.existingRatedTrackCount === candidate.existingRatedTrackCount
-        && album.existingLovedTrackCount === candidate.existingLovedTrackCount;
+        && album.existingLovedTrackCount === candidate.existingLovedTrackCount
+        && album.identicalTrackFiles === candidate.identicalTrackFiles;
     });
 }
