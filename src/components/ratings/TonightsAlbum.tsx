@@ -1,3 +1,4 @@
+import { PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { useEffect, useRef, useState } from "react";
 import { Check, Moon, Play, RefreshCw, ThumbsUp, X } from "lucide-react";
 import { Artwork } from "../Artwork";
@@ -82,12 +83,12 @@ export function TonightsAlbum({ onPlay, onOpen, onSettings, playbackBusy = false
       <div className="tonight__options"><label><input type="checkbox" checked={draft.useJev} disabled={locked} onChange={event => setDraft({ ...draft, useJev: event.target.checked })} /> Ask Jev to help</label><button type="button" onClick={onSettings}>Jev settings</button><button type="button" disabled={locked} onClick={() => void run(async () => { await resetTonightFeedback(); setResult(null); setMessage("Album feedback reset. Request suggestions when you’re ready."); })}>Reset album feedback</button></div>
       {!result && <p className="tonight__note">Three whole albums that fit your time. Suggestions change only when you ask. Jev uses a small metadata shortlist; local ranking is always available.</p>}
       {result && <><div className="tonight__result-heading"><p>For <strong>{intentions.find(item => item.value === result.request.intention)?.label.toLowerCase()}</strong> · {result.request.minutes} minutes{result.request.description ? ` · “${result.request.description}”` : ""}</p><small>Chosen {new Date(result.generatedAtMs).toLocaleString()}</small></div>{changed && <p className="tonight__note">Your choices changed. Request suggestions to apply them.</p>}<p className="tonight__note">{result.message}</p>
-        <div className="tonight__cards">{result.suggestions.map(item => <article className="tonight__card" key={item.album.id} aria-label={`${item.album.title} by ${item.album.artist}`}>
+        <div className="tonight__cards">{result.suggestions.map(item => <PlaylistRow key={item.album.id} selection={{albumIds:[item.album.id],artistName:item.album.artist,label:item.album.title}}><article tabIndex={0} className="tonight__card" key={item.album.id} aria-label={`${item.album.title} by ${item.album.artist}`}>
           <button type="button" className="tonight__cover" onClick={() => onOpen(item.album)} aria-label={`Open ${item.album.title} in library`}><Artwork track={tonightAlbumTrack(item.album)} size="large" /></button>
           <div className="tonight__card-body"><h3>{item.album.title}</h3><p>{item.album.artist}</p><small>{[item.album.originalYear, item.album.genre].filter(Boolean).join(" · ")}</small><ul>{item.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
           <button type="button" className="button button--primary tonight__play" disabled={locked} onClick={() => void run(async () => { await onPlay(item.album, result.request.minutes); setMessage(`Playing ${item.album.title}.`); })}><Play aria-hidden="true" /> Play album</button>
           <div className="tonight__feedback"><button type="button" aria-pressed={item.feedback === "good"} disabled={locked || item.feedback === "good"} onClick={() => void feedback(item.album.id, "good")}>{item.feedback === "good" ? <Check aria-hidden="true" /> : <ThumbsUp aria-hidden="true" />} Good fit</button><button type="button" disabled={locked} onClick={() => void feedback(item.album.id, "dismiss")}><X aria-hidden="true" /> Not for this</button></div></div>
-        </article>)}</div>
+        </article></PlaylistRow>)}</div>
         {result.suggestions.length === 0 ? <p className="tonight__empty">No suggestions to show. Try more time, another intention, or reset album feedback.</p> : <button type="button" className="button tonight__none" disabled={locked || changed} onClick={() => void suggest(true)}>None of these — find another three</button>}
       </>}
       {message && <p className="tonight__message" role="status">{message}</p>}

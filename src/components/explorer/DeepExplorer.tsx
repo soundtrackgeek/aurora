@@ -42,7 +42,7 @@ import { CountryFlag } from "../CountryFlag";
 import { applyWindowsSelection, type SelectionModifiers } from "./windowsSelection";
 import { ContentTransition } from "../ContentTransition";
 import "./DeepExplorer.css";
-import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { PlaylistAuthoringContext } from "../playlists/playlistAuthoringContext";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
@@ -476,7 +476,7 @@ function TrackTable({
             const current = track.trackKey === currentTrackKey;
             const busy = busyTrackKeys.has(track.trackKey);
             return (
-              <tr
+              <PlaylistRow key={track.trackKey} selection={{ tracks: multiSelectedTrackKeys?.has(track.trackKey) ? tracks.filter(item => multiSelectedTrackKeys.has(item.trackKey)) : [track], label: multiSelectedTrackKeys?.has(track.trackKey) && multiSelectedTrackKeys.size > 1 ? `${multiSelectedTrackKeys.size} selected songs` : track.title }}><tr
                 key={track.trackKey}
                 ref={(node) => {
                   if (node) rowRefs.current.set(track.id, node);
@@ -571,7 +571,7 @@ function TrackTable({
                     </button>
                   </td>
                 ) : null}
-              </tr>
+              </tr></PlaylistRow>
             );
           })}
         </tbody>
@@ -685,7 +685,7 @@ function AlbumGrid({
             const selected = selectedAlbumIds ? selectedAlbumIds.has(album.id) : selectedAlbumId === album.id;
             const expanded = selectedAlbumId === album.id;
             return (
-              <div className="playlist-album-row" key={album.id}><button
+              <div className="playlist-album-row" key={album.id}><PlaylistRow selection={{ albumIds: selectedAlbumIds?.has(album.id) ? albums.filter(item => selectedAlbumIds.has(item.id)).map(item => item.id) : [album.id], artistName: album.artist, label: selectedAlbumIds?.has(album.id) && selectedAlbumIds.size > 1 ? `${selectedAlbumIds.size} selected albums` : album.title }}><button
                 type="button"
                 className={`deep-explorer-album${selected ? " is-selected" : ""}`}
                 aria-pressed={selected}
@@ -721,7 +721,7 @@ function AlbumGrid({
                   </span>
                 </span>
                 <ChevronRight aria-hidden="true" />
-              </button>
+              </button></PlaylistRow>
               <AddToPlaylistButton albumId={album.id} label={album.title} /></div>
             );
           })}
@@ -963,7 +963,7 @@ function ArtistList({
     <ol className="deep-explorer-artists" aria-label="Artists">
       {artists.map((artist, index) => (
         <li key={artist.id}>
-          <button
+          <PlaylistRow selection={{ artistName: artist.name, artistOnly: true, label: artist.name }}><button
             type="button"
             className={selectedArtistId === artist.id ? "is-selected" : undefined}
             aria-pressed={selectedArtistId === artist.id}
@@ -987,7 +987,7 @@ function ArtistList({
               )}
             </span>
             <ChevronRight aria-hidden="true" />
-          </button>
+          </button></PlaylistRow>
         </li>
       ))}
     </ol>

@@ -295,6 +295,13 @@ fn catalog_rebind_plan(
         };
     };
     let current_key = &current_queue[current_index].track_key;
+    if key_order_unchanged {
+        return CatalogRebindPlan {
+            key_order_unchanged,
+            current_index: Some(current_index),
+            current_removed: false,
+        };
+    }
     if let Some(refreshed_index) = refreshed_queue
         .iter()
         .position(|track| &track.track_key == current_key)
@@ -319,6 +326,42 @@ fn catalog_rebind_plan(
         current_index: replacement_key,
         current_removed: true,
     }
+}
+
+fn priority_next_index(current: usize, end: Option<usize>) -> Option<usize> {
+    end.filter(|end| current < *end).map(|_| current + 1)
+}
+
+fn enqueue_entries(
+    queue: &[TrackSummary],
+    current: Option<usize>,
+    priority_end: Option<usize>,
+    additions: Vec<TrackSummary>,
+    next: bool,
+) -> Result<(Vec<TrackSummary>, usize, Option<usize>), String> {
+    let keep_from = current.unwrap_or(0).saturating_sub(RETAINED_QUEUE_HISTORY);
+    if queue.len().saturating_sub(keep_from) + additions.len() > MAX_PLAYBACK_QUEUE {
+        return Err(
+            "The queue holds at most 200 songs. Remove songs or select fewer before adding.".into(),
+        );
+    }
+    let index = current.unwrap_or(0) - keep_from;
+    let mut result = queue[keep_from..].to_vec();
+    let at = if next && !result.is_empty() {
+        index + 1
+    } else {
+        result.len()
+    };
+    let pending = priority_end
+        .filter(|end| current.is_some_and(|current| *end > current))
+        .map(|end| end - keep_from);
+    let end = if next && current.is_some() {
+        Some(at + additions.len() - 1 + pending.map(|end| end - index).unwrap_or(0))
+    } else {
+        pending
+    };
+    result.splice(at..at, additions);
+    Ok((result, index, end))
 }
 
 fn append_queue_entries(
@@ -364,6 +407,7 @@ pub(crate) struct PlaybackRuntime {
     player: Option<Player>,
     queue: Vec<TrackSummary>,
     current_index: Option<usize>,
+    priority_next_end: Option<usize>,
     status: PlaybackStatus,
     position_seconds: f64,
     volume: f32,
@@ -424,16 +468,32 @@ impl PlaybackRuntime {
         };
         let current_index = stored
             .current_index
-            .and_then(|index| stored.queue.get(index))
-            .and_then(|reference| {
-                queue.iter().position(|track| {
-                    reference
-                        .track_key
-                        .as_ref()
-                        .map_or(track.id == reference.track_id, |key| {
-                            track.track_key == *key
-                        })
-                })
+            .filter(|index| *index < stored.queue.len())
+            .and_then(|index| {
+                if queue.len() == stored.queue.len() {
+                    return Some(index);
+                }
+                let reference = &stored.queue[index];
+                let occurrence = stored.queue[..index]
+                    .iter()
+                    .filter(|entry| {
+                        entry.track_key == reference.track_key
+                            && entry.track_id == reference.track_id
+                    })
+                    .count();
+                queue
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, track)| {
+                        reference
+                            .track_key
+                            .as_ref()
+                            .map_or(track.id == reference.track_id, |key| {
+                                &track.track_key == key
+                            })
+                    })
+                    .nth(occurrence)
+                    .map(|(index, _)| index)
             });
         let position_seconds = current_index
             .and_then(|index| queue[index].duration_seconds)
@@ -441,6 +501,9 @@ impl PlaybackRuntime {
             .unwrap_or(0.0);
         let history_threshold_seconds = history.play_threshold_seconds()?;
         let persistence = PlaybackPersistence::new(history.clone(), store.clone())?;
+        let priority_next_end = stored
+            .priority_next_end
+            .filter(|end| queue.len() == stored.queue.len() && *end < queue.len());
         Ok(Self {
             events: crate::native_events::PlaybackEvents::default(),
             output: None,
@@ -455,6 +518,7 @@ impl PlaybackRuntime {
             position_seconds,
             volume: stored.volume,
             shuffle: stored.shuffle,
+            priority_next_end,
             repeat_mode: RepeatMode::from_stored(&stored.repeat_mode),
             error,
             audio_store,
@@ -671,6 +735,7 @@ impl PlaybackRuntime {
                     })
                     .collect(),
                 current_index: self.current_index,
+                priority_next_end: self.priority_next_end,
                 position_seconds: self.position_seconds,
                 volume: self.volume,
                 shuffle: self.shuffle,
@@ -821,6 +886,9 @@ impl PlaybackRuntime {
 
     fn choose_next_index(&self, allow_wrap: bool) -> Option<usize> {
         let current = self.current_index?;
+        if priority_next_index(current, self.priority_next_end).is_some() {
+            return Some(current + 1);
+        }
         if self.queue.len() <= 1 {
             return allow_wrap.then_some(current);
         }
@@ -844,6 +912,12 @@ impl PlaybackRuntime {
     }
 
     fn intended_next_index(&self) -> Option<usize> {
+        if let Some(next) = self
+            .current_index
+            .and_then(|current| priority_next_index(current, self.priority_next_end))
+        {
+            return Some(next);
+        }
         if self.repeat_mode == RepeatMode::One {
             self.current_index
         } else {
@@ -852,6 +926,12 @@ impl PlaybackRuntime {
     }
 
     fn start_next_preparation(&mut self) {
+        if self
+            .current_index
+            .is_some_and(|current| self.priority_next_end.is_some_and(|end| current >= end))
+        {
+            self.priority_next_end = None;
+        }
         if self.prepared_next.is_some() || self.pending_next.is_some() || self.preparation_attempted
         {
             return;
@@ -1025,6 +1105,12 @@ impl PlaybackRuntime {
     }
 
     pub(crate) fn snapshot(&mut self) -> PlaybackSnapshot {
+        if self
+            .current_index
+            .is_some_and(|current| self.priority_next_end.is_some_and(|end| current >= end))
+        {
+            self.priority_next_end = None;
+        }
         let mut timing = crate::timing::Span::new("playback.snapshot", "");
         timing.stage("synchronize_audio_runtime");
         if !self.closing {
@@ -1098,6 +1184,7 @@ impl PlaybackRuntime {
         self.observe_history();
         self.finish_history("skipped");
         self.queue = queue;
+        self.priority_next_end = None;
         self.current_index = Some(start_index);
         self.position_seconds = 0.0;
         if let Err(error) = self.load_current(true, 0.0) {
@@ -1128,6 +1215,7 @@ impl PlaybackRuntime {
             .current_index
             .ok_or_else(|| "Choose a track before extending its queue.".to_owned())?;
         let additions = catalog::load_tracks_by_ids(&track_references, &self.store)?;
+        let keep_from = current_index.saturating_sub(RETAINED_QUEUE_HISTORY);
         append_queue_entries(
             &mut self.queue,
             &mut current_index,
@@ -1135,6 +1223,38 @@ impl PlaybackRuntime {
             additions,
         );
         self.current_index = Some(current_index);
+        self.priority_next_end = self
+            .priority_next_end
+            .map(|end| end.saturating_sub(keep_from));
+        self.persist()?;
+        Ok(self.snapshot())
+    }
+
+    pub(crate) fn enqueue(
+        &mut self,
+        references: Vec<TrackReference>,
+        next: bool,
+    ) -> Result<PlaybackSnapshot, String> {
+        self.ensure_not_closing()?;
+        if references.is_empty() || references.len() > MAX_PLAYBACK_QUEUE {
+            return Err("Select between 1 and 200 songs for the queue.".into());
+        }
+        // Resolve every identity before changing playback or queue order.
+        let additions = catalog::load_tracks_by_ids(&references, &self.store)?;
+        self.synchronize_audio_runtime();
+        let (queue, current_index, priority_end) = enqueue_entries(
+            &self.queue,
+            self.current_index,
+            self.priority_next_end,
+            additions,
+            next,
+        )?;
+        self.invalidate_prepared_queue()
+            .map_err(|error| self.set_error(error))?;
+        self.queue = queue;
+        self.current_index = Some(current_index);
+        self.priority_next_end = priority_end;
+        self.preparation_attempted = false;
         self.persist()?;
         Ok(self.snapshot())
     }
@@ -1179,6 +1299,7 @@ impl PlaybackRuntime {
         let should_play = self.status == PlaybackStatus::Playing;
         let had_prepared_track = self.prepared_next.is_some();
         self.queue = refreshed_queue;
+        self.priority_next_end = None;
         self.current_index = plan.current_index;
         self.prepared_next = None;
         self.pending_next = None;
@@ -1489,6 +1610,7 @@ impl PlaybackRuntime {
             self.finish_history("skipped");
         }
         self.queue.remove(index);
+        self.priority_next_end = None;
         self.preparation_attempted = false;
         if self.queue.is_empty() {
             self.close_output();
@@ -1526,12 +1648,21 @@ impl PlaybackRuntime {
         self.invalidate_prepared_queue()
             .map_err(|error| self.set_error(error))?;
         if from != to {
-            let current_id = self.current_track().map(|track| track.id.clone());
+            let current = self.current_index;
             let track = self.queue.remove(from);
             self.queue.insert(to, track);
-            self.current_index = current_id
-                .as_ref()
-                .and_then(|id| self.queue.iter().position(|track| &track.id == id));
+            self.current_index = current.map(|index| {
+                if index == from {
+                    to
+                } else if from < index && to >= index {
+                    index - 1
+                } else if from > index && to <= index {
+                    index + 1
+                } else {
+                    index
+                }
+            });
+            self.priority_next_end = None;
         }
         self.preparation_attempted = false;
         self.persist()?;
@@ -1546,6 +1677,7 @@ impl PlaybackRuntime {
         self.finish_history("skipped");
         self.close_output();
         self.queue.clear();
+        self.priority_next_end = None;
         self.current_index = None;
         self.position_seconds = 0.0;
         self.status = PlaybackStatus::Stopped;
@@ -2029,6 +2161,62 @@ mod tests {
     }
 
     #[test]
+    fn user_queue_edits_preserve_current_track_repeats_and_selected_order() {
+        let queue = (0..3).map(queue_track).collect::<Vec<_>>();
+        let (next, index, end) = enqueue_entries(
+            &queue,
+            Some(1),
+            None,
+            vec![queue_track(1), queue_track(4)],
+            true,
+        )
+        .unwrap();
+        assert_eq!(index, 1);
+        assert_eq!(
+            next.iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            ["0", "1", "1", "4", "2"]
+        );
+        assert_eq!(end, Some(3));
+        assert_eq!(priority_next_index(index, end), Some(2));
+        assert_eq!(priority_next_index(3, end), None);
+        let (appended, _, _) = enqueue_entries(
+            &queue,
+            Some(1),
+            None,
+            vec![queue_track(1), queue_track(4)],
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            appended
+                .iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            ["0", "1", "2", "1", "4"]
+        );
+    }
+
+    #[test]
+    fn queue_capacity_rejection_keeps_existing_songs_and_compacts_only_history() {
+        let queue = (0..MAX_PLAYBACK_QUEUE).map(queue_track).collect::<Vec<_>>();
+        assert!(enqueue_entries(&queue, Some(0), None, vec![queue_track(9)], true).is_err());
+        assert_eq!(queue.len(), MAX_PLAYBACK_QUEUE);
+        let (next, index, end) =
+            enqueue_entries(&queue, Some(181), Some(183), vec![queue_track(250)], true).unwrap();
+        assert_eq!(index, 20);
+        assert_eq!(next[index].id, "181");
+        assert_eq!(next[index + 1].id, "250");
+        assert_eq!(end, Some(23));
+        let (empty, index, end) =
+            enqueue_entries(&[], None, None, vec![queue_track(1)], false).unwrap();
+        assert_eq!(empty.len(), 1);
+        assert_eq!(index, 0);
+        assert_eq!(end, None);
+    }
+
+    #[test]
     fn catalog_rebind_preserves_current_index_when_stable_order_is_unchanged() {
         let current = (0..3).map(queue_track).collect::<Vec<_>>();
         let mut refreshed = current.clone();
@@ -2044,6 +2232,15 @@ mod tests {
                 current_index: Some(1),
                 current_removed: false,
             }
+        );
+    }
+
+    #[test]
+    fn catalog_refresh_retains_the_current_repeated_song_occurrence() {
+        let queue = vec![queue_track(1), queue_track(2), queue_track(1)];
+        assert_eq!(
+            catalog_rebind_plan(&queue, Some(2), &queue).current_index,
+            Some(2)
         );
     }
 

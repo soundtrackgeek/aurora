@@ -60,6 +60,7 @@ const emptyPlayback: PlaybackSnapshot = {
 
 let browserPlayback: PlaybackSnapshot = { ...emptyPlayback };
 let browserStartedAt = 0;
+let browserPriorityEnd: number | null = null;
 
 function cloneBrowserPlayback(): PlaybackSnapshot {
   return {
@@ -72,6 +73,10 @@ function cloneBrowserPlayback(): PlaybackSnapshot {
 function chooseBrowserNext(): number | null {
   const { currentIndex, queue, repeatMode, shuffle } = browserPlayback;
   if (currentIndex === null || queue.length === 0) return null;
+  if (browserPriorityEnd !== null) {
+    if (currentIndex < browserPriorityEnd) return currentIndex + 1;
+    browserPriorityEnd = null;
+  }
   if (repeatMode === "one") return currentIndex;
   if (shuffle && queue.length > 1) return (currentIndex + 3) % queue.length;
   if (currentIndex + 1 < queue.length) return currentIndex + 1;
@@ -135,6 +140,7 @@ export async function rebindPlaybackCatalog(): Promise<PlaybackCatalogRebind> {
 }
 
 export async function playTrackQueue(tracks: Track[], startTrackId: string): Promise<PlaybackSnapshot> {
+  browserPriorityEnd = null;
   if (isTauriRuntime()) {
     const startTrack = tracks.find((track) => track.id === startTrackId);
     if (!startTrack) throw new Error("The selected track is not part of this queue.");
@@ -158,6 +164,22 @@ export async function playTrackQueue(tracks: Track[], startTrackId: string): Pro
   return cloneBrowserPlayback();
 }
 
+/** User queue edits preserve repeated songs and fail atomically when the queue is full. */
+export async function enqueueTrackQueue(tracks: Track[], next: boolean): Promise<PlaybackSnapshot> {
+  if (!tracks.length || tracks.length > 200) throw new Error("Select between 1 and 200 songs for the queue.");
+  if (isTauriRuntime()) return command("playback_enqueue", { trackReferences: tracks.map(({ id, trackKey }) => ({ id, trackKey })), next });
+  refreshBrowserClock();
+  const keepFrom = Math.max(0, (browserPlayback.currentIndex ?? 0) - 20);
+  const queue = browserPlayback.queue.slice(keepFrom);
+  if (queue.length + tracks.length > 200) throw new Error("The queue holds at most 200 songs. Remove songs or select fewer before adding.");
+  const currentIndex = browserPlayback.currentIndex === null ? 0 : browserPlayback.currentIndex - keepFrom;
+  const at = next && queue.length ? currentIndex + 1 : queue.length;
+  queue.splice(at, 0, ...tracks);
+  browserPriorityEnd = next && browserPlayback.currentIndex !== null ? at + tracks.length - 1 + Math.max(0, (browserPriorityEnd ?? -1) - (browserPlayback.currentIndex ?? 0)) : browserPriorityEnd === null ? null : browserPriorityEnd - keepFrom;
+  browserPlayback = { ...browserPlayback, queue, currentIndex, currentTrack: queue[currentIndex] };
+  return cloneBrowserPlayback();
+}
+
 export async function appendTrackQueue(tracks: Track[]): Promise<PlaybackSnapshot> {
   if (tracks.length === 0 || tracks.length > 100) throw new Error("Queue refill batches must contain between 1 and 100 tracks.");
   if (isTauriRuntime()) {
@@ -178,6 +200,7 @@ export async function appendTrackQueue(tracks: Track[]): Promise<PlaybackSnapsho
       keys.add(track.trackKey);
     }
   }
+  if (browserPriorityEnd !== null) browserPriorityEnd -= keepFrom;
   browserPlayback = {
     ...browserPlayback,
     queue,
@@ -270,6 +293,7 @@ export async function changeRepeatMode(repeatMode: RepeatMode): Promise<Playback
 export async function removeQueueItem(index: number): Promise<PlaybackSnapshot> {
   if (isTauriRuntime()) return command("playback_remove_queue_item", { index });
   if (index < 0 || index >= browserPlayback.queue.length) throw new Error("This queue item no longer exists.");
+  browserPriorityEnd = null;
   const queue = browserPlayback.queue.filter((_, itemIndex) => itemIndex !== index);
   let currentIndex = browserPlayback.currentIndex;
   if (queue.length === 0) {
@@ -292,16 +316,18 @@ export async function moveQueueItem(from: number, to: number): Promise<PlaybackS
   if (from < 0 || to < 0 || from >= browserPlayback.queue.length || to >= browserPlayback.queue.length) {
     throw new Error("The queue changed before this reorder completed.");
   }
-  const currentId = browserPlayback.currentTrack?.id;
+  const current = browserPlayback.currentIndex;
   const queue = [...browserPlayback.queue];
   const [track] = queue.splice(from, 1);
   queue.splice(to, 0, track);
-  const currentIndex = currentId ? queue.findIndex((item) => item.id === currentId) : null;
+  const currentIndex = current === null ? null : current === from ? to : from < current && to >= current ? current - 1 : from > current && to <= current ? current + 1 : current;
+  browserPriorityEnd = null;
   browserPlayback = { ...browserPlayback, queue, currentIndex };
   return cloneBrowserPlayback();
 }
 
 export async function clearPlaybackQueue(): Promise<PlaybackSnapshot> {
+  browserPriorityEnd = null;
   if (isTauriRuntime()) return command("playback_clear_queue");
   browserPlayback = { ...emptyPlayback, volume: browserPlayback.volume, shuffle: browserPlayback.shuffle, repeatMode: browserPlayback.repeatMode };
   return cloneBrowserPlayback();
@@ -439,6 +465,7 @@ export function usePlayback() {
     },
     play: (tracks: Track[], startTrackId: string) => run(() => playTrackQueue(tracks, startTrackId)),
     append,
+    enqueue: (tracks: Track[], next: boolean) => run(() => enqueueTrackQueue(tracks, next)),
     rebindCatalog,
     toggle: () => run(togglePlayback),
     next: () => run(nextTrack),

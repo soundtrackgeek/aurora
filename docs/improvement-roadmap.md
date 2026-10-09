@@ -366,9 +366,15 @@ atomic export use Music Library's capability-gated bridge. See
 
 ### 3. Context menus with Play next / Add to queue
 
+**Implemented in Aurora 0.35.0.** Shared in-WebView menus support right-click,
+Shift+F10 and the Menu key, ordered queue insertion/appending, Explorer/Finder,
+navigation, copy, Tags and track ratings. Add to playlist offers three recent
+regular playlists plus choose/create through the shared Music Library bridge.
+See [context menus](context-menus.md) for supported surfaces and bounded actions.
+
 **What.** Right-click (or Shift+F10 / the Menu key) on any track, album, artist, chart entry, or history row to get: Play, **Play next**, **Add to queue**, Add to playlist, Go to album/artist, Show in Explorer/Finder, Copy "Artist – Title", Open Tags, and Rate.
 
-**Why.** Aurora has no context menus today, so these actions are spread across pages or missing. Build them as an accessible in-WebView menu or with Tauri's native `Menu` API.
+**Why.** Context menus bring the playback, library and playlist actions together wherever a song or album appears. Aurora implements them as an accessible in-WebView menu.
 
 ### 4. Rating Sprint
 

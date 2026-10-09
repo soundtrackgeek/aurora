@@ -282,12 +282,12 @@ function CompletionWorkspace({ props }: { props: RatingsStudioProps }) {
           </div>
         </div>
         <div className="completion-tracks" role="table" aria-label={`${selectedAlbum.title} tracks`}>
-          {albumTracks.slice(0, 10).map((track, index) => <div role="row" className="completion-track" onClick={() => props.onSelectTrack(track)} onDoubleClick={() => props.onPlayTrack(track)} tabIndex={0} key={track.trackKey}>
+          {albumTracks.slice(0, 10).map((track, index) => <PlaylistRow key={track.trackKey} selection={{tracks:[track],label:track.title}}><div role="row" className="completion-track" onClick={() => props.onSelectTrack(track)} onDoubleClick={() => props.onPlayTrack(track)} tabIndex={0} key={track.trackKey}>
             <span>{index + 1}</span><span className="completion-track__title"><strong>{track.title}</strong><small>[{displayTrackArtist(track)}]</small></span>
             <InlineRatingControl title={track.title} rating={track.rating} busy={props.busyTrackKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => props.onRatingChange(track, rating)} />
             <InlineLoveControl title={track.title} loveState={track.loveState} busy={props.busyTrackKeys.has(track.trackKey)} onLoveChange={(state) => props.onLoveChange(track, state)} />
             <small>{formatDuration(track.durationSeconds)} <AddToPlaylistButton track={track} label={track.title} /></small>
-          </div>)}
+          </div></PlaylistRow>)}
         </div>
       </div> : null}
     </>}

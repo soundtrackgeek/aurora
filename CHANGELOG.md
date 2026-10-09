@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.0] - 2026-10-09
+
+### Added
+- Accessible right-click, Shift+F10 and Menu-key context menus on songs, albums, artists, chart entries, history, playlist and queue rows, with keyboard navigation and focus restoration.
+- Play next and Add to queue preserve selected order and repeated songs, retain the current song and position, and report a full queue without dropping pending songs. Play next takes priority over shuffle and Repeat One; its order is saved for restart.
+- Show in Windows Explorer selects the catalog song file or opens its album folder. macOS uses Finder, and Linux opens the containing folder.
+- Add to playlist shortcuts for the three most recently worked-on regular playlists, Choose playlist and Create playlist, using revision-guarded Music Library writes.
+- Album/artist navigation, Copy Artist – Title, Tags and half-star track ratings in the shared menu. Unmatched chart and history items retain copy/artist navigation without offering unavailable file actions.
+
+### Fixed
+- Preserve the current occurrence when moving or refreshing queues containing repeated songs.
+
 ## [0.34.1] - 2026-10-09
 
 ### Fixed

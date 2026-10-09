@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, ListMusic, Trash2, X } from "lucide-react";
 import { Artwork } from "./Artwork";
 import type { PlaybackSnapshot } from "../playback";
-import { AddToPlaylistButton } from "./playlists/PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "./playlists/PlaylistAuthoring";
 
 export function QueuePanel({
   playback,
@@ -35,7 +35,7 @@ export function QueuePanel({
             const isCurrent = playback.currentIndex === index;
             return (
               <li className={isCurrent ? "is-current" : undefined} key={`${track.id}-${index}`}>
-                <button
+                <PlaylistRow selection={{tracks: [track], label: track.title}}><button
                   type="button"
                   className="queue-track"
                   onClick={() => onPlay(track.id)}
@@ -44,7 +44,7 @@ export function QueuePanel({
                   <span className="queue-position">{isCurrent ? <ListMusic aria-hidden="true" /> : index + 1}</span>
                   <Artwork track={track} />
                   <span className="queue-copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span>
-                </button>
+                </button></PlaylistRow>
                 <span className="queue-actions">
                   <AddToPlaylistButton track={track} label={track.title} />
                   <button type="button" aria-label={`Move ${track.title} up`} disabled={index === 0} onClick={() => onMove(index, index - 1)}><ArrowUp aria-hidden="true" /></button>

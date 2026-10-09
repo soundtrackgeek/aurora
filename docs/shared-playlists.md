@@ -1,5 +1,10 @@
 # Shared playlists and saved views
 
+Context menus in Aurora 0.35.0 add shortcuts for the three recently worked-on
+regular playlists, Choose playlist and Create playlist. Shared modification times
+and successful Aurora edits order the shortcuts; Smart playlists and mixtapes
+keep their dedicated editing rules. See [context menus](context-menus.md).
+
 Aurora 0.33.0 and Music Library 0.185.0 use one playlist catalog. Aurora reads
 `saved_playlists` and `playlist_automations` through its read-only catalog connection.
 Creation, rule edits and explicit refresh go through protocol-1 bridge operations

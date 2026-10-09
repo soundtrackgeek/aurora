@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { displayTrackArtist, formatCount, formatDuration, type Track } from "../../library";
 import { authorPlaylist, exportPlaylist, previewPlaylistImport, savePlaylistImport, loadMusicLibraryPlaylist, refreshSmartPlaylist, type PlaylistImportPreview, type PlaylistEdit, type PlaylistPageContext, type SavedPlaylistDetail, type SavedPlaylistSummary } from "../../playlists";
 import { SmartPlaylistEditor } from "./SmartPlaylistEditor";
-import { AddToPlaylistButton } from "./PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "./PlaylistAuthoring";
 
 type Props = {
   active: boolean;
@@ -146,12 +146,12 @@ export function PlaylistsPage({ active, playlists, selectedId, listLoading, list
           </div>
           <ol className="saved-playlists__tracks">
             {detail.tracks.slice(0, visibleCount).map((track, index) => <li key={`${track.trackKey}-${index}`}>
-              <button type="button" onClick={() => void startAt(index)} aria-label={`Play ${track.title} from here`}>
+              <PlaylistRow selection={{tracks: [track], label: track.title}}><button type="button" onClick={() => void startAt(index)} aria-label={`Play ${track.title} from here`}>
                 <span className="saved-playlists__number">{(detail.positions?.[index]??index) + 1}</span>
                 <span className="saved-playlists__song"><strong>{track.title}</strong><small>{displayTrackArtist(track)} · {track.album}</small></span>
                 <span className="saved-playlists__duration">{formatDuration(track.durationSeconds)}</span>
                 <Play aria-hidden="true" className="saved-playlists__row-play" />
-              </button>
+              </button></PlaylistRow>
               <span className="playlist-song-actions"><AddToPlaylistButton track={track} label={track.title} />{detail.editable&&detail.revision&&detail.positions?.[index]!=null&&<>
                 <button type="button" aria-label={`Move ${track.title} up`} disabled={busy||detail.positions[index]===0} onClick={()=>void edit({action:"move",id:detail.id,expectedUpdatedAt:detail.revision,from:detail.positions?.[index],to:(detail.positions?.[index]??0)-1})}>↑</button>
                 <button type="button" aria-label={`Move ${track.title} down`} disabled={busy||detail.positions[index]>=detail.trackCount-1} onClick={()=>void edit({action:"move",id:detail.id,expectedUpdatedAt:detail.revision,from:detail.positions?.[index],to:(detail.positions?.[index]??0)+1})}>↓</button>

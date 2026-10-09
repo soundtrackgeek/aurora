@@ -10,6 +10,7 @@ mod cover_cache;
 mod cover_protocol;
 mod curation;
 mod curation_store;
+mod desktop_reveal;
 mod device_mode;
 mod explorer;
 mod fanart;
@@ -1248,6 +1249,18 @@ async fn playback_append_queue(
 }
 
 #[tauri::command]
+async fn playback_enqueue(
+    app: AppHandle,
+    track_references: Vec<TrackReference>,
+    next: bool,
+) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, "playback_enqueue", move |runtime| {
+        runtime.enqueue(track_references, next)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn playback_toggle(app: AppHandle) -> Result<PlaybackSnapshot, String> {
     with_playback_snapshot(app, "playback_toggle", PlaybackRuntime::toggle).await
 }
@@ -2063,6 +2076,8 @@ pub fn run() {
             playback_rebind_catalog,
             playback_replace_queue,
             playback_append_queue,
+            playback_enqueue,
+            desktop_reveal::reveal_catalog_item,
             playback_toggle,
             playback_next,
             playback_previous,

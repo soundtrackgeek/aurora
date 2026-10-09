@@ -1,4 +1,4 @@
-import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { useAlbumCoverUrl } from "../../albumArtwork";
 import {
   Album,
@@ -305,7 +305,7 @@ function GenreAlbums({ detail }: { detail: GenreDetail }) {
   return (
     <section className="genre-panel genre-albums" aria-labelledby="genre-albums-title">
       <header><div><span>Representative releases</span><h3 id="genre-albums-title">Albums in orbit</h3></div><Album aria-hidden="true" /></header>
-      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <article key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><AddToPlaylistButton albumId={album.id} label={album.title} /><small>{album.publisher ?? "Publisher unknown"} · {album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article>)}</div>
+      <div className="genre-albums__grid">{detail.albums.slice(0, 8).map((album) => <PlaylistRow key={album.id} selection={{albumIds:[album.id],artistName:album.artist,label:album.title}}><article tabIndex={0} key={album.id}><Artwork track={albumAsTrack(album)} size="large" decorative={false} /><strong>{album.title}</strong><span>{album.artist}</span><AddToPlaylistButton albumId={album.id} label={album.title} /><small>{album.publisher ?? "Publisher unknown"} · {album.year ?? "Year unknown"} · {countLabel(album.totalTracks, "track")}{album.rating === null ? "" : ` · ${album.rating.toFixed(1)} ★`}</small></article></PlaylistRow>)}</div>
     </section>
   );
 }
@@ -315,7 +315,7 @@ function GenreArtists({ detail, onOpenArtist }: { detail: GenreDetail; onOpenArt
   return (
     <section className="genre-panel genre-artists" aria-labelledby="genre-artists-title">
       <header><div><span>Largest bodies</span><h3 id="genre-artists-title">Artists shaping the genre</h3></div><UsersRound aria-hidden="true" /></header>
-      <ol>{detail.artists.map((artist, index) => <li key={artist.name}><button type="button" onClick={() => onOpenArtist(artist.name)}><span className="genre-artists__rank">{String(index + 1).padStart(2, "0")}</span><span className="genre-artists__copy"><strong>{artist.name}</strong><small>{countLabel(artist.albumCount, "album")} · {countLabel(artist.trackCount, "track")}</small><i aria-hidden="true"><b style={{ width: `${Math.max(5, (artist.trackCount / largest) * 100)}%` }} /></i></span>{artist.lovedTracks > 0 ? <span className="genre-artists__love"><Heart aria-hidden="true" /> {formatCount(artist.lovedTracks)}</span> : null}<ChevronRight aria-hidden="true" /></button></li>)}</ol>
+      <ol>{detail.artists.map((artist, index) => <li key={artist.name}><PlaylistRow key={artist.name} selection={{artistName:artist.name,artistOnly:true,label:artist.name}}><button type="button" onClick={() => onOpenArtist(artist.name)}><span className="genre-artists__rank">{String(index + 1).padStart(2, "0")}</span><span className="genre-artists__copy"><strong>{artist.name}</strong><small>{countLabel(artist.albumCount, "album")} · {countLabel(artist.trackCount, "track")}</small><i aria-hidden="true"><b style={{ width: `${Math.max(5, (artist.trackCount / largest) * 100)}%` }} /></i></span>{artist.lovedTracks > 0 ? <span className="genre-artists__love"><Heart aria-hidden="true" /> {formatCount(artist.lovedTracks)}</span> : null}<ChevronRight aria-hidden="true" /></button></PlaylistRow></li>)}</ol>
     </section>
   );
 }
@@ -332,7 +332,7 @@ function GenreHighlights({
   return (
     <section className="genre-panel genre-highlights" aria-labelledby="genre-highlights-title">
       <header><div><span>Your strongest signals</span><h3 id="genre-highlights-title">Highlights</h3></div><Music2 aria-hidden="true" /></header>
-      {detail.highlights.length ? <ol>{detail.highlights.map((track, index) => <li key={track.trackKey} onClick={() => onSelectTrack(track)} onDoubleClick={() => onPlayTrack(track)}><button type="button" className="genre-highlight__play" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); onPlayTrack(track); }}><Play aria-hidden="true" /></button><span className="genre-highlight__rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span className="genre-highlight__copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="genre-highlight__time">{formatDuration(track.durationSeconds)}</span><AddToPlaylistButton track={track} label={track.title} /><InlineRatingControl title={track.title} rating={track.rating} busy={busyKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><InlineLoveControl title={track.title} loveState={track.loveState} busy={busyKeys.has(track.trackKey)} onLoveChange={(loveState) => onLoveChange(track, loveState)} /></li>)}</ol> : <p className="genre-panel__empty">No rated or representative tracks are available.</p>}
+      {detail.highlights.length ? <ol>{detail.highlights.map((track, index) => <PlaylistRow key={track.trackKey} selection={{tracks:[track],label:track.title}}><li tabIndex={0} key={track.trackKey} onClick={() => onSelectTrack(track)} onDoubleClick={() => onPlayTrack(track)}><button type="button" className="genre-highlight__play" aria-label={`Play ${track.title}`} onClick={(event) => { event.stopPropagation(); onPlayTrack(track); }}><Play aria-hidden="true" /></button><span className="genre-highlight__rank">{String(index + 1).padStart(2, "0")}</span><Artwork track={track} /><span className="genre-highlight__copy"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="genre-highlight__time">{formatDuration(track.durationSeconds)}</span><AddToPlaylistButton track={track} label={track.title} /><InlineRatingControl title={track.title} rating={track.rating} busy={busyKeys.has(track.trackKey)} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><InlineLoveControl title={track.title} loveState={track.loveState} busy={busyKeys.has(track.trackKey)} onLoveChange={(loveState) => onLoveChange(track, loveState)} /></li></PlaylistRow>)}</ol> : <p className="genre-panel__empty">No rated or representative tracks are available.</p>}
     </section>
   );
 }

@@ -29,3 +29,16 @@ it("opens row actions without selecting or playing the row and supports keyboard
   fireEvent.keyDown(screen.getByRole("row"),{key:"F10",shiftKey:true});
   expect(open).toHaveBeenLastCalledWith({tracks:[song],label:"Song"});expect(row).not.toHaveBeenCalled();
 });
+
+it("starts Choose playlist on an existing regular playlist and Create on a new one",async()=>{
+  vi.mocked(listMusicLibraryPlaylists).mockResolvedValue([{id:2,name:"Regular",description:"",trackCount:1,updatedAt:"rev",editable:true}]);
+  const props={onClose:vi.fn(),onSaved:vi.fn()};
+  const view=render(<PlaylistAuthoringDialog selection={{tracks:[song],label:"Song",playlistMode:"choose"}} {...props} />);
+  await waitFor(()=>expect(screen.getByLabelText("Playlist")).toHaveValue("2"));
+  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  view.unmount();
+  render(<PlaylistAuthoringDialog selection={{tracks:[song],label:"Song",playlistMode:"create"}} {...props} />);
+  await screen.findByRole("option",{name:"Regular"});
+  expect(screen.getByLabelText("Playlist")).toHaveValue("");
+  expect(screen.getByLabelText("Name")).toBeInTheDocument();
+});

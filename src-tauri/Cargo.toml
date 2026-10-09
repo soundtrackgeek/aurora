@@ -1,6 +1,6 @@
 [package]
 name = "aurora"
-version = "0.34.1"
+version = "0.35.0"
 description = "A fast, local-first explorer for a personal music universe"
 authors = ["Jørn Tillnes"]
 edition = "2024"
@@ -52,6 +52,9 @@ windows = { version = "0.61.3", features = [
   "Media",
   "Win32_Foundation",
   "Win32_System_WinRT",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

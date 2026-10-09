@@ -1,5 +1,21 @@
 # Aurora
 
+Aurora 0.35.0 adds context menus for library songs, albums and artists, matched
+chart entries, history, playlist songs and queue rows. Right-click or press
+Shift+F10 / the Menu key for Play, Play next, Add to queue, Add to playlist,
+album/artist navigation, Show in Windows Explorer, Copy, Tags and track ratings.
+Play next preserves the playing song and queues the selection ahead of shuffle
+or Repeat One; Add to queue appends without starting a stopped player. Queue
+edits retain deliberate repeats and reject additions beyond the 200-song limit.
+Artist actions use the first 50 local songs in rating/title order.
+
+Add to playlist offers the three most recently worked-on regular playlists,
+plus Choose playlist and Create playlist. Successful shared edits in Aurora
+are remembered on this device; Music Library modification times supply the
+cross-app fallback. Smart playlists and mixtapes retain their own editing rules.
+Explorer selects a song file or opens an album folder from its current catalog
+identity. See [context menus](docs/context-menus.md) for behavior and limits.
+
 Aurora **0.34.1**, with Music Library **0.186.2 or newer**, explains existing
 albums during intake preview: identical MP3 files are labeled **Already in
 library**, and different incoming files are identified before replacement.

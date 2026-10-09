@@ -4,10 +4,19 @@ import type { Track } from "../../library";
 import { authorPlaylist, listMusicLibraryPlaylists, type SavedPlaylistSummary } from "../../playlists";
 
 import { PlaylistAuthoringContext, type PlaylistSelection } from "./playlistAuthoringContext";
+import { MediaMenuContext, mediaMenuHandlers, type MediaSelection } from "../context/mediaMenuContext";
 
 /** Keep the existing row DOM and navigation handlers while adding keyboard context access. */
-export function PlaylistRow({ selection, children }: { selection: PlaylistSelection; children: ReactElement<{onContextMenu?: (e:MouseEvent<HTMLElement>)=>void; onKeyDown?: (e:KeyboardEvent<HTMLElement>)=>void}> }) {
+export function PlaylistRow({ selection, children }: { selection: MediaSelection; children: ReactElement<{onContextMenu?: (e:MouseEvent<HTMLElement>)=>void; onKeyDown?: (e:KeyboardEvent<HTMLElement>)=>void}> }) {
   const open=useContext(PlaylistAuthoringContext);
+  const openMenu = useContext(MediaMenuContext);
+  if (openMenu) {
+    const handlers = mediaMenuHandlers(openMenu, selection);
+    return cloneElement(children, {
+      onContextMenu: handlers.onContextMenu,
+      onKeyDown: event => { handlers.onKeyDown(event); if (!event.defaultPrevented) children.props.onKeyDown?.(event); },
+    });
+  }
   if(!open)return children;
   return cloneElement(children,{
     onContextMenu:e=>{e.preventDefault();e.stopPropagation();open(selection);},
@@ -31,7 +40,7 @@ export function PlaylistAuthoringDialog({ selection, onClose, onSaved }: { selec
   const [busy,setBusy] = useState(false);
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState<string|null>(null);
-  useEffect(()=>{dialog.current?.showModal();let cancelled=false;void listMusicLibraryPlaylists().then(items=>{if(!cancelled)setPlaylists(items.filter(p=>p.editable));}).catch((r:unknown)=>{if(!cancelled)setError(String(r));}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[]);
+  useEffect(()=>{dialog.current?.showModal();let cancelled=false;void listMusicLibraryPlaylists().then(items=>{if(!cancelled){const editable=items.filter(p=>p.editable&&!p.smart);setPlaylists(editable);if(selection.playlistMode==="choose"&&editable.length)setTarget(String(editable[0].id));}}).catch((r:unknown)=>{if(!cancelled)setError(String(r));}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[selection.playlistMode]);
   return <dialog ref={dialog} className="playlist-composer" aria-label="Add to playlist" onCancel={e=>{if(busy)e.preventDefault();else onClose();}}><form className="playlist-rule-editor" onSubmit={e=>{
     e.preventDefault();if(busy)return;setBusy(true);setError(null);
     const chosen=playlists.find(p=>p.id===Number(target));

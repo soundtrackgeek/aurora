@@ -1,4 +1,4 @@
-import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { TrackChartInfo } from "./TrackChartInfo";
 import { PublishedChartPicker } from "./PublishedChartPicker";
 import {
@@ -438,7 +438,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
           <div className="chart-table__head" role="row"><span>#</span><span>Title</span><span>Move</span><span>{page.request.scope === "week" ? "LW" : "#1"}</span><span>Peak</span><span>{page.request.scope === "week" || page.request.source === "publishedUs" ? "Wks" : "Points"}</span><span>Library</span></div>
           {page.entries.map((entry) => {
             const selected = selectedEntry?.artistKey === entry.artistKey && selectedEntry.titleKey === entry.titleKey;
-            return <div className={`chart-row${entry.position <= 3 ? " is-podium" : ""}${selected ? " is-selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} onClick={() => selectEntry(entry, page)} onDoubleClick={() => entry.matchedTrackId && void loadChartEntryTrack(entry.matchedTrackId).then((track) => callbacksRef.current.onPlayQueue([track]))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectEntry(entry, page); } }} key={`${entry.artistKey}:${entry.titleKey}`}>
+            return <PlaylistRow key={`${entry.artistKey}:${entry.titleKey}`} selection={{ label: entry.title, artistName: entry.artist, albumIds: page.request.kind === "albums" && entry.matchedAlbumId ? [entry.matchedAlbumId] : undefined, loadTrack: page.request.kind === "singles" && entry.matchedTrackId ? () => loadChartEntryTrack(entry.matchedTrackId!) : undefined }}><div className={`chart-row${entry.position <= 3 ? " is-podium" : ""}${selected ? " is-selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} onClick={() => selectEntry(entry, page)} onDoubleClick={() => entry.matchedTrackId && void loadChartEntryTrack(entry.matchedTrackId).then((track) => callbacksRef.current.onPlayQueue([track]))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectEntry(entry, page); } }} key={`${entry.artistKey}:${entry.titleKey}`}>
               <strong className="chart-row__rank">{entry.position}</strong>
               <div className="chart-row__identity"><Artwork track={entryAsTrack(entry)} decorative={false} /><span><strong>{entry.title}</strong><small><ArtistSmartLink artist={entry.artist} onOpen={onOpenArtistAlbums} /></small></span></div>
               {movementLabel(entry)}
@@ -446,7 +446,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
               <span>{entry.peakPosition ?? "—"}</span>
               <span>{formatCount(page.request.scope === "week" || page.request.source === "publishedUs" ? entry.appearances : entry.totalPoints)}</span>
               <span className="chart-row__actions">{entry.matchedAlbumId&&page.request.kind==="albums"?<AddToPlaylistButton albumId={entry.matchedAlbumId} label={entry.title} />:entry.matchedTrackId?<AddToPlaylistButton label={entry.title} loadTrack={()=>loadChartEntryTrack(entry.matchedTrackId!)} />:null}{entry.matchedTrackId || entry.matchedAlbumId ? <CheckCircle2 aria-label="In your library" /> : <span aria-label="Not matched">—</span>}{entry.loved ? <Heart className="is-loved" aria-label="Loved" /> : null}{entry.matchedTrackId ? <button type="button" aria-label={`Play ${entry.title}`} onClick={(event) => { event.stopPropagation(); void loadChartEntryTrack(entry.matchedTrackId!).then((track) => callbacksRef.current.onPlayQueue([track])); }}><Play aria-hidden="true" /></button> : null}</span>
-            </div>;
+            </div></PlaylistRow>;
           })}
         </div>
         {page.entries.length < page.totalEntries ? <button type="button" className="button button--quiet chart-show-more" disabled={isLoading || awaitingPublishedDate} onClick={() => setRequest((current) => ({ ...current, limit: page.entries.length >= 1000 ? 0 : Math.min(1000, page.entries.length + 100) }))}>{page.entries.length >= 1000 ? "Show full chart" : `Show next ${formatCount(Math.min(100, page.totalEntries - page.entries.length))} entries`} ({formatCount(page.totalEntries - page.entries.length)} remaining)</button> : null}
@@ -474,7 +474,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
             <button type="button" className="chart-score-shelf__open" onClick={() => { changeKind("albums"); changeSource("auroraScore"); }}>View full chart <ChevronRight aria-hidden="true" /></button>
           </div>
         </header>
-        <div>{page.albumScoreEntries.map((album, index) => <button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button>)}</div>
+        <div>{page.albumScoreEntries.map((album, index) => <PlaylistRow key={album.id} selection={{albumIds:[album.id],artistName:album.artist,label:album.title}}><button type="button" onClick={() => { const entry = scoreEntriesToChart(album, index); selectEntry(entry, { ...page, request: { ...page.request, kind: "albums", source: "auroraScore", scope: "period" }, chartTitle: `Aurora Album Score · ${page.request.period.label}` }); }} key={album.id}><strong>{index + 1}</strong><Artwork track={scoreAsTrack(album)} decorative={false} /><span><b>{album.title}</b><small><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested /></small></span><em>{album.score.toFixed(1)}</em></button></PlaylistRow>)}</div>
       </section> : null}
     </>}
     </div>

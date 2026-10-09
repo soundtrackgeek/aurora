@@ -1,5 +1,5 @@
 import { RememberedPage } from "../navigation/RememberedPage";
-import { AddToPlaylistButton } from "../playlists/PlaylistAuthoring";
+import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import {
   BarChart3,
   CalendarDays,
@@ -112,7 +112,7 @@ function HistoryRow({ item, onSelectTrack, onPlayTrack, onOpenArtistAlbums }: {
   onOpenArtistAlbums: (artist: string) => void;
 }) {
   return (
-    <article className={`history-row history-row--${item.outcome}${item.registeredPlay ? " is-play" : ""}`}>
+    <PlaylistRow selection={{tracks: item.track ? [item.track] : [], artistName: item.artist, label: item.title}}><article tabIndex={0} className={`history-row history-row--${item.outcome}${item.registeredPlay ? " is-play" : ""}`}>
       <button
         type="button"
         className="history-row__track"
@@ -140,7 +140,7 @@ function HistoryRow({ item, onSelectTrack, onPlayTrack, onOpenArtistAlbums }: {
         aria-label={`Play ${item.title} again`}
       ><Play aria-hidden="true" /></button>
       </span>
-    </article>
+    </article></PlaylistRow>
   );
 }
 

@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 16;
+pub(crate) const SCHEMA_VERSION: i64 = 17;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
@@ -27,6 +27,7 @@ pub(crate) struct StoredQueueEntry {
 pub(crate) struct StoredPlaybackState {
     pub(crate) queue: Vec<StoredQueueEntry>,
     pub(crate) current_index: Option<usize>,
+    pub(crate) priority_next_end: Option<usize>,
     pub(crate) position_seconds: f64,
     pub(crate) volume: f32,
     pub(crate) shuffle: bool,
@@ -38,6 +39,7 @@ impl Default for StoredPlaybackState {
         Self {
             queue: Vec::new(),
             current_index: None,
+            priority_next_end: None,
             position_seconds: 0.0,
             volume: 0.7,
             shuffle: false,
@@ -435,6 +437,18 @@ impl StateStore {
                     format!("Could not migrate Aurora's durable library-sync schedule: {error}")
                 })?;
         }
+        let has_priority_column: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('playback_state') WHERE name = 'priority_next_end')",
+            [], |row| row.get(0),
+        ).map_err(|error| format!("Could not inspect Aurora's Play next state: {error}"))?;
+        if !has_priority_column {
+            transaction
+                .execute(
+                    "ALTER TABLE playback_state ADD COLUMN priority_next_end INTEGER",
+                    [],
+                )
+                .map_err(|error| format!("Could not migrate Aurora's Play next order: {error}"))?;
+        }
         if current < 13 {
             transaction
                 .execute(
@@ -640,7 +654,7 @@ impl StateStore {
         connection
             .query_row(
                 r#"
-                SELECT current_index, position_seconds, volume, shuffle, repeat_mode
+                SELECT current_index, position_seconds, volume, shuffle, repeat_mode, priority_next_end
                 FROM playback_state WHERE singleton = 1
                 "#,
                 [],
@@ -649,6 +663,7 @@ impl StateStore {
                     Ok(StoredPlaybackState {
                         queue,
                         current_index: current_index.and_then(|value| usize::try_from(value).ok()),
+                        priority_next_end: row.get::<_, Option<i64>>(5)?.and_then(|value| usize::try_from(value).ok()),
                         position_seconds: row.get::<_, f64>(1)?.max(0.0),
                         volume: row.get::<_, f32>(2)?.clamp(0.0, 1.0),
                         shuffle: row.get::<_, i64>(3)? == 1,
@@ -768,10 +783,10 @@ impl StateStore {
                 r#"
                 UPDATE playback_state
                 SET current_index = ?1, position_seconds = ?2, volume = ?3,
-                    shuffle = ?4, repeat_mode = ?5
+                    shuffle = ?4, repeat_mode = ?5, priority_next_end = ?6
                 WHERE singleton = 1 AND NOT (
                   current_index IS ?1 AND position_seconds IS ?2 AND volume IS ?3
-                  AND shuffle IS ?4 AND repeat_mode IS ?5
+                  AND shuffle IS ?4 AND repeat_mode IS ?5 AND priority_next_end IS ?6
                 )
                 "#,
                 params![
@@ -780,6 +795,7 @@ impl StateStore {
                     state.volume.clamp(0.0, 1.0),
                     i64::from(state.shuffle),
                     state.repeat_mode,
+                    state.priority_next_end.map(|value| value as i64),
                 ],
             )
             .map_err(|error| format!("Could not save Aurora's playback settings: {error}"))?;
@@ -1991,6 +2007,7 @@ mod tests {
             volume: 0.42,
             shuffle: true,
             repeat_mode: "all".to_owned(),
+            priority_next_end: Some(1),
         };
         store.save(&expected).expect("save stable state");
         assert_eq!(store.load().expect("reload state"), expected);

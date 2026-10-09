@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { browserPreview } from "./library";
 import {
   appendTrackQueue,
+  enqueueTrackQueue,
   changeRepeatMode,
   changeShuffle,
   clearPlaybackQueue,
   getPlaybackSnapshot,
   moveQueueItem,
+  nextTrack,
   playTrackQueue,
   rebindPlaybackCatalog,
   seekPlayback,
@@ -14,6 +16,45 @@ import {
 } from "./playback";
 
 describe("browser playback adapter", () => {
+  it("inserts selected repeats next while preserving the playing song and prioritizing them over shuffle and repeat-one", async () => {
+    const [first, second, third] = browserPreview.tracks;
+    await playTrackQueue([first, second], first.id);
+    await changeShuffle(true);
+    await changeRepeatMode("one");
+    await seekPlayback(21);
+    const next = await enqueueTrackQueue([first, third], true);
+    expect(next.queue).toEqual([first, first, third, second]);
+    expect(next.currentIndex).toBe(0);
+    expect(next.currentTrack?.trackKey).toBe(first.trackKey);
+    expect(next.positionSeconds).toBeGreaterThanOrEqual(21);
+    expect(next.shuffle).toBe(true);
+    expect(next.repeatMode).toBe("one");
+    expect((await nextTrack()).currentIndex).toBe(1);
+    expect((await nextTrack()).currentIndex).toBe(2);
+    expect((await nextTrack()).currentIndex).toBe(2);
+    await changeShuffle(false);
+    await changeRepeatMode("off");
+  });
+
+  it("can fill an empty stopped queue and rejects a full queue without losing or partially adding songs", async () => {
+    await clearPlaybackQueue();
+    const [song, other] = browserPreview.tracks;
+    const queued = await enqueueTrackQueue([song, song], false);
+    expect(queued.queue).toEqual([song, song]);
+    expect(queued.status).toBe("stopped");
+    await playTrackQueue(Array.from({ length: 200 }, () => song), song.id);
+    await expect(enqueueTrackQueue([other], false)).rejects.toThrow("at most 200");
+    expect((await getPlaybackSnapshot()).queue).toEqual(Array.from({ length: 200 }, () => song));
+  });
+
+  it("retains the current occurrence when reordering a queue with repeated songs", async () => {
+    const [song, other] = browserPreview.tracks;
+    await playTrackQueue([song, other, song], other.id);
+    await nextTrack();
+    const next = await moveQueueItem(0, 1);
+    expect(next.currentIndex).toBe(2);
+    expect(next.currentTrack?.trackKey).toBe(song.trackKey);
+  });
   it("exercises the same queue and transport contract as the native boundary", async () => {
     const tracks = browserPreview.tracks.slice(0, 3);
     let state = await playTrackQueue(tracks, tracks[1].id);

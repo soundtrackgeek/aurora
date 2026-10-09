@@ -37,6 +37,8 @@ import { listSavedViews, type SavedView } from "./savedViews";
 import { PlaylistComposer, SaveViewControl, type PlaylistDraft } from "./components/playlists/ExplorerCuration";
 import { PlaylistAuthoringDialog } from "./components/playlists/PlaylistAuthoring";
 import { PlaylistAuthoringContext, type PlaylistSelection } from "./components/playlists/playlistAuthoringContext";
+import { MediaContextMenuProvider } from "./components/context/MediaContextMenu";
+import { ContextTagDialog } from "./components/context/ContextTagDialog";
 import { AppStoreProvider } from "./app/AppStoreProvider";
 import { useArtistNavigation } from "./app/artist/useArtistNavigation";
 import { EmptyInspector } from "./app/components/EmptyInspector";
@@ -207,6 +209,7 @@ function App() {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [playlistDraft, setPlaylistDraft] = useState<PlaylistDraft | null>(null);
   const [playlistSelection, setPlaylistSelection] = useState<PlaylistSelection | null>(null);
+  const [contextTags, setContextTags] = useState<PlaylistSelection | null>(null);
   const [playlistSaveMessage, setPlaylistSaveMessage] = useState<string | null>(null);
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
   useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
@@ -1302,6 +1305,12 @@ function App() {
 
   return (
     <PlaylistAuthoringContext value={setPlaylistSelection}>
+    <MediaContextMenuProvider playlists={savedPlaylists}
+      onPlay={async tracks => { endGenreQueue(); const result = await playback.play(tracks, tracks[0].id); if (result) selectTrack(tracks[0]); return Boolean(result); }}
+      onEnqueue={async (tracks, next) => Boolean(await playback.enqueue(tracks, next))}
+      onOpenAlbum={openTrackAlbum} onOpenArtist={openArtistAlbums} onOpenTags={setContextTags}
+      onRate={(track, rating) => saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
+      onPlaylistSaved={() => setPlaylistsReloadToken(value => value + 1)}>
     <div
       className="app-shell"
       data-left-sidebar={layoutPreferences.leftSidebar}
@@ -1312,6 +1321,9 @@ function App() {
     >
       {playlistDraft && <PlaylistComposer draft={playlistDraft} onClose={() => setPlaylistDraft(null)} onSaved={() => { setPlaylistDraft(null); setPlaylistsReloadToken(v=>v+1); setPlaylistSaveMessage("Playlist saved in Music Library and Aurora."); }} />}
       {playlistSelection && <PlaylistAuthoringDialog selection={playlistSelection} onClose={()=>setPlaylistSelection(null)} onSaved={()=>{setPlaylistSelection(null);setPlaylistsReloadToken(v=>v+1);setPlaylistSaveMessage("Playlist saved in Music Library and Aurora.");}} />}
+      {contextTags && <ContextTagDialog onClose={() => setContextTags(null)}><TagEditor
+        target={contextTags.albumIds?.length ? { kind: "albums", albumIds: [...contextTags.albumIds], label: contextTags.label } : { kind: "tracks", tracks: (contextTags.tracks ?? []).map(track => ({ trackId: track.id, trackKey: track.trackKey })), label: contextTags.label }}
+        onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} /></ContextTagDialog>}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
@@ -1346,7 +1358,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.34.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.35.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1965,6 +1977,7 @@ function App() {
         </div>
       )}
     </div>
+    </MediaContextMenuProvider>
     </PlaylistAuthoringContext>
   );
 }
