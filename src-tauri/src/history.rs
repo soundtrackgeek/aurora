@@ -1189,15 +1189,17 @@ impl HistoryStore {
         let mut tracks: HashMap<String, HistoryTopRow> = HashMap::new();
         let mut decades: BTreeMap<String, i64> = BTreeMap::new();
         for row in &current_plays {
-            let artist_key = row.artist.trim().to_lowercase();
+            // Rank the performing Artist, not the stored Album Artist, so
+            // compilations do not collapse into "Various Artists".
+            let track_artist = report_track_artist(row, resolved_by_key.get(&row.track_key));
             artists
-                .entry(artist_key)
+                .entry(track_artist.to_lowercase())
                 .and_modify(|artist| {
                     artist.plays = artist.plays.saturating_add(1);
                     artist.listened_seconds += row.listened_seconds;
                 })
                 .or_insert_with(|| HistoryReportArtist {
-                    artist: row.artist.clone(),
+                    artist: track_artist.to_owned(),
                     plays: 1,
                     listened_seconds: row.listened_seconds,
                 });
@@ -2189,6 +2191,14 @@ fn report_genres(
     (tagged_plays, genres)
 }
 
+fn report_track_artist<'a>(row: &'a HistoryRow, track: Option<&'a TrackSummary>) -> &'a str {
+    track
+        .and_then(|track| track.display_artist.as_deref())
+        .map(str::trim)
+        .filter(|artist| !artist.is_empty())
+        .unwrap_or_else(|| row.artist.trim())
+}
+
 fn report_track_references(rows: &[&HistoryRow]) -> Vec<StoredQueueEntry> {
     let mut seen = HashSet::new();
     rows.iter()
@@ -3082,6 +3092,24 @@ mod tests {
         assert_eq!(report_decade(Some(&summary)), "1980s");
         summary.original_year = None;
         assert_eq!(report_decade(Some(&summary)), "Unknown");
+    }
+
+    #[test]
+    fn report_artists_prefer_the_catalog_track_artist_over_album_artist() {
+        let mut row = report_row(1, None, 0);
+        row.artist = "Various Artists".to_owned();
+        let mut catalog_track = track(240);
+        catalog_track.display_artist = Some(" James Horner ".to_owned());
+        assert_eq!(
+            report_track_artist(&row, Some(&catalog_track)),
+            "James Horner"
+        );
+        catalog_track.display_artist = Some("  ".to_owned());
+        assert_eq!(
+            report_track_artist(&row, Some(&catalog_track)),
+            "Various Artists"
+        );
+        assert_eq!(report_track_artist(&row, None), "Various Artists");
     }
 
     #[test]

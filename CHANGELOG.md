@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.36.1] - 2026-10-10
+
+### Fixed
+- Listening Report's **Top music → Artists** now ranks each play by the track's Artist from the catalog instead of the Album Artist stored in history, so compilations no longer pile up under "Various Artists". Already-recorded plays are corrected too; plays whose track is no longer in the catalog keep the stored artist. Top albums still group by Album Artist.
+
 ## [0.36.0] - 2026-10-10
 
 ### Added
