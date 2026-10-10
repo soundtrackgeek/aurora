@@ -316,7 +316,7 @@ macOS Network Mode, by contrast, already has a settings-backed connections model
 | --- | --- | --- | --- |
 | 1 | Smart playlists and saved views | Query language, app brief "Planned #2" | M |
 | 2 | Playlist authoring | Music Library bridge, playlists | M |
-| 3 | Context menus with Play next / Add to queue | Queue insert (Improvement 8) | S–M |
+| 3 | Context menus with Play next / Add to queue — DONE | Queue insert (Improvement 8) | S–M |
 | 4 | Rating Sprint | 947,794 unrated tracks, verified tag writes | M |
 | 5 | Suggested ratings from listening behavior | Session outcomes in history | M |
 | 6 | "More like this" sonic radio | bliss-audio, analysis worker | L |
@@ -364,12 +364,16 @@ atomic export use Music Library's capability-gated bridge. See
 
 **How it fits.** `saved_playlists` lives in the Music Library catalog, which Aurora only reads. Send writes through the existing versioned file bridge so Music Library stays the only catalog writer, or start with Aurora-owned playlists in the state database plus an **Export to Music Library** action.
 
-### 3. Context menus with Play next / Add to queue
+### 3. Context menus with Play next / Add to queue - DONE
 
 **Implemented in Aurora 0.35.0.** Shared in-WebView menus support right-click,
-Shift+F10 and the Menu key, ordered queue insertion/appending, Explorer/Finder,
-navigation, copy, Tags and track ratings. Add to playlist offers three recent
-regular playlists plus choose/create through the shared Music Library bridge.
+Shift+F10 and the Menu key on library songs, albums and artists, matched chart
+and history entries, playlist songs and queue rows. Play next inserts ahead of
+pending songs; Add to queue appends while retaining the current song and playback
+state. Show in Windows Explorer selects a song file or opens its album folder
+(Finder on macOS). Add to playlist offers the three most recently worked-on
+regular playlists, Choose playlist and Create playlist through the shared Music
+Library bridge. Navigation, copy, Tags and track ratings are also available.
 See [context menus](context-menus.md) for supported surfaces and bounded actions.
 
 **What.** Right-click (or Shift+F10 / the Menu key) on any track, album, artist, chart entry, or history row to get: Play, **Play next**, **Add to queue**, Add to playlist, Go to album/artist, Show in Explorer/Finder, Copy "Artist – Title", Open Tags, and Rate.
@@ -626,7 +630,7 @@ Aurora already integrates MusicBrainz, Discogs, Last.fm (metadata only: `track.g
 | Phase | Theme | Items |
 | --- | --- | --- |
 | 1 · Quick wins (days) | Safety and speed | Improvement 6 (single instance), 3 (async covers and cache cap), 10 (one syntax registry, Enter to search), 9 (keyboard), 13 (report periods); Feature 16 (sleep timer) |
-| 2 · Listening quality (1–3 weeks) | Sound and flow | Improvement 7 (loudness), 8 (queue) together with Feature 3 (context menus), Improvement 2 (native scheduling and events); Feature 8 (lyrics) |
+| 2 · Listening quality (1–3 weeks) | Sound and flow | Improvement 7 (loudness), 8 (queue) together with Feature 3 (context menus, DONE), Improvement 2 (native scheduling and events); Feature 8 (lyrics) |
 | 3 · Curation (weeks) | The unrated 86 % | Features 4 (Rating Sprint) and 5 (suggested ratings), 1 (smart playlists), 2 (playlist authoring), 11 (Library Health); Improvement 12 (Universe) |
 | 4 · Connected, all opt-in (weeks) | Discovery | Features 9 (scrobbling), 10 (release radar), 18 (wishlist and previews), 17 (setlists), 7 (Ask) |
 | 5 · Analysis platform (longer) | One decode pass, many insights | Shared analysis worker → Feature 6 (sonic radio), Feature 12 (fingerprints), BPM/key fields |

@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora 0.35.2 marks roadmap feature 3, **Context menus with Play next / Add to
+queue**, complete, including Show in Windows Explorer and Add to playlist with
+three recent regular playlists, Choose playlist and Create playlist. See the
+[improvement roadmap](docs/improvement-roadmap.md#3-context-menus-with-play-next--add-to-queue---done).
+
 Aurora 0.35.1 makes the Albums navigation verification deterministic across
 release runners. The tests control loading timers, exercise delayed album
 responses in Universe, Songs, Albums, Artists and Tags, and retain the Album

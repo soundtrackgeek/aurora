@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.35.2] - 2026-10-10
+
+### Changed
+- Mark roadmap feature 3 complete in its summary, detailed entry and suggested sequence. Document Play next / Add to queue, Show in Windows Explorer, and Add to playlist with the three most recently worked-on regular playlists plus choose/create options.
+
 ## [0.35.1] - 2026-10-09
 
 ### Fixed
