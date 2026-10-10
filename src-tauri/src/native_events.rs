@@ -120,6 +120,29 @@ impl NativeBackgroundTasks {
             },
         )?;
 
+        // Skip the launch tick so startup never waits on a Music Library process.
+        let plays_app = app.clone();
+        let mut launch_tick = true;
+        self.schedule(
+            "aurora-library-plays",
+            Duration::from_secs(crate::library_plays::EXPORT_INTERVAL_SECONDS),
+            move || {
+                if std::mem::take(&mut launch_tick) {
+                    return Ok(());
+                }
+                let directory = plays_app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|error| error.to_string())?;
+                crate::library_plays::run_scheduled(
+                    &plays_app.state::<HistoryStore>(),
+                    &directory,
+                    crate::state_sync::now_ms(),
+                    |payload| crate::library_bridge::record_plays(&plays_app, payload),
+                )
+            },
+        )?;
+
         let library_app = app.clone();
         let mut sync_previous = None;
         self.schedule("aurora-library-sync", Duration::from_secs(5), move || {

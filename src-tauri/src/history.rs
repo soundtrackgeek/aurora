@@ -46,6 +46,18 @@ const TONEHAVN_HISTORY_DEVICES: [(&str, &str); 2] = [
     ("tonehavn-ios", "aurora-history-tonehavn-ios.sqlite3"),
 ];
 
+/// One registered play, as sent to Music Library's listening history.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RegisteredPlay {
+    pub(crate) device_id: String,
+    pub(crate) started_at_ms: i64,
+    pub(crate) title: String,
+    pub(crate) artist: String,
+    pub(crate) album: String,
+    pub(crate) directory: String,
+    pub(crate) filename: String,
+}
+
 #[derive(Clone, Debug)]
 struct HistoryMetadata {
     device_id: String,
@@ -790,6 +802,33 @@ impl HistoryStore {
         Ok(())
     }
 
+    /// A store isolated from OneDrive and Tonehavn, for other modules' tests.
+    #[cfg(test)]
+    pub(crate) fn for_tests(directory: &Path, device_id: &str) -> Self {
+        Self::new_with_tonehavn_directory(
+            directory.join("history.sqlite3"),
+            directory.join("remote"),
+            device_id.to_owned(),
+            "Test".to_owned(),
+            None,
+        )
+        .expect("test history store")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_test_session(
+        &self,
+        track: &TrackSummary,
+        started_at_ms: i64,
+        registered: bool,
+    ) {
+        let mut active = self.capture_session(track, 0.0, 30);
+        active.started_at_ms = started_at_ms;
+        active.registered_play = registered;
+        self.persist_checkpoint(&active.finish("completed").expect("finish"))
+            .expect("persist test session");
+    }
+
     // Synchronous adapters keep the existing history-contract tests independent
     // of scheduling. Playback uses capture_session and the background writer.
     #[cfg(test)]
@@ -1356,6 +1395,60 @@ impl HistoryStore {
     }
 
     /// One indexed batch per available history source. No artist/title guessing.
+    /// Registered plays from every history source (this device, other devices'
+    /// OneDrive snapshots, and Tonehavn), oldest first. Each device is read
+    /// from its own cursor minus `overlap_ms`, because a peer snapshot can
+    /// arrive long after its plays happened.
+    pub(crate) fn registered_plays_after(
+        &self,
+        cursors: &HashMap<String, i64>,
+        overlap_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<RegisteredPlay>, String> {
+        let mut plays = Vec::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let since = cursors
+                .get(&metadata.device_id)
+                .map_or(i64::MIN, |cursor| cursor.saturating_sub(overlap_ms));
+            let mut statement = connection
+                .prepare(
+                    "SELECT started_at_ms, title, artist, album, directory, filename
+                     FROM listening_sessions
+                     WHERE registered_play = 1 AND started_at_ms > ?1
+                     ORDER BY started_at_ms LIMIT ?2",
+                )
+                .map_err(|error| format!("Could not prepare registered plays: {error}"))?;
+            let rows = statement
+                .query_map(params![since, limit as i64], |row| {
+                    Ok(RegisteredPlay {
+                        device_id: metadata.device_id.clone(),
+                        started_at_ms: row.get(0)?,
+                        title: row.get(1)?,
+                        artist: row.get(2)?,
+                        album: row.get(3)?,
+                        directory: row.get(4)?,
+                        filename: row.get(5)?,
+                    })
+                })
+                .map_err(|error| format!("Could not read registered plays: {error}"))?;
+            for row in rows {
+                plays.push(row.map_err(|error| error.to_string())?);
+            }
+        }
+        plays.sort_by_key(|play| play.started_at_ms);
+        plays.truncate(limit);
+        Ok(plays)
+    }
+
     pub(crate) fn last_listened_for_keys(
         &self,
         keys: &[String],
@@ -2553,6 +2646,61 @@ mod tests {
             registered_at_ms: Some(started_at_ms + 30_000),
             outcome: "completed".to_owned(),
         }
+    }
+
+    #[test]
+    fn registered_plays_follow_per_device_cursors_with_overlap() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new_with_tonehavn_directory(
+            directory.path().join("history.sqlite3"),
+            directory.path().join("remote"),
+            "device-test-plays".to_owned(),
+            "Test".to_owned(),
+            None,
+        )
+        .unwrap();
+        for (started_at_ms, registered) in [(1_000, true), (2_000, false), (3_000, true)] {
+            let mut active = store.capture_session(&track(240), 0.0, 30);
+            active.started_at_ms = started_at_ms;
+            active.registered_play = registered;
+            store
+                .persist_checkpoint(&active.finish("completed").unwrap())
+                .unwrap();
+        }
+
+        let all = store
+            .registered_plays_after(&HashMap::new(), 0, 10)
+            .unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|play| play.started_at_ms)
+                .collect::<Vec<_>>(),
+            vec![1_000, 3_000]
+        );
+        assert_eq!(all[0].device_id, "device-test-plays");
+        assert_eq!(all[0].directory, r"D:\MUSIC\Artist");
+
+        let cursors = HashMap::from([("device-test-plays".to_owned(), 3_000)]);
+        assert!(
+            store
+                .registered_plays_after(&cursors, 0, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .registered_plays_after(&cursors, 2_500, 10)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            store
+                .registered_plays_after(&HashMap::new(), 0, 1)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

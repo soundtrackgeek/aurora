@@ -451,3 +451,14 @@ export async function saveHistoryPlayThreshold(playThresholdSeconds: number): Pr
 export function resetHistoryPreview(): void {
   previewThresholdSeconds = 30;
 }
+
+export interface LibraryPlayExportStatus {
+  sentPlays: number;
+  lastExportedAtMs: number | null;
+  lastError: string | null;
+}
+
+export async function loadLibraryPlayExportStatus(): Promise<LibraryPlayExportStatus> {
+  if (!isTauriRuntime()) return { sentPlays: 0, lastExportedAtMs: null, lastError: null };
+  return invoke<LibraryPlayExportStatus>("library_play_export_status");
+}

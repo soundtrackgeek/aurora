@@ -1,5 +1,18 @@
 # Aurora
 
+Aurora 0.36.0, with Music Library **0.187.0 or newer**, sends registered plays
+to Music Library's **Statistics → Listening** history. Plays from every history
+source are included: this PC, other devices' OneDrive history, and Tonehavn.
+Every two minutes the home PC sends new plays in batches of up to 1,000 through
+the `recordPlays` bridge operation; the first run sends the whole history. Each
+device has its own sent-up-to point. Every request also re-reads six hours
+behind it so late OneDrive snapshots are not missed, and Music Library ignores
+plays it already has. Network Mode and Laptop Mode do not send plays. After a
+failure, such as an older Music Library, Aurora waits an hour and sends the same
+plays again. **Listening History** shows how many plays were sent, when they
+were last sent, or the latest error. The state is kept in
+`aurora-library-plays.json` in Aurora's app-data folder.
+
 Aurora 0.35.2 marks roadmap feature 3, **Context menus with Play next / Add to
 queue**, complete, including Show in Windows Explorer and Add to playlist with
 three recent regular playlists, Choose playlist and Create playlist. See the

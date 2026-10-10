@@ -447,6 +447,15 @@ pub(crate) fn save_sonic_journey(
     invoke_bridge(app, "sonicSaveJourney", input, Duration::from_secs(60))
 }
 
+/// Sends registered plays to Music Library's listening history. Music Library
+/// treats a repeated play as a duplicate, so retrying a batch is harmless.
+pub(crate) fn record_plays(
+    app: &AppHandle,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    invoke_bridge(app, "recordPlays", input, Duration::from_secs(120))
+}
+
 pub(crate) fn playlist_operation(
     app: &AppHandle,
     operation: &'static str,

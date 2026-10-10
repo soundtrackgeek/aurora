@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.0] - 2026-10-10
+
+### Added
+- Send registered plays from every history source (this PC, OneDrive device snapshots, and Tonehavn) to Music Library 0.187.0's listening history through the `recordPlays` bridge operation. A background task runs every two minutes on the home PC. It sends up to 1,000 plays per request, tracks a sent-up-to point per device, re-reads six hours behind it, and waits an hour after a failure. Network Mode and Laptop Mode do not send.
+- **Listening History** shows how many plays were sent to Music Library, when they were last sent, or the latest error.
+
 ## [0.35.2] - 2026-10-10
 
 ### Changed

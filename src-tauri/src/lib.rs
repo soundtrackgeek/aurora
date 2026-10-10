@@ -23,6 +23,7 @@ mod jev;
 mod laptop_mode;
 mod lastfm;
 mod library_bridge;
+mod library_plays;
 mod library_sync;
 mod live_genres;
 mod media_controls;
@@ -1736,6 +1737,17 @@ async fn set_history_play_threshold(
 }
 
 #[tauri::command]
+fn library_play_export_status(app: AppHandle) -> Result<library_plays::PlayExportStatus, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Aurora could not locate its app-data folder: {error}"))?;
+    Ok(library_plays::status(&library_plays::load_state(
+        &library_plays::state_path(&directory),
+    )))
+}
+
+#[tauri::command]
 fn global_shortcut_settings(app: AppHandle) -> Result<shortcuts::GlobalShortcutStatus, String> {
     let state = app.state::<GlobalShortcutState>();
     let runtime = state
@@ -2104,6 +2116,7 @@ pub fn run() {
             listening_history_report,
             track_history_insight,
             set_history_play_threshold,
+            library_play_export_status,
             global_shortcut_settings,
             update_global_shortcut_settings,
             audio_settings,

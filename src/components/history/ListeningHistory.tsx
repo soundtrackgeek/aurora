@@ -28,6 +28,7 @@ import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ContentTransition } from "../ContentTransition";
 import { transitionContent } from "../../contentTransition";
+import { LibraryPlayExport } from "./LibraryPlayExport";
 import "./ListeningHistory.css";
 
 const ListeningReport = lazy(() => import("./ListeningReport").then((module) => ({ default: module.ListeningReport })));
@@ -243,6 +244,7 @@ export function ListeningHistory({
         message={thresholdMessage}
         onSave={onSaveThreshold}
       />
+      <LibraryPlayExport />
 
       {(page?.topTracks.length ?? 0) > 0 && (
         <section className="history-top" aria-labelledby="history-top-title">
