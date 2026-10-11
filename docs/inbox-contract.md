@@ -29,6 +29,18 @@ Aurora 0.24.6 provides Inbox as a device-local preparation area. Its files are o
 
 ## Tag transaction
 
+**Fill track totals** in the toolbar and Readiness panel applies to every selected
+album, independently of track checkboxes. A native worker reads each album's
+current regular MP3 files, counts all tracks in each numbered disc (or the whole
+album when no discs are numbered), and fills only missing track totals. Existing
+totals are retained. Albums with lossless audio or partially missing disc numbers
+report a failure before any tags change. Paths must remain inside monitored roots;
+duplicate album paths are processed once. The action uses the same verified,
+rollback-capable tag transaction below with only Track Total selected and no
+rename or removal. Albums are processed sequentially; successes remain updated if
+another album fails. A fresh Inbox scan updates readiness and retains the latest
+selection. Other preparation requirements continue to block intake when needed.
+
 The Auto-Tagger submits one canonical album path, one bounded list of its visible MP3 paths, selected editable fields, and desired per-track values. Rust re-canonicalizes every path and rejects any track whose direct parent is not the selected album.
 
 Before replacing originals, Aurora:

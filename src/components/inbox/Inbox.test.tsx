@@ -11,6 +11,74 @@ afterEach(() => {
 });
 
 describe("Inbox", () => {
+  it("fills totals for 51 selected albums, rescans readiness, and keeps the latest selection", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const albums = Array.from({ length: 52 }, (_, index) => {
+      const path = `C:\\Music\\Inbox\\Bulk ${index + 1}`;
+      const tracks = first.tracks.slice(0, 2 + index % 3).map((track) => ({ ...track, path: track.path.replace(first.path, path), trackTotal: null }));
+      return { ...first, id: `totals-${index}`, path, album: `Bulk ${index + 1}`, tracks, trackCount: tracks.length, readiness: { ready: false, issues: ["Track totals are incomplete"] } };
+    });
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    let finish!: (result: inboxAdapter.InboxTrackTotalsResult) => void;
+    const fill = vi.spyOn(inboxAdapter, "fillInboxTrackTotals").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    await screen.findByRole("row", { name: "Bulk 1 by Baltimoore" });
+    fireEvent.click(screen.getByRole("row", { name: "Bulk 51 by Baltimoore" }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Fill track totals (51)" }));
+    expect(fill).toHaveBeenCalledExactlyOnceWith(albums.slice(0, 51).map((album) => album.path));
+    expect(screen.getByRole("button", { name: "Filling track totals…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move selected (51)" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("row", { name: "Bulk 52 by Baltimoore" }));
+    load.mockResolvedValue({ ...snapshot, albums: albums.map((album, index) => index < 51 ? { ...album, tracks: album.tracks.map((track) => ({ ...track, trackTotal: album.trackCount })), readiness: { ready: true, issues: [] } } : album) });
+    finish({ changedTracks: 153, changedAlbums: 51, unchangedAlbums: 0, failures: [] });
+    expect(await screen.findByText("Filled missing track totals in 153 tracks across 51 albums.")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "Bulk 52 by Baltimoore" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("row", { name: "Bulk 1 by Baltimoore" })).toHaveTextContent("Ready");
+    expect(screen.getByRole("row", { name: "Bulk 52 by Baltimoore" })).toHaveTextContent("1 issue");
+    fireEvent.click(screen.getByRole("row", { name: "Bulk 1 by Baltimoore" }));
+    expect(screen.getByRole("button", { name: "Fill track totals" })).toBeDisabled();
+  });
+
+  it("fills from Readiness despite track exclusions and reports partial failures after rescan", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const second = { ...first, id: "totals-second", album: "Second", path: "C:\\Music\\Inbox\\Second" };
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [first, second] });
+    const fill = vi.spyOn(inboxAdapter, "fillInboxTrackTotals").mockResolvedValue({ changedTracks: 2, changedAlbums: 1, unchangedAlbums: 0, failures: [{ albumPath: second.path, message: "File is locked." }] });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    await screen.findByRole("row", { name: /Freak by/ });
+    fireEvent.click(screen.getByRole("row", { name: "Second by Baltimoore" }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "None" }));
+    load.mockResolvedValue({ ...snapshot, albums: [{ ...first, tracks: first.tracks.map((track) => ({ ...track, trackTotal: 10 })), readiness: { ready: false, issues: ["Genre is missing"] } }, second] });
+    fireEvent.click(screen.getByRole("button", { name: /Fill missing track totals/ }));
+    expect(await screen.findByText("1 album could not have track totals filled. Second: File is locked.")).toBeInTheDocument();
+    expect(fill).toHaveBeenCalledExactlyOnceWith([first.path, second.path]);
+    expect(screen.getByText("Filled missing track totals in 2 tracks across 1 album.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("row", { name: /Freak by/ }));
+    expect(screen.getByText("Genre is missing")).toBeInTheDocument();
+    expect(screen.queryByText("Track totals are incomplete")).not.toBeInTheDocument();
+  });
+
+  it("disables filling totals for an empty selection or lossless album and exposes worker errors", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue(snapshot);
+    const fill = vi.spyOn(inboxAdapter, "fillInboxTrackTotals").mockRejectedValue(new Error("Music writes are unavailable."));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    const row = await screen.findByRole("row", { name: /Freak by/ });
+    fireEvent.click(row, { ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Fill track totals" })).toBeDisabled();
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole("button", { name: "Fill track totals" }));
+    expect(await screen.findByText("Music writes are unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fill track totals" })).toBeEnabled();
+    load.mockResolvedValue({ ...snapshot, albums: [{ ...first, losslessTrackCount: 1 }] });
+    fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Fill track totals" })).toBeDisabled());
+    expect(fill).toHaveBeenCalledTimes(1);
+  });
+
   it("selects Inbox album ranges with Shift and toggles albums with Ctrl", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     const first = snapshot.albums[0];
@@ -112,7 +180,7 @@ describe("Inbox", () => {
 
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     expect(screen.getByText("1 selected · 1 album outside the library")).toBeInTheDocument();
-    expect(screen.getByText("3 issues")).toBeInTheDocument();
+    expect(screen.getByText("4 issues")).toBeInTheDocument();
     expect(screen.getByText("320 kbps average")).toBeInTheDocument();
     expect(screen.getByText(/^MP3$/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Freak cover" })).toHaveAttribute(

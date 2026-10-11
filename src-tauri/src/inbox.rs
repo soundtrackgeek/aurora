@@ -294,6 +294,28 @@ pub(crate) struct InboxTagApplyResult {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InboxTrackTotalsRequest {
+    album_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxTrackTotalsFailure {
+    album_path: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboxTrackTotalsResult {
+    changed_tracks: usize,
+    changed_albums: usize,
+    unchanged_albums: usize,
+    failures: Vec<InboxTrackTotalsFailure>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct InboxCoverEmbedRequest {
     album_path: String,
     image_path: Option<String>,
@@ -890,6 +912,114 @@ pub(crate) fn apply_tags(
         recovery_path: recovery_directory.as_deref().map(path_text).transpose()?,
         album_path: path_text(&final_album)?,
     })
+}
+
+pub(crate) fn fill_track_totals(
+    request: InboxTrackTotalsRequest,
+    monitored_roots: &[PathBuf],
+    recovery_root: &Path,
+) -> Result<InboxTrackTotalsResult, String> {
+    if request.album_paths.is_empty() || request.album_paths.len() > MAX_SCANNED_DIRECTORIES {
+        return Err("Select one or more Inbox albums to fill track totals.".to_owned());
+    }
+    let mut result = InboxTrackTotalsResult::default();
+    let mut seen = HashSet::new();
+    for requested_path in request.album_paths {
+        let changed = (|| {
+            let album = canonical_directory(&requested_path)?;
+            if !monitored_roots.iter().any(|root| album.starts_with(root)) {
+                return Err("The Inbox album is outside the monitored folders.".to_owned());
+            }
+            if !seen.insert(path_key(&album)) {
+                return Ok(None);
+            }
+            fill_album_track_totals(&album, monitored_roots, recovery_root).map(Some)
+        })();
+        match changed {
+            Ok(Some(0)) => result.unchanged_albums += 1,
+            Ok(Some(count)) => {
+                result.changed_tracks += count;
+                result.changed_albums += 1;
+            }
+            Ok(None) => {}
+            Err(message) => result.failures.push(InboxTrackTotalsFailure {
+                album_path: requested_path,
+                message,
+            }),
+        }
+    }
+    Ok(result)
+}
+
+fn fill_album_track_totals(
+    album: &Path,
+    monitored_roots: &[PathBuf],
+    recovery_root: &Path,
+) -> Result<usize, String> {
+    // Count current files, including tracks whose totals are already filled.
+    let mut tracks = Vec::new();
+    let mut counts = HashMap::<Option<u32>, u32>::new();
+    for entry in
+        fs::read_dir(album).map_err(|error| format!("Could not read the Inbox album: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Could not read an Inbox track: {error}"))?;
+        let path = entry.path();
+        if !is_inbox_audio(&path) {
+            continue;
+        }
+        let kind = entry.file_type().map_err(|error| error.to_string())?;
+        if !kind.is_file() || kind.is_symlink() {
+            return Err("An Inbox audio file is not a regular file.".to_owned());
+        }
+        if !is_mp3(&path) {
+            return Err("Convert this album to MP3 before filling track totals.".to_owned());
+        }
+        let (tag, _) = read_tag_for_write(&path)?;
+        let values = read_editable_tag_values(&tag)?;
+        *counts.entry(values.disc_number).or_default() += 1;
+        tracks.push((path, values));
+    }
+    if tracks.is_empty() {
+        return Err("The Inbox album contains no MP3 files.".to_owned());
+    }
+    if tracks
+        .iter()
+        .all(|(_, values)| values.track_total.is_some())
+    {
+        return Ok(0);
+    }
+    if counts.len() > 1 && counts.contains_key(&None) {
+        return Err(
+            "Fill the missing disc numbers before filling track totals for this album.".to_owned(),
+        );
+    }
+    let patches = tracks
+        .into_iter()
+        .filter_map(|(path, mut values)| {
+            if values.track_total.is_some() {
+                return None;
+            }
+            values.track_total = Some(counts[&values.disc_number]);
+            Some(InboxTrackPatch {
+                path: path.to_string_lossy().into_owned(),
+                values,
+            })
+        })
+        .collect();
+    apply_tags(
+        InboxTagApplyRequest {
+            album_path: path_text(album)?,
+            fields: vec![EditableTagField::TrackTotal],
+            tracks: patches,
+            rename_after_apply: false,
+            remove_track_paths: Vec::new(),
+            artwork_token: None,
+        },
+        None,
+        recovery_root,
+        monitored_roots,
+    )
+    .map(|result| result.changed_tracks)
 }
 
 pub(crate) fn embed_album_cover(
@@ -3665,6 +3795,175 @@ mod tests {
             .write_to(&mut bytes, image::ImageFormat::Png)
             .expect("encode cover");
         bytes.into_inner()
+    }
+
+    #[test]
+    fn fill_track_totals_handles_51_albums_and_preserves_existing_tags_and_audio() {
+        let root = tempfile::tempdir().unwrap();
+        let monitored = root.path().canonicalize().unwrap();
+        let mut paths = Vec::new();
+        let mut originals = Vec::new();
+        let mut expected_changes = 0;
+        for index in 0..51 {
+            let album = root.path().join(format!("Album {index}"));
+            fs::create_dir(&album).unwrap();
+            let count = 2 + index % 3;
+            for track in 1..=count {
+                let path = album.join(format!("{track:02}.mp3"));
+                write_artwork_fixture(&path, track, Some(7));
+                let mut tag = Tag::read_from_path(&path).unwrap();
+                if track == 1 {
+                    tag.set_total_tracks(99);
+                } else {
+                    tag.remove_total_tracks();
+                    expected_changes += 1;
+                }
+                tag.write_to_path(&path, Version::Id3v24).unwrap();
+                originals.push((path.clone(), tag, audio_payload_hash(&path).unwrap(), count));
+            }
+            fs::write(album.join("cover.jpg"), b"sidecar").unwrap();
+            fs::write(album.join(".aurora-inbox-123-0.tmp.mp3"), b"staging").unwrap();
+            paths.push(path_text(&album).unwrap());
+        }
+        // Duplicate paths must not count or write the same album twice.
+        paths.push(paths[0].clone());
+        let result = fill_track_totals(
+            InboxTrackTotalsRequest {
+                album_paths: paths.clone(),
+            },
+            std::slice::from_ref(&monitored),
+            &root.path().join("recovery"),
+        )
+        .unwrap();
+        assert_eq!(result.changed_albums, 51);
+        assert_eq!(result.changed_tracks, expected_changes);
+        assert!(result.failures.is_empty());
+        for (path, before, hash, count) in originals {
+            let after = Tag::read_from_path(&path).unwrap();
+            assert_eq!(
+                after.total_tracks(),
+                Some(if before.track() == Some(1) { 99 } else { count })
+            );
+            assert_eq!(audio_payload_hash(&path).unwrap(), hash);
+            let mut expected = read_editable_tag_values(&before).unwrap();
+            expected.track_total = after.total_tracks();
+            assert_eq!(read_editable_tag_values(&after).unwrap(), expected);
+            for frame in editor_non_target_frames(&before, &[EditableTagField::TrackTotal], false) {
+                assert!(after.frames().any(|written| written == &frame));
+            }
+        }
+        let again = fill_track_totals(
+            InboxTrackTotalsRequest { album_paths: paths },
+            &[monitored],
+            &root.path().join("recovery"),
+        )
+        .unwrap();
+        assert_eq!(again.changed_tracks, 0);
+        assert_eq!(again.unchanged_albums, 51);
+    }
+
+    #[test]
+    fn fill_track_totals_counts_each_disc_and_refreshes_readiness() {
+        let root = tempfile::tempdir().unwrap();
+        let album = root.path().join("Test Artist - Test Album (1990)");
+        fs::create_dir(&album).unwrap();
+        for (disc, count) in [(1, 2), (2, 3)] {
+            for number in 1..=count {
+                let path = album.join(format!(
+                    "{disc}-{number:02} - Test Artist - Track {number}.mp3"
+                ));
+                write_artwork_fixture(&path, number, Some(7));
+                let mut tag = Tag::read_from_path(&path).unwrap();
+                tag.set_disc(disc);
+                tag.set_year(1990);
+                tag.remove_total_tracks();
+                tag.write_to_path(&path, Version::Id3v24).unwrap();
+            }
+        }
+        let before = scan_album(&album).unwrap();
+        assert!(
+            before
+                .readiness
+                .issues
+                .contains(&"Track totals are incomplete".to_owned())
+        );
+        let result = fill_track_totals(
+            InboxTrackTotalsRequest {
+                album_paths: vec![path_text(&album).unwrap()],
+            },
+            &[root.path().canonicalize().unwrap()],
+            &root.path().join("recovery"),
+        )
+        .unwrap();
+        assert_eq!(result.changed_tracks, 5);
+        let scanned = scan_album(&album).unwrap();
+        assert_eq!(
+            scanned.readiness.issues,
+            before
+                .readiness
+                .issues
+                .into_iter()
+                .filter(|issue| issue != "Track totals are incomplete")
+                .collect::<Vec<_>>()
+        );
+        for track in scanned.tracks {
+            assert_eq!(
+                track.track_total,
+                Some(if track.disc_number == Some(1) { 2 } else { 3 })
+            );
+        }
+    }
+
+    #[test]
+    fn fill_track_totals_reports_album_failures_without_changing_their_files() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        let mut originals = Vec::new();
+        for (name, mixed_discs, lossless) in [
+            ("Mixed discs", true, false),
+            ("Lossless", false, true),
+            ("Valid", false, false),
+        ] {
+            let album = root.path().join(name);
+            fs::create_dir(&album).unwrap();
+            for number in 1..=2 {
+                let path = album.join(format!("{number}.mp3"));
+                write_artwork_fixture(&path, number, None);
+                let mut tag = Tag::read_from_path(&path).unwrap();
+                tag.remove_total_tracks();
+                if mixed_discs && number == 1 {
+                    tag.set_disc(1);
+                }
+                tag.write_to_path(&path, Version::Id3v24).unwrap();
+                if mixed_discs || lossless {
+                    originals.push((path.clone(), fs::read(&path).unwrap()));
+                }
+            }
+            if lossless {
+                fs::write(album.join("3.flac"), b"FLAC").unwrap();
+            }
+            paths.push(path_text(&album).unwrap());
+        }
+        let outside_track = outside.path().join("outside.mp3");
+        write_artwork_fixture(&outside_track, 1, None);
+        originals.push((outside_track.clone(), fs::read(&outside_track).unwrap()));
+        paths.push(path_text(outside.path()).unwrap());
+        let result = fill_track_totals(
+            InboxTrackTotalsRequest { album_paths: paths },
+            &[root.path().canonicalize().unwrap()],
+            &root.path().join("recovery"),
+        )
+        .unwrap();
+        assert_eq!(result.changed_tracks, 2);
+        assert_eq!(result.changed_albums, 1);
+        assert_eq!(result.failures.len(), 3);
+        assert!(result.failures[0].message.contains("disc numbers"));
+        assert!(result.failures[1].message.contains("Convert"));
+        assert!(result.failures[2].message.contains("outside"));
+        for (path, bytes) in originals {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
     }
 
     fn write_artwork_fixture(path: &Path, track: u32, picture_seed: Option<u8>) {

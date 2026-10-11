@@ -128,6 +128,13 @@ export interface InboxTagApplyResult {
   albumPath: string;
 }
 
+export interface InboxTrackTotalsResult {
+  changedTracks: number;
+  changedAlbums: number;
+  unchangedAlbums: number;
+  failures: Array<{ albumPath: string; message: string }>;
+}
+
 export interface InboxRenameResult {
   albumPath: string;
   renamedTracks: number;
@@ -186,7 +193,7 @@ const previewTracks = [
   year: 1990,
   releaseYear: 1990,
   trackNumber: index + 1,
-  trackTotal: 10,
+  trackTotal: index < 2 ? null : 10,
   discNumber: null,
   discTotal: null,
 }));
@@ -225,6 +232,7 @@ const previewAlbum: InboxAlbum = {
   readiness: {
     ready: false,
     issues: [
+      "Track totals are incomplete",
       "Genre is missing",
       "Album folder is not organized as Album Artist - Album (Year)",
       "One or more track filenames are not organized from their tags",
@@ -345,6 +353,21 @@ export async function applyInboxTags(request: InboxTagApplyRequest): Promise<Inb
     albumPath: request.albumPath,
   };
   return invoke<InboxTagApplyResult>("apply_inbox_tags", { request });
+}
+
+export async function fillInboxTrackTotals(albumPaths: string[]): Promise<InboxTrackTotalsResult> {
+  if (!isTauriRuntime()) {
+    const selected = albumPaths.includes(previewAlbum.path);
+    const missing = selected ? previewTracks.filter((track) => track.trackTotal === null) : [];
+    for (const track of missing) track.trackTotal = previewTracks.length;
+    if (missing.length) {
+      const issues = previewAlbum.readiness.issues.filter((issue) => issue !== "Track totals are incomplete");
+      previewAlbum.readiness = { ready: issues.length === 0, issues };
+      previewAlbum.modifiedAtMs = Date.now();
+    }
+    return { changedTracks: missing.length, changedAlbums: missing.length ? 1 : 0, unchangedAlbums: selected && !missing.length ? 1 : 0, failures: [] };
+  }
+  return invoke<InboxTrackTotalsResult>("fill_inbox_track_totals", { request: { albumPaths } });
 }
 
 export async function selectInboxCoverImage(): Promise<string | null> {

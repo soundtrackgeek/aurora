@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.36.2] - 2026-10-11
+
+### Added
+- Inbox **Fill track totals** in the toolbar and Readiness panel fills missing totals across all selected albums, including batches of 50 or more. Counts come from each album's current local MP3s, separately per numbered disc, regardless of track checkbox exclusions. Existing totals, track numbers, other tags, artwork, audio, and filenames are preserved through the verified album tag transaction. Readiness is rescanned while retaining the latest selection; failures identify the affected album and successful albums remain updated. Convert lossless albums and complete partial disc numbering before using the action.
+
 ## [0.36.1] - 2026-10-10
 
 ### Fixed

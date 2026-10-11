@@ -79,8 +79,8 @@ use inbox::{
     DiscogsCredentialsRequest, InboxBatchRenameRequest, InboxBatchRenameResult,
     InboxConvertRequest, InboxConvertResult, InboxCoverEmbedRequest, InboxCoverEmbedResult,
     InboxRenameRequest, InboxRenameResult, InboxRuntime, InboxSettingsStatus, InboxSnapshot,
-    InboxTagApplyRequest, InboxTagApplyResult, ReleaseCandidateDetail, ReleaseDetailRequest,
-    ReleaseSearchRequest, ReleaseSearchResult,
+    InboxTagApplyRequest, InboxTagApplyResult, InboxTrackTotalsRequest, InboxTrackTotalsResult,
+    ReleaseCandidateDetail, ReleaseDetailRequest, ReleaseSearchRequest, ReleaseSearchResult,
 };
 use laptop_mode::{LaptopModeRuntime, LaptopModeStatus};
 use lastfm::{AlbumPopularity, LastFmCredentialsRequest};
@@ -306,6 +306,29 @@ async fn apply_inbox_tags(
     })
     .await
     .map_err(|error| format!("Aurora's Inbox tag worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn fill_inbox_track_totals(
+    app: AppHandle,
+    request: InboxTrackTotalsRequest,
+) -> Result<InboxTrackTotalsResult, String> {
+    connections::require_music_writes()?;
+    let monitored_roots = app
+        .state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .monitored_roots();
+    let recovery_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Aurora could not locate its Inbox recovery folder: {error}"))?
+        .join("inbox-recovery");
+    tauri::async_runtime::spawn_blocking(move || {
+        inbox::fill_track_totals(request, &monitored_roots, &recovery_root)
+    })
+    .await
+    .map_err(|error| format!("Aurora's Inbox track-total worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -2138,6 +2161,7 @@ pub fn run() {
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,
+            fill_inbox_track_totals,
             select_album_cover_image,
             select_inbox_cover_image,
             embed_inbox_album_cover,

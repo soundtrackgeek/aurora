@@ -1,5 +1,12 @@
 # Aurora
 
+Aurora 0.36.2 adds **Fill track totals** to Inbox's toolbar and Readiness panel.
+Ctrl-click or Shift-click to select any number of albums, including 50 or more,
+then fill their missing totals in one step. Each album uses its current local
+MP3 count, with a separate count for each numbered disc. Existing totals are
+kept, track checkboxes do not limit the count, and a fresh scan updates readiness
+without changing your selection. Other readiness issues still need attention.
+
 Aurora 0.36.0, with Music Library **0.187.0 or newer**, sends registered plays
 to Music Library's **Statistics → Listening** history. Plays from every history
 source are included: this PC, other devices' OneDrive history, and Tonehavn.
