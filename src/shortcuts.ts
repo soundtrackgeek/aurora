@@ -35,6 +35,15 @@ export interface GlobalShortcutResult {
   catalogSync: CatalogSync | null;
   playback: PlaybackSnapshot | null;
   failedTrackKey?: string | null;
+  ratingSave?: ShortcutRatingSave | null;
+}
+
+/** Presentation-only intent; confirmed Track.rating changes on the verified receipt. */
+export interface ShortcutRatingSave {
+  requestId: number;
+  trackKey: string;
+  rating: number | null;
+  pending: boolean;
 }
 
 const previewPlatform: GlobalShortcutStatus["platform"] = navigator.userAgent.includes("Mac") ? "macos" : "windows";

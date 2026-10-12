@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import App from "./App";
 import * as library from "./library";
 import * as tags from "./tags";
@@ -7,6 +7,9 @@ import * as shortcuts from "./shortcuts";
 
 // Canvas playback rendering is unrelated to album request/commit ordering.
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
+
+// The saving-state checks exercise rendered controls, not cold route compilation.
+beforeAll(async () => { await import("./app/routes/LibraryRoute"); });
 
 afterEach(() => {
   cleanup();
@@ -24,6 +27,40 @@ async function openAlbums() {
     await vi.dynamicImportSettled();
   });
 }
+
+it("shows keyboard saving stars in the album row and player until the verified receipt", async () => {
+  let receive!: (result: shortcuts.GlobalShortcutResult) => void;
+  vi.spyOn(shortcuts, "listenForGlobalShortcutResults").mockImplementation(async (handler) => {
+    receive = handler;
+    return () => undefined;
+  });
+  const track = library.browserPreview.tracks[0];
+  render(<App />);
+  await openAlbums();
+  fireEvent.click(await screen.findByRole("button", { name: /^Hurry Up, We're Dreaming cover/ }));
+  const details = await screen.findByRole("complementary", { name: "Hurry Up, We're Dreaming album details" });
+  const albumScore = within(details).getByText(/^Album Score /).textContent;
+  fireEvent.doubleClick(within(details).getByRole("row", { name: /Midnight City/ }));
+  await waitFor(() => expect(screen.getAllByRole("group", { name: `Rate ${track.title}` })).toHaveLength(2));
+  const save = { requestId: 1, trackKey: track.trackKey, rating: 4, pending: true };
+  const event: shortcuts.GlobalShortcutResult = { action: "rating4", success: true,
+    message: "Saving tags…", ratingSave: save, track: null, previousTrack: null, catalogSync: null, playback: null };
+  await act(async () => { receive(event); });
+  for (const group of screen.getAllByRole("group", { name: `Rate ${track.title}` })) {
+    expect(group).toHaveClass("is-saving");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(4);
+  }
+  expect(within(details).getByText(/^Album Score /).textContent).toBe(albumScore);
+  await act(async () => {
+    receive({ ...event, ratingSave: { ...save, pending: false }, track: { ...track, rating: 4 },
+      previousTrack: track, catalogSync: { status: "pending", pendingFolderCount: 1, projectionToken: 500 } });
+  });
+  for (const group of screen.getAllByRole("group", { name: `Rate ${track.title}` })) {
+    expect(group).not.toHaveClass("is-saving");
+    expect(group).toHaveAttribute("aria-busy", "false");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(4);
+  }
+});
 
 it("keeps a failed keyboard rating visible after background reconciliation and allows dismissal", async () => {
   let receive!: (result: shortcuts.GlobalShortcutResult) => void;

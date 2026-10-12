@@ -108,6 +108,53 @@ it("projects a keyboard rating only after a verified receipt and retains failure
   );
 });
 
+it("keeps the latest keyboard rating pending through older receipts and fails back to the confirmed value", async () => {
+  const fixture = options();
+  let receive!: (result: shortcuts.GlobalShortcutResult) => void;
+  vi.spyOn(shortcuts, "listenForGlobalShortcutResults").mockImplementation(async (handler) => {
+    receive = handler;
+    return () => undefined;
+  });
+  const { result } = renderHook(() => useTagMutations(fixture.input));
+  const key = fixture.track.trackKey;
+  const first = { requestId: 1, trackKey: key, rating: 4, pending: true };
+  const latest = { ...first, requestId: 2, rating: 5 };
+  const event: shortcuts.GlobalShortcutResult = { action: "rating4", success: true,
+    message: "Saving tags…", track: null, previousTrack: null, catalogSync: null, playback: null };
+  await act(async () => {
+    receive({ ...event, ratingSave: first });
+    receive({ ...event, action: "rating5", ratingSave: latest });
+  });
+  expect(result.current.shortcutRatingSaves[key]).toEqual(latest);
+  expect(fixture.explorerTracks.value[0].rating).toBeNull();
+  expect(fixture.playback.refreshTrack).not.toHaveBeenCalled();
+
+  const confirmed = { ...fixture.track, rating: 4 };
+  await act(async () => {
+    receive({ ...event, ratingSave: { ...first, pending: false }, track: confirmed,
+      previousTrack: fixture.track, catalogSync: { status: "pending", pendingFolderCount: 1, projectionToken: 10 } });
+  });
+  expect(result.current.shortcutRatingSaves[key]).toEqual(latest);
+  expect(fixture.explorerTracks.value[0].rating).toBe(4);
+  await act(async () => {
+    receive({ ...event, success: false, action: "rating5", failedTrackKey: key, message: "File locked",
+      ratingSave: { ...latest, pending: false } });
+    // A delayed pending event must not restart a completed request.
+    receive({ ...event, action: "rating5", ratingSave: latest });
+  });
+  expect(result.current.shortcutRatingSaves[key].pending).toBe(false);
+  expect(fixture.explorerTracks.value[0].rating).toBe(4);
+  expect(result.current.tagSaveErrors[key]).toContain("File locked");
+  await act(async () => {
+    receive({ ...event, ratingSave: { ...latest, requestId: 3, pending: false },
+      track: { ...fixture.track, rating: 5 }, catalogSync: { status: "pending", pendingFolderCount: 1, projectionToken: 11 } });
+    receive({ ...event, ratingSave: first });
+  });
+  expect(result.current.shortcutRatingSaves[key].pending).toBe(false);
+  expect(fixture.explorerTracks.value[0].rating).toBe(5);
+  expect(result.current.tagSaveErrors).toEqual({});
+});
+
 it("keeps another track's failed shortcut save until it is dismissed and rejects stale confirmations", async () => {
   const fixture = options();
   let receive!: (result: shortcuts.GlobalShortcutResult) => void;

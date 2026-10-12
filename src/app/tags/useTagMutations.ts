@@ -7,7 +7,7 @@ import {
   type LibrarySnapshot, type Track,
 } from "../../library";
 import type { usePlayback } from "../../playback";
-import { listenForGlobalShortcutResults, type GlobalShortcutResult } from "../../shortcuts";
+import { listenForGlobalShortcutResults, type GlobalShortcutResult, type ShortcutRatingSave } from "../../shortcuts";
 import { tagValuesForTrack, trackWithTagValues, updateTrackTags, type CatalogSync, type TagValues } from "../../tags";
 import type { useCatalogProjection } from "../catalog/useCatalogProjection";
 import type { usePendingLibrarySync } from "../catalog/usePendingLibrarySync";
@@ -81,6 +81,7 @@ export function useTagMutations({
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
   const [tagSaveErrors, setTagSaveErrors] = useState<Record<string, string>>({});
+  const [shortcutRatingSaves, setShortcutRatingSaves] = useState<Record<string, ShortcutRatingSave>>({});
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
 
@@ -265,6 +266,16 @@ export function useTagMutations({
 
   useLayoutEffect(() => {
     shortcutResultHandlerRef.current = (result) => {
+      const save = result.ratingSave;
+      if (save) {
+        setShortcutRatingSaves((current) => {
+          const latest = current[save.trackKey];
+          // Older receipts cannot finish a newer keypress or restart a finished blink.
+          if (latest && (latest.requestId > save.requestId
+            || (latest.requestId === save.requestId && !latest.pending))) return current;
+          return { ...current, [save.trackKey]: save };
+        });
+      }
       if (result.playback) playback.applySnapshot(result.playback);
       const projection = result.success && result.catalogSync
         ? acceptTrackProjectionKeys(
@@ -356,6 +367,6 @@ export function useTagMutations({
     }
   }
 
-  return { inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError,
+  return { inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError, shortcutRatingSaves,
     applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange };
 }

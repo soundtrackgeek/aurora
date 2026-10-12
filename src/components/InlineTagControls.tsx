@@ -1,7 +1,10 @@
 import { Ban, Heart, Star, StarHalf } from "lucide-react";
+import { useContext } from "react";
+import { ShortcutRatingSaveContext } from "../app/tags/ratingSaveContext";
 import type { LoveState } from "../tags";
 
 interface InlineRatingControlProps {
+  trackKey: string;
   title: string;
   rating: number | null;
   busy: boolean;
@@ -29,26 +32,36 @@ function RatingIcon({ rating, star }: { rating: number | null; star: number }) {
 }
 
 export function InlineRatingControl({
+  trackKey,
   title,
   rating,
   busy,
   allowClear = false,
   onRatingChange,
 }: InlineRatingControlProps) {
+  const save = useContext(ShortcutRatingSaveContext)[trackKey];
+  const pending = save?.pending === true;
+  const displayedRating = pending ? save.rating : rating;
+  const savingLabel = pending
+    ? (save.rating === null ? `Clearing rating for ${title}…` : `Saving ${save.rating} star rating for ${title}…`)
+    : undefined;
   return (
-    <span className="inline-rating" role="group" aria-label={`Rate ${title}`} aria-busy={busy}>
+    <span className={`inline-rating${pending ? " is-saving" : ""}`}
+      data-clearing={pending && displayedRating === null ? "true" : undefined}
+      role="group" aria-label={`Rate ${title}`} aria-busy={busy || pending}
+      aria-description={savingLabel} title={savingLabel}>
       {[1, 2, 3, 4, 5].map((star) => (
         <span className="inline-rating__star" key={star}>
-          <RatingIcon rating={rating} star={star} />
+          <RatingIcon rating={displayedRating} star={star} />
           {[star].map((value) => (
             <button
               type="button"
               className="inline-rating__whole"
-              aria-label={allowClear && rating === value
+              aria-label={allowClear && displayedRating === value
                 ? `Clear rating for ${title}`
                 : `Rate ${title} ${value.toFixed(1)} stars`}
-              aria-pressed={rating === value}
-              disabled={busy}
+              aria-pressed={displayedRating === value}
+              disabled={busy || pending}
               onClick={(event) => {
                 event.stopPropagation();
                 onRatingChange(allowClear && rating === value ? null : value);

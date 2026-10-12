@@ -14,7 +14,10 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,6 +26,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 const SETTINGS_VERSION: u8 = 3;
 const PREVIOUS_SETTINGS_VERSION: u8 = 2;
 const LEGACY_SETTINGS_VERSION: u8 = 1;
+static RATING_SAVE_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) const RESULT_EVENT: &str = "aurora-global-shortcut-result";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -159,6 +163,28 @@ pub(crate) struct GlobalShortcutResult {
     catalog_sync: Option<CatalogSync>,
     playback: Option<PlaybackSnapshot>,
     failed_track_key: Option<String>,
+    rating_save: Option<ShortcutRatingSave>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShortcutRatingSave {
+    request_id: u64,
+    track_key: String,
+    rating: Option<f64>,
+    pending: bool,
+}
+
+fn pending_rating_save(action: ShortcutAction, track_key: &str) -> Option<ShortcutRatingSave> {
+    let ShortcutAction::Rating(stars) = action else {
+        return None;
+    };
+    Some(ShortcutRatingSave {
+        request_id: RATING_SAVE_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+        track_key: track_key.to_owned(),
+        rating: (stars > 0).then_some(f64::from(stars)),
+        pending: true,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -173,6 +199,7 @@ struct ShortcutTagTask {
     track_key: String,
     title: String,
     work: ShortcutTagWork,
+    rating_save: Option<ShortcutRatingSave>,
 }
 
 #[derive(Clone, Copy)]
@@ -646,6 +673,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                     catalog_sync: None,
                     playback: None,
                     failed_track_key: None,
+                    rating_save: None,
                 },
             );
         }
@@ -666,6 +694,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                 catalog_sync: None,
                 playback: None,
                 failed_track_key: None,
+                rating_save: None,
             },
         };
         let success = result.success;
@@ -687,11 +716,13 @@ fn queue_remote_tag_action(app: &AppHandle, action: ShortcutAction) -> Result<()
     };
     let task = ShortcutTagTask {
         timing: crate::timing::Span::new("shortcut.tag_queue", &current.track_key),
+        rating_save: pending_rating_save(action, &current.track_key),
         track_id: current.id,
         track_key: current.track_key,
         title: current.title,
         work: ShortcutTagWork::Remote(action),
     };
+    emit_pending_tag_action(app, &task, action);
     app.state::<ShortcutTagQueue>().enqueue(app, task);
     Ok(())
 }
@@ -714,6 +745,7 @@ pub(crate) fn emit_media_playback(app: &AppHandle, action: &str, snapshot: Playb
             catalog_sync: None,
             playback: Some(snapshot),
             failed_track_key: None,
+            rating_save: None,
         },
     );
 }
@@ -753,6 +785,7 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                 catalog_sync: None,
                 playback: Some(snapshot),
                 failed_track_key: None,
+                rating_save: None,
             })
         }
         ShortcutAction::Rating(_) | ShortcutAction::Love => unreachable!(),
@@ -774,6 +807,7 @@ fn queue_local_tag_action(app: &AppHandle, action: ShortcutAction) -> Result<(),
         })?;
         Ok(ShortcutTagTask {
             timing: crate::timing::Span::new("shortcut.tag_queue", &current.track_key),
+            rating_save: pending_rating_save(action, &current.track_key),
             track_id: current.id,
             track_key: current.track_key,
             title: current.title,
@@ -783,24 +817,27 @@ fn queue_local_tag_action(app: &AppHandle, action: ShortcutAction) -> Result<(),
 
     timing.finish(result.is_ok());
     let task = result?;
-    let message = format!("Saving tags for {}…", task.title);
-    // Emit pending status before starting the worker. A fast save must not
-    // deliver its confirmation before the pending event.
+    emit_pending_tag_action(app, &task, action);
+    app.state::<ShortcutTagQueue>().enqueue(app, task);
+    Ok(())
+}
+
+fn emit_pending_tag_action(app: &AppHandle, task: &ShortcutTagTask, action: ShortcutAction) {
+    // Emit before starting the worker so a fast save cannot confirm before its pending event.
     let _ = app.emit(
         RESULT_EVENT,
         GlobalShortcutResult {
             action: action_name(action).to_owned(),
             success: true,
-            message,
+            message: format!("Saving tags for {}…", task.title),
             track: None,
             previous_track: None,
             catalog_sync: None,
             playback: None,
             failed_track_key: None,
+            rating_save: task.rating_save.clone(),
         },
     );
-    app.state::<ShortcutTagQueue>().enqueue(app, task);
-    Ok(())
 }
 
 fn drain_tag_queue(app: &AppHandle) {
@@ -829,10 +866,11 @@ fn drain_tag_queue(app: &AppHandle) {
                 catalog_sync: snapshot.catalog_sync,
                 playback: None,
                 failed_track_key: None,
+                rating_save: None,
             }
         });
         task.timing.finish(result.is_ok());
-        let event = match result {
+        let mut event = match result {
             Ok(event) => event,
             Err(message) => {
                 let store = app.state::<crate::state_store::StateStore>();
@@ -846,9 +884,14 @@ fn drain_tag_queue(app: &AppHandle) {
                     catalog_sync: None,
                     playback: None,
                     failed_track_key: Some(task.track_key.clone()),
+                    rating_save: None,
                 }
             }
         };
+        event.rating_save = task.rating_save.clone().map(|mut save| {
+            save.pending = false;
+            save
+        });
         let _ = app.emit(RESULT_EVENT, event);
     }
 }

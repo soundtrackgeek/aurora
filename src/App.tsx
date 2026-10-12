@@ -78,6 +78,7 @@ import {
 } from "./app/routes/DestinationRoutes";
 import { useAppSettings } from "./app/settings/useAppSettings";
 import { useTagMutations } from "./app/tags/useTagMutations";
+import { ShortcutRatingSaveContext } from "./app/tags/ratingSaveContext";
 import { useAppSlice, useAppStore } from "./app/useAppStore";
 import { ArtistSmartLink } from "./components/ArtistSmartLink";
 import { Artwork } from "./components/Artwork";
@@ -623,7 +624,7 @@ function App() {
   });
 
   const {
-    inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError,
+    inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError, shortcutRatingSaves,
     applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange,
   } = useTagMutations({
     snapshot, setSnapshot, selectedTrack, setSelectedTrack, activeNav, setSyncMessage,
@@ -1305,6 +1306,7 @@ function App() {
   const catalogNoticeMessage = catalogSyncNotice ? catalogSyncMessage(catalogSyncNotice) : null;
 
   return (
+    <ShortcutRatingSaveContext value={shortcutRatingSaves}>
     <PlaylistAuthoringContext value={setPlaylistSelection}>
     <MediaContextMenuProvider playlists={savedPlaylists}
       onPlay={async tracks => { endGenreQueue(); const result = await playback.play(tracks, tracks[0].id); if (result) selectTrack(tracks[0]); return Boolean(result); }}
@@ -1359,7 +1361,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.36.3</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.36.4</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1987,6 +1989,7 @@ function App() {
     </div>
     </MediaContextMenuProvider>
     </PlaylistAuthoringContext>
+    </ShortcutRatingSaveContext>
   );
 }
 

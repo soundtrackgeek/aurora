@@ -1,14 +1,46 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InlineLoveControl, InlineRatingControl } from "./InlineTagControls";
+import { ShortcutRatingSaveContext } from "../app/tags/ratingSaveContext";
+
+afterEach(cleanup);
 
 describe("Explore inline tag controls", () => {
+  it("shows requested stars only on the saving track and restores confirmed stars on failure", () => {
+    const control = <InlineRatingControl trackKey="test-track" title="Annabel" rating={2}
+      busy={false} onRatingChange={vi.fn()} />;
+    const save = { requestId: 1, trackKey: "test-track", rating: 4, pending: true };
+    const { rerender } = render(<ShortcutRatingSaveContext value={{ "test-track": save }}>{control}</ShortcutRatingSaveContext>);
+    const group = screen.getByRole("group", { name: "Rate Annabel" });
+    expect(group).toHaveClass("is-saving");
+    expect(group).toHaveAttribute("aria-busy", "true");
+    expect(group).toHaveAttribute("aria-description", "Saving 4 star rating for Annabel…");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Rate Annabel 4.0 stars" })).toBeDisabled();
+
+    rerender(<ShortcutRatingSaveContext value={{ "other-track": save }}>{control}</ShortcutRatingSaveContext>);
+    expect(group).not.toHaveClass("is-saving");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(2);
+    rerender(<ShortcutRatingSaveContext value={{ "test-track": { ...save, pending: false } }}>{control}</ShortcutRatingSaveContext>);
+    expect(group).not.toHaveClass("is-saving");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(2);
+  });
+
+  it("marks clearing a rating as saving while showing empty stars", () => {
+    render(<ShortcutRatingSaveContext value={{ "test-track": { requestId: 2, trackKey: "test-track", rating: null, pending: true } }}>
+      <InlineRatingControl trackKey="test-track" title="Annabel" rating={4} busy={false} onRatingChange={vi.fn()} />
+    </ShortcutRatingSaveContext>);
+    const group = screen.getByRole("group", { name: "Rate Annabel" });
+    expect(group).toHaveAttribute("data-clearing", "true");
+    expect(group).toHaveAttribute("aria-description", "Clearing rating for Annabel…");
+    expect(group.querySelectorAll("svg.is-filled")).toHaveLength(0);
+  });
   it("offers whole-star hit areas and emits the clicked rating", () => {
     const onRatingChange = vi.fn();
     const onRowDoubleClick = vi.fn();
     render(
       <div onDoubleClick={onRowDoubleClick}>
-        <InlineRatingControl
+        <InlineRatingControl trackKey="test-track"
           title="Annabel"
           rating={3}
           busy={false}
@@ -53,7 +85,7 @@ describe("Explore inline tag controls", () => {
   it("can clear the current rating when enabled by the player", () => {
     const onRatingChange = vi.fn();
     render(
-      <InlineRatingControl
+      <InlineRatingControl trackKey="test-track"
         title="Midnight City"
         rating={4}
         busy={false}

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.36.4] - 2026-10-12
+
+### Added
+- Keyboard rating shortcuts immediately blink the requested stars in matching track rows and the player until the verified save completes. Clearing a rating blinks the empty stars; reduced-motion preferences show a steady saving underline. Track identities and per-keypress request IDs keep a previous save from stopping a newer rating indicator. Failed saves restore the last confirmed stars and retain their error, while pending ratings remain separate from saved metadata and album averages.
+
 ## [0.36.3] - 2026-10-12
 
 ### Fixed

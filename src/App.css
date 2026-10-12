@@ -409,6 +409,14 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .inline-rating__star { position: relative; display: grid; place-items: center; width: 16px; height: 27px; }
 .inline-rating__star > svg { width: 12px; height: 12px; pointer-events: none; transition: color .1s ease, fill .1s ease, transform .1s ease; }
 .inline-rating__star > svg.is-filled { fill: #a855f7; color: #b865fa; }
+.inline-rating.is-saving .inline-rating__star > svg.is-filled,
+.inline-rating.is-saving[data-clearing="true"] .inline-rating__star > svg { animation: rating-save-blink .9s steps(1, end) infinite; }
+@keyframes rating-save-blink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+@media (prefers-reduced-motion: reduce) {
+  .inline-rating.is-saving .inline-rating__star > svg.is-filled,
+  .inline-rating.is-saving[data-clearing="true"] .inline-rating__star > svg { animation: none; }
+  .inline-rating.is-saving { border-bottom: 1px dotted #b865fa; }
+}
 .inline-rating__star > button { position: absolute; z-index: 1; top: 0; bottom: 0; width: 50%; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .inline-rating__half { left: 0; }.inline-rating__full { right: 0; }
 .inline-rating__star:has(button:hover) > svg { color: #c77dff; transform: scale(1.12); }

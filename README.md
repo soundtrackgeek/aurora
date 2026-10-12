@@ -1,5 +1,14 @@
 # Aurora
 
+Aurora 0.36.4 blinks the requested stars while a keyboard rating is saving.
+For example, rating four stars immediately blinks the first four stars in
+the track row and player; they become solid after the MP3 save is verified.
+Rapid shortcuts keep the latest requested rating blinking until its own save
+finishes. A failed save restores the last confirmed stars and retains its
+error. Clearing a rating blinks the empty stars; reduced-motion settings use
+a steady saving underline instead. Pending stars do not change saved ratings
+or album averages.
+
 Aurora 0.36.3 confirms keyboard rating and Love edits only after the MP3 save
 has verified. The status says **Saving tags** while the ordered worker runs;
 stars and playback metadata update together on confirmation, even if you

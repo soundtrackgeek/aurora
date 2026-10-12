@@ -204,7 +204,7 @@ export function PlayerBar({
                     <Headphones aria-hidden="true" /><span>{audioLabel}</span>
                   </button>
                 </div>
-                <InlineRatingControl
+                <InlineRatingControl trackKey={track.trackKey}
                   title={track.title}
                   rating={track.rating}
                   busy={tagBusy}

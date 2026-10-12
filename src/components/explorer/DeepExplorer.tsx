@@ -531,7 +531,7 @@ function TrackTable({
                 <td className="is-numeric">{track.playCount === null ? "—" : formatCount(track.playCount)}</td>
                 <td className="deep-explorer-table__rating">
                   {onRatingChange ? (
-                    <InlineRatingControl
+                    <InlineRatingControl trackKey={track.trackKey}
                       title={track.title}
                       rating={track.rating}
                       busy={busy}
