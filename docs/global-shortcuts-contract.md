@@ -37,11 +37,11 @@ Windows exposes AltGr combinations as `Ctrl+Alt`. Numeric-keypad rating defaults
 
 ## Tag workflow
 
-On Windows, the rating and Love handler snapshots the native now-playing track, derives the expected and desired tag values, and calls the same `TagService` transaction used by visible controls. That transaction:
+On Windows, the rating and Love handler captures the stable identity of the native now-playing track at keypress and queues the action on one ordered worker. It emits **Saving tags** without changing the stars or playback tags. The worker reads the current MP3 values before each action, so rapid Love presses toggle from the preceding confirmed save. It calls the same `TagService` transaction used by visible controls. That transaction:
 
 1. Writes and verifies the MusicBee MP3 frames.
-2. Records the operation journal and optimistic overlay in `aurora-state.sqlite3`.
-3. Refreshes playback metadata and emits a result event for visible Aurora surfaces.
+2. Records the operation journal and verified file-tag overlay in `aurora-state.sqlite3`.
+3. Refreshes native playback metadata and emits the complete verified track plus its shared catalog projection token for visible Aurora surfaces. A late older receipt cannot replace a newer rating; moving to another track or album does not retarget the save or reopen details.
 4. Leaves the durable exact-file/folder synchronization journal for the focused background Music Library retry, so a slow companion process cannot delay the shortcut result.
 
 The shared Music Library catalog remains read-only. A later tagged-album folder sync, or a legacy MusicBee TSV import, updates that catalog; Aurora reconciliation then clears an overlay that has caught up. External file-tag edits can still become visible through the existing bounded reconciliation path.
@@ -52,11 +52,22 @@ On macOS in Network Mode, rating and Love shortcuts capture the now-playing trac
 
 - Rating or Love without a current playback track fails without selecting or mutating another track.
 - Registration conflicts do not produce a partially active set.
-- Tag conflicts, missing files, unsupported files, and verification failures follow the existing tag-editing recovery contract and are surfaced through Aurora's status message.
+- Temporary read/lookup failures (SQLite locks or Windows sharing violations) and specifically known pre-replacement sharing failures retry up to three attempts, with 250 ms and 500 ms waits. Each retry reads the same captured track again. Remote writes, external-tag conflicts, verification failures, and post-replacement journal or snapshot errors are never replayed automatically.
+- Failed rating/Love saves display a persistent, dismissible alert independent of routine reconciliation status. A later successful save clears only that track's alert; another track's save or catalog refresh cannot hide it. No failed shortcut projects unverified tag values.
+- Worker failures also append the stable track key, action, full error, UTC timestamp, and version to device-local `aurora-shortcut-errors.jsonl`. This separate log and its `aurora-shortcut-errors.previous.jsonl` rotation are bounded to approximately 1 MiB each and stay outside OneDrive state snapshots.
 - The browser preview can exercise the Settings workflow but explicitly reports that global registration is available only in the native app.
 
 ## Verification
 
 - Rust tests cover defaults, invalid/duplicate bindings, rating clearing and mapping, Love toggling, remote shortcut request sequencing and tag-field preservation, and device-local persistence.
-- React tests cover capture, complete-set save, duplicate rejection, default restoration, and the now-playing-only explanation.
+- React tests cover capture, complete-set save, duplicate rejection, default restoration, the now-playing-only explanation, confirmed-only track projection, stale receipt rejection, persistent failure alerts across focus reconciliation, and dismissal.
 - Native smoke testing confirms the full default set registers and `Ctrl+Alt+P` reaches Aurora while another Windows application has focus; playback is restored afterward and no real MP3 rating/Love value is changed during the smoke test.
+
+For an optional live source check, set `AURORA_TAG_SMOKE_TRACK_ID` and
+`AURORA_TAG_SMOKE_TRACK_KEY`, then run
+`cargo test --manifest-path src-tauri/Cargo.toml live_shortcut_tag_copy_smoke -- --ignored --nocapture --test-threads=1`.
+It reads the selected catalog/MP3 with a temporary Aurora state database, writes
+and verifies four stars on a temporary copy, and verifies that the original
+fingerprint and tag values remain unchanged. It does not simulate global key
+registration or repair an earlier unsuccessful rating. Run `cargo clean` in
+`src-tauri` after Rust checks.

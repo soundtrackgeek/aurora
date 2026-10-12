@@ -623,7 +623,8 @@ function App() {
   });
 
   const {
-    inlineSavingKeys, inlineTagRevisions, applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange,
+    inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError,
+    applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange,
   } = useTagMutations({
     snapshot, setSnapshot, selectedTrack, setSelectedTrack, activeNav, setSyncMessage,
     explorer: explorerWorkspace,
@@ -1358,7 +1359,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.36.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.36.3</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1408,6 +1409,13 @@ function App() {
             </output>
           ) : null}
           <div className="topbar__status">
+            {Object.entries(tagSaveErrors).map(([trackKey, message]) => (
+              <span className="tag-save-error" role="alert" key={trackKey}>
+                <span title={message}>{message}</span>
+                <button type="button" aria-label={`Dismiss tag save error: ${message}`}
+                  onClick={() => dismissTagSaveError(trackKey)}><X size={14} aria-hidden="true" /></button>
+              </span>
+            ))}
             {backgroundIntakeNotice && (
               <span
                 className="tag-sync-message intake-background-message"
@@ -1416,8 +1424,8 @@ function App() {
                 title={backgroundIntakeNotice.message}
               >{backgroundIntakeNotice.message}</span>
             )}
-            {!backgroundIntakeNotice && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
-            {!backgroundIntakeNotice && catalogNoticeMessage && (
+            {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+            {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && catalogNoticeMessage && (
               <span
                 className="tag-sync-message"
                 data-sync-status={catalogSyncNotice?.status}

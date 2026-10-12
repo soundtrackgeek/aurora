@@ -273,6 +273,10 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .topbar__actions .add-music-action svg { width: 15px; height: 15px; }
 .topbar__actions .update-badge { padding: 0 10px; color: #e3c8ff; background: rgba(139,67,214,.18); font-size: max(var(--aurora-font-min), calc(11px + var(--aurora-font-offset))); }
 .tag-sync-message { max-width: 260px; overflow: hidden; color: #8fdde8; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); text-overflow: ellipsis; white-space: nowrap; }
+.tag-save-error { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 1 1 0; color: #ffb7b7; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
+.tag-save-error > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-save-error > button { display: flex; flex-shrink: 0; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.tag-save-error > button:hover { background: #ffffff15; }
 .intake-background-message { max-width: 360px; }
 .intake-background-message[data-intake-status="completed"] { color: #9fe1bc; }
 .intake-background-message[data-intake-status="failed"] { color: #ffacc3; }

@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import * as library from "../../library";
 import { browserPreview, type LibrarySnapshot, type Track } from "../../library";
 import * as tags from "../../tags";
+import * as shortcuts from "../../shortcuts";
 import { defaultExplorerFilters } from "../../viewPreferences";
 import { useTagMutations, type TagMutationOptions } from "./useTagMutations";
 
@@ -65,6 +66,72 @@ function options() {
   };
   return { input, track, explorerTracks, snapshot, playback };
 }
+
+it("projects a keyboard rating only after a verified receipt and retains failures across refreshes", async () => {
+  const fixture = options();
+  let receive!: (result: shortcuts.GlobalShortcutResult) => void;
+  vi.spyOn(shortcuts, "listenForGlobalShortcutResults").mockImplementation(async (handler) => {
+    receive = handler;
+    return () => undefined;
+  });
+  const { result, rerender } = renderHook(() => useTagMutations(fixture.input));
+  const event: shortcuts.GlobalShortcutResult = {
+    action: "rating4", success: true, message: "Saving tags…", track: null,
+    previousTrack: null, catalogSync: null, playback: null,
+  };
+  await act(async () => { receive(event); });
+  expect(fixture.explorerTracks.value[0].rating).toBeNull();
+  expect(fixture.playback.refreshTrack).not.toHaveBeenCalled();
+
+  await act(async () => {
+    receive({ ...event, success: false, failedTrackKey: fixture.track.trackKey, message: "MP3 unavailable" });
+  });
+  expect(result.current.tagSaveErrors[fixture.track.trackKey]).toContain("MP3 unavailable");
+  // Catalog reconciliation clears the ordinary status message. It must not
+  // dismiss an unsuccessful shortcut save or manufacture a rated track.
+  fixture.input.setSyncMessage(null);
+  rerender();
+  await act(async () => { receive({ ...event, action: "next", message: "Playing next track" }); });
+  expect(result.current.tagSaveErrors[fixture.track.trackKey]).toContain("MP3 unavailable");
+  expect(fixture.explorerTracks.value[0].rating).toBeNull();
+
+  const confirmed = { ...fixture.track, rating: 4, tagSyncState: "pendingImport" as const };
+  await act(async () => {
+    receive({ ...event, track: confirmed, previousTrack: fixture.track,
+      catalogSync: { status: "pending", pendingFolderCount: 1, projectionToken: 10 } });
+  });
+  expect(fixture.explorerTracks.value[0].rating).toBe(4);
+  expect(fixture.playback.refreshTrack).toHaveBeenLastCalledWith(confirmed);
+  expect(result.current.tagSaveErrors).toEqual({});
+  expect(fixture.input.handleCatalogSync).toHaveBeenLastCalledWith(
+    { status: "pending", pendingFolderCount: 1, projectionToken: 10 }, true,
+  );
+});
+
+it("keeps another track's failed shortcut save until it is dismissed and rejects stale confirmations", async () => {
+  const fixture = options();
+  let receive!: (result: shortcuts.GlobalShortcutResult) => void;
+  vi.spyOn(shortcuts, "listenForGlobalShortcutResults").mockImplementation(async (handler) => {
+    receive = handler;
+    return () => undefined;
+  });
+  const { result } = renderHook(() => useTagMutations(fixture.input));
+  const event: shortcuts.GlobalShortcutResult = {
+    action: "rating4", success: false, message: "First track failed", track: null,
+    previousTrack: null, catalogSync: null, playback: null, failedTrackKey: "first-track",
+  };
+  await act(async () => {
+    receive(event);
+    receive({ ...event, success: true, track: { ...fixture.track, rating: 5 },
+      catalogSync: { status: "synced", pendingFolderCount: 0, projectionToken: 20 } });
+    receive({ ...event, success: true, track: { ...fixture.track, rating: 4 },
+      catalogSync: { status: "synced", pendingFolderCount: 0, projectionToken: 19 } });
+  });
+  expect(fixture.explorerTracks.value[0].rating).toBe(5);
+  expect(result.current.tagSaveErrors["first-track"]).toContain("First track failed");
+  await act(async () => { result.current.dismissTagSaveError("first-track"); });
+  expect(result.current.tagSaveErrors).toEqual({});
+});
 
 it.each([false, true])("guards duplicate saves and rolls back only without a newer projection (newer: %s)", async (hasNewerProjection) => {
   const fixture = options();

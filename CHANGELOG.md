@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.3] - 2026-10-12
+
+### Fixed
+- Keyboard rating and Love shortcuts no longer show a saved rating before the MP3 write succeeds. They show a saving status, then project the verified track into playback and visible library views with the shared delivery token. Queued actions keep the track captured at keypress; rapid Love presses toggle from each preceding confirmed file value. Temporary read/lookup locks and known safe pre-replacement Windows sharing failures retry up to three times. Conflicts and uncertain installed edits remain protected.
+- Failed shortcut saves stay visible across routine catalog refreshes until dismissed or successfully saved on the same track. Track identity, action, and the full error are retained in a separate bounded device-local diagnostic log. Added deterministic retry, stale-delivery, persistent-error, and UI regression coverage plus an opt-in live MP3-copy smoke test that preserves the original file.
+
 ## [0.36.2] - 2026-10-11
 
 ### Added

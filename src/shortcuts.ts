@@ -34,6 +34,7 @@ export interface GlobalShortcutResult {
   previousTrack: Track | null;
   catalogSync: CatalogSync | null;
   playback: PlaybackSnapshot | null;
+  failedTrackKey?: string | null;
 }
 
 const previewPlatform: GlobalShortcutStatus["platform"] = navigator.userAgent.includes("Mac") ? "macos" : "windows";

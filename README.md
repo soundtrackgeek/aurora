@@ -1,5 +1,17 @@
 # Aurora
 
+Aurora 0.36.3 confirms keyboard rating and Love edits only after the MP3 save
+has verified. The status says **Saving tags** while the ordered worker runs;
+stars and playback metadata update together on confirmation, even if you
+have already moved to another track or album. Temporary catalog locks and
+safe Windows sharing failures retry automatically up to three attempts.
+Unsuccessful saves remain visible until dismissed or the same track saves
+successfully. Detailed failures are kept locally in
+`%APPDATA%\com.soundtrackgeek.aurora\aurora-shortcut-errors.jsonl` and its
+previous rotation, separately from the busy playback timing log. Each file
+is limited to approximately 1 MiB. Conflicts and edits requiring recovery
+are reported without automatic replay.
+
 Aurora 0.36.2 adds **Fill track totals** to Inbox's toolbar and Readiness panel.
 Ctrl-click or Shift-click to select any number of albums, including 50 or more,
 then fill their missing totals in one step. Each album uses its current local

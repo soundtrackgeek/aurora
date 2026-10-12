@@ -80,6 +80,7 @@ export function useTagMutations({
   const { acceptTrackProjectionKeys, latestTrackProjectionTokensRef } = projection;
   const [inlineSavingKeys, setInlineSavingKeys] = useState<Set<string>>(() => new Set());
   const [inlineTagRevisions, setInlineTagRevisions] = useState<Record<string, number>>({});
+  const [tagSaveErrors, setTagSaveErrors] = useState<Record<string, string>>({});
   const inlineSaveRef = useRef<Set<string>>(new Set());
   const shortcutResultHandlerRef = useRef<(result: GlobalShortcutResult) => void>(() => undefined);
 
@@ -272,6 +273,13 @@ export function useTagMutations({
         )
         : null;
       if (result.track && projection && !projection.acceptedTrackKeys.has(result.track.trackKey)) return;
+      if (!result.success && (result.action.startsWith("rating") || result.action === "love")) {
+        setTagSaveErrors((current) => ({
+          ...current, [result.failedTrackKey ?? "shortcut"]: `Could not save tags: ${result.message}`,
+        }));
+      } else if (result.success && result.track && result.catalogSync) {
+        dismissTagSaveError(result.track.trackKey);
+      }
       setSyncMessage(result.success ? result.message : `Shortcut failed: ${result.message}`);
       if (result.track) applyTrackChange(result.track, result.previousTrack ?? undefined);
       if (result.success && result.catalogSync) {
@@ -279,6 +287,14 @@ export function useTagMutations({
       }
     };
   });
+
+  function dismissTagSaveError(trackKey: string) {
+    setTagSaveErrors((current) => {
+      const next = { ...current };
+      delete next[trackKey];
+      return next;
+    });
+  }
 
   async function saveInlineTagChange(track: Track, desired: TagValues) {
     if (inlineSaveRef.current.has(track.trackKey)) return;
@@ -340,5 +356,6 @@ export function useTagMutations({
     }
   }
 
-  return { inlineSavingKeys, inlineTagRevisions, applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange };
+  return { inlineSavingKeys, inlineTagRevisions, tagSaveErrors, dismissTagSaveError,
+    applyTrackChanges, refreshTagEditorCatalogViews, saveInlineTagChange };
 }

@@ -4,8 +4,8 @@ use crate::{
     library_sync::{CatalogSync, LibrarySyncCoordinator},
     playback::PlaybackSnapshot,
     state_sync,
-    tag_model::{LoveState, TagEditRequest, TagSyncState, TagValues},
-    tagging::TrackTagSnapshot,
+    tag_model::{LoveState, TagEditRequest, TagValues},
+    tagging::{TagService, TrackTagSnapshot},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -158,6 +158,7 @@ pub(crate) struct GlobalShortcutResult {
     previous_track: Option<TrackSummary>,
     catalog_sync: Option<CatalogSync>,
     playback: Option<PlaybackSnapshot>,
+    failed_track_key: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -176,7 +177,7 @@ struct ShortcutTagTask {
 
 #[derive(Clone, Copy)]
 enum ShortcutTagWork {
-    Local(ShortcutTagIntent),
+    Local(ShortcutAction),
     Remote(ShortcutAction),
 }
 
@@ -626,33 +627,27 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
         return;
     };
     if matches!(action, ShortcutAction::Rating(_) | ShortcutAction::Love) {
-        if crate::connections::network_mode() {
-            timing.stage("queue_remote_tag_action");
-            let result = queue_remote_tag_action(app, action);
-            if let Err(message) = result {
-                let _ = app.emit(
-                    RESULT_EVENT,
-                    GlobalShortcutResult {
-                        action: action_name(action).to_owned(),
-                        success: false,
-                        message,
-                        track: None,
-                        previous_track: None,
-                        catalog_sync: None,
-                        playback: None,
-                    },
-                );
-                timing.finish(false);
-            } else {
-                timing.finish(true);
-            }
+        timing.stage("queue_tag_action");
+        let result = if crate::connections::network_mode() {
+            queue_remote_tag_action(app, action)
         } else {
-            timing.stage("optimistic_tag_action");
-            let result = optimistic_tag_action(app, action);
-            let success = result.success;
-            timing.stage("emit_result");
-            let emitted = app.emit(RESULT_EVENT, result);
-            timing.finish(success && emitted.is_ok());
+            queue_local_tag_action(app, action)
+        };
+        timing.finish(result.is_ok());
+        if let Err(message) = result {
+            let _ = app.emit(
+                RESULT_EVENT,
+                GlobalShortcutResult {
+                    action: action_name(action).to_owned(),
+                    success: false,
+                    message,
+                    track: None,
+                    previous_track: None,
+                    catalog_sync: None,
+                    playback: None,
+                    failed_track_key: None,
+                },
+            );
         }
         return;
     }
@@ -670,6 +665,7 @@ pub(crate) fn handle_shortcut(app: &AppHandle, shortcut_value: &Shortcut, state:
                 previous_track: None,
                 catalog_sync: None,
                 playback: None,
+                failed_track_key: None,
             },
         };
         let success = result.success;
@@ -717,6 +713,7 @@ pub(crate) fn emit_media_playback(app: &AppHandle, action: &str, snapshot: Playb
             previous_track: None,
             catalog_sync: None,
             playback: Some(snapshot),
+            failed_track_key: None,
         },
     );
 }
@@ -755,69 +752,55 @@ fn execute_action(app: &AppHandle, action: ShortcutAction) -> Result<GlobalShort
                 previous_track: None,
                 catalog_sync: None,
                 playback: Some(snapshot),
+                failed_track_key: None,
             })
         }
         ShortcutAction::Rating(_) | ShortcutAction::Love => unreachable!(),
     }
 }
 
-fn optimistic_tag_action(app: &AppHandle, action: ShortcutAction) -> GlobalShortcutResult {
-    let mut timing = crate::timing::Span::new("shortcut.optimistic_tag", action_name(action));
+fn queue_local_tag_action(app: &AppHandle, action: ShortcutAction) -> Result<(), String> {
+    let mut timing = crate::timing::Span::new("shortcut.queue_tag", action_name(action));
     timing.stage("playback_lock_wait");
-    let result = (|| -> Result<(TrackSummary, TrackSummary, ShortcutTagTask), String> {
+    let result = (|| -> Result<ShortcutTagTask, String> {
         crate::connections::require_music_writes()?;
         let state = app.state::<PlaybackState>();
         let mut playback = state
             .lock()
             .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
         timing.stage("playback_lock_held");
-        let previous = playback.current_track_for_shortcut().ok_or_else(|| {
+        let current = playback.current_track_for_shortcut().ok_or_else(|| {
             "Start a track in Aurora before using rating or Love shortcuts.".to_owned()
         })?;
-        let intent = tag_intent(&previous, action)
-            .ok_or_else(|| "This shortcut does not edit track tags.".to_owned())?;
-        let mut optimistic = previous.clone();
-        apply_tag_intent_to_track(&mut optimistic, intent);
-        optimistic.tag_sync_state = Some(TagSyncState::PendingImport);
-        playback.refresh_track_tags(&optimistic);
-        let task = ShortcutTagTask {
-            timing: crate::timing::Span::new("shortcut.tag_queue", &previous.track_key),
-            track_id: previous.id.clone(),
-            track_key: previous.track_key.clone(),
-            title: previous.title.clone(),
-            work: ShortcutTagWork::Local(intent),
-        };
-        Ok((previous, optimistic, task))
+        Ok(ShortcutTagTask {
+            timing: crate::timing::Span::new("shortcut.tag_queue", &current.track_key),
+            track_id: current.id,
+            track_key: current.track_key,
+            title: current.title,
+            work: ShortcutTagWork::Local(action),
+        })
     })();
 
     timing.finish(result.is_ok());
-    match result {
-        Ok((previous, optimistic, task)) => {
-            let ShortcutTagWork::Local(intent) = task.work else {
-                unreachable!("local shortcut task must contain a tag intent")
-            };
-            let message = intent_message(&optimistic.title, intent);
-            app.state::<ShortcutTagQueue>().enqueue(app, task);
-            GlobalShortcutResult {
-                action: action_name(action).to_owned(),
-                success: true,
-                message,
-                track: Some(optimistic),
-                previous_track: Some(previous),
-                catalog_sync: None,
-                playback: None,
-            }
-        }
-        Err(message) => GlobalShortcutResult {
+    let task = result?;
+    let message = format!("Saving tags for {}…", task.title);
+    // Emit pending status before starting the worker. A fast save must not
+    // deliver its confirmation before the pending event.
+    let _ = app.emit(
+        RESULT_EVENT,
+        GlobalShortcutResult {
             action: action_name(action).to_owned(),
-            success: false,
+            success: true,
             message,
             track: None,
             previous_track: None,
             catalog_sync: None,
             playback: None,
+            failed_track_key: None,
         },
-    }
+    );
+    app.state::<ShortcutTagQueue>().enqueue(app, task);
+    Ok(())
 }
 
 fn drain_tag_queue(app: &AppHandle) {
@@ -826,58 +809,45 @@ fn drain_tag_queue(app: &AppHandle) {
             return;
         };
         let action = match task.work {
-            ShortcutTagWork::Local(ShortcutTagIntent::Rating(None)) => ShortcutAction::Rating(0),
-            ShortcutTagWork::Local(ShortcutTagIntent::Rating(Some(rating))) => {
-                ShortcutAction::Rating(rating as u8)
-            }
-            ShortcutTagWork::Local(ShortcutTagIntent::Love(_)) => ShortcutAction::Love,
-            ShortcutTagWork::Remote(action) => action,
+            ShortcutTagWork::Local(action) | ShortcutTagWork::Remote(action) => action,
         };
         task.timing.stage("persist");
-        let result = match task.work {
-            ShortcutTagWork::Local(intent) => {
-                persist_tag_task(app, &task, intent).map(|(mut sync, projection_token)| {
-                    sync.projection_token = Some(projection_token);
-                    GlobalShortcutResult {
-                        action: action_name(action).to_owned(),
-                        success: true,
-                        message: format!("Saved {}", task.title),
-                        track: None,
-                        previous_track: None,
-                        catalog_sync: Some(sync),
-                        playback: None,
-                    }
-                })
-            }
-            ShortcutTagWork::Remote(action) => persist_remote_tag_task(app, &task, action).map(
-                |(mut snapshot, previous, intent, projection_token)| {
-                    if let Some(sync) = &mut snapshot.catalog_sync {
-                        sync.projection_token = Some(projection_token);
-                    }
-                    GlobalShortcutResult {
-                        action: action_name(action).to_owned(),
-                        success: true,
-                        message: intent_message(&snapshot.track.title, intent),
-                        track: Some(snapshot.track),
-                        previous_track: Some(previous),
-                        catalog_sync: snapshot.catalog_sync,
-                        playback: None,
-                    }
-                },
-            ),
+        let saved = match task.work {
+            ShortcutTagWork::Local(action) => persist_tag_task(app, &task, action),
+            ShortcutTagWork::Remote(action) => persist_remote_tag_task(app, &task, action),
         };
+        let result = saved.map(|(mut snapshot, previous, intent, projection_token)| {
+            if let Some(sync) = &mut snapshot.catalog_sync {
+                sync.projection_token = Some(projection_token);
+            }
+            GlobalShortcutResult {
+                action: action_name(action).to_owned(),
+                success: true,
+                message: intent_message(&snapshot.track.title, intent),
+                track: Some(snapshot.track),
+                previous_track: Some(previous),
+                catalog_sync: snapshot.catalog_sync,
+                playback: None,
+                failed_track_key: None,
+            }
+        });
         task.timing.finish(result.is_ok());
         let event = match result {
             Ok(event) => event,
-            Err(message) => GlobalShortcutResult {
-                action: action_name(action).to_owned(),
-                success: false,
-                message: format!("{} could not be saved: {message}", task.title),
-                track: None,
-                previous_track: None,
-                catalog_sync: None,
-                playback: None,
-            },
+            Err(message) => {
+                let store = app.state::<crate::state_store::StateStore>();
+                let _ = record_tag_failure(store.path(), &task.track_key, action, &message);
+                GlobalShortcutResult {
+                    action: action_name(action).to_owned(),
+                    success: false,
+                    message: format!("{} could not be saved: {message}", task.title),
+                    track: None,
+                    previous_track: None,
+                    catalog_sync: None,
+                    playback: None,
+                    failed_track_key: Some(task.track_key.clone()),
+                }
+            }
         };
         let _ = app.emit(RESULT_EVENT, event);
     }
@@ -886,30 +856,23 @@ fn drain_tag_queue(app: &AppHandle) {
 fn persist_tag_task(
     app: &AppHandle,
     task: &ShortcutTagTask,
-    intent: ShortcutTagIntent,
-) -> Result<(CatalogSync, u64), String> {
+    action: ShortcutAction,
+) -> Result<(TrackTagSnapshot, TrackSummary, ShortcutTagIntent, u64), String> {
     let mut timing = crate::timing::Span::new("shortcut.tag_persistence", &task.track_key);
     timing.stage("coordinator_lock_wait");
     let coordinator = app.state::<LibrarySyncCoordinator>();
     let (result, projection_token) = coordinator.serialize_tag_edit(|| {
         timing.stage("tag_service_lock_wait");
-        let mut updated = {
+        let (mut updated, previous, intent) = {
             let state = app.state::<TagState>();
             let service = state
                 .lock()
                 .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
-            timing.stage("inspect");
-            let track = service.inspect(&task.track_id, &task.track_key)?.track;
-            let expected = track.catalog_tag_values();
-            let mut desired = expected.clone();
-            apply_tag_intent_to_values(&mut desired, intent);
-            timing.stage("update");
-            service.update(TagEditRequest {
-                track_id: track.id,
-                track_key: track.track_key,
-                expected,
-                desired,
-            })?
+            timing.stage("inspect_and_update");
+            retry_shortcut_save(
+                || save_local_tag_action(&service, &task.track_id, &task.track_key, action),
+                std::thread::sleep,
+            )?
         };
         timing.stage("library_sync_queue");
         let directory = updated.track.directory.clone();
@@ -918,10 +881,119 @@ fn persist_tag_task(
             updated.track.tag_sync_state = None;
             updated.tag_state.sync_state = None;
         }
-        Ok::<CatalogSync, String>(sync.catalog_sync)
+        updated.catalog_sync = Some(sync.catalog_sync);
+        crate::refresh_playback_track_tags(app, &updated.track);
+        Ok::<_, String>((updated, previous, intent))
     });
     timing.finish(result.is_ok());
-    Ok((result?, projection_token))
+    let (snapshot, previous, intent) = result?;
+    Ok((snapshot, previous, intent, projection_token))
+}
+
+fn save_local_tag_action(
+    service: &TagService,
+    track_id: &str,
+    track_key: &str,
+    action: ShortcutAction,
+) -> Result<(TrackTagSnapshot, TrackSummary, ShortcutTagIntent), ShortcutSaveError> {
+    // Read the authoritative file when this queued action executes. In particular,
+    // two queued Love presses must toggle twice, even before either result arrives.
+    let previous = service
+        .inspect(track_id, track_key)
+        .map_err(|message| ShortcutSaveError {
+            retryable: transient_shortcut_save_error(&message),
+            message,
+        })?
+        .track;
+    let (request, intent) =
+        tag_request_for_action(&previous, action).map_err(|message| ShortcutSaveError {
+            retryable: false,
+            message,
+        })?;
+    let snapshot = service
+        .update(request)
+        .map_err(|message| ShortcutSaveError {
+            retryable: retryable_shortcut_save_error(&message),
+            message,
+        })?;
+    Ok((snapshot, previous, intent))
+}
+
+struct ShortcutSaveError {
+    message: String,
+    retryable: bool,
+}
+
+fn retry_shortcut_save<T>(
+    mut save: impl FnMut() -> Result<T, ShortcutSaveError>,
+    mut wait: impl FnMut(std::time::Duration),
+) -> Result<T, String> {
+    for attempt in 0..3 {
+        match save() {
+            Err(error) if attempt < 2 && error.retryable => {
+                wait(std::time::Duration::from_millis(250 * (attempt + 1)));
+            }
+            result => return result.map_err(|error| error.message),
+        }
+    }
+    unreachable!("the final attempt returns")
+}
+
+fn retryable_shortcut_save_error(error: &str) -> bool {
+    // Only retry known pre-replacement failures. Never replay a conflict, failed
+    // verification, remote edit, or an installed edit needing journal recovery.
+    let safe_stage = [
+        "Could not open the music catalog read-only:",
+        "Could not configure the read-only catalog:",
+        "Could not resolve this track from the catalog:",
+        "Could not resolve the normalized track path:",
+        "Could not safely decode this MP3's ID3 tag:",
+        "The MP3 is open for writing in another application.",
+        "Windows could not start Aurora's atomic save.",
+    ]
+    .iter()
+    .any(|prefix| error.starts_with(prefix));
+    safe_stage && transient_shortcut_save_error(error)
+}
+
+fn transient_shortcut_save_error(error: &str) -> bool {
+    [
+        "database is locked",
+        "database is busy",
+        "os error 32",
+        "os error 33",
+    ]
+    .iter()
+    .any(|marker| error.contains(marker))
+}
+
+fn record_tag_failure(
+    state_path: &Path,
+    track_key: &str,
+    action: ShortcutAction,
+    message: &str,
+) -> std::io::Result<()> {
+    let path = state_path.with_file_name("aurora-shortcut-errors.jsonl");
+    let previous = path.with_extension("previous.jsonl");
+    let event = serde_json::json!({
+        "timestampMs": state_sync::now_ms(), "version": env!("CARGO_PKG_VERSION"),
+        "trackKey": track_key, "action": action_name(action), "message": message,
+    });
+    let mut bytes = serde_json::to_vec(&event)?;
+    bytes.push(b'\n');
+    if fs::metadata(&path).is_ok_and(|meta| meta.len() + bytes.len() as u64 > 1024 * 1024) {
+        match fs::remove_file(&previous) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
+        }
+        fs::rename(&path, previous)?;
+    }
+    File::options()
+        .create(true)
+        .append(true)
+        .open(path)?
+        .write_all(&bytes)
 }
 
 fn persist_remote_tag_task(
@@ -998,6 +1070,7 @@ fn apply_tag_intent_to_values(values: &mut TagValues, intent: ShortcutTagIntent)
     }
 }
 
+#[cfg(test)]
 fn apply_tag_intent_to_track(track: &mut TrackSummary, intent: ShortcutTagIntent) {
     match intent {
         ShortcutTagIntent::Rating(rating) => track.rating = rating,
@@ -1074,6 +1147,105 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcut_save_retries_temporary_failures_before_confirming() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        let result = retry_shortcut_save(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    let message = "Windows could not start Aurora's atomic save. The original MP3 was left untouched: os error 32".to_owned();
+                    Err(ShortcutSaveError {
+                        retryable: retryable_shortcut_save_error(&message),
+                        message,
+                    })
+                } else {
+                    Ok("verified")
+                }
+            },
+            |delay| delays.push(delay.as_millis()),
+        );
+        assert_eq!(result.unwrap(), "verified");
+        assert_eq!(attempts, 3);
+        assert_eq!(delays, [250, 500]);
+    }
+
+    #[test]
+    fn shortcut_save_exhaustion_and_conflicts_never_confirm_or_replay_uncertain_edits() {
+        for (message, expected_attempts) in [
+            (
+                "Could not resolve this track from the catalog: database is locked",
+                3,
+            ),
+            (
+                "This MP3 changed outside Aurora after the editor opened. Reload its tags before saving.",
+                1,
+            ),
+            (
+                "Aurora installed and verified the MP3 edit, but could not finish its journal: database is locked",
+                1,
+            ),
+            // A state failure during the post-save snapshot can follow a verified
+            // Love toggle. Retrying it would toggle again and erase that edit.
+            (
+                "Could not open Aurora's state database: database is locked",
+                1,
+            ),
+            (
+                "Could not safely decode this MP3's ID3 tag: malformed frame",
+                1,
+            ),
+            (
+                "The MP3 is open for writing in another application. Close that edit and try again: os error 5",
+                1,
+            ),
+        ] {
+            let mut attempts = 0;
+            let result: Result<(), String> = retry_shortcut_save(
+                || {
+                    attempts += 1;
+                    Err(ShortcutSaveError {
+                        message: message.into(),
+                        retryable: retryable_shortcut_save_error(message),
+                    })
+                },
+                |_| {},
+            );
+            assert_eq!(result.unwrap_err(), message);
+            assert_eq!(attempts, expected_attempts, "{message}");
+        }
+        assert!(transient_shortcut_save_error(
+            "Could not open Aurora's state database: database is locked"
+        ));
+    }
+
+    #[test]
+    fn shortcut_failures_retain_track_action_and_error_in_a_separate_bounded_log() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join("aurora-state.sqlite3");
+        let path = state.with_file_name("aurora-shortcut-errors.jsonl");
+        fs::write(&path, vec![b'x'; 1024 * 1024]).unwrap();
+        record_tag_failure(
+            &state,
+            "stable-first-track",
+            ShortcutAction::Rating(4),
+            "database is locked",
+        )
+        .unwrap();
+        let event: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(event["trackKey"], "stable-first-track");
+        assert_eq!(event["action"], "rating4");
+        assert_eq!(event["message"], "database is locked");
+        assert!(event["timestampMs"].as_i64().unwrap() > 0);
+        assert_eq!(
+            fs::metadata(path.with_extension("previous.jsonl"))
+                .unwrap()
+                .len(),
+            1024 * 1024
+        );
+    }
 
     fn track(rating: Option<f64>, love_state: LoveState) -> TrackSummary {
         TrackSummary {

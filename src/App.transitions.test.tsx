@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import App from "./App";
 import * as library from "./library";
 import * as tags from "./tags";
+import * as shortcuts from "./shortcuts";
 
 // Canvas playback rendering is unrelated to album request/commit ordering.
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
@@ -23,6 +24,28 @@ async function openAlbums() {
     await vi.dynamicImportSettled();
   });
 }
+
+it("keeps a failed keyboard rating visible after background reconciliation and allows dismissal", async () => {
+  let receive!: (result: shortcuts.GlobalShortcutResult) => void;
+  vi.spyOn(shortcuts, "listenForGlobalShortcutResults").mockImplementation(async (handler) => {
+    receive = handler;
+    return () => undefined;
+  });
+  const reconciliation = vi.spyOn(tags, "reconcilePendingTags");
+  render(<App />);
+  await screen.findByRole("region", { name: "Library overview" });
+  await act(async () => {
+    receive({ action: "rating4", success: false, message: "Summer Breeze could not be saved: file unavailable",
+      failedTrackKey: "summer-breeze", track: null, previousTrack: null, catalogSync: null, playback: null });
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Summer Breeze could not be saved");
+  const callsBeforeFocus = reconciliation.mock.calls.length;
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
+  await waitFor(() => expect(reconciliation.mock.calls.length).toBeGreaterThan(callsBeforeFocus));
+  expect(screen.getByRole("alert")).toHaveTextContent("Summer Breeze could not be saved");
+  fireEvent.click(screen.getByRole("button", { name: /^Dismiss tag save error:/ }));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
 
 it("commits local album details before starting file reconciliation", async () => {
   const load = library.loadAlbumDetail;

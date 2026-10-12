@@ -3167,6 +3167,42 @@ mod tests {
     use std::io::{Cursor, Write};
 
     #[test]
+    #[ignore = "requires AURORA_TAG_SMOKE_TRACK_ID and AURORA_TAG_SMOKE_TRACK_KEY; writes only a temporary copy"]
+    fn live_shortcut_tag_copy_smoke() {
+        let track_id = std::env::var("AURORA_TAG_SMOKE_TRACK_ID").expect("catalog track ID");
+        let track_key = std::env::var("AURORA_TAG_SMOKE_TRACK_KEY").expect("stable track key");
+        let root = tempfile::tempdir().unwrap();
+        let service =
+            TagService::new(StateStore::new(root.path().join("state.sqlite3")).unwrap()).unwrap();
+        let snapshot = service
+            .inspect(&track_id, &track_key)
+            .expect("read live file tags");
+        let source = catalog::resolve_track(&track_id, &track_key, &service.store)
+            .unwrap()
+            .audio_path;
+        let fingerprint = FileFingerprint::read(&source).unwrap();
+        let copy = root.path().join("rating-smoke.mp3");
+        fs::copy(&source, &copy).unwrap();
+        let (mut tag, version) = read_tag_for_write(&copy).unwrap();
+        let before = read_tag_values(&tag).unwrap();
+        let desired = TagValues {
+            rating: Some(4.0),
+            ..before.clone()
+        };
+        let preserved = non_target_frames(&tag);
+        let hash = audio_payload_hash(&copy).unwrap();
+        apply_tag_changes(&mut tag, version, &before, &desired).unwrap();
+        write_tag_preserving_frames(&tag, &copy, version).unwrap();
+        verify_written_file(&copy, &desired, &preserved, &hash).expect("verify copied MP3 rating");
+        assert_eq!(FileFingerprint::read(&source).unwrap(), fingerprint);
+        assert_eq!(read_tag_values_from_path(&source).unwrap(), before);
+        println!(
+            "{}: source rating {:?}; temporary copy verified at 4 stars; original unchanged",
+            snapshot.track.title, before.rating
+        );
+    }
+
+    #[test]
     fn genre_edit_preserves_latin1_frames_and_rejects_unselected_changes() {
         for version in [Version::Id3v23, Version::Id3v24] {
             let root = tempfile::tempdir().expect("temporary fixture");
