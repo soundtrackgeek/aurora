@@ -1,4 +1,5 @@
 mod artist_discovery;
+mod artist_identity;
 mod artwork;
 mod audio_settings;
 mod catalog;
@@ -746,6 +747,13 @@ async fn artist_detail(app: AppHandle, artist: String) -> Result<ArtistDetail, S
     })
     .await
     .map_err(|error| format!("The artist detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn artist_identity_for_album(album_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || artist_identity::album_reference(&album_id))
+        .await
+        .map_err(|_| "The artist identity worker stopped.".to_owned())?
 }
 
 #[tauri::command]
@@ -2063,6 +2071,7 @@ pub fn run() {
             track_popularity,
             delete_album_track,
             artist_detail,
+            artist_identity_for_album,
             artist_discovery,
             artist_artwork,
             artist_listening,

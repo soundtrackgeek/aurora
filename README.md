@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.37.0** supports artist splits made in **Music Library 0.190.0 or later**. Use **Artists → Split artist** in Music Library to review album assignments and give same-name profiles a distinguishing description and optional MusicBrainz ID. Aurora's Artists list, artist pages, album links, track selection, genre shelves, provider information and local listening history follow those assignments. The catalog watcher detects artist changes without requiring an import; source music tags stay unchanged. Older catalogs keep their existing browsing behavior. Unlinked ambiguous profiles wait for an identity before provider lookups; accurate identity-linked fanart.tv artwork remains available on artist pages.
+
 Aurora 0.36.4 blinks the requested stars while a keyboard rating is saving.
 For example, rating four stars immediately blinks the first four stars in
 the track row and player; they become solid after the MP3 save is verified.

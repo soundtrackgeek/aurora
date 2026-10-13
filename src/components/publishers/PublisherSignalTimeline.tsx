@@ -417,7 +417,7 @@ export function PublisherAlbumInspector({ album, busy, onPlay, onOpenArtistAlbum
   return (
     <div className="publisher-album-inspector">
       <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
-      <div className="publisher-album-inspector__heading"><div><h2>{album.title}</h2><p><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} /></p></div>{album.lovedTracks > 0 ? <span><Star aria-hidden="true" /> {album.rating?.toFixed(1) ?? "—"}</span> : null}</div>
+      <div className="publisher-album-inspector__heading"><div><h2>{album.title}</h2><p><ArtistSmartLink artist={album.artist} albumId={album.id} onOpen={onOpenArtistAlbums} /></p></div>{album.lovedTracks > 0 ? <span><Star aria-hidden="true" /> {album.rating?.toFixed(1) ?? "—"}</span> : null}</div>
       <dl className="metadata-list">
         <div><dt>Original Year</dt><dd>{album.originalYear ?? "—"}</dd></div>
         <div><dt>Release Year</dt><dd>{album.releaseYear ?? "—"}</dd></div>

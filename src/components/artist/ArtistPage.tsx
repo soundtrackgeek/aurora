@@ -39,6 +39,7 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
   const [tab, setTab] = useState<Tab>("Overview");
   const [detail, setDetail] = useState<ArtistDetail | null>(null);
   const [intelligence, setIntelligence] = useState<ArtistIntelligence | null>(null);
+  const displayName = detail?.artist.name ?? intelligence?.artist ?? (artist.startsWith("artist:") || artist.startsWith("unresolved:") ? "Artist" : artist);
   const [discovery, setDiscovery] = useState<ArtistDiscovery | null>(null);
   const [artwork, setArtwork] = useState<ArtistArtwork | null>(null);
   const [listening, setListening] = useState<ArtistListening | null>(null);
@@ -138,7 +139,7 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     {tab === "Albums" && detail?.albumsTruncated && <button className="button" disabled={Boolean(busy)} onClick={() => void allAlbums()}>Load remaining albums</button>}
   </Panel>;
 
-  return <article className="artist-page" aria-label={`${artist} artist page`} onClick={(event) => {
+  return <article className="artist-page" aria-label={`${displayName} artist page`} onClick={(event) => {
     const link = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
     if (!link) return;
     event.preventDefault();
@@ -148,8 +149,8 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     <header className="artist-hero">
       {background && <img className="artist-hero__background" src={background} alt="" onError={() => setFailedImages((current) => [...current, background])} />}
       <div className="artist-hero__identity">
-        <span className="artist-hero__portrait">{portrait ? <img src={portrait} alt="" onError={() => setFailedImages((current) => [...current, portrait])} /> : <ArtistPortrait artist={artist} size={128} eager />}</span>
-        <div className="artist-hero__copy"><p className="eyebrow">Artist</p><h1>{artist}</h1><p>{summary}</p><div className="artist-hero__tags">{profile?.countryCode && <span className="artist-hero__country"><CountryFlag code={profile.countryCode} name={profile.countryName} />{profile.countryName ?? profile.countryCode}</span>}{tags.slice(0, 4).map((tag) => <span key={tag}>{tag}</span>)}</div></div>
+        <span className="artist-hero__portrait">{portrait ? <img src={portrait} alt="" onError={() => setFailedImages((current) => [...current, portrait])} /> : <ArtistPortrait artist={displayName} artistId={artist} size={128} eager />}</span>
+        <div className="artist-hero__copy"><p className="eyebrow">Artist</p><h1>{displayName}</h1>{detail?.artist.disambiguation ? <p>{detail.artist.disambiguation}</p> : null}<p>{summary}</p><div className="artist-hero__tags">{profile?.countryCode && <span className="artist-hero__country"><CountryFlag code={profile.countryCode} name={profile.countryName} />{profile.countryName ?? profile.countryCode}</span>}{tags.slice(0, 4).map((tag) => <span key={tag}>{tag}</span>)}</div></div>
         <div className="artist-hero__actions"><button className="button button--primary" disabled={!tracks?.items.length || Boolean(busy)} onClick={() => void play(tracks?.items ?? [])} title={`Play ${tracks?.items.length ?? 0} loaded tracks`}><Play aria-hidden="true" /> Play</button><button className="button" disabled={!tracks?.items.length || Boolean(busy)} onClick={() => void play(tracks?.items ?? [], true)} title="Shuffle loaded tracks"><Shuffle aria-hidden="true" /> Shuffle</button></div>
       </div>
       {background && <a className="artist-hero__credit" href="https://fanart.tv/" target="_blank" rel="noreferrer">Photography via fanart.tv</a>}

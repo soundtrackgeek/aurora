@@ -1,9 +1,8 @@
 use crate::{
     catalog::{
-        ArtistSummary, TrackSummary, apply_overlays, artist_key_sql, attach_aurora_state,
-        default_catalog_path, live_album_rated_tracks_sql, live_album_total_tracks_sql,
-        map_track_row, open_catalog, parse_catalog_search, push_album_search_predicates,
-        push_track_search_predicates,
+        ArtistSummary, TrackSummary, apply_overlays, attach_aurora_state, default_catalog_path,
+        live_album_rated_tracks_sql, live_album_total_tracks_sql, map_track_row, open_catalog,
+        parse_catalog_search, push_album_search_predicates, push_track_search_predicates,
     },
     ratings,
     state_store::StateStore,
@@ -137,6 +136,7 @@ pub(crate) struct AlbumSummary {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) artist: String,
+    pub(crate) artist_id: Option<String>,
     pub(crate) release_year: Option<i64>,
     pub(crate) original_year: Option<i64>,
     pub(crate) publisher: Option<String>,
@@ -639,8 +639,8 @@ fn track_page_from_connection(
         push_exact_filter(
             &mut predicates,
             &mut params,
-            "t.album_artist_display",
-            artist,
+            &crate::artist_identity::key_sql(connection, "t.album_artist_display"),
+            crate::artist_identity::resolve(connection, &artist)?.0,
         );
     }
     let total_count = filtered_row_count(
@@ -666,7 +666,7 @@ fn track_page_from_connection(
     params.push(Value::Integer((page_size + 1) as i64));
 
     let mut statement = connection
-        .prepare(&sql)
+        .prepare(&crate::artist_identity::project_sql(connection, &sql))
         .map_err(|error| format!("Could not prepare the track explorer: {error}"))?;
     let mut rows = statement
         .query(params_from_iter(params.iter()))
@@ -697,6 +697,7 @@ fn track_page_from_connection(
         .map(|(track, _)| track)
         .collect::<Vec<_>>();
     apply_overlays(&mut items, store)?;
+    crate::artist_identity::attach_tracks(connection, &mut items)?;
     Ok(TrackPage {
         items,
         next_cursor,
@@ -708,6 +709,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
     let effective_rating: Option<f64> = row.get(10)?;
     Ok(AlbumSummary {
         id: row.get(0)?,
+        artist_id: row.get("artist_identity_id").unwrap_or(None),
         title: row
             .get::<_, Option<String>>(1)?
             .unwrap_or_else(|| "Unknown Album".to_owned()),
@@ -862,12 +864,14 @@ fn album_page_from_connection(
         .and_then(|search| search.plain_fts_query().map(str::to_owned));
     let sort = album_sort(request.sort.unwrap_or_default());
     let mut params = Vec::<Value>::new();
-    let origin_key = artist_key_sql("a.album_artist_display");
+    let origin_key = crate::artist_identity::key_sql(connection, "a.album_artist_display");
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "a.album_artist_display");
     let live_genre = crate::live_genres::album_sql("a");
     let live_total_tracks = live_album_total_tracks_sql("a");
     let live_rated_tracks = live_album_rated_tracks_sql("a");
     let display_sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, {artist_reference} AS artist_identity_id, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
         sort.expression
     );
     let mut sql = String::from(" WHERE 1 = 1");
@@ -900,12 +904,21 @@ fn album_page_from_connection(
         push_exact_filter(&mut sql, &mut params, "a.canonical_genre", genre);
     }
     if let Some(artist) = artist {
-        push_exact_filter(&mut sql, &mut params, "a.album_artist_display", artist);
+        push_exact_filter(
+            &mut sql,
+            &mut params,
+            &crate::artist_identity::key_sql(connection, "a.album_artist_display"),
+            crate::artist_identity::resolve(connection, &artist)?.0,
+        );
     }
     // Count and page share one connection-local matching set. Display joins and
     // sorting must not repeat a potentially expensive full-text search.
     let filtered_sql = format!("SELECT a.id FROM albums AS a{sql}");
-    let total_count = prepare_album_page_matches(connection, &filtered_sql, &params)?;
+    let total_count = prepare_album_page_matches(
+        connection,
+        &crate::artist_identity::project_sql(connection, &filtered_sql),
+        &params,
+    )?;
     params.clear();
     sql = display_sql;
     sql.push_str(" WHERE a.id IN (SELECT album_id FROM temp.aurora_album_page_matches)");
@@ -922,7 +935,7 @@ fn album_page_from_connection(
     params.push(Value::Integer((page_size + 1) as i64));
 
     let mut statement = connection
-        .prepare(&sql)
+        .prepare(&crate::artist_identity::project_sql(connection, &sql))
         .map_err(|error| format!("Could not prepare the album explorer: {error}"))?;
     let mut rows = statement
         .query(params_from_iter(params.iter()))
@@ -1044,9 +1057,12 @@ fn artist_page_from_connection(
     if let Some(genre) = genre {
         push_exact_filter(&mut rollup_where, &mut params, "a.canonical_genre", genre);
     }
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "a.album_artist_display");
+    let artist_description = crate::artist_identity::description_sql(connection, "r.id");
     let live_total_tracks = live_album_total_tracks_sql("a");
     let mut sql = format!(
-        "WITH r AS (SELECT a.album_artist_display AS name, CAST(SUM({live_total_tracks}) AS INTEGER) AS track_count, COUNT(*) AS album_count FROM albums AS a {rollup_where} GROUP BY a.album_artist_display COLLATE NOCASE) SELECT r.name, r.track_count, r.album_count, CAST(({}) AS TEXT) AS cursor_value FROM r WHERE 1 = 1",
+        "WITH r AS (SELECT MIN(a.album_artist_display) AS name, {artist_reference} AS id, CAST(SUM({live_total_tracks}) AS INTEGER) AS track_count, COUNT(*) AS album_count FROM albums AS a {rollup_where} GROUP BY {artist_reference} COLLATE NOCASE) SELECT r.name, r.track_count, r.album_count, CAST(({}) AS TEXT) AS cursor_value, r.id, {artist_description} AS disambiguation FROM r WHERE 1 = 1",
         definition.expression
     );
     let total_count = filtered_row_count(connection, &sql, &params, "artist")?;
@@ -1055,14 +1071,14 @@ fn artist_page_from_connection(
         &mut params,
         request.cursor.as_ref(),
         definition,
-        "r.name COLLATE NOCASE",
+        "r.id COLLATE NOCASE",
         false,
     )?;
-    push_order_by(&mut sql, definition, "r.name COLLATE NOCASE");
+    push_order_by(&mut sql, definition, "r.id COLLATE NOCASE");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
     let mut statement = connection
-        .prepare(&sql)
+        .prepare(&crate::artist_identity::project_sql(connection, &sql))
         .map_err(|error| format!("Could not prepare the artist explorer: {error}"))?;
     let mut rows = statement
         .query(params_from_iter(params.iter()))
@@ -1077,7 +1093,8 @@ fn artist_page_from_connection(
             .map_err(|error| format!("Could not decode the artist explorer: {error}"))?;
         mapped.push((
             ArtistSummary {
-                id: name.clone(),
+                disambiguation: row.get(5).map_err(|error| error.to_string())?,
+                id: row.get(4).map_err(|error| error.to_string())?,
                 name,
                 track_count: row
                     .get(1)
@@ -1098,7 +1115,7 @@ fn artist_page_from_connection(
         let (artist, value) = mapped.last().expect("a page with more rows has an item");
         ExploreCursor {
             value: format!("{}:{value}", definition.cursor_tag),
-            id: artist.name.clone(),
+            id: artist.id.clone(),
         }
     });
     Ok(ArtistPage {
@@ -1214,7 +1231,7 @@ fn album_detail_with_file_refresh(
 ) -> Result<AlbumDetail, String> {
     let mut album = connection
         .query_row(
-            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", artist_key_sql("a.album_artist_display"), live_genre = crate::live_genres::album_sql("a")),
+            &format!("SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, a.total_tracks, a.rated_tracks, a.loved_tracks, a.total_seconds, a.album_score, a.effective_album_rating, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, {} AS artist_identity_id FROM albums AS a LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id WHERE a.id = ?", crate::artist_identity::reference_sql(connection, "a.album_artist_display"), crate::artist_identity::key_sql(connection, "a.album_artist_display"), live_genre = crate::live_genres::album_sql("a")),
             [album_id],
             map_album_row,
         )
@@ -1275,14 +1292,19 @@ fn artist_detail_from_connection(
     connection: &Connection,
     artist: &str,
 ) -> Result<ArtistDetail, String> {
+    let (artist_id, _, _) = crate::artist_identity::resolve(connection, artist)?;
+    let key = crate::artist_identity::key_sql(connection, "album_artist_display");
+    let reference = crate::artist_identity::reference_sql(connection, "album_artist_display");
+    let description = crate::artist_identity::description_sql(connection, "artist_group.artist_id");
     let artist_summary = connection
         .query_row(
-            "SELECT ?1, CAST(SUM(total_tracks) AS INTEGER), COUNT(*) FROM albums WHERE album_artist_display = ?1 COLLATE NOCASE HAVING COUNT(*) > 0",
-            [artist],
+            &format!("SELECT artist_group.*, {description} FROM (SELECT MIN(album_artist_display), CAST(SUM(total_tracks) AS INTEGER), COUNT(*), {reference} AS artist_id FROM albums WHERE {key} = ?1 COLLATE NOCASE HAVING COUNT(*) > 0) artist_group"),
+            [&artist_id],
             |row| {
                 let name: String = row.get(0)?;
                 Ok(ArtistSummary {
-                    id: name.clone(),
+                    disambiguation: row.get(4)?,
+                    id: row.get(3)?,
                     name,
                     track_count: row.get(1)?,
                     album_count: row.get(2)?,
@@ -1296,7 +1318,11 @@ fn artist_detail_from_connection(
         connection,
         AlbumPageRequest {
             page_size: Some(MAX_PAGE_SIZE),
-            artist: Some(artist.to_owned()),
+            artist: Some(if crate::artist_identity::published(connection) {
+                artist_id
+            } else {
+                artist.to_owned()
+            }),
             sort: Some(AlbumSort::YearDesc),
             ..AlbumPageRequest::default()
         },
@@ -1391,6 +1417,80 @@ mod tests {
         refresh_live_album_rating_projection(&connection)
             .expect("initial live album rating projection");
         connection
+    }
+
+    #[test]
+    fn split_artists_keep_separate_pages_tracks_and_same_name_cursors() {
+        let connection = fixture();
+        connection.execute_batch("ALTER TABLE albums ADD COLUMN artist_identity_key TEXT; ALTER TABLE tracks ADD COLUMN artist_identity_key TEXT;
+          CREATE TABLE artist_identities(id TEXT PRIMARY KEY,name_key TEXT,display_artist TEXT,disambiguation TEXT);
+          INSERT INTO artist_identities VALUES('zoo','zoo','Zoo','Norwegian group'),('artist:france','zoo','Zoo','French group');
+          UPDATE albums SET album_artist_display='Zoo',artist_identity_key=CASE id WHEN 'a1' THEN 'zoo' ELSE 'artist:france' END;
+          UPDATE tracks SET album_artist_display='Zoo',artist_identity_key=CASE album_id WHEN 'a1' THEN 'zoo' ELSE 'artist:france' END;").unwrap();
+        let first = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                page_size: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(first.total_count, 2);
+        assert_eq!(first.items.len(), 1);
+        let second = artist_page_from_connection(
+            &connection,
+            ArtistPageRequest {
+                page_size: Some(1),
+                cursor: first.next_cursor.clone(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(first.items[0].id, second.items[0].id);
+        assert_eq!(first.items[0].name, "Zoo");
+        assert_eq!(second.items[0].name, "Zoo");
+        for (id, albums, tracks, label) in [
+            ("zoo", 1, 2, "Norwegian group"),
+            ("artist:france", 2, 2, "French group"),
+        ] {
+            let detail = artist_detail_from_connection(&connection, id).unwrap();
+            assert_eq!(detail.artist.name, "Zoo");
+            assert_eq!(detail.artist.disambiguation.as_deref(), Some(label));
+            assert_eq!(detail.albums.len(), albums);
+            assert!(
+                detail
+                    .albums
+                    .iter()
+                    .all(|album| album.artist_id.as_deref() == Some(id))
+            );
+            let page = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    artist: Some(id.into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+            assert_eq!(page.items.len(), tracks);
+            assert!(
+                page.items
+                    .iter()
+                    .all(|track| track.artist_id.as_deref() == Some(id))
+            );
+        }
+        assert!(crate::artist_identity::resolve(&connection, "Zoo").is_err());
+        connection
+            .execute("DELETE FROM albums WHERE artist_identity_key='zoo'", [])
+            .unwrap();
+        assert_eq!(
+            crate::artist_identity::resolve(&connection, "zoo")
+                .unwrap()
+                .0,
+            "zoo"
+        );
+        assert!(artist_detail_from_connection(&connection, "zoo").is_err());
     }
 
     #[test]

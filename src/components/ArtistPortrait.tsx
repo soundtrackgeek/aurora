@@ -11,16 +11,18 @@ function initialsForArtist(artist: string): string {
 
 export function ArtistPortrait({
   artist,
+  artistId,
   className,
   size = 64,
   eager = false,
 }: {
   artist: string;
+  artistId?: string | null;
   className?: string;
   size?: 64 | 128;
   eager?: boolean;
 }) {
-  const source = artistPortraitUrl(artist, size);
+  const source = artistPortraitUrl(artistId ?? artist, size);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const initials = useMemo(() => initialsForArtist(artist), [artist]);
 

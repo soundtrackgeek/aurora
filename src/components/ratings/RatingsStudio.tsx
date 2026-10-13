@@ -321,7 +321,7 @@ export function RatingAlbumInspector({ album, busy, onPlay, onOpenArtistAlbums }
   const completion = Math.round(album.ratedTracks / Math.max(1, album.totalTracks) * 100);
   return <div className="rating-album-inspector">
     <Artwork track={albumAsTrack(album)} size="large" decorative={false} />
-    <div className="rating-album-inspector__heading"><div><h2>{album.title}</h2><p><ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} /></p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>
+    <div className="rating-album-inspector__heading"><div><h2>{album.title}</h2><p><ArtistSmartLink artist={album.artist} albumId={album.id} onOpen={onOpenArtistAlbums} /></p></div>{album.lovedTracks > 0 ? <span><Heart aria-hidden="true" /> {formatCount(album.lovedTracks)}</span> : null}</div>
     <dl className="metadata-list">
       <div><dt>Original Year</dt><dd>{album.originalYear ?? "—"}</dd></div>
       <div><dt>Release Year</dt><dd>{album.releaseYear ?? "—"}</dd></div>

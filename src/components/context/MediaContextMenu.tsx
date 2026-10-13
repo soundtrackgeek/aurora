@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { displayTrackArtist, isTauriRuntime, loadAlbumDetail, loadArtistTracks, type Track } from "../../library";
+import { displayTrackArtist, displayTrackArtistId, isTauriRuntime, loadAlbumDetail, loadArtistTracks, type Track } from "../../library";
 import { authorPlaylist, recentEditablePlaylists, type SavedPlaylistSummary } from "../../playlists";
 import { PlaylistAuthoringContext, type PlaylistSelection } from "../playlists/playlistAuthoringContext";
 import { MediaMenuContext, type MediaMenuRequest, type MediaSelection } from "./mediaMenuContext";
@@ -144,7 +144,10 @@ export function MediaContextMenuProvider({ children, playlists, onPlay, onEnqueu
         {item("Add to playlist", () => setSection("playlist"), !playlistAvailable, true)}
         <div role="separator" />
         {item("Go to album", () => run(async () => { onOpenAlbum(await firstTrack()); }), !(singleTrack || singleAlbum) || (Boolean(track) && !track?.albumId))}
-        {item("Go to artist", () => run(async () => { onOpenArtist(artist ?? (singleAlbum ? (await loadAlbumDetail(selection.albumIds![0], { localOnly: true })).album.artist : displayTrackArtist(await firstTrack()))); }), !artist && !available)}
+        {item("Go to artist", () => run(async () => { let reference = artist;
+          if (!reference && singleAlbum) { const album = (await loadAlbumDetail(selection.albumIds![0], { localOnly: true })).album; reference = album.artistId ?? album.artist; }
+          if (!reference) { const song = await firstTrack(); reference = displayTrackArtistId(song) ?? displayTrackArtist(song); }
+          onOpenArtist(reference); }), !artist && !available)}
         {item(fileBrowserLabel, () => run(async () => {
           if (!isTauriRuntime()) throw new Error("Open the file browser from Aurora desktop.");
           if (singleAlbum) await invoke("reveal_catalog_item", { albumId: selection.albumIds![0] });

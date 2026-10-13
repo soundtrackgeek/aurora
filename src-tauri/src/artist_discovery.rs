@@ -231,11 +231,34 @@ pub(crate) fn load(
     store: &StateStore,
 ) -> Result<ArtistDiscovery, String> {
     let artist = validate_artist(artist)?;
+    let catalog = crate::catalog::default_catalog_path()
+        .and_then(|path| crate::catalog::open_catalog(&path))
+        .ok();
+    let resolved = catalog
+        .as_ref()
+        .map(|connection| crate::artist_identity::resolve(connection, artist))
+        .transpose()?;
+    let (artist_id, name, ambiguous) =
+        resolved.unwrap_or_else(|| (artist.to_lowercase(), artist.to_owned(), false));
+    let mbid = if ambiguous {
+        catalog.as_ref().and_then(|connection| connection.query_row("SELECT mbid FROM musicbrainz_artist_links WHERE local_artist_key=?1 AND ignored=0",[&artist_id],|row|row.get::<_,Option<String>>(0)).optional().ok().flatten().flatten())
+    } else {
+        None
+    };
     let mut result = ArtistDiscovery::default();
+    if ambiguous && mbid.is_none() {
+        result.warnings.push("Link this separate artist to MusicBrainz in Music Library before loading provider information.".into());
+        return Ok(result);
+    }
+    let lookup_field = if mbid.is_some() { "mbid" } else { "artist" };
+    let lookup_value = mbid.as_deref().unwrap_or(&name);
     for method in ["artist.getinfo", "artist.gettoptracks", "artist.getsimilar"] {
         let response = cached_json(
             store,
-            &format!("lastfm:{method}:{}", artist.to_lowercase()),
+            &format!(
+                "lastfm:{method}:{artist_id}:{}",
+                mbid.as_deref().unwrap_or("name")
+            ),
             refresh,
             || {
                 let key =
@@ -244,7 +267,7 @@ pub(crate) fn load(
                     .get("https://ws.audioscrobbler.com/2.0/")
                     .query(&[
                         ("method", method),
-                        ("artist", artist),
+                        (lookup_field, lookup_value),
                         ("api_key", &key),
                         ("format", "json"),
                         ("autocorrect", "0"),

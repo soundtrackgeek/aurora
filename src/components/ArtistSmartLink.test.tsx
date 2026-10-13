@@ -18,4 +18,11 @@ describe("ArtistSmartLink", () => {
     expect(onOpen).toHaveBeenCalledWith("M83");
     expect(onParent).not.toHaveBeenCalled();
   });
+
+  it("keeps the displayed name while opening the selected same-name profile", () => {
+    const onOpen = vi.fn();
+    render(<ArtistSmartLink artist="Zoo" artistId="artist:french" onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open artist page for Zoo" }));
+    expect(onOpen).toHaveBeenCalledWith("artist:french");
+  });
 });

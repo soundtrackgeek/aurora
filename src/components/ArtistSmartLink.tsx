@@ -1,22 +1,29 @@
 import { useContext, type KeyboardEvent, type MouseEvent } from "react";
 import { MediaMenuContext, mediaMenuHandlers } from "./context/mediaMenuContext";
+import { loadAlbumArtistIdentity } from "../library";
 import "./ArtistSmartLink.css";
 
 interface ArtistSmartLinkProps {
   artist: string;
+  artistId?: string | null;
+  albumId?: string | null;
   onOpen: (artist: string) => void;
   nested?: boolean;
   className?: string;
 }
 
-export function ArtistSmartLink({ artist, onOpen, nested = false, className }: ArtistSmartLinkProps) {
+export function ArtistSmartLink({ artist, artistId, albumId, onOpen, nested = false, className }: ArtistSmartLinkProps) {
   const trimmedArtist = artist.trim();
   const classes = ["artist-smart-link", className].filter(Boolean).join(" ");
-  const menu = mediaMenuHandlers(useContext(MediaMenuContext), { artistName: trimmedArtist, artistOnly: true, label: trimmedArtist });
+  const reference = artistId ?? trimmedArtist;
+  const menu = mediaMenuHandlers(useContext(MediaMenuContext), { artistName: reference, artistOnly: true, label: trimmedArtist });
 
   function activate(event: MouseEvent | KeyboardEvent) {
     event.stopPropagation();
-    if (trimmedArtist) onOpen(trimmedArtist);
+    if (!trimmedArtist) return;
+    if (!artistId && albumId) {
+      void loadAlbumArtistIdentity(albumId).then(onOpen).catch(() => onOpen(reference));
+    } else onOpen(reference);
   }
 
   if (nested) {

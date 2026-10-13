@@ -58,6 +58,8 @@ pub(crate) struct GenreAlbum {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GenreArtist {
+    pub(crate) id: String,
+    pub(crate) disambiguation: Option<String>,
     pub(crate) name: String,
     pub(crate) track_count: i64,
     pub(crate) album_count: i64,
@@ -192,11 +194,13 @@ fn query_genre_index(
     store: Option<&StateStore>,
 ) -> Result<Vec<GenreSummary>, String> {
     prepare_genre_views(connection)?;
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
     let mut statement = connection
         .prepare(
-            r#"
+            &format!(r#"
             WITH ranked AS MATERIALIZED (
-              SELECT id, canonical_genre, album_artist_display, total_tracks,
+              SELECT id, canonical_genre, album_artist_display, {artist_reference} AS artist_identity_id, total_tracks,
                      rated_tracks, loved_tracks, total_seconds, year,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating) AS rating_value,
                      ROW_NUMBER() OVER (
@@ -210,7 +214,7 @@ fn query_genre_index(
             )
             SELECT canonical_genre,
                    CAST(SUM(total_tracks) AS INTEGER), COUNT(*),
-                   COUNT(DISTINCT COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')),
+                   COUNT(DISTINCT artist_identity_id),
                    CAST(SUM(rated_tracks) AS INTEGER), CAST(SUM(loved_tracks) AS INTEGER),
                    CAST(SUM(total_seconds) AS INTEGER),
                    CASE WHEN SUM(CASE WHEN rating_value IS NOT NULL THEN rated_tracks ELSE 0 END) > 0
@@ -223,7 +227,7 @@ fn query_genre_index(
             GROUP BY canonical_genre
             ORDER BY SUM(total_tracks) DESC, canonical_genre COLLATE NOCASE
             LIMIT ?1
-            "#,
+            "#),
         )
         .map_err(|error| format!("Could not prepare the genre atlas: {error}"))?;
     let mut summaries = statement
@@ -243,11 +247,13 @@ fn query_genre_summary(
     history: &HashMap<String, GenreHistoryInsight>,
     store: Option<&StateStore>,
 ) -> Result<GenreSummary, String> {
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
     let mut statement = connection
         .prepare(
-            r#"
+            &format!(r#"
             WITH ranked AS MATERIALIZED (
-              SELECT id, canonical_genre, album_artist_display, total_tracks,
+              SELECT id, canonical_genre, album_artist_display, {artist_reference} AS artist_identity_id, total_tracks,
                      rated_tracks, loved_tracks, total_seconds, year,
                      COALESCE(effective_album_rating, calculated_album_rating, album_rating) AS rating_value,
                      ROW_NUMBER() OVER (
@@ -260,7 +266,7 @@ fn query_genre_summary(
             )
             SELECT canonical_genre,
                    CAST(SUM(total_tracks) AS INTEGER), COUNT(*),
-                   COUNT(DISTINCT COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')),
+                   COUNT(DISTINCT artist_identity_id),
                    CAST(SUM(rated_tracks) AS INTEGER), CAST(SUM(loved_tracks) AS INTEGER),
                    CAST(SUM(total_seconds) AS INTEGER),
                    CASE WHEN SUM(CASE WHEN rating_value IS NOT NULL THEN rated_tracks ELSE 0 END) > 0
@@ -271,7 +277,7 @@ fn query_genre_summary(
                    MAX(CASE WHEN cover_rank = 1 THEN id END)
             FROM ranked
             GROUP BY canonical_genre
-            "#,
+            "#),
         )
         .map_err(|error| format!("Could not prepare this genre summary: {error}"))?;
     let mut summaries = statement
@@ -446,23 +452,28 @@ fn query_albums(connection: &Connection, genre: &str) -> Result<Vec<GenreAlbum>,
 }
 
 fn query_artists(connection: &Connection, genre: &str) -> Result<Vec<GenreArtist>, String> {
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
+    let artist_description = crate::artist_identity::description_sql(connection, &artist_reference);
     let mut statement = connection
         .prepare(
-            r#"
-            SELECT COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist'),
-                   CAST(SUM(total_tracks) AS INTEGER), COUNT(*), CAST(SUM(loved_tracks) AS INTEGER)
+            &format!(r#"
+            SELECT MIN(COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')),
+                   CAST(SUM(total_tracks) AS INTEGER), COUNT(*), CAST(SUM(loved_tracks) AS INTEGER), {artist_reference}, {artist_description}
             FROM aurora_genre_albums
             WHERE canonical_genre = ?1
               AND COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist') <> 'Various Artists'
-            GROUP BY COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')
+            GROUP BY {artist_reference}
             ORDER BY SUM(total_tracks) DESC, SUM(loved_tracks) DESC, album_artist_display COLLATE NOCASE
             LIMIT 10
-            "#,
+            "#),
         )
         .map_err(|error| format!("Could not prepare the genre artists: {error}"))?;
     statement
         .query_map([genre], |row| {
             Ok(GenreArtist {
+                id: row.get(4)?,
+                disambiguation: row.get(5)?,
                 name: row.get(0)?,
                 track_count: row.get(1)?,
                 album_count: row.get(2)?,
@@ -475,29 +486,33 @@ fn query_artists(connection: &Connection, genre: &str) -> Result<Vec<GenreArtist
 }
 
 fn query_related(connection: &Connection, genre: &str) -> Result<Vec<RelatedGenre>, String> {
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
+    let other_reference =
+        crate::artist_identity::reference_sql(connection, "a.album_artist_display");
     let mut statement = connection
-        .prepare(
+        .prepare(&format!(
             r#"
             WITH selected_artists AS MATERIALIZED (
-              SELECT DISTINCT album_artist_display
+              SELECT DISTINCT {artist_reference} AS artist_identity_id
               FROM aurora_genre_albums
               WHERE canonical_genre = ?1
                 AND NULLIF(TRIM(album_artist_display), '') IS NOT NULL
                 AND album_artist_display <> 'Various Artists'
             )
-            SELECT a.canonical_genre, COUNT(DISTINCT a.album_artist_display),
+            SELECT a.canonical_genre, COUNT(DISTINCT {other_reference}),
                    COUNT(*), CAST(SUM(a.total_tracks) AS INTEGER)
             FROM aurora_genre_albums AS a
             JOIN selected_artists AS selected
-              ON selected.album_artist_display = a.album_artist_display
+              ON selected.artist_identity_id = {other_reference}
             WHERE a.canonical_genre <> ?1
               AND NULLIF(TRIM(a.canonical_genre), '') IS NOT NULL
             GROUP BY a.canonical_genre
-            ORDER BY COUNT(DISTINCT a.album_artist_display) DESC,
+            ORDER BY COUNT(DISTINCT {other_reference}) DESC,
                      SUM(a.total_tracks) DESC, a.canonical_genre COLLATE NOCASE
             LIMIT 8
-            "#,
-        )
+            "#
+        ))
         .map_err(|error| format!("Could not prepare connected genres: {error}"))?;
     statement
         .query_map([genre], |row| {

@@ -19,11 +19,11 @@ export function Universe({ artists, activeArtist, onSelect }: { artists: Artist[
         {visibleArtists.map((artist, index) => (
           <button
             type="button"
-            className={`planet planet--${index + 1}${activeArtist === artist.name ? " is-active" : ""}`}
+            className={`planet planet--${index + 1}${activeArtist === artist.id ? " is-active" : ""}`}
             key={artist.id}
             onClick={() => onSelect(artist)}
             aria-label={`Explore ${artist.name}, ${formatCount(artist.trackCount)} tracks`}
-            aria-pressed={activeArtist === artist.name}
+            aria-pressed={activeArtist === artist.id}
           >
             <span className="planet__dot" />
             <span className="planet__label">{artist.name}</span>

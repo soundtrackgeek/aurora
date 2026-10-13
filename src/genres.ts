@@ -39,6 +39,8 @@ export interface GenreAlbum {
 }
 
 export interface GenreArtist {
+  id?: string;
+  disambiguation?: string | null;
   name: string;
   trackCount: number;
   albumCount: number;

@@ -1833,6 +1833,7 @@ mod tests {
 
     fn queue_track(index: usize) -> TrackSummary {
         TrackSummary {
+            artist_id: None,
             id: index.to_string(),
             track_key: format!("d:\\music\\track-{index}.mp3"),
             album_id: Some("album".to_owned()),

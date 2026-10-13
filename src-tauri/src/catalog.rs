@@ -38,6 +38,8 @@ pub(crate) struct LibrarySummary {
 pub(crate) struct ArtistSummary {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) disambiguation: Option<String>,
     pub(crate) track_count: i64,
     pub(crate) album_count: i64,
     pub(crate) play_count: Option<i64>,
@@ -52,6 +54,8 @@ pub(crate) struct TrackSummary {
     pub(crate) album_id: Option<String>,
     pub(crate) title: String,
     pub(crate) artist: String,
+    #[serde(default)]
+    pub(crate) artist_id: Option<String>,
     pub(crate) display_artist: Option<String>,
     pub(crate) album: String,
     pub(crate) release_year: Option<i64>,
@@ -390,9 +394,20 @@ fn completed_import_revision_for_connection(connection: &Connection) -> Result<S
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|error| format!("Could not identify the current library import: {error}"))?;
-    Ok(format!(
-        "{completed_count}:{maximum_id}:{latest_completion}"
-    ))
+    let artist_revision: Option<i64> = connection
+        .query_row(
+            "SELECT revision FROM artist_identity_revision WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap_or(None);
+    Ok(match artist_revision {
+        Some(revision) => {
+            format!("{completed_count}:{maximum_id}:{latest_completion}:artists:{revision}")
+        }
+        None => format!("{completed_count}:{maximum_id}:{latest_completion}"),
+    })
 }
 
 pub(crate) fn completed_import_revision() -> Result<String, String> {
@@ -409,6 +424,7 @@ pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
     let filename: String = row.get(12)?;
     let love_state = LoveState::from_catalog(love.as_deref());
     Ok(TrackSummary {
+        artist_id: None,
         id: id.to_string(),
         track_key: normalize_track_key(&directory, &filename),
         title: row
@@ -596,17 +612,19 @@ pub(crate) fn query_snapshot(
         .map(|store| reconcile_all_overlays(connection, store))
         .transpose()?
         .unwrap_or_default();
+    let summary_artist_key =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
     let mut summary = connection
         .query_row(
-            r#"
+            &format!(r#"
             SELECT
               (SELECT COUNT(*) FROM tracks),
               (SELECT COUNT(*) FROM albums),
-              (SELECT COUNT(DISTINCT COALESCE(NULLIF(TRIM(album_artist_display), ''), 'unknown')) FROM albums),
+              (SELECT COUNT(DISTINCT {summary_artist_key}) FROM albums),
               (SELECT COUNT(DISTINCT COALESCE(NULLIF(TRIM(canonical_genre), ''), 'unknown')) FROM albums),
               (SELECT COUNT(*) FROM tracks WHERE love = 'L'),
               (SELECT COUNT(*) FROM tracks WHERE normalized_rating IS NOT NULL)
-            "#,
+            "#),
             [],
             |row| {
                 Ok(LibrarySummary {
@@ -621,31 +639,36 @@ pub(crate) fn query_snapshot(
         )
         .map_err(|error| format!("Could not read the library overview: {error}"))?;
 
+    let artist_reference =
+        crate::artist_identity::reference_sql(connection, "album_artist_display");
+    let artist_description =
+        crate::artist_identity::description_sql(connection, "artist_rollup.artist_id");
     let mut artist_statement = connection
         .prepare_cached(
-            r#"
+            &format!(r#"
             WITH artist_rollup AS (
               SELECT
                 COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist') AS display_name,
                 SUM(total_tracks) AS track_count,
-                COUNT(*) AS album_count
+                COUNT(*) AS album_count, {artist_reference} AS artist_id
               FROM albums
               WHERE NULLIF(TRIM(album_artist_display), '') IS NOT NULL
                 AND album_artist_display <> 'Various Artists'
-              GROUP BY COALESCE(NULLIF(TRIM(album_artist_display), ''), 'Unknown Artist')
+              GROUP BY {artist_reference} COLLATE NOCASE
             )
-            SELECT display_name, CAST(track_count AS INTEGER), album_count
+            SELECT display_name, CAST(track_count AS INTEGER), album_count, artist_id, {artist_description}
             FROM artist_rollup
             ORDER BY track_count DESC, display_name COLLATE NOCASE
             LIMIT 8
-            "#,
+            "#),
         )
         .map_err(|error| format!("Could not prepare the artist universe: {error}"))?;
     let artists = artist_statement
         .query_map([], |row| {
             let name: String = row.get(0)?;
             Ok(ArtistSummary {
-                id: name.clone(),
+                disambiguation: row.get(4)?,
+                id: row.get(3)?,
                 name,
                 track_count: row.get(1)?,
                 album_count: row.get(2)?,
@@ -721,8 +744,9 @@ pub(crate) fn query_tracks<P: rusqlite::Params>(
     label: &str,
     store: Option<&StateStore>,
 ) -> Result<Vec<TrackSummary>, String> {
+    let sql = crate::artist_identity::project_sql(connection, sql);
     let mut statement = connection
-        .prepare(sql)
+        .prepare(&sql)
         .map_err(|error| format!("Could not prepare the {label}: {error}"))?;
     let mut tracks = statement
         .query_map(params, map_track_row)
@@ -730,6 +754,7 @@ pub(crate) fn query_tracks<P: rusqlite::Params>(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Could not decode the {label}: {error}"))?;
     apply_overlays(&mut tracks, store)?;
+    crate::artist_identity::attach_tracks(connection, &mut tracks)?;
     Ok(tracks)
 }
 
@@ -752,9 +777,12 @@ pub(crate) fn load_artist_tracks(
     }
     let path = default_catalog_path()?;
     let connection = open_catalog(&path)?;
+    let (artist, _, _) = crate::artist_identity::resolve(&connection, &artist)?;
+    let artist_key = crate::artist_identity::key_sql(&connection, "album_artist_display");
     query_tracks(
         &connection,
-        r#"
+        &format!(
+            r#"
         WITH page AS MATERIALIZED (
           SELECT id, title, album_artist_display, display_artist, album, release_year,
                  year, publisher,
@@ -767,7 +795,7 @@ pub(crate) fn load_artist_tracks(
                  love, time_seconds, canonical_genre, album_id,
                  file_path, filename, import_run_id
           FROM tracks
-          WHERE album_artist_display = :artist COLLATE NOCASE
+          WHERE {artist_key} = :artist COLLATE NOCASE
           ORDER BY rating_value DESC, title COLLATE NOCASE ASC, id ASC
           LIMIT 50
         )
@@ -781,7 +809,8 @@ pub(crate) fn load_artist_tracks(
           ON l.artist_key = lower(trim(p.album_artist_display))
          AND l.track_key = lower(trim(p.title))
         ORDER BY p.rating_value DESC, p.title COLLATE NOCASE ASC, p.id ASC
-        "#,
+        "#
+        ),
         named_params! { ":artist": artist },
         "artist track page",
         Some(store),
@@ -2861,6 +2890,7 @@ mod tests {
     #[test]
     fn inline_tag_projection_preserves_metadata_from_a_full_editor_save() {
         let mut edited = TrackSummary {
+            artist_id: None,
             id: "fresh-id".to_owned(),
             track_key: "d:\\music\\track.mp3".to_owned(),
             album_id: Some("fresh-album".to_owned()),

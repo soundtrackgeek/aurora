@@ -17,6 +17,15 @@ use tauri::{AppHandle, Manager};
 
 const MAX_ALBUM_ID_CHARS: usize = 512;
 
+fn validate_catalog_artist(reference: &str) -> Result<(String, String), String> {
+    if let Ok(connection) = default_catalog_path().and_then(|path| open_catalog(&path)) {
+        let (id, name, _) = crate::artist_identity::resolve(&connection, reference)?;
+        Ok((name, id))
+    } else {
+        validate_artist(reference)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) enum ArtistDecisionRequest {
@@ -66,7 +75,7 @@ pub(crate) fn update_artist_decision(
 ) -> Result<ArtistIntelligence, String> {
     match request {
         ArtistDecisionRequest::Confirm { artist, mbid } => {
-            let (display_artist, artist_key) = validate_artist(&artist)?;
+            let (display_artist, artist_key) = validate_catalog_artist(&artist)?;
             let mbid = mbid.trim().to_lowercase();
             if !valid_mbid(&mbid) {
                 return Err("Choose a valid MusicBrainz artist candidate.".to_owned());
@@ -104,12 +113,12 @@ pub(crate) fn update_artist_decision(
             load_artist_intelligence_with_store(display_artist, store)
         }
         ArtistDecisionRequest::Ignore { artist } => {
-            let (display_artist, artist_key) = validate_artist(&artist)?;
+            let (display_artist, artist_key) = validate_catalog_artist(&artist)?;
             store.save_artist_decision(&artist_key, &display_artist, "ignored", None, None)?;
             load_artist_intelligence_with_store(display_artist, store)
         }
         ArtistDecisionRequest::Clear { artist } => {
-            let (display_artist, artist_key) = validate_artist(&artist)?;
+            let (display_artist, artist_key) = validate_catalog_artist(&artist)?;
             let current = load_artist_intelligence_with_store(display_artist.clone(), store)?;
             if let Some(local_mbid) = current
                 .decision
@@ -167,7 +176,7 @@ pub(crate) fn update_release_decision(
             release_mbid,
         } => (artist, artist_mbid, release_mbid, "clear", None),
     };
-    let (display_artist, artist_key) = validate_artist(&artist)?;
+    let (display_artist, artist_key) = validate_catalog_artist(&artist)?;
     let artist_mbid = artist_mbid.trim().to_lowercase();
     let release_mbid = release_mbid.trim().to_lowercase();
     if !valid_mbid(&artist_mbid) || !valid_mbid(&release_mbid) {
@@ -276,14 +285,14 @@ fn validate_local_album(artist_key: &str, album_id: &str) -> Result<(), String> 
         return Err("The local album identity is invalid.".to_owned());
     }
     let connection = open_catalog(&default_catalog_path()?)?;
-    let album_artist = connection
+    let key_sql = crate::artist_identity::key_sql(&connection, "album_artist_display");
+    let album_artist_key = connection
         .query_row(
-            "SELECT album_artist_display FROM albums WHERE id = ?1",
+            &format!("SELECT {key_sql} FROM albums WHERE id = ?1"),
             [album_id],
             |row| row.get::<_, String>(0),
         )
         .map_err(|_| "That local album is no longer available in the catalog.".to_owned())?;
-    let (_, album_artist_key) = validate_artist(&album_artist)?;
     if album_artist_key != artist_key {
         return Err("The selected local album belongs to another artist.".to_owned());
     }

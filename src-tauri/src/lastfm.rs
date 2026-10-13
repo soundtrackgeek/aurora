@@ -689,6 +689,17 @@ fn page_image_url(page_url: &str) -> Result<Url, String> {
 }
 
 fn resolve_artist_image(artist: &str, size: u32) -> Result<Url, String> {
+    if let Ok(connection) =
+        crate::catalog::default_catalog_path().and_then(|path| crate::catalog::open_catalog(&path))
+    {
+        let (_, name, ambiguous) = crate::artist_identity::resolve(&connection, artist)?;
+        if ambiguous {
+            return Err("Use identity-linked artwork for this separate artist.".into());
+        }
+        if name != artist {
+            return resolve_artist_image(&name, size);
+        }
+    }
     let api_key = api_key().ok_or_else(|| "Last.fm is not configured.".to_owned())?;
     let response = client()?
         .get(LAST_FM_API_URL)
@@ -786,6 +797,12 @@ fn load_artist_image<R: Runtime>(
     artist: &str,
     size: u32,
 ) -> Result<Vec<u8>, String> {
+    if let Ok(connection) =
+        crate::catalog::default_catalog_path().and_then(|path| crate::catalog::open_catalog(&path))
+        && crate::artist_identity::resolve(&connection, artist)?.2
+    {
+        return Err("Use identity-linked artwork for this separate artist.".into());
+    }
     let path = cache_path(app, artist, size)?;
     if let Ok(bytes) = fs::read(&path) {
         return Ok(bytes);

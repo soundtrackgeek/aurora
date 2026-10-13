@@ -16,6 +16,7 @@ export interface LibrarySummary {
 export interface Artist {
   id: string;
   name: string;
+  disambiguation?: string | null;
   trackCount: number;
   albumCount: number;
   playCount: number | null;
@@ -30,6 +31,7 @@ export interface Track {
   albumId: string | null;
   title: string;
   artist: string;
+  artistId?: string | null;
   displayArtist?: string | null;
   album: string;
   releaseYear: number | null;
@@ -56,9 +58,23 @@ export function displayTrackArtist(track: Track): string {
   return track.displayArtist?.trim() || track.artist;
 }
 
+/** The assigned ID belongs to Album Artist; performer links keep their own credit. */
+export function displayTrackArtistId(track: Track): string | null {
+  const key = (name: string) => name.trim().toLowerCase().replace(/[\u2010-\u2014\u2212]/g, "-").replace(/\s+/g, " ");
+  return key(displayTrackArtist(track)) === key(track.artist) ? track.artistId ?? null : null;
+}
+
+let artistPortraitRevision = "";
+
 export function artistPortraitUrl(artist: string, size: 64 | 128 = 64): string | null {
   if (!isTauriRuntime() || !artist.trim()) return null;
-  return `${protocolUrl("aurora-artist", "artist", artist)}?size=${size}`;
+  return `${protocolUrl("aurora-artist", "artist", artist)}?size=${size}&revision=${encodeURIComponent(artistPortraitRevision)}`;
+}
+
+export async function loadAlbumArtistIdentity(albumId: string): Promise<string> {
+  if (isTauriRuntime()) return invoke("artist_identity_for_album", { albumId });
+  const detail = await loadAlbumDetail(albumId);
+  return detail.album.artistId ?? detail.album.artist;
 }
 
 export function catalogRefreshIsConsistent(
@@ -167,6 +183,7 @@ export interface AlbumSummary {
   id: string;
   title: string;
   artist: string;
+  artistId?: string | null;
   releaseYear: number | null;
   originalYear?: number | null;
   publisher?: string | null;
@@ -426,7 +443,9 @@ export async function loadLibrarySnapshot(): Promise<LibrarySnapshot> {
     return browserPreview;
   }
 
-  return invoke<LibrarySnapshot>("library_snapshot");
+  const snapshot = await invoke<LibrarySnapshot>("library_snapshot");
+  artistPortraitRevision = snapshot.catalogRevision;
+  return snapshot;
 }
 
 export async function loadCatalogRevision(): Promise<string> {

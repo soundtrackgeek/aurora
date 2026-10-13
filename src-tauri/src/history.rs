@@ -1594,6 +1594,40 @@ impl HistoryStore {
     /// Aggregate the same device sources as listening history, without a library-wide scan.
     pub(crate) fn artist_listening(&self, artist: &str) -> Result<ArtistListening, String> {
         let artist = crate::artist_discovery::validate_artist(artist)?;
+        let membership = if let Ok(catalog) =
+            catalog::default_catalog_path().and_then(|path| catalog::open_catalog(&path))
+        {
+            let (id, _, ambiguous) = crate::artist_identity::resolve(&catalog, artist)?;
+            if ambiguous {
+                let key = crate::artist_identity::key_sql(&catalog, "t.album_artist_display");
+                let mut statement = catalog
+                    .prepare(&format!(
+                        "SELECT file_path,filename FROM tracks t WHERE {key}=?1"
+                    ))
+                    .map_err(|error| error.to_string())?;
+                let keys = statement
+                    .query_map([id], |row| {
+                        Ok(catalog::normalize_track_key(
+                            &row.get::<_, String>(0)?,
+                            &row.get::<_, String>(1)?,
+                        ))
+                    })
+                    .map_err(|error| error.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?;
+                Some(serde_json::to_string(&keys).map_err(|error| error.to_string())?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let artist_filter = if membership.is_some() {
+            "track_key IN (SELECT value FROM json_each(?1))"
+        } else {
+            "TRIM(artist) = TRIM(?1) COLLATE NOCASE"
+        };
+        let identity_filter = membership.as_deref().unwrap_or(artist);
         let mut result = ArtistListening::default();
         let mut tracks: HashMap<String, ArtistListeningTrack> = HashMap::new();
         let now = state_sync::now_ms();
@@ -1608,10 +1642,10 @@ impl HistoryStore {
                 continue;
             }
             let mut statement = connection.prepare(
-                "SELECT track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch'), COUNT(*), SUM(listened_seconds) FROM listening_sessions WHERE registered_play = 1 AND TRIM(artist) = TRIM(?1) COLLATE NOCASE AND started_at_ms >= CAST(strftime('%s', ?2 / 1000, 'unixepoch', 'start of month', '-11 months') AS INTEGER) * 1000 AND started_at_ms <= ?2 GROUP BY track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch')"
+                &format!("SELECT track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch'), COUNT(*), SUM(listened_seconds) FROM listening_sessions WHERE registered_play = 1 AND {artist_filter} AND started_at_ms >= CAST(strftime('%s', ?2 / 1000, 'unixepoch', 'start of month', '-11 months') AS INTEGER) * 1000 AND started_at_ms <= ?2 GROUP BY track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch')")
             ).map_err(|e| e.to_string())?;
             let rows = statement
-                .query_map(params![artist, now], |row| {
+                .query_map(params![identity_filter, now], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -2608,6 +2642,7 @@ mod tests {
 
     fn track(duration_seconds: i64) -> TrackSummary {
         TrackSummary {
+            artist_id: None,
             id: "42".to_owned(),
             track_key: r"d:\music\artist\track.mp3".to_owned(),
             album_id: Some("album-1".to_owned()),

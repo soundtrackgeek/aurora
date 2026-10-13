@@ -136,7 +136,8 @@ export function ArtistWorld({
           ))}
         </div>
         <p className="eyebrow"><Sparkles aria-hidden="true" /> Constellations</p>
-        <h2>{artistName}</h2>
+        <h2>{catalogDetail?.artist.name ?? intelligence?.artist ?? (artistName.startsWith("artist:") || artistName.startsWith("unresolved:") ? "Artist" : artistName)}</h2>
+        {catalogDetail?.artist.disambiguation ? <p>{catalogDetail.artist.disambiguation}</p> : null}
         <p>Local catalog gravity with optional MusicBrainz context.</p>
       </header>
 

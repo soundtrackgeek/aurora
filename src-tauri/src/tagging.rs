@@ -3421,6 +3421,7 @@ mod tests {
         };
         ResolvedTrack {
             summary: TrackSummary {
+                artist_id: None,
                 id: track_id.to_owned(),
                 track_key: track_key.to_owned(),
                 album_id: Some(album_id.to_owned()),

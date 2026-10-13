@@ -662,7 +662,17 @@ fn load_artist_intelligence_internal(
     artist: String,
     store: Option<&StateStore>,
 ) -> Result<ArtistIntelligence, String> {
-    let (artist, artist_key) = validate_artist(&artist)?;
+    let resolved = default_catalog_path()
+        .and_then(|path| open_catalog(&path))
+        .and_then(|connection| crate::artist_identity::resolve(&connection, &artist));
+    let (artist_key, artist, ambiguous_name) = match resolved {
+        Ok(value) => value,
+        Err(error) if error.starts_with("Several artists") => return Err(error),
+        Err(_) => {
+            let (name, key) = validate_artist(&artist)?;
+            (key, name, false)
+        }
+    };
     let local_decision = store
         .map(|store| store.artist_decision(&artist_key))
         .transpose()?
@@ -703,6 +713,7 @@ fn load_artist_intelligence_internal(
 
     let cached_identity = match cache
         .as_ref()
+        .filter(|_| !ambiguous_name)
         .map(|connection| cache_identity(connection, &artist_key))
         .transpose()
     {
@@ -719,6 +730,7 @@ fn load_artist_intelligence_internal(
     };
     let curated_identity = match overlay
         .as_ref()
+        .filter(|_| !ambiguous_name)
         .map(|connection| overlay_identity(connection, &artist_key, "curatedOverlay"))
         .transpose()
     {
@@ -966,14 +978,20 @@ pub(crate) fn load_artist_review_page(
         let batch_was_full = rows.len() == SCAN_BATCH;
         for (artist_key, display_artist, imported_mbid) in rows {
             cursor = artist_key.clone();
+            let ambiguous_name = crate::artist_identity::resolve(&catalog, &artist_key)?.2;
             let cached_identity = cache
                 .as_ref()
+                .filter(|_| !ambiguous_name)
                 .and_then(|connection| cache_identity(connection, &artist_key).ok().flatten());
-            let external_curated = overlay.as_ref().and_then(|connection| {
-                overlay_identity(connection, &artist_key, "curatedOverlay")
-                    .ok()
-                    .flatten()
-            });
+            let external_curated =
+                overlay
+                    .as_ref()
+                    .filter(|_| !ambiguous_name)
+                    .and_then(|connection| {
+                        overlay_identity(connection, &artist_key, "curatedOverlay")
+                            .ok()
+                            .flatten()
+                    });
             let embedded_curated = if external_curated.is_none() {
                 overlay_identity(&catalog, &artist_key, "catalogOverlay")
                     .ok()

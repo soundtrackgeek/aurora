@@ -6,6 +6,7 @@ const DEVICE: &str = "device-test-export";
 
 fn track(directory: &str) -> TrackSummary {
     TrackSummary {
+        artist_id: None,
         id: "1".to_owned(),
         track_key: r"d:\music\kate bush\01.mp3".to_owned(),
         album_id: Some("hounds".to_owned()),

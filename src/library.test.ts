@@ -5,6 +5,7 @@ import {
   applyEditableTrackTagProjection,
   applyTrackTagProjection,
   catalogRefreshIsConsistent,
+  displayTrackArtistId,
   exploreAlbums,
   exploreArtists,
   exploreTracks,
@@ -22,6 +23,12 @@ const tracks: Track[] = [
   { id: "1", trackKey: "c:/music/sigur ros/takk/saeglopur.mp3", albumId: "album-1", title: "Sæglópur", artist: "Sigur Rós", displayArtist: "Jónsi", album: "Takk...", originalYear: 1999, releaseYear: 2005, publisher: "EMI Records", originCountryCode: "IS", originCountryName: "Iceland", rating: 5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 473, genre: "Post-rock", playCount: 12 },
   { id: "2", trackKey: "c:/music/m83/hurry up/midnight city.mp3", albumId: "album-2", title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", releaseYear: 2011, originCountryCode: "FR", originCountryName: "France", rating: 4.5, loved: true, loveState: "loved", tagSyncState: null, canUndoTagEdit: false, durationSeconds: 243, genre: "Electronic", playCount: 42 },
 ];
+
+it("uses the split ID only for the corresponding artist credit", () => {
+  expect(displayTrackArtistId({ ...tracks[1], artist: "Zoo", displayArtist: "ZOO", artistId: "artist:french" })).toBe("artist:french");
+  expect(displayTrackArtistId({ ...tracks[0], artistId: "sigur ros" })).toBeNull();
+  expect(displayTrackArtistId({ ...tracks[1], artist: "Various Artists", displayArtist: "Zoo", artistId: "various artists" })).toBeNull();
+});
 
 it("filters partial sonic coverage with boolean search syntax", () => {
   const partial = [{ ...tracks[0], sonicAnalyzed: true }, { ...tracks[1], sonicAnalyzed: false }];

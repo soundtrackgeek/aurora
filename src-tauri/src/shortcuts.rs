@@ -1292,6 +1292,7 @@ mod tests {
 
     fn track(rating: Option<f64>, love_state: LoveState) -> TrackSummary {
         TrackSummary {
+            artist_id: None,
             id: "track-1".to_owned(),
             track_key: "d:\\music\\artist\\song.mp3".to_owned(),
             album_id: None,

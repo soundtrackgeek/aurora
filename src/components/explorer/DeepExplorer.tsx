@@ -703,7 +703,7 @@ function AlbumGrid({
                   <strong>{album.title}</strong>
                   <span className="deep-explorer-album__artist">
                     <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
-                    <ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} nested />
+                    <ArtistSmartLink artist={album.artist} albumId={album.id} onOpen={onOpenArtistAlbums} nested />
                   </span>
                   <small className="deep-explorer-album__metadata">
                     {album.originalYear ?? "Year unknown"} <span aria-hidden="true">—</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
@@ -845,7 +845,7 @@ function AlbumDetail({
           <h3>{album.title}</h3>
           <p className="deep-explorer-album-detail__artist">
             <CountryFlag code={album.originCountryCode} name={album.originCountryName} />
-            <ArtistSmartLink artist={album.artist} onOpen={onOpenArtistAlbums} />
+            <ArtistSmartLink artist={album.artist} albumId={album.id} onOpen={onOpenArtistAlbums} />
           </p>
           <span className="deep-explorer-album-publisher">
             {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
@@ -963,16 +963,17 @@ function ArtistList({
     <ol className="deep-explorer-artists" aria-label="Artists">
       {artists.map((artist, index) => (
         <li key={artist.id}>
-          <PlaylistRow selection={{ artistName: artist.name, artistOnly: true, label: artist.name }}><button
+          <PlaylistRow selection={{ artistName: artist.id, artistOnly: true, label: artist.name }}><button
             type="button"
             className={selectedArtistId === artist.id ? "is-selected" : undefined}
             aria-pressed={selectedArtistId === artist.id}
             onClick={() => onSelectArtist(artist)}
           >
             <span className="deep-explorer-artist__rank">{String(index + 1).padStart(2, "0")}</span>
-            <ArtistPortrait artist={artist.name} className="deep-explorer-artist__avatar" />
+            <ArtistPortrait artist={artist.name} artistId={artist.id} className="deep-explorer-artist__avatar" />
             <span className="deep-explorer-artist__copy">
               <strong>{artist.name}</strong>
+              {artist.disambiguation ? <small>{artist.disambiguation}</small> : null}
               <small>{formatCount(artist.albumCount)} albums · {formatCount(artist.trackCount)} tracks</small>
               <span aria-hidden="true"><i style={{ width: `${Math.max(4, (artist.trackCount / largestTrackCount) * 100)}%` }} /></span>
             </span>

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.37.0] - 2026-10-13
+
+### Added
+- Read Music Library 0.190.0's separate artist identities. Same-name profiles keep their own artist pages, album and track selections, MusicBrainz identity, artwork lookup, origin filters, and descriptions. Artist pagination uses the profile ID to keep duplicate names on distinct pages.
+- Album and track artist links open the assigned profile, including context menus and artist-only playback. Genre artist shelves and related genres use the separate identities too.
+
+### Fixed
+- Refresh the catalog after a Music Library split or artist-information update without requiring a new import. Keep compatible browsing for older catalogs.
+- Scope split-artist listening history to stable local track keys. Provider lookups use the linked MBID for ambiguous names; unlinked profiles wait for review, and ambiguous name-based portrait scraping does not reuse another artist's cached picture.
+
 ## [0.36.4] - 2026-10-12
 
 ### Added

@@ -119,9 +119,11 @@ import {
   applyAlbumTrackMetricsProjection,
   deleteAlbumTracks,
   displayTrackArtist,
+  displayTrackArtistId,
   formatCount,
   formatDuration,
   loadAlbumDetail,
+  loadAlbumArtistIdentity,
   loadLibrarySnapshot,
   type Artist,
   type LibrarySnapshot,
@@ -980,9 +982,9 @@ function App() {
       setActiveNav(destination === "albums" ? "Albums" : "Artists");
       expandLibraryNavigation();
       setExplorerView(destination);
-      setExplorerFilters((current) => ({ ...current, artist: artist.name, sort: defaultExplorerSort[destination] }));
+      setExplorerFilters((current) => ({ ...current, artist: artist.id, sort: defaultExplorerSort[destination] }));
       if (destination === "albums") setSelectedAlbumId(null);
-      openArtistInspector(artist.name);
+      openArtistInspector(artist.id);
     }, "artist-detail");
   }
 
@@ -1361,7 +1363,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.36.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.37.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1523,7 +1525,7 @@ function App() {
                   actionBusy={curationActionBusy === "export" || curationActionBusy === "undo" ? curationActionBusy : null}
                   message={curationMessage}
                   onFilterChange={setReviewFilter}
-                  onSelect={(item) => openArtistInspector(item.displayArtist)}
+                  onSelect={(item) => openArtistInspector(item.artistKey)}
                   onLoadMore={() => void loadMoreReviewItems()}
                   onRefresh={() => setReviewReloadToken((value) => value + 1)}
                   onUndo={() => void undoCuration()}
@@ -1743,7 +1745,7 @@ function App() {
                       onSelectTrack={selectTrack}
                       onActivateTrack={(track) => playTrack(track, albumTracks.some((candidate) => candidate.id === track.id) ? albumTracks : explorerTracks)}
                       onSelectAlbum={selectAlbum}
-                      onSelectArtist={(artist) => { if (artist) openArtistAlbums(artist.name); else setSelectedArtistId(null); }}
+                      onSelectArtist={(artist) => { if (artist) openArtistAlbums(artist.id); else setSelectedArtistId(null); }}
                       onOpenArtistAlbums={openArtistAlbums}
                       onLoadMore={() => void loadMoreExplorerResults()}
                       onRetry={() => {
@@ -1798,8 +1800,18 @@ function App() {
             aria-selected={inspectorView === "artist"}
             disabled={!inspectorArtistCandidate}
             onClick={() => {
+              const albumId = explorerAlbumInspectorContext?.album.id;
+              if (albumId) {
+                const requestId = ++artistRequestRef.current;
+                void loadAlbumArtistIdentity(albumId).then((reference) => {
+                  if (artistRequestRef.current === requestId) openArtistInspector(reference);
+                }).catch((error: unknown) => {
+                  if (artistRequestRef.current === requestId) setArtistWorldError(error instanceof Error ? error.message : String(error));
+                });
+                return;
+              }
               const artistName = explorerAlbumInspectorContext?.artistName
-                ?? (selectedInspectorTrack ? displayTrackArtist(selectedInspectorTrack) : null)
+                ?? (selectedInspectorTrack ? displayTrackArtistId(selectedInspectorTrack) ?? displayTrackArtist(selectedInspectorTrack) : null)
                 ?? inspectorArtistName;
               if (artistName) openArtistInspector(artistName);
             }}
@@ -1880,7 +1892,7 @@ function App() {
           <div className="inspector-scroll">
             <Artwork track={inspectorTrack} size="large" />
             <div className="track-hero-copy">
-              <div><h2>{inspectorTrack.title}</h2><p><ArtistSmartLink artist={displayTrackArtist(inspectorTrack)} onOpen={openArtistAlbums} /></p>{inspectorTrack.albumId ? <button type="button" className="track-album-link" onClick={() => openTrackAlbum(inspectorTrack)} title={`Open ${inspectorTrack.album} in Albums`}>{inspectorTrack.album}</button> : <span>{inspectorTrack.album}</span>}</div>
+              <div><h2>{inspectorTrack.title}</h2><p><ArtistSmartLink artist={displayTrackArtist(inspectorTrack)} artistId={displayTrackArtistId(inspectorTrack)} onOpen={openArtistAlbums} /></p>{inspectorTrack.albumId ? <button type="button" className="track-album-link" onClick={() => openTrackAlbum(inspectorTrack)} title={`Open ${inspectorTrack.album} in Albums`}>{inspectorTrack.album}</button> : <span>{inspectorTrack.album}</span>}</div>
               <button type="button" className="inspector-play" onClick={() => playTrack(inspectorTrack)}><Play aria-hidden="true" /> Play</button>
             </div>
             <dl className="metadata-list">
