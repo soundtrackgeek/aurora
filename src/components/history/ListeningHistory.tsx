@@ -25,7 +25,7 @@ import type {
 } from "../../history";
 import { formatCount, type Track } from "../../library";
 import { Artwork } from "../Artwork";
-import { ArtistSmartLink } from "../ArtistSmartLink";
+import { HistoryArtistLink } from "./HistoryArtistLink";
 import { ContentTransition } from "../ContentTransition";
 import { transitionContent } from "../../contentTransition";
 import { LibraryPlayExport } from "./LibraryPlayExport";
@@ -114,19 +114,17 @@ function HistoryRow({ item, onSelectTrack, onPlayTrack, onOpenArtistAlbums }: {
 }) {
   return (
     <PlaylistRow selection={{tracks: item.track ? [item.track] : [], artistName: item.artist, label: item.title}}><article tabIndex={0} className={`history-row history-row--${item.outcome}${item.registeredPlay ? " is-play" : ""}`}>
-      <button
-        type="button"
-        className="history-row__track"
-        disabled={!item.track}
-        onClick={() => item.track && onSelectTrack(item.track)}
-        aria-label={item.track ? `Inspect ${item.title}` : `${item.title} is unavailable in the current catalog`}
-      >
+      <div className="history-row__track">
         {item.track ? <Artwork track={item.track} size="small" /> : <span className="history-row__missing"><ListMusic aria-hidden="true" /></span>}
         <span className="history-row__copy">
-          <strong>{item.title}</strong>
-          <small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} nested /> <span>·</span> {item.album}</small>
+          <button type="button" className="history-row__inspect" disabled={!item.track}
+            onClick={() => item.track && onSelectTrack(item.track)}
+            aria-label={item.track ? `Inspect ${item.title}` : `${item.title} is unavailable in the current catalog`}>
+            <strong>{item.title}</strong>
+          </button>
+          <small><HistoryArtistLink artist={item.artist} artistId={item.artistId} artistDisambiguation={item.artistDisambiguation} onOpen={onOpenArtistAlbums} nested /> <span>·</span> {item.album}</small>
         </span>
-      </button>
+      </div>
       <span className="history-row__time"><strong>{timeLabel(item.startedAtMs)}</strong><small>{listenedLabel(item.listenedSeconds)}</small></span>
       <span className={`history-row__outcome history-row__outcome--${item.outcome}`}>
         {outcomeIcon(item)}<span>{outcomeLabel(item)}</span>
@@ -251,12 +249,12 @@ export function ListeningHistory({
           <div className="history-section-heading"><div><p className="eyebrow">Your rotation</p><h2 id="history-top-title">Most played</h2></div></div>
           <div className="history-top__grid">
             {page?.topTracks.slice(0, 4).map((item, index) => (
-              <button type="button" key={item.trackKey} disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)}>
+              <article key={item.trackKey}>
                 <span className="history-top__rank">{String(index + 1).padStart(2, "0")}</span>
                 {item.track ? <Artwork track={item.track} size="small" /> : <span className="history-row__missing"><ListMusic aria-hidden="true" /></span>}
-                <span><strong>{item.title}</strong><small><ArtistSmartLink artist={item.artist} onOpen={onOpenArtistAlbums} nested /> · {item.plays} {item.plays === 1 ? "play" : "plays"}</small></span>
-                <Play aria-hidden="true" />
-              </button>
+                <span><strong>{item.title}</strong><small><HistoryArtistLink artist={item.artist} artistId={item.artistId} artistDisambiguation={item.artistDisambiguation} onOpen={onOpenArtistAlbums} nested /> · {item.plays} {item.plays === 1 ? "play" : "plays"}</small></span>
+                <button type="button" className="history-row__play" disabled={!item.track} onClick={() => item.track && onPlayTrack(item.track)} aria-label={`Play ${item.title}`}><Play aria-hidden="true" /></button>
+              </article>
             ))}
           </div>
         </section>

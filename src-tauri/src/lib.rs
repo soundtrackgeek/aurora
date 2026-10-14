@@ -567,9 +567,12 @@ async fn explore_artists(
         let history = app.state::<HistoryStore>();
         let insights = history.artist_insights()?;
         for artist in &mut page.items {
-            if let Some(insight) = insights.get(&history::artist_identity(&artist.name)) {
+            if let Some(insight) = insights.get(&history::artist_identity(&artist.id)) {
                 artist.play_count = Some(insight.plays);
                 artist.last_played_at_ms = insight.last_played_at_ms;
+            } else {
+                artist.play_count = Some(0);
+                artist.last_played_at_ms = None;
             }
         }
         Ok(page)

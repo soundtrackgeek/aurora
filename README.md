@@ -1,5 +1,17 @@
 # Aurora
 
+Aurora **0.37.1** separates same-name artists in **Listening History**, reports,
+discovery totals and artist play counts using Music Library's reviewed album
+assignments. Update Music Library to **0.190.1** for matching history behavior
+in both apps. Use **Artists → Split artist** there to assign albums and describe
+each Creed, The Kids or other same-name profile. History shows the description
+and opens the selected profile. Existing plays are recalculated when read; an
+exact file match wins, and unique album/title evidence can identify moved files.
+Ambiguous plays stay visible as **Unresolved artist** and contribute to the
+overall history without being credited to a specific group. Original per-device
+history snapshots stay intact. Compilation plays count toward Track Artist,
+while album rankings retain Album Artist.
+
 Aurora **0.37.0** supports artist splits made in **Music Library 0.190.0 or later**. Use **Artists → Split artist** in Music Library to review album assignments and give same-name profiles a distinguishing description and optional MusicBrainz ID. Aurora's Artists list, artist pages, album links, track selection, genre shelves, provider information and local listening history follow those assignments. The catalog watcher detects artist changes without requiring an import; source music tags stay unchanged. Older catalogs keep their existing browsing behavior. Unlinked ambiguous profiles wait for an identity before provider lookups; accurate identity-linked fanart.tv artwork remains available on artist pages.
 
 Aurora 0.36.4 blinks the requested stars while a keyboard rating is saving.

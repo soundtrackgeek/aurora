@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime, loadLibrarySnapshot, type Track } from "./library";
+import { displayTrackArtist, displayTrackArtistId, isTauriRuntime, loadLibrarySnapshot, type Track } from "./library";
 
 export type HistoryOutcomeFilter = "all" | "played" | "completed" | "skipped" | "interrupted";
 export type HistoryOutcome = "active" | "completed" | "skipped" | "interrupted";
@@ -15,6 +15,8 @@ export interface HistoryPageRequest {
 }
 
 export interface HistoryItem {
+  artistId?: string | null;
+  artistDisambiguation?: string | null;
   sessionId: string;
   trackKey: string;
   title: string;
@@ -50,6 +52,8 @@ export interface HistoryDevice {
 }
 
 export interface HistoryTopTrack {
+  artistId?: string | null;
+  artistDisambiguation?: string | null;
   trackKey: string;
   title: string;
   artist: string;
@@ -97,12 +101,16 @@ export interface HistoryReportBucket {
 }
 
 export interface HistoryReportArtist {
+  artistId?: string | null;
+  artistDisambiguation?: string | null;
   artist: string;
   plays: number;
   listenedSeconds: number;
 }
 
 export interface HistoryReportAlbum {
+  artistId?: string | null;
+  artistDisambiguation?: string | null;
   album: string;
   artist: string;
   plays: number;
@@ -176,7 +184,8 @@ function previewItems(tracks: Track[]): HistoryItem[] {
       sessionId: `preview-session-${index}`,
       trackKey: track.trackKey,
       title: track.title,
-      artist: track.artist,
+      artist: displayTrackArtist(track),
+      artistId: displayTrackArtistId(track),
       album: track.album,
       genre: track.genre,
       durationSeconds: track.durationSeconds,
@@ -218,6 +227,8 @@ function previewTopTracks(items: HistoryItem[]): HistoryTopTrack[] {
         trackKey: item.trackKey,
         title: item.title,
         artist: item.artist,
+        artistId: item.artistId,
+        artistDisambiguation: item.artistDisambiguation,
         album: item.album,
         plays: 1,
         listenedSeconds: item.listenedSeconds,
@@ -267,6 +278,14 @@ function localDayStart(timestamp: number, timezoneOffsetMinutes: number): number
   return Math.floor((timestamp - offsetMs) / 86_400_000) * 86_400_000 + offsetMs;
 }
 
+function artistKey(item: HistoryItem): string {
+  return item.artistId ?? `${item.artistDisambiguation === "Unresolved artist" ? "unresolved:" : ""}${item.artist.toLocaleLowerCase()}`;
+}
+
+function albumKey(item: HistoryItem): string {
+  return item.track?.albumId ?? `${artistKey(item)}\u0000${item.album.toLocaleLowerCase()}`;
+}
+
 function reportSummary(items: HistoryItem[], timezoneOffsetMinutes: number): HistoryReportSummary {
   const plays = items.filter((item) => item.registeredPlay);
   const daily = new Map<number, number>();
@@ -282,8 +301,8 @@ function reportSummary(items: HistoryItem[], timezoneOffsetMinutes: number): His
     skips: items.filter((item) => item.outcome === "skipped").length,
     uniqueTracks: new Set(plays.map((item) => item.trackKey)).size,
     listenedSeconds: items.reduce((total, item) => total + item.listenedSeconds, 0),
-    uniqueArtists: new Set(plays.map((item) => item.artist.toLocaleLowerCase())).size,
-    uniqueAlbums: new Set(plays.map((item) => `${item.artist}\u0000${item.album}`.toLocaleLowerCase())).size,
+    uniqueArtists: new Set(plays.map(artistKey)).size,
+    uniqueAlbums: new Set(plays.map(albumKey)).size,
     completed: items.filter((item) => item.outcome === "completed").length,
     activeDays: daily.size,
     mostActiveDayStartMs: mostActive?.[0] ?? null,
@@ -358,23 +377,23 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
   const artistMap = new Map<string, HistoryReportArtist>();
   const albumMap = new Map<string, HistoryReportAlbum>();
   for (const item of plays) {
-    const artistKey = item.artist.toLocaleLowerCase();
-    const artist = artistMap.get(artistKey) ?? { artist: item.artist, plays: 0, listenedSeconds: 0 };
+    const key = artistKey(item);
+    const artist = artistMap.get(key) ?? { artist: item.artist, artistId: item.artistId, artistDisambiguation: item.artistDisambiguation, plays: 0, listenedSeconds: 0 };
     artist.plays += 1;
     artist.listenedSeconds += item.listenedSeconds;
-    artistMap.set(artistKey, artist);
-    const albumKey = `${item.artist}\u0000${item.album}`.toLocaleLowerCase();
-    const album = albumMap.get(albumKey) ?? { album: item.album, artist: item.artist, plays: 0, listenedSeconds: 0, track: item.track };
+    artistMap.set(key, artist);
+    const albumId = albumKey(item);
+    const album = albumMap.get(albumId) ?? { album: item.album, artist: item.track?.artist ?? item.artist, artistId: item.track?.artistId, plays: 0, listenedSeconds: 0, track: item.track };
     album.plays += 1;
     album.listenedSeconds += item.listenedSeconds;
-    albumMap.set(albumKey, album);
+    albumMap.set(albumId, album);
   }
   const firstArtist = new Map<string, number>();
   const firstAlbum = new Map<string, number>();
   const firstTrack = new Map<string, number>();
   for (const item of all.filter((candidate) => candidate.registeredPlay)) {
-    const artist = item.artist.toLocaleLowerCase();
-    const album = `${item.artist}\u0000${item.album}`.toLocaleLowerCase();
+    const artist = artistKey(item);
+    const album = albumKey(item);
     firstArtist.set(artist, Math.min(firstArtist.get(artist) ?? item.startedAtMs, item.startedAtMs));
     firstAlbum.set(album, Math.min(firstAlbum.get(album) ?? item.startedAtMs, item.startedAtMs));
     firstTrack.set(item.trackKey, Math.min(firstTrack.get(item.trackKey) ?? item.startedAtMs, item.startedAtMs));
@@ -398,9 +417,9 @@ function previewHistoryReport(request: HistoryReportRequest, tracks: Track[]): H
     topTracks: previewTopTracks(current).slice(0, 5),
     discovery: {
       newArtists: [...firstArtist.values()].filter(isNew).length,
-      totalArtists: new Set(plays.map((item) => item.artist.toLocaleLowerCase())).size,
+      totalArtists: new Set(plays.map(artistKey)).size,
       newAlbums: [...firstAlbum.values()].filter(isNew).length,
-      totalAlbums: new Set(plays.map((item) => `${item.artist}\u0000${item.album}`.toLocaleLowerCase())).size,
+      totalAlbums: new Set(plays.map(albumKey)).size,
       newTracks: [...firstTrack.values()].filter(isNew).length,
       totalTracks: new Set(plays.map((item) => item.trackKey)).size,
     },

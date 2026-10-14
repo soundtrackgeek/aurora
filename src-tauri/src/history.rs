@@ -15,6 +15,8 @@ use std::{
 };
 
 const HISTORY_SCHEMA_VERSION: i64 = 1;
+mod artist_profiles;
+use artist_profiles::{ArtistProfile, ArtistProfiles};
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,8 +68,11 @@ struct HistoryMetadata {
     mirrored_revision: i64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct HistoryRow {
+    artist_profile: Option<ArtistProfile>,
+    album_profile: Option<ArtistProfile>,
+    album_identity: Option<String>,
     session_id: String,
     track_key: String,
     title: String,
@@ -115,6 +120,8 @@ pub(crate) struct HistoryPageRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryItem {
+    artist_id: Option<String>,
+    artist_disambiguation: Option<String>,
     session_id: String,
     track_key: String,
     title: String,
@@ -156,6 +163,8 @@ pub(crate) struct HistoryDevice {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryTopTrack {
+    artist_id: Option<String>,
+    artist_disambiguation: Option<String>,
     track_key: String,
     title: String,
     artist: String,
@@ -218,6 +227,8 @@ pub(crate) struct HistoryReportBucket {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryReportArtist {
+    artist_id: Option<String>,
+    artist_disambiguation: Option<String>,
     artist: String,
     plays: i64,
     listened_seconds: f64,
@@ -226,6 +237,8 @@ pub(crate) struct HistoryReportArtist {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryReportAlbum {
+    artist_id: Option<String>,
+    artist_disambiguation: Option<String>,
     album: String,
     artist: String,
     plays: i64,
@@ -1024,14 +1037,24 @@ impl HistoryStore {
             .into_iter()
             .map(|track| (track.track_key.clone(), track))
             .collect::<HashMap<_, _>>();
+        let mut artist_profiles = ArtistProfiles::open()?;
+        artist_profiles.project_rows(&mut rows)?;
         let items = rows
             .into_iter()
             .map(|row| HistoryItem {
+                artist_id: row.artist_profile.as_ref().and_then(|p| p.id.clone()),
+                artist_disambiguation: row
+                    .artist_profile
+                    .as_ref()
+                    .and_then(|p| p.disambiguation.clone()),
                 track: resolved_by_key.get(&row.track_key).cloned(),
                 session_id: row.session_id,
                 track_key: row.track_key,
                 title: row.title,
-                artist: row.artist,
+                artist: row
+                    .artist_profile
+                    .as_ref()
+                    .map_or_else(|| row.artist.clone(), |p| p.name.clone()),
                 album: row.album,
                 genre: row.genre,
                 duration_seconds: row.duration_seconds,
@@ -1047,17 +1070,11 @@ impl HistoryStore {
             .collect();
         let top_tracks = top_rows
             .into_iter()
-            .map(|row| HistoryTopTrack {
-                track: resolved_by_key.get(&row.track_key).cloned(),
-                track_key: row.track_key,
-                title: row.title,
-                artist: row.artist,
-                album: row.album,
-                plays: row.plays,
-                listened_seconds: row.listened_seconds,
-                last_played_at_ms: row.last_played_at_ms,
+            .map(|row| {
+                let track = resolved_by_key.get(&row.track_key).cloned();
+                artist_profiles.top_track(row, track)
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         devices.sort_by(|left, right| {
             right
                 .is_this_device
@@ -1116,6 +1133,8 @@ impl HistoryStore {
         all_rows.sort_by_key(|row| std::cmp::Reverse(row.started_at_ms));
         let mut seen = HashSet::new();
         all_rows.retain(|row| seen.insert(row.session_id.clone()));
+        let mut artist_profiles = ArtistProfiles::open()?;
+        artist_profiles.project_rows(&mut all_rows)?;
 
         let current = all_rows
             .iter()
@@ -1191,23 +1210,22 @@ impl HistoryStore {
         for row in &current_plays {
             // Rank the performing Artist, not the stored Album Artist, so
             // compilations do not collapse into "Various Artists".
-            let track_artist = report_track_artist(row, resolved_by_key.get(&row.track_key));
+            let profile = row.artist_profile();
+            let track_artist = &profile.name;
             artists
-                .entry(track_artist.to_lowercase())
+                .entry(profile.key())
                 .and_modify(|artist| {
                     artist.plays = artist.plays.saturating_add(1);
                     artist.listened_seconds += row.listened_seconds;
                 })
                 .or_insert_with(|| HistoryReportArtist {
+                    artist_id: profile.id,
+                    artist_disambiguation: profile.disambiguation,
                     artist: track_artist.to_owned(),
                     plays: 1,
                     listened_seconds: row.listened_seconds,
                 });
-            let album_key = format!(
-                "{}\0{}",
-                row.artist.trim().to_lowercase(),
-                row.album.trim().to_lowercase()
-            );
+            let album_key = row.album_key();
             albums
                 .entry(album_key)
                 .and_modify(|(album, representative)| {
@@ -1224,8 +1242,16 @@ impl HistoryStore {
                 .or_insert_with(|| {
                     (
                         HistoryReportAlbum {
+                            artist_id: row.album_profile.as_ref().and_then(|p| p.id.clone()),
+                            artist_disambiguation: row
+                                .album_profile
+                                .as_ref()
+                                .and_then(|p| p.disambiguation.clone()),
                             album: row.album.clone(),
-                            artist: row.artist.clone(),
+                            artist: row
+                                .album_profile
+                                .as_ref()
+                                .map_or_else(|| row.artist.clone(), |p| p.name.clone()),
                             plays: 1,
                             listened_seconds: row.listened_seconds,
                             track: None,
@@ -1287,17 +1313,11 @@ impl HistoryStore {
         top_track_rows.truncate(5);
         let top_tracks = top_track_rows
             .into_iter()
-            .map(|row| HistoryTopTrack {
-                track: resolved_by_key.get(&row.track_key).cloned(),
-                track_key: row.track_key,
-                title: row.title,
-                artist: row.artist,
-                album: row.album,
-                plays: row.plays,
-                listened_seconds: row.listened_seconds,
-                last_played_at_ms: row.last_played_at_ms,
+            .map(|row| {
+                let track = resolved_by_key.get(&row.track_key).cloned();
+                artist_profiles.top_track(row, track)
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
 
         let discovery = report_discovery(
             &all_rows,
@@ -1541,6 +1561,14 @@ impl HistoryStore {
     }
 
     pub(crate) fn artist_insights(&self) -> Result<HashMap<String, ArtistHistoryInsight>, String> {
+        let mut profiles = ArtistProfiles::open()?;
+        self.artist_insights_with_profiles(&mut profiles)
+    }
+
+    fn artist_insights_with_profiles(
+        &self,
+        profiles: &mut ArtistProfiles,
+    ) -> Result<HashMap<String, ArtistHistoryInsight>, String> {
         let mut insights: HashMap<String, ArtistHistoryInsight> = HashMap::new();
         for source in self.available_sources() {
             let (metadata, connection) = match open_valid_history_source(&source) {
@@ -1552,82 +1580,47 @@ impl HistoryStore {
             if source != self.path && metadata.device_id == self.device_id {
                 continue;
             }
-            let mut statement = connection
-                .prepare(
-                    r#"
-                    SELECT TRIM(artist), COUNT(*), MAX(started_at_ms)
-                    FROM listening_sessions
-                    WHERE registered_play = 1
-                      AND NULLIF(TRIM(artist), '') IS NOT NULL
-                    GROUP BY TRIM(artist) COLLATE NOCASE
-                    "#,
-                )
-                .map_err(|error| format!("Could not prepare Aurora's artist history: {error}"))?;
-            let rows = statement
-                .query_map([], |row| {
+            let mut statement=connection.prepare("SELECT track_key,title,artist,album,directory,filename,COUNT(*),MAX(started_at_ms) FROM listening_sessions WHERE registered_play=1 GROUP BY track_key,title,artist,album,directory,filename").map_err(|e|e.to_string())?;
+            for value in statement
+                .query_map([], |r| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        ArtistHistoryInsight {
-                            plays: row.get(1)?,
-                            last_played_at_ms: row.get(2)?,
+                        HistoryRow {
+                            track_key: r.get(0)?,
+                            title: r.get(1)?,
+                            artist: r.get(2)?,
+                            album: r.get(3)?,
+                            directory: r.get(4)?,
+                            filename: r.get(5)?,
+                            ..Default::default()
                         },
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, Option<i64>>(7)?,
                     ))
                 })
-                .map_err(|error| format!("Could not read Aurora's artist history: {error}"))?;
-            for row in rows {
-                let (artist, candidate) = row.map_err(|error| {
-                    format!("Could not decode Aurora's artist history: {error}")
-                })?;
-                let combined = insights.entry(artist_identity(&artist)).or_default();
-                combined.plays = combined.plays.saturating_add(candidate.plays);
-                combined.last_played_at_ms =
-                    match (combined.last_played_at_ms, candidate.last_played_at_ms) {
-                        (Some(current), Some(next)) => Some(current.max(next)),
-                        (None, next) => next,
-                        (current, None) => current,
-                    };
+                .map_err(|e| e.to_string())?
+            {
+                let (mut row, plays, last) = value.map_err(|e| e.to_string())?;
+                profiles.project(&mut row)?;
+                let combined = insights.entry(row.artist_key()).or_default();
+                combined.plays = combined.plays.saturating_add(plays);
+                combined.last_played_at_ms = combined.last_played_at_ms.max(last);
             }
         }
         Ok(insights)
     }
 
-    /// Aggregate the same device sources as listening history, without a library-wide scan.
     pub(crate) fn artist_listening(&self, artist: &str) -> Result<ArtistListening, String> {
-        let artist = crate::artist_discovery::validate_artist(artist)?;
-        let membership = if let Ok(catalog) =
-            catalog::default_catalog_path().and_then(|path| catalog::open_catalog(&path))
-        {
-            let (id, _, ambiguous) = crate::artist_identity::resolve(&catalog, artist)?;
-            if ambiguous {
-                let key = crate::artist_identity::key_sql(&catalog, "t.album_artist_display");
-                let mut statement = catalog
-                    .prepare(&format!(
-                        "SELECT file_path,filename FROM tracks t WHERE {key}=?1"
-                    ))
-                    .map_err(|error| error.to_string())?;
-                let keys = statement
-                    .query_map([id], |row| {
-                        Ok(catalog::normalize_track_key(
-                            &row.get::<_, String>(0)?,
-                            &row.get::<_, String>(1)?,
-                        ))
-                    })
-                    .map_err(|error| error.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| error.to_string())?;
-                Some(serde_json::to_string(&keys).map_err(|error| error.to_string())?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        let artist_filter = if membership.is_some() {
-            "track_key IN (SELECT value FROM json_each(?1))"
-        } else {
-            "TRIM(artist) = TRIM(?1) COLLATE NOCASE"
-        };
-        let identity_filter = membership.as_deref().unwrap_or(artist);
+        let mut profiles = ArtistProfiles::open()?;
+        self.artist_listening_with_profiles(artist, &mut profiles)
+    }
+
+    fn artist_listening_with_profiles(
+        &self,
+        artist: &str,
+        profiles: &mut ArtistProfiles,
+    ) -> Result<ArtistListening, String> {
+        let reference = crate::artist_discovery::validate_artist(artist)?;
+        let requested = profiles.reference(reference)?.key();
         let mut result = ArtistListening::default();
         let mut tracks: HashMap<String, ArtistListeningTrack> = HashMap::new();
         let now = state_sync::now_ms();
@@ -1641,32 +1634,40 @@ impl HistoryStore {
             if source != self.path && metadata.device_id == self.device_id {
                 continue;
             }
-            let mut statement = connection.prepare(
-                &format!("SELECT track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch'), COUNT(*), SUM(listened_seconds) FROM listening_sessions WHERE registered_play = 1 AND {artist_filter} AND started_at_ms >= CAST(strftime('%s', ?2 / 1000, 'unixepoch', 'start of month', '-11 months') AS INTEGER) * 1000 AND started_at_ms <= ?2 GROUP BY track_key, title, album, strftime('%Y-%m', started_at_ms / 1000, 'unixepoch')")
-            ).map_err(|e| e.to_string())?;
-            let rows = statement
-                .query_map(params![identity_filter, now], |row| {
+            let mut statement=connection.prepare("SELECT track_key,title,artist,album,directory,filename,strftime('%Y-%m',started_at_ms/1000,'unixepoch'),COUNT(*),SUM(listened_seconds) FROM listening_sessions WHERE registered_play=1 AND started_at_ms>=CAST(strftime('%s',?1/1000,'unixepoch','start of month','-11 months') AS INTEGER)*1000 AND started_at_ms<=?1 GROUP BY track_key,title,artist,album,directory,filename,strftime('%Y-%m',started_at_ms/1000,'unixepoch')").map_err(|e|e.to_string())?;
+            for value in statement
+                .query_map([now], |r| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, f64>(5)?,
+                        HistoryRow {
+                            track_key: r.get(0)?,
+                            title: r.get(1)?,
+                            artist: r.get(2)?,
+                            album: r.get(3)?,
+                            directory: r.get(4)?,
+                            filename: r.get(5)?,
+                            ..Default::default()
+                        },
+                        r.get::<_, String>(6)?,
+                        r.get::<_, i64>(7)?,
+                        r.get::<_, f64>(8)?,
                     ))
                 })
-                .map_err(|e| e.to_string())?;
-            for row in rows {
-                let (key, title, album, month, plays, seconds) = row.map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+            {
+                let (mut row, month, plays, seconds) = value.map_err(|e| e.to_string())?;
+                profiles.project(&mut row)?;
+                if row.artist_key() != requested {
+                    continue;
+                }
                 result.plays += plays;
                 result.listened_seconds += seconds;
                 *result.months.entry(month).or_default() += plays;
                 tracks
-                    .entry(key.clone())
+                    .entry(row.track_key.clone())
                     .or_insert(ArtistListeningTrack {
-                        track_key: key,
-                        title,
-                        album,
+                        track_key: row.track_key,
+                        title: row.title,
+                        album: row.album,
                         plays: 0,
                     })
                     .plays += plays;
@@ -2108,12 +2109,8 @@ fn report_summary(rows: &[&HistoryRow], timezone_offset_minutes: i32) -> History
         if row.registered_play {
             summary.plays = summary.plays.saturating_add(1);
             tracks.insert(row.track_key.to_owned());
-            artists.insert(row.artist.trim().to_lowercase());
-            albums.insert(format!(
-                "{}\0{}",
-                row.artist.trim().to_lowercase(),
-                row.album.trim().to_lowercase()
-            ));
+            artists.insert(row.artist_key());
+            albums.insert(row.album_key());
             *days
                 .entry(report_local_day_start(
                     row.started_at_ms,
@@ -2225,6 +2222,7 @@ fn report_genres(
     (tagged_plays, genres)
 }
 
+#[cfg(test)]
 fn report_track_artist<'a>(row: &'a HistoryRow, track: Option<&'a TrackSummary>) -> &'a str {
     track
         .and_then(|track| track.display_artist.as_deref())
@@ -2267,8 +2265,8 @@ fn report_discovery(
     let mut first_albums: HashMap<String, i64> = HashMap::new();
     let mut first_tracks: HashMap<String, i64> = HashMap::new();
     for row in all_rows.iter().filter(|row| row.registered_play) {
-        let artist = row.artist.trim().to_lowercase();
-        let album = format!("{}\0{}", artist, row.album.trim().to_lowercase());
+        let artist = row.artist_key();
+        let album = row.album_key();
         first_artists
             .entry(artist)
             .and_modify(|first| *first = (*first).min(row.started_at_ms))
@@ -2284,17 +2282,11 @@ fn report_discovery(
     }
     let current_artists = current_plays
         .iter()
-        .map(|row| row.artist.trim().to_lowercase())
+        .map(|row| row.artist_key())
         .collect::<HashSet<_>>();
     let current_albums = current_plays
         .iter()
-        .map(|row| {
-            format!(
-                "{}\0{}",
-                row.artist.trim().to_lowercase(),
-                row.album.trim().to_lowercase()
-            )
-        })
+        .map(|row| row.album_key())
         .collect::<HashSet<_>>();
     let current_tracks = current_plays
         .iter()
@@ -2340,6 +2332,9 @@ fn query_report_rows(
     statement
         .query_map([], |row| {
             Ok(HistoryRow {
+                artist_profile: None,
+                album_profile: None,
+                album_identity: None,
                 session_id: row.get(0)?,
                 track_key: row.get(1)?,
                 title: row.get(2)?,
@@ -2434,6 +2429,9 @@ fn query_rows(
             ],
             |row| {
                 Ok(HistoryRow {
+                    artist_profile: None,
+                    album_profile: None,
+                    album_identity: None,
                     session_id: row.get(0)?,
                     track_key: row.get(1)?,
                     title: row.get(2)?,
@@ -2673,6 +2671,9 @@ mod tests {
 
     fn report_row(index: i64, genre: Option<&str>, started_at_ms: i64) -> HistoryRow {
         HistoryRow {
+            artist_profile: None,
+            album_profile: None,
+            album_identity: None,
             session_id: format!("report-session-{index}"),
             track_key: format!("report-track-{index}"),
             title: format!("Track {index}"),
@@ -3045,6 +3046,9 @@ mod tests {
     fn report_aggregation_is_not_limited_to_the_visible_history_page() {
         let rows = (0..150)
             .map(|index| HistoryRow {
+                artist_profile: None,
+                album_profile: None,
+                album_identity: None,
                 session_id: format!("session-{index}"),
                 track_key: format!("track-{}", index % 12),
                 title: format!("Track {}", index % 12),
@@ -3151,6 +3155,9 @@ mod tests {
     fn report_catalog_references_deduplicate_before_bounded_batches() {
         let rows = (0..371)
             .map(|index| HistoryRow {
+                artist_profile: None,
+                album_profile: None,
+                album_identity: None,
                 session_id: format!("session-{index}"),
                 track_key: format!("track-{}", index % 12),
                 title: "Track".to_owned(),

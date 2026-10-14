@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1] - 2026-10-14
+
+### Fixed
+- Display reviewed artist profile descriptions and open the correct same-name profile from history and listening reports. Separate Top artists, distinct artist/album totals, discovery, all-time artist counters and the artist page's twelve-month listening details by identity.
+- Recalculate saved per-device plays from current catalog assignments. Use exact paths or uniquely identifying album/title evidence for moved files; keep ambiguous records visible as **Unresolved artist** without guessing. Preserve raw history snapshots and compilation performing-artist credits.
+- Attach assigned artist IDs to tracks resolved from history and queue references so later navigation and playback retain the correct artist profile.
+
 ## [0.37.0] - 2026-10-13
 
 ### Added

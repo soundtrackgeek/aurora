@@ -6,16 +6,18 @@ import "./ArtistSmartLink.css";
 interface ArtistSmartLinkProps {
   artist: string;
   artistId?: string | null;
+  disambiguation?: string | null;
   albumId?: string | null;
   onOpen: (artist: string) => void;
   nested?: boolean;
   className?: string;
 }
 
-export function ArtistSmartLink({ artist, artistId, albumId, onOpen, nested = false, className }: ArtistSmartLinkProps) {
+export function ArtistSmartLink({ artist, artistId, disambiguation, albumId, onOpen, nested = false, className }: ArtistSmartLinkProps) {
   const trimmedArtist = artist.trim();
   const classes = ["artist-smart-link", className].filter(Boolean).join(" ");
   const reference = artistId ?? trimmedArtist;
+  const label = `Open artist page for ${trimmedArtist}${disambiguation ? ` (${disambiguation})` : ""}`;
   const menu = mediaMenuHandlers(useContext(MediaMenuContext), { artistName: reference, artistOnly: true, label: trimmedArtist });
 
   function activate(event: MouseEvent | KeyboardEvent) {
@@ -33,8 +35,8 @@ export function ArtistSmartLink({ artist, artistId, albumId, onOpen, nested = fa
         className={classes}
         role="link"
         tabIndex={0}
-        title={`Open artist page for ${trimmedArtist}`}
-        aria-label={`Open artist page for ${trimmedArtist}`}
+        title={label}
+        aria-label={label}
         onClick={activate}
         onDoubleClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
@@ -55,8 +57,8 @@ export function ArtistSmartLink({ artist, artistId, albumId, onOpen, nested = fa
       {...menu}
       type="button"
       className={classes}
-      title={`Open artist page for ${trimmedArtist}`}
-      aria-label={`Open artist page for ${trimmedArtist}`}
+      title={label}
+      aria-label={label}
       onClick={activate}
     >
       {artist}

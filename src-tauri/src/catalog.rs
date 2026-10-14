@@ -2248,6 +2248,7 @@ pub(crate) fn load_tracks_by_references(
         .map_err(|error| format!("Could not finish the consistent queue rebind: {error}"))?;
     if !tracks.is_empty() {
         apply_overlays(&mut tracks, Some(store))?;
+        crate::artist_identity::attach_tracks(&connection, &mut tracks)?;
     }
     Ok((tracks, missing, catalog_revision))
 }

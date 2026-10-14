@@ -115,4 +115,12 @@ describe("ListeningHistory", () => {
     fireEvent.click(artistLinks[artistLinks.length - 1]);
     expect(onOpenArtistAlbums).toHaveBeenCalledWith(track.artist);
   });
+
+  it("opens the resolved artist profile even when its original track is unavailable", () => {
+    const { onOpenArtistAlbums } = renderHistory([historyItem({ track: null, artist: "The Kids", artistId: "artist:third", artistDisambiguation: "Third group" })]);
+    const link = screen.getByRole("link", { name: "Open artist page for The Kids (Third group)" });
+    expect(link.closest("button")).toBeNull();
+    fireEvent.click(link);
+    expect(onOpenArtistAlbums).toHaveBeenCalledWith("artist:third");
+  });
 });
