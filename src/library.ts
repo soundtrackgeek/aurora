@@ -1,3 +1,4 @@
+import { randomSortRank } from "./randomSort";
 import { protocolUrl } from "./protocolUrl";
 import { invoke } from "@tauri-apps/api/core";
 import type { CatalogSync } from "./tags";
@@ -142,6 +143,7 @@ export interface ExplorerCursor {
 }
 
 export type TrackSort =
+  | "random"
   | "newest"
   | "oldest"
   | "titleAsc"
@@ -171,6 +173,7 @@ export interface TrackPageRequest {
   genre?: string;
   artist?: string;
   sort?: TrackSort;
+  randomSeed?: number;
 }
 
 export interface TrackPage {
@@ -290,6 +293,7 @@ export function applyAlbumTrackMetricsProjection(
 }
 
 export type AlbumSort =
+  | "random"
   | "newest"
   | "oldest"
   | "titleAsc"
@@ -316,6 +320,7 @@ export interface AlbumPageRequest {
   genre?: string;
   artist?: string;
   sort?: AlbumSort;
+  randomSeed?: number;
 }
 
 export interface AlbumPage {
@@ -557,6 +562,7 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
     .filter((track) => !request.artist || matchesArtistName(track.artist, request.artist))
     .sort((left, right) => {
       switch (request.sort) {
+        case "random": return randomSortRank(left.id, request.randomSeed) - randomSortRank(right.id, request.randomSeed) || compareText(left.id, right.id);
         case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);
         case "titleDesc": return compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
         case "artistAsc": return compareText(left.artist, right.artist) || compareText(left.title, right.title) || compareText(left.id, right.id);
@@ -599,6 +605,7 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
         .filter((track) => track.albumId === albumId)
         .reduce((newest, track) => compareText(newest, track.id) < 0 ? track.id : newest, "");
       switch (request.sort) {
+        case "random": return randomSortRank(left.id, request.randomSeed) - randomSortRank(right.id, request.randomSeed) || compareText(left.id, right.id);
         case "newest": return compareText(newestTrackId(left.id), newestTrackId(right.id), true) || compareText(left.id, right.id, true);
         case "oldest": return compareText(newestTrackId(left.id), newestTrackId(right.id)) || compareText(left.id, right.id);
         case "titleAsc": return compareText(left.title, right.title) || compareText(left.id, right.id);

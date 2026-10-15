@@ -61,6 +61,7 @@ pub(crate) enum TrackSort {
     ReleaseYearDesc,
     RatingAsc,
     RatingDesc,
+    Random,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
@@ -82,6 +83,7 @@ pub(crate) struct TrackPageRequest {
     pub(crate) genre: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) sort: Option<TrackSort>,
+    pub(crate) random_seed: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -108,6 +110,7 @@ pub(crate) enum AlbumSort {
     ReleaseYearDesc,
     RatingAsc,
     RatingDesc,
+    Random,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
@@ -128,6 +131,7 @@ pub(crate) struct AlbumPageRequest {
     pub(crate) genre: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) sort: Option<AlbumSort>,
+    pub(crate) random_seed: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -238,8 +242,8 @@ enum CursorKind {
 }
 
 #[derive(Clone, Copy)]
-struct SortDefinition {
-    cursor_tag: &'static str,
+struct SortDefinition<'a> {
+    cursor_tag: &'a str,
     expression: &'static str,
     descending: bool,
     cursor_kind: CursorKind,
@@ -377,7 +381,7 @@ fn push_keyset(
     sql: &mut String,
     params: &mut Vec<Value>,
     cursor: Option<&ExploreCursor>,
-    sort: SortDefinition,
+    sort: SortDefinition<'_>,
     id_expression: &str,
     numeric_id: bool,
 ) -> Result<(), String> {
@@ -452,7 +456,7 @@ fn push_keyset(
     Ok(())
 }
 
-fn push_order_by(sql: &mut String, sort: SortDefinition, id_expression: &str) {
+fn push_order_by(sql: &mut String, sort: SortDefinition<'_>, id_expression: &str) {
     let direction = if sort.descending { "DESC" } else { "ASC" };
     sql.push_str(" ORDER BY ");
     if matches!(sort.cursor_kind, CursorKind::NullableInteger) {
@@ -470,8 +474,14 @@ fn push_order_by(sql: &mut String, sort: SortDefinition, id_expression: &str) {
     sql.push_str(direction);
 }
 
-fn track_sort(sort: TrackSort) -> SortDefinition {
+fn track_sort(sort: TrackSort) -> SortDefinition<'static> {
     match sort {
+        TrackSort::Random => SortDefinition {
+            cursor_tag: "track-random",
+            expression: "aurora_random_order(CAST(t.id AS TEXT))",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
         TrackSort::Newest => SortDefinition {
             cursor_tag: "track-added-desc",
             expression: "t.id",
@@ -559,6 +569,35 @@ fn track_sort(sort: TrackSort) -> SortDefinition {
     }
 }
 
+// Use a seeded rank rather than SQLite random(): every keyset page must see the
+// same ordering. IDs break rank collisions; cursor tags reject a different seed.
+fn random_order_rank(id: &str, seed: u32) -> u32 {
+    let mut hash = 2_166_136_261_u32 ^ seed;
+    for byte in id.bytes() {
+        hash = (hash ^ u32::from(byte)).wrapping_mul(16_777_619);
+    }
+    hash = (hash ^ (hash >> 16)).wrapping_mul(0x85eb_ca6b);
+    hash = (hash ^ (hash >> 13)).wrapping_mul(0xc2b2_ae35);
+    hash ^ (hash >> 16)
+}
+
+fn register_random_order(connection: &Connection, seed: u32) -> Result<(), String> {
+    connection
+        .create_scalar_function(
+            "aurora_random_order",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |context| {
+                Ok(i64::from(random_order_rank(
+                    &context.get::<String>(0)?,
+                    seed,
+                )))
+            },
+        )
+        .map_err(|error| format!("Could not prepare random sorting: {error}"))
+}
+
 fn filtered_row_count(
     connection: &Connection,
     filtered_sql: &str,
@@ -597,7 +636,12 @@ fn track_page_from_connection(
             total_count: 0,
         });
     }
-    let sort = track_sort(request.sort.unwrap_or_default());
+    let mut sort = track_sort(request.sort.unwrap_or_default());
+    let random_tag = format!("track-random-{}", request.random_seed.unwrap_or(0));
+    if request.sort == Some(TrackSort::Random) {
+        register_random_order(connection, request.random_seed.unwrap_or(0))?;
+        sort.cursor_tag = &random_tag;
+    }
     let mut params = Vec::<Value>::new();
     let mut predicates = String::from(
         " WHERE t.id NOT IN (SELECT track_id FROM temp.aurora_verified_files WHERE missing=1)",
@@ -761,8 +805,14 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
     })
 }
 
-fn album_sort(sort: AlbumSort) -> SortDefinition {
+fn album_sort(sort: AlbumSort) -> SortDefinition<'static> {
     match sort {
+        AlbumSort::Random => SortDefinition {
+            cursor_tag: "album-random",
+            expression: "aurora_random_order(CAST(a.id AS TEXT))",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
         AlbumSort::Newest => SortDefinition {
             cursor_tag: "album-added-desc",
             expression: "COALESCE((SELECT addition.added_at_ms FROM aurora_state.album_additions AS addition WHERE addition.album_id = a.id), (SELECT MAX(album_track.id) FROM tracks AS album_track WHERE album_track.album_id = a.id))",
@@ -862,7 +912,12 @@ fn album_page_from_connection(
     let plain_match_query = parsed_search
         .as_ref()
         .and_then(|search| search.plain_fts_query().map(str::to_owned));
-    let sort = album_sort(request.sort.unwrap_or_default());
+    let mut sort = album_sort(request.sort.unwrap_or_default());
+    let random_tag = format!("album-random-{}", request.random_seed.unwrap_or(0));
+    if request.sort == Some(AlbumSort::Random) {
+        register_random_order(connection, request.random_seed.unwrap_or(0))?;
+        sort.cursor_tag = &random_tag;
+    }
     let mut params = Vec::<Value>::new();
     let origin_key = crate::artist_identity::key_sql(connection, "a.album_artist_display");
     let artist_reference =
@@ -2076,6 +2131,193 @@ mod tests {
                 id: "1 OR 1=1".to_owned(),
             })
             .is_err()
+        );
+    }
+
+    #[test]
+    fn random_tracks_page_the_complete_filtered_set_and_reject_another_shuffle() {
+        let connection = fixture();
+        let request = TrackPageRequest {
+            sort: Some(TrackSort::Random),
+            random_seed: Some(42),
+            page_size: Some(100),
+            ..Default::default()
+        };
+        let ids = |page: TrackPage| {
+            page.items
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>()
+        };
+        let complete = ids(track_page_from_connection(&connection, request.clone(), None).unwrap());
+        assert_eq!(complete.len(), 4);
+        assert_eq!(
+            complete,
+            ids(track_page_from_connection(&connection, request.clone(), None).unwrap())
+        );
+        let mut paged = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    page_size: Some(1),
+                    cursor,
+                    ..request.clone()
+                },
+                None,
+            )
+            .unwrap();
+            assert_eq!(page.total_count, 4);
+            cursor = page.next_cursor.clone();
+            paged.extend(ids(page));
+            if cursor.is_none() {
+                break;
+            }
+            assert!(paged.len() < 4);
+        }
+        assert_eq!(paged, complete);
+        let first = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                page_size: Some(1),
+                ..request.clone()
+            },
+            None,
+        )
+        .unwrap();
+        assert!(
+            track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    cursor: first.next_cursor,
+                    random_seed: Some(43),
+                    ..request.clone()
+                },
+                None
+            )
+            .unwrap_err()
+            .contains("current sort")
+        );
+        assert_ne!(
+            complete,
+            ids(track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    random_seed: Some(43),
+                    ..request.clone()
+                },
+                None
+            )
+            .unwrap())
+        );
+        let filtered = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                genre: Some("Post-rock".into()),
+                ..request
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(filtered.total_count, 3);
+        assert_eq!(
+            ids(filtered),
+            complete
+                .into_iter()
+                .filter(|id| id != "10")
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn random_albums_page_the_complete_filtered_set_and_reject_another_shuffle() {
+        let connection = fixture();
+        let request = AlbumPageRequest {
+            sort: Some(AlbumSort::Random),
+            random_seed: Some(42),
+            page_size: Some(100),
+            ..Default::default()
+        };
+        let ids = |page: AlbumPage| {
+            page.items
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>()
+        };
+        let complete = ids(album_page_from_connection(&connection, request.clone()).unwrap());
+        assert_eq!(complete.len(), 3);
+        assert_eq!(
+            complete,
+            ids(album_page_from_connection(&connection, request.clone()).unwrap())
+        );
+        let mut paged = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    page_size: Some(1),
+                    cursor,
+                    ..request.clone()
+                },
+            )
+            .unwrap();
+            assert_eq!(page.total_count, 3);
+            cursor = page.next_cursor.clone();
+            paged.extend(ids(page));
+            if cursor.is_none() {
+                break;
+            }
+            assert!(paged.len() < 3);
+        }
+        assert_eq!(paged, complete);
+        let first = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                page_size: Some(1),
+                ..request.clone()
+            },
+        )
+        .unwrap();
+        assert!(
+            album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    cursor: first.next_cursor,
+                    random_seed: Some(43),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("current sort")
+        );
+        assert_ne!(
+            complete,
+            ids(album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    random_seed: Some(43),
+                    ..request.clone()
+                }
+            )
+            .unwrap())
+        );
+        let filtered = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("Sigur".into()),
+                ..request
+            },
+        )
+        .unwrap();
+        assert_eq!(filtered.total_count, 2);
+        assert_eq!(
+            ids(filtered),
+            complete
+                .into_iter()
+                .filter(|id| id != "a3")
+                .collect::<Vec<_>>()
         );
     }
 

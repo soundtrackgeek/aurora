@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.37.2] - 2026-10-15
+
+### Added
+- **Random** sort in Tracks and Albums, covering the complete matching catalog with existing search and filters. Select Random again to reshuffle; scrolling, catalog refreshes, saved views and workspace restoration retain the chosen order. Seeded native keyset pagination prevents duplicate or skipped results and rejects cursors from another shuffle. Browser preview uses the same seeded ranking.
+
 ## [0.37.1] - 2026-10-14
 
 ### Fixed

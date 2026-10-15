@@ -44,11 +44,13 @@ import { ContentTransition } from "../ContentTransition";
 import "./DeepExplorer.css";
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { PlaylistAuthoringContext } from "../playlists/playlistAuthoringContext";
+import { nextRandomSortSeed } from "../../randomSort";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
 export type ExplorerRatingFilter = "all" | "unrated" | 0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 3.5 | 4 | 4.5 | 5;
 export type ExplorerLoveFilter = "all" | Track["loveState"];
 export type ExplorerSort =
+  | "random"
   | "newest"
   | "oldest"
   | "titleAsc"
@@ -78,6 +80,7 @@ export interface ExplorerFilters {
   genre: string | null;
   artist: string | null;
   sort: ExplorerSort;
+  randomSeed?: number;
 }
 
 export interface ExplorerAlbum {
@@ -157,7 +160,7 @@ const viewTabs: ReadonlyArray<{ id: ExplorerView; label: string; icon: typeof Mu
   { id: "artists", label: "Artists", icon: UsersRound },
 ];
 
-type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "releaseYear" | "rating" | "trackCount";
+type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "releaseYear" | "rating" | "trackCount" | "random";
 
 interface ExplorerSortOption {
   value: ExplorerSortCriterion;
@@ -176,6 +179,7 @@ const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
     { value: "year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
     { value: "releaseYear", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
     { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
+    { value: "random", primary: "random", primaryLabel: "Random", reverse: "random", reverseLabel: "Random" },
   ],
   albums: [
     { value: "added", primary: "newest", primaryLabel: "Added · newest", reverse: "oldest", reverseLabel: "Added · oldest" },
@@ -184,6 +188,7 @@ const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
     { value: "title", primary: "titleAsc", primaryLabel: "Album · A–Z", reverse: "titleDesc", reverseLabel: "Album · Z–A" },
     { value: "artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
     { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
+    { value: "random", primary: "random", primaryLabel: "Random", reverse: "random", reverseLabel: "Random" },
   ],
   artists: [
     { value: "artist", primary: "artistAsc", primaryLabel: "Artist · A–Z", reverse: "artistDesc", reverseLabel: "Artist · Z–A" },
@@ -1191,7 +1196,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
         <SortControl
           view={view}
           current={filters.sort}
-          onChange={(sort) => updateFilters({ sort })}
+          onChange={(sort) => updateFilters({ sort, ...(sort === "random" ? { randomSeed: nextRandomSortSeed(filters.randomSeed) } : {}) })}
         />
         {onClearFilters ? (
           <button type="button" className="deep-explorer-clear" onClick={onClearFilters}>

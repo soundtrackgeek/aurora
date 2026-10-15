@@ -63,8 +63,8 @@ export const defaultExplorerFilters: ExplorerFilters = {
 };
 
 export const explorerSorts: Record<ExplorerView, readonly ExplorerSort[]> = {
-  tracks: ["newest", "oldest", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "albumAsc", "albumDesc", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "ratingAsc", "ratingDesc"],
-  albums: ["newest", "oldest", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
+  tracks: ["random", "newest", "oldest", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "albumAsc", "albumDesc", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "ratingAsc", "ratingDesc"],
+  albums: ["random", "newest", "oldest", "yearAsc", "yearDesc", "releaseYearAsc", "releaseYearDesc", "titleAsc", "titleDesc", "artistAsc", "artistDesc", "ratingAsc", "ratingDesc"],
   artists: ["artistAsc", "artistDesc", "trackCountAsc", "trackCountDesc"],
 };
 
@@ -141,7 +141,8 @@ function validFilters(value: unknown, view: ExplorerView): value is ExplorerFilt
     && typeof filters.yearMissing === "boolean"
     && isNullableString(filters.genre)
     && isNullableString(filters.artist)
-    && explorerSorts[view].includes(filters.sort as ExplorerSort);
+    && explorerSorts[view].includes(filters.sort as ExplorerSort)
+    && (filters.randomSeed === undefined || (Number.isInteger(filters.randomSeed) && filters.randomSeed >= 0 && filters.randomSeed <= 0xffff_ffff));
 }
 
 export function loadViewPreferences(storage: ViewStorage | null = browserStorage()): ViewPreferences {

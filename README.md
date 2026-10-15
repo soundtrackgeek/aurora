@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora **0.37.2** adds **Sort → Random** to Tracks and Albums. It shuffles all
+matching results while keeping your search and filters. The order stays stable
+while scrolling, refreshing the catalog, and restoring your workspace or a saved
+view. Select **Random** again for a fresh shuffle.
+
 Aurora **0.37.1** separates same-name artists in **Listening History**, reports,
 discovery totals and artist play counts using Music Library's reviewed album
 assignments. Update Music Library to **0.190.1** for matching history behavior

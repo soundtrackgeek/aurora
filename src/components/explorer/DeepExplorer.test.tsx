@@ -114,6 +114,22 @@ function explorerProps(overrides: Partial<DeepExplorerProps> = {}): DeepExplorer
 }
 
 describe("DeepExplorer", () => {
+  it.each(["tracks", "albums"] as const)("offers Random and reshuffles the %s view on reselection", (view) => {
+    const onFiltersChange = vi.fn();
+    const props = explorerProps({ view, onFiltersChange });
+    const { rerender } = render(<DeepExplorer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Sort:/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Random" }));
+    const shuffled = onFiltersChange.mock.lastCall![0] as ExplorerFilters;
+    expect(shuffled).toEqual({ ...filters, sort: "random", randomSeed: expect.any(Number) });
+    rerender(<DeepExplorer {...props} filters={shuffled} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Random" }));
+    expect(screen.getByRole("menuitemradio", { name: "Random" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Random" }));
+    expect(onFiltersChange.mock.lastCall![0].sort).toBe("random");
+    expect(onFiltersChange.mock.lastCall![0].randomSeed).not.toBe(shuffled.randomSeed);
+  });
+
   it("retains multi-selection when a remembered page resumes its effects", () => {
     const props = explorerProps();
     const { rerender } = render(<RememberedPage active><DeepExplorer {...props} /></RememberedPage>);
