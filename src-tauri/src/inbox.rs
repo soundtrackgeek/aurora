@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -2234,9 +2234,13 @@ fn scan_album_cached(
         if tracks.iter().any(|track| track.title.is_none()) {
             issues.push("One or more track titles are missing".to_owned());
         }
-        if tracks.iter().any(|track| track.track_number.is_none()) {
+        if tracks
+            .iter()
+            .any(|track| track.track_number.is_none_or(|number| number == 0))
+        {
             issues.push("Track numbers are incomplete".to_owned());
         }
+        issues.extend(track_sequence_issues(&tracks));
         if tracks.len() > 1 && tracks.iter().any(|track| track.track_total.is_none()) {
             issues.push("Track totals are incomplete".to_owned());
         }
@@ -2323,6 +2327,90 @@ fn scan_album_cached(
         },
         tracks,
     })
+}
+
+fn track_sequence_issues(tracks: &[InboxTrack]) -> Vec<String> {
+    // A track without a disc assignment could belong to any numbered disc.
+    // The existing incomplete-disc warning covers that ambiguous grouping.
+    if tracks.iter().any(|track| track.disc_number.is_some())
+        && tracks.iter().any(|track| track.disc_number.is_none())
+    {
+        return Vec::new();
+    }
+    let mut discs = BTreeMap::<_, Vec<_>>::new();
+    for track in tracks {
+        discs.entry(track.disc_number).or_default().push(track);
+    }
+    let mut issues = Vec::new();
+    for (disc, tracks) in discs {
+        // An unnumbered file may fill a perceived gap; ask for tags first.
+        if tracks
+            .iter()
+            .any(|track| track.track_number.is_none_or(|number| number == 0))
+        {
+            continue;
+        }
+        let suffix = disc.map_or_else(String::new, |number| format!(" on disc {number}"));
+        let mut numbers = tracks
+            .iter()
+            .filter_map(|track| track.track_number)
+            .collect::<Vec<_>>();
+        numbers.sort_unstable();
+        let mut duplicates = numbers
+            .windows(2)
+            .filter_map(|pair| (pair[0] == pair[1]).then_some(pair[0]))
+            .collect::<Vec<_>>();
+        duplicates.dedup();
+        if !duplicates.is_empty() {
+            issues.push(format!(
+                "Duplicate track numbers{suffix}: {}",
+                duplicates
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        numbers.dedup();
+        let last = numbers
+            .iter()
+            .copied()
+            .chain(tracks.iter().filter_map(|track| track.track_total))
+            .max()
+            .unwrap_or(0);
+        let mut next = 1u64;
+        let mut missing_count = 0u64;
+        let mut missing = Vec::new();
+        // Walk existing numbers, not every possible tag value. Even a corrupt
+        // u32::MAX total produces one bounded range instead of billions of rows.
+        for number in numbers
+            .into_iter()
+            .map(u64::from)
+            .chain([u64::from(last) + 1])
+        {
+            if number > next {
+                missing_count += number - next;
+                missing.push(if number == next + 1 {
+                    next.to_string()
+                } else {
+                    format!("{next}-{}", number - 1)
+                });
+            }
+            next = number + 1;
+        }
+        if missing_count > 0 {
+            issues.push(format!(
+                "Missing {} {}{suffix}",
+                if missing_count == 1 {
+                    "track"
+                } else {
+                    "tracks"
+                },
+                missing.join(", ")
+            ));
+        }
+    }
+    issues
 }
 
 fn organization_issues(
@@ -3795,6 +3883,188 @@ mod tests {
             .write_to(&mut bytes, image::ImageFormat::Png)
             .expect("encode cover");
         bytes.into_inner()
+    }
+
+    fn scan_numbered_fixture(positions: &[(Option<u32>, Option<u32>, Option<u32>)]) -> InboxAlbum {
+        let root = tempfile::tempdir().unwrap();
+        let album = root.path().join("Test Artist - Test Album (1990)");
+        fs::create_dir(&album).unwrap();
+        for (index, &(disc, number, total)) in positions.iter().enumerate() {
+            let number_for_name = number.unwrap_or(index as u32 + 1);
+            let position = disc.map_or_else(
+                || format!("{number_for_name:02}"),
+                |disc| format!("{disc}-{number_for_name:02}"),
+            );
+            let path = album.join(format!("{position} - Test Artist - Track {index}.mp3"));
+            // A short MPEG stream keeps the readiness check independent of FFmpeg.
+            let mut frame = vec![0; 417];
+            frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            fs::write(&path, frame.repeat(64)).unwrap();
+            let mut tag = Tag::new();
+            tag.set_album_artist("Test Artist");
+            tag.set_artist("Test Artist");
+            tag.set_album("Test Album");
+            tag.set_title(format!("Track {index}"));
+            tag.set_year(1990);
+            tag.set_genre("Rock");
+            tag.set_text("TPUB", "Test Label");
+            if let Some(number) = number {
+                tag.set_track(number);
+            }
+            if let Some(total) = total {
+                // The convenience setter supplies track 1 when it is absent.
+                // Write the raw frame to retain deliberately incomplete tags.
+                tag.set_text(
+                    "TRCK",
+                    format!(
+                        "{}/{total}",
+                        number.map_or_else(String::new, |n| n.to_string())
+                    ),
+                );
+            }
+            if let Some(disc) = disc {
+                tag.set_disc(disc);
+            }
+            tag.add_frame(Picture {
+                mime_type: "image/png".to_owned(),
+                picture_type: PictureType::CoverFront,
+                description: String::new(),
+                data: cover_fixture_bytes(7),
+            });
+            tag.write_to_path(&path, Version::Id3v24).unwrap();
+        }
+        scan_album(&album).unwrap()
+    }
+
+    #[test]
+    fn track_sequence_missing_first_track_blocks_an_otherwise_ready_album() {
+        let complete = (1..=12)
+            .map(|n| (Some(1), Some(n), Some(12)))
+            .collect::<Vec<_>>();
+        let ready = scan_numbered_fixture(&complete);
+        assert!(ready.readiness.ready, "{:?}", ready.readiness.issues);
+        let missing = scan_numbered_fixture(&complete[1..]);
+        assert!(!missing.readiness.ready);
+        assert_eq!(missing.readiness.issues, vec!["Missing track 1 on disc 1"]);
+    }
+
+    #[test]
+    fn track_sequence_detects_middle_and_trailing_gaps_without_inventing_a_total() {
+        for (numbers, total, expected) in [
+            (vec![1, 2, 3, 4, 6], Some(6), "Missing track 5"),
+            (vec![1, 2, 3, 4], Some(5), "Missing track 5"),
+            (vec![2, 3, 5], None, "Missing tracks 1, 4"),
+            (vec![1, 3, 7], Some(10), "Missing tracks 2, 4-6, 8-10"),
+            (vec![2, 3], Some(2), "Missing track 1"),
+        ] {
+            let positions = numbers
+                .iter()
+                .map(|&n| (None, Some(n), total))
+                .collect::<Vec<_>>();
+            let album = scan_numbered_fixture(&positions);
+            assert!(!album.readiness.ready);
+            assert!(
+                album.readiness.issues.contains(&expected.to_owned()),
+                "{:?}",
+                album.readiness.issues
+            );
+        }
+    }
+
+    #[test]
+    fn track_sequence_checks_each_disc_independently() {
+        let album = scan_numbered_fixture(&[
+            (Some(1), Some(1), Some(2)),
+            (Some(1), Some(2), Some(2)),
+            (Some(2), Some(2), Some(3)),
+            (Some(2), Some(3), Some(3)),
+        ]);
+        assert_eq!(album.readiness.issues, vec!["Missing track 1 on disc 2"]);
+        let complete = scan_numbered_fixture(&[
+            (Some(1), Some(1), Some(2)),
+            (Some(1), Some(2), Some(2)),
+            (Some(2), Some(1), Some(1)),
+        ]);
+        assert!(complete.readiness.ready, "{:?}", complete.readiness.issues);
+    }
+
+    #[test]
+    fn track_sequence_duplicate_numbers_cannot_hide_a_missing_track() {
+        let album = scan_numbered_fixture(&[
+            (None, Some(1), Some(3)),
+            (None, Some(1), Some(3)),
+            (None, Some(3), Some(3)),
+        ]);
+        assert_eq!(
+            album.readiness.issues,
+            vec!["Duplicate track numbers: 1", "Missing track 2"]
+        );
+    }
+
+    #[test]
+    fn track_sequence_requests_missing_tags_before_guessing_gaps() {
+        for positions in [
+            vec![(None, None, Some(2)), (None, Some(2), Some(2))],
+            vec![(None, Some(0), Some(2)), (None, Some(2), Some(2))],
+            vec![(Some(1), Some(2), Some(2)), (None, Some(1), Some(2))],
+        ] {
+            let album = scan_numbered_fixture(&positions);
+            assert!(!album.readiness.ready);
+            assert!(track_sequence_issues(&album.tracks).is_empty());
+            assert!(
+                album
+                    .readiness
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "Track numbers are incomplete"
+                        || issue == "Disc numbers are incomplete")
+            );
+        }
+    }
+
+    #[test]
+    fn track_sequence_bounds_extreme_tag_values_and_accepts_a_single_complete_track() {
+        let album = scan_numbered_fixture(&[(None, Some(1), Some(u32::MAX))]);
+        assert!(
+            album
+                .readiness
+                .issues
+                .contains(&"Missing tracks 2-4294967295".to_owned())
+        );
+        let single = scan_numbered_fixture(&[(None, Some(1), None)]);
+        assert!(single.readiness.ready, "{:?}", single.readiness.issues);
+    }
+
+    #[test]
+    #[ignore = "read-only verification of an explicitly supplied local Inbox album"]
+    fn track_sequence_live_circles_read_only() {
+        let path =
+            std::env::var_os("AURORA_TEST_INBOX_ALBUM").expect("set AURORA_TEST_INBOX_ALBUM");
+        let originals = fs::read_dir(&path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .map(|path| {
+                let hash = file_sha256(&path).unwrap();
+                (path, hash)
+            })
+            .collect::<Vec<_>>();
+        let album = scan_album(Path::new(&path)).unwrap();
+        println!("{}", serde_json::to_string_pretty(&album).unwrap());
+        if let Some(output) = std::env::var_os("AURORA_TEST_INBOX_SNAPSHOT") {
+            assert!(!Path::new(&output).starts_with(Path::new(&path)));
+            fs::write(output, serde_json::to_vec_pretty(&album).unwrap()).unwrap();
+        }
+        assert!(!album.readiness.ready);
+        assert!(
+            album
+                .readiness
+                .issues
+                .contains(&"Missing track 1 on disc 1".to_owned())
+        );
+        for (path, hash) in originals {
+            assert_eq!(file_sha256(&path).unwrap(), hash);
+        }
     }
 
     #[test]

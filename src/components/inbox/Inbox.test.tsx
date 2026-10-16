@@ -11,6 +11,28 @@ afterEach(() => {
 });
 
 describe("Inbox", () => {
+  it("shows the missing first track and blocks intake until a rescan confirms it is present", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const first = snapshot.albums[0];
+    const tracks = first.tracks.map((track, index) => ({ ...track, discNumber: 1, trackNumber: index + 2, trackTotal: first.tracks.length + 1 }));
+    const album = { ...first, artist: "Thorn.Eleven", album: "Circles", tracks, readiness: { ready: false, issues: ["Missing track 1 on disc 1"] } };
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [album] });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    const row = await screen.findByRole("row", { name: "Circles by Thorn.Eleven" });
+    expect(row).toHaveTextContent("1 issue");
+    expect(screen.getByText("Missing track 1 on disc 1")).toBeInTheDocument();
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Library destination" }), { target: { value: "general" } });
+    expect(screen.getByRole("button", { name: "Preview move" })).toBeDisabled();
+
+    load.mockResolvedValue({ ...snapshot, albums: [{ ...album, trackCount: tracks.length + 1, tracks: [{ ...tracks[0], path: `${album.path}\\01.mp3`, trackNumber: 1 }, ...tracks], readiness: { ready: true, issues: [] } }] });
+    fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+    await waitFor(() => expect(row).toHaveTextContent("Ready"));
+    expect(screen.queryByText("Missing track 1 on disc 1")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview move" })).toBeEnabled();
+  });
+
   it("fills totals for 51 selected albums, rescans readiness, and keeps the latest selection", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     const first = snapshot.albums[0];

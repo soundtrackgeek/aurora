@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.37.3** checks Inbox track sequences before marking an album Ready.
+Missing first or middle tracks are listed in Readiness, with a separate sequence
+for each numbered disc. Track-total tags also reveal missing end tracks; without
+a declared total, Aurora checks through the highest available track number.
+Duplicate numbers are flagged too. Rescan Inbox to refresh existing albums.
+
 Aurora **0.37.2** adds **Sort → Random** to Tracks and Albums. It shuffles all
 matching results while keeping your search and filters. The order stays stable
 while scrolling, refreshing the catalog, and restoring your workspace or a saved

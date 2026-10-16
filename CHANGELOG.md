@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.37.3] - 2026-10-16
+
+### Fixed
+- Inbox no longer marks an album Ready when its numbered tracks have gaps, including a missing first track. Readiness lists missing numbers and ranges separately for each disc, checks declared track totals for missing end tracks, and flags duplicate numbers. Missing or zero track numbers and partial disc assignments require tag repair before sequence gaps are inferred. Scanning remains read-only and existing readiness requirements still apply.
+
 ## [0.37.2] - 2026-10-15
 
 ### Added
