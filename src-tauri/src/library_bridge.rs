@@ -30,6 +30,7 @@ const PREVIEW_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const STALLED_PROGRESS_NOTICE_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SYNC_FOLDERS: usize = 32;
 const ABANDONED_INBOX_TEMP_AGE_MS: u64 = 5 * 60 * 1_000;
 const MAX_INTAKE_CLEANUP_ENTRIES: usize = 100_000;
@@ -1301,6 +1302,8 @@ fn wait_for_child(
     let started = Instant::now();
     let mut last_progress = Vec::new();
     let mut last_progress_stage = String::new();
+    let mut last_progress_value: Option<LibraryIntakeProgress> = None;
+    let mut last_activity = Instant::now();
     let mut timing = crate::timing::Span::new(
         "bridge.process",
         &format!("{operation} {}", plan_id.unwrap_or_default()),
@@ -1332,9 +1335,24 @@ fn wait_for_child(
                     });
                     last_progress_stage.clone_from(&progress.stage);
                 }
+                last_progress_value = Some(progress.clone());
                 let _ = app.emit("library-intake-progress", progress);
             }
             last_progress = bytes;
+            last_activity = Instant::now();
+        } else if let (Some(app), Some(base)) = (app, last_progress_value.as_ref())
+            && operation == "applyBatch"
+            && !matches!(
+                base.stage.as_str(),
+                "validating" | "transferring" | "verifying"
+            )
+            && last_activity.elapsed() >= STALLED_PROGRESS_NOTICE_INTERVAL
+        {
+            let _ = app.emit(
+                "library-intake-progress",
+                still_finishing_progress(base, plan_id, started.elapsed()),
+            );
+            last_activity = Instant::now();
         }
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -1358,6 +1376,56 @@ fn wait_for_child(
             }
         }
     }
+}
+
+/// Music Library publishes the catalog commit and then keeps working (search
+/// index, statistics) without reporting new stages. Say so, with elapsed time,
+/// rather than leaving the last stage message on screen indefinitely.
+fn still_finishing_progress(
+    base: &LibraryIntakeProgress,
+    plan_id: Option<&str>,
+    elapsed: Duration,
+) -> LibraryIntakeProgress {
+    let minutes = elapsed.as_secs() / 60;
+    let seconds = elapsed.as_secs() % 60;
+    let published = plan_id.is_some_and(apply_journal_published);
+    let message = if published {
+        format!(
+            "Music was added and the catalog change is published. Music Library is still finishing post-commit work ({minutes}m {seconds:02}s elapsed)."
+        )
+    } else {
+        format!(
+            "Music Library is still working on the catalog update ({minutes}m {seconds:02}s elapsed). Large catalogs can take several minutes."
+        )
+    };
+    LibraryIntakeProgress {
+        message,
+        ..base.clone()
+    }
+}
+
+fn apply_journal_published(plan_id: &str) -> bool {
+    let Ok(catalog) = crate::connections::native_catalog_path() else {
+        return false;
+    };
+    let Some(directory) = catalog.parent() else {
+        return false;
+    };
+    let journal = directory
+        .join("aurora-bridge")
+        .join("plans")
+        .join(plan_id)
+        .join("apply-journal.json");
+    fs::read(journal)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| {
+            value
+                .get("phase")
+                .and_then(|phase| phase.as_str())
+                .map(|phase| phase == "published")
+        })
+        .unwrap_or(false)
 }
 
 fn read_protocol_response<T: DeserializeOwned>(

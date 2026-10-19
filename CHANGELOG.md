@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.37.4] - 2026-10-19
+
+### Fixed
+- The add-to-library dialog no longer sits on an unchanged Catalog message when Music Library takes a long time to finish a large catalog. After 15 seconds without a new stage, Aurora shows elapsed time, and states that the change is published and Music Library is finishing post-commit work once its apply journal reports `published`. Transfers and verification are unaffected.
+
 ## [0.37.3] - 2026-10-16
 
 ### Fixed

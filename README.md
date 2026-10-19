@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.37.3** checks Inbox track sequences before marking an album Ready.
+Aurora **0.37.4** keeps the add-to-library dialog informative while Music Library finishes a slow catalog commit, and checks Inbox track sequences before marking an album Ready.
 Missing first or middle tracks are listed in Readiness, with a separate sequence
 for each numbered disc. Track-total tags also reveal missing end tracks; without
 a declared total, Aurora checks through the highest available track number.
