@@ -296,10 +296,11 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.37.5"
+version = "0.37.6"
 dependencies = [
  "cpal",
  "dotenvy",
+ "getrandom 0.4.3",
  "id3",
  "image",
  "keyring",

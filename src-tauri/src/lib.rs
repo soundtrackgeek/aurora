@@ -1873,12 +1873,31 @@ async fn tonehavn_status(app: AppHandle) -> Result<tonehavn::Status, String> {
 }
 
 #[tauri::command]
-async fn tonehavn_login(
+async fn tonehavn_request_email_login(
     app: AppHandle,
-    request: tonehavn::Login,
+    request: tonehavn::EmailLogin,
 ) -> Result<tonehavn::Status, String> {
     let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || tonehavn::login(&root, request))
+    tauri::async_runtime::spawn_blocking(move || tonehavn::request_email_login(&root, request))
+        .await
+        .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn tonehavn_complete_email_login(
+    app: AppHandle,
+    request: tonehavn::EmailComplete,
+) -> Result<tonehavn::Status, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tonehavn::complete_email_login(&root, request))
+        .await
+        .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn tonehavn_cancel_email_login(app: AppHandle) -> Result<tonehavn::Status, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tonehavn::cancel_email_login(&root))
         .await
         .map_err(|_| "Tonehavn authentication worker stopped.".to_owned())?
 }
@@ -2043,7 +2062,9 @@ pub fn run() {
             sonic_save_journey,
             sonic_analyze_seed,
             tonehavn_status,
-            tonehavn_login,
+            tonehavn_request_email_login,
+            tonehavn_complete_email_login,
+            tonehavn_cancel_email_login,
             tonehavn_logout,
             connection_settings,
             save_connection_settings,

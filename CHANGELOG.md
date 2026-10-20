@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.6] - 2026-10-20
+
+### Fixed
+- Replace Aurora’s username/password/authenticator form with Tonehavn 0.41.0’s email-link sign-in: request a link, then paste it into Aurora on the requesting computer to establish the trusted session used for ratings and Love.
+- Keep the cryptographically random request verifier in the native credential store across restarts, enforce the 15-minute lifetime and exact HTTPS server/path, and clear pasted links after each attempt. Preserve session verification, CSRF refresh and server-side sign-out.
+- Clear expired or revoked sessions encountered before rating edits and direct the user to email sign-in, replacing the obsolete authenticator-code message. Add native contract/link-validation and frontend sign-in recovery coverage.
+
 ## [0.37.5] - 2026-10-20
 
 ### Fixed

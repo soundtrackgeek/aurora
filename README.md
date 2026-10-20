@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.37.6** signs in to Tonehavn with an email link. In **Settings → Connections → Tonehavn account**, enter your server and email, select **Send sign-in link**, then copy the emailed link and paste it into Aurora to complete sign-in. Request the link on the same computer; it expires after 15 minutes and works once. Requires Tonehavn **0.41.0 or newer** with email delivery configured on the PC. Confirmed rating and Love saves use the resulting trusted session.
+
 Aurora **0.37.5** maintains the manual Mac catalog refresh helper in
 `scripts/catalog_sync.py`. With Aurora and Music Library closed, it checkpoints
 leftover SQLite WAL changes before checking the schema, preserving local
@@ -327,11 +329,13 @@ Conflicting edits are rejected. If no receipt arrives, the PC may have applied t
 
 Verified on macOS against Tonehavn 0.38.5: inline four-star and Love edits reached the PC MP3, the consistent PC Music Library snapshot, and the Mac catalog with matching album aggregates. At this library size, Tonehavn’s full serving-catalog refresh took about 16 minutes; another edit to the same file can be rejected until publication finishes.
 
-## Tonehavn authentication (0.25.3)
+## Tonehavn email-link authentication (0.37.6)
 
-Open **Settings → Connections → Tonehavn account** and enter the same HTTPS server address, username, password and six-digit authenticator code used by Tonehavn. Aurora requests its own trusted session, stores the session cookie and CSRF token in macOS Keychain (Windows Credential Manager on Windows), and never saves the password or authenticator code. Only the server address and a device ID are stored in local `tonehavn-auth.json`; nothing is synchronized through OneDrive. HTTPS certificates are verified and redirects are rejected.
+Open **Settings → Connections → Tonehavn account** and enter your HTTPS server address and the owner email configured in Tonehavn. Select **Send sign-in link**, copy the complete HTTPS link from the email, and paste it into **Sign-in link** in Aurora, then select **Complete sign-in**. Use a link requested in Aurora on this computer; links requested on your phone or another computer cannot complete this request. The email landing page currently opens the Tonehavn iPhone app, so copy the emailed link directly for Aurora. Links expire after 15 minutes and work once. **Start again** clears the pending local request so you can request a fresh link or change the address. Tonehavn **0.41.0 or newer** and configured SMTP delivery are required.
 
-Opening Connections verifies a saved session and refreshes its anti-forgery token. **Verify saved session** retries after connection failures. Expired or revoked sessions require a fresh sign-in. **Sign out of Tonehavn** revokes the session on the server before removing its local credential; if the server is unavailable, reconnect and retry. The connection works without restarting Aurora. Authentication supports the remote rating/Love workflow described above.
+Aurora stores the device-bound pending request, session cookie and CSRF token in macOS Keychain (Windows Credential Manager on Windows). Pending sign-in survives restarting Aurora. Only the server address and the existing device ID are stored in local `tonehavn-auth.json`; the email and pasted link are not saved there, and sign-in data is never synchronized through OneDrive. HTTPS certificates are verified, redirects are rejected, and links must match the exact configured server and sign-in path. The trusted personal session lasts up to ten years unless revoked by Tonehavn.
+
+Opening Connections verifies a saved session and refreshes its anti-forgery token. **Verify saved session** retries after connection failures. Expired or revoked sessions require a new email sign-in link. A rejected rating-save session is cleared locally and reports how to sign in again; the rejected edit is not replayed automatically. **Sign out of Tonehavn** revokes the session on the server before removing its local credential; if the server is unavailable, reconnect and retry. The connection works without restarting Aurora. Authentication supports the remote rating/Love workflow described above.
 
 
 ## Playback history correction (0.25.1)
