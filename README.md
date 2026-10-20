@@ -1,5 +1,14 @@
 # Aurora
 
+Aurora **0.37.5** maintains the manual Mac catalog refresh helper in
+`scripts/catalog_sync.py`. With Aurora and Music Library closed, it checkpoints
+leftover SQLite WAL changes before checking the schema, preserving local
+settings and a complete rollback copy. Open or busy catalogs, unreadable logs,
+and catalog changes during the download stop replacement safely. The installed
+`Refresh Music Catalog.command` uses this helper; keep both apps closed until
+it reports **Refreshed**. Validate the helper with
+`python3 -m unittest discover -s scripts -p test_catalog_sync.py`.
+
 Aurora **0.37.4** keeps the add-to-library dialog informative while Music Library finishes a slow catalog commit, and checks Inbox track sequences before marking an album Ready.
 Missing first or middle tracks are listed in Readiness, with a separate sequence
 for each numbered disc. Track-total tags also reveal missing end tracks; without
@@ -667,6 +676,7 @@ npm run check:version
 npm run lint
 npm test
 npm run build
+python -m unittest discover -s scripts -p test_catalog_sync.py
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml

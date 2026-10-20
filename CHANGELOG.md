@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.37.5] - 2026-10-20
+
+### Fixed
+- Manual Mac catalog refresh now checkpoints leftover committed SQLite WAL changes instead of treating any nonempty WAL as an active catalog. Schema checks, local settings and the standalone rollback copy include those changes. Open handles, busy checkpoints, unrecognized WALs, rollback journals and changes during download stop replacement safely.
+- Maintain the installed catalog helper and 14 regression tests in `scripts/`, with Python 3.12.13 pinned in CI.
+
 ## [0.37.4] - 2026-10-19
 
 ### Fixed

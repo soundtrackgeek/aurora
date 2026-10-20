@@ -15,6 +15,7 @@ dist-ssr
 .env.*
 !.env.example
 *.tsbuildinfo
+__pycache__/
 .secrets/
 .playwright-mcp/
 src-tauri/target/

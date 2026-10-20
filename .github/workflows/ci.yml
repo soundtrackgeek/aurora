@@ -25,6 +25,10 @@ jobs:
         with:
           toolchain: 1.98.1
           components: rustfmt, clippy
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.13'
       - name: Cache Rust build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
@@ -43,6 +47,8 @@ jobs:
         run: npm test
       - name: Test release asset assembly
         run: npm run test:release
+      - name: Test catalog refresh helper
+        run: python -m unittest discover -s scripts -p test_catalog_sync.py
       - name: Build frontend
         run: npm run build
       - name: Check Rust formatting
