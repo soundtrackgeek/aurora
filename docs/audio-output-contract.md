@@ -30,7 +30,8 @@ The count combines detectable CPAL xruns with Aurora PCM-ring starvation. A zero
 Audio preferences are stored atomically in `%APPDATA%\com.soundtrackgeek.aurora\aurora-audio.json` with a versioned schema:
 
 - selected endpoint ID or `system-default`;
-- ReplayGain mode: `off`, `track`, or `album`.
+- ReplayGain mode: `off`, `track`, or `album`;
+- `estimateMissingGain` (0.38.0, default `true`). Files saved by earlier versions omit it and load with the default.
 
 The file is separate from `aurora-state.sqlite3`, Laptop Mode snapshots, and OneDrive. Desktop and Laptop therefore keep independent device choices while sharing the existing catalog and Aurora state workflows.
 
@@ -48,12 +49,33 @@ Keys are matched case-insensitively with spaces or hyphens normalized to undersc
 Mode behavior:
 
 - **Off:** unity gain.
-- **Track:** use Track gain and its peak when present.
-- **Album:** use Album gain and peak; fall back to Track gain and peak when Album frames are absent.
+- **Track:** Track tag → Track estimate → unity.
+- **Album:** Album tag → Album estimate → Track tag → Track estimate → unity.
 
-The requested linear multiplier is `10^(gain_db / 20)`. When a positive multiplier and tagged peak would exceed full scale, Aurora caps it at `1 / peak`. The player reports the effective gain and whether that cap prevented clipping. Volume remains an independent user multiplier.
+Estimates are used only when **Estimate from audio analysis when tags are missing** is on. Tags always win.
+
+The requested linear multiplier is `10^(gain_db / 20)`. When a positive multiplier and tagged peak would exceed full scale, Aurora caps it at `1 / peak`. The player reports the effective gain, whether that cap prevented clipping, and whether the gain is estimated (`−8.2 dB est.`). Volume remains an independent user multiplier.
 
 ReplayGain is read-only playback metadata. Aurora does not calculate, add, remove, or rewrite ReplayGain frames, and it does not alter audio bytes.
+
+### Estimated gain from audio analysis (0.38.0)
+
+Music Library's `music-analysis.sqlite3` stores a level for every analyzed MP3: Bliss feature 8, the mean frame power of the whole file, normalized from −90…0 dBFS. Aurora reads it through the same read-only, `query_only` catalog connection it uses for sonic features. Estimates never open, decode, measure, or rewrite an MP3.
+
+- **Calibration** `bliss-v2-r128-2026-10-a`: `LUFS ≈ 0.88 × level_dBFS − 1.0`. It was fitted on 2026-10-21 against FFmpeg EBU R128 integrated loudness for 360 random library MP3s (one-time, read-only measurement).
+  - Cross-validated error: mean 0.89 dB, median 0.67 dB, 95th percentile 2.3 dB.
+  - General music averages 0.55 dB of error and scores 0.92 dB, because R128 gating ignores quiet passages.
+- **Target −18 LUFS**, the reference implied by the library's existing ReplayGain frames, so tagged and estimated tracks share one scale.
+- **Attenuation only:** `gain = clamp(−18 − estimate, −24 dB, 0 dB)`. The analysis has no peak value, so an estimate never boosts and never needs clipping protection.
+- **Album estimate:** a duration-weighted energy mean of the album's track estimates. It is used only when at least 80% of the album's cataloged MP3s have a current estimate.
+- **No estimate**, so the next rule applies, when:
+  - the analysis store is absent;
+  - the profile differs;
+  - the file's size or modification time no longer matches the analysis row;
+  - the features are invalid;
+  - the track is near-silent (below −60 dBFS).
+
+On the calibration sample in random order, attenuation-only estimates reduced the median loudness jump between consecutive tracks from 3.9 dB to 1.1 dB. Jumps over 6 dB fell from 32% of transitions to 7%.
 
 ## Gapless-capable queue handoff
 
@@ -68,6 +90,7 @@ The handoff is capability-based, not an unconditional guarantee. Missing files, 
 
 ## Verification
 
-- Browser interaction covers Audio/Shortcuts navigation, device and ReplayGain draft/save behavior, and the compact player readout.
+- Browser interaction covers Audio/Shortcuts navigation, device, ReplayGain and estimate draft/save behavior, and the compact player readout including `est.`.
+- Rust tests cover the calibration formula, the attenuation clamp, silence and invalid vectors, album energy means and the 80% coverage gate, stale-file and wrong-profile rejection, tag-versus-estimate precedence, and loading pre-0.38.0 settings files.
 - Native Windows-only tests enumerate non-empty output endpoints, round-trip their stable IDs, identify the current default, and verify that Aurora can open its stable shared output configuration.
 - Unit tests cover the observed numeric formats, negative gain, positive-gain peak limiting, safe defaults, and invalid endpoint IDs.

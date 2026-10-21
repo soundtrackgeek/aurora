@@ -18,7 +18,7 @@ const shortcutStatus: GlobalShortcutStatus = {
 };
 
 const audioStatus: AudioSettingsStatus = {
-  settings: { outputDeviceId: "system-default", replayGainMode: "off" },
+  settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true },
   devices: [
     { id: "speakers", label: "Speakers (Realtek Audio)", isDefault: true },
     { id: "dac", label: "USB DAC", isDefault: false },
@@ -132,9 +132,25 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Album/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "dac", replayGainMode: "album" });
+    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "dac", replayGainMode: "album", estimateMissingGain: true });
     expect(screen.getByText("Clipping protection is always on")).toBeInTheDocument();
     expect(screen.getByText("Gapless queue transitions")).toBeInTheDocument();
+  });
+
+  it("saves the analysis estimate choice and disables it while ReplayGain is off", () => {
+    const onSaveAudio = vi.fn();
+    renderSettings({ initialTab: "audio", onSaveAudio });
+
+    const estimate = screen.getByRole("checkbox", { name: /Estimate from audio analysis when tags are missing/ });
+    expect(estimate).toBeChecked();
+    expect(estimate).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: /Track/ }));
+    expect(estimate).toBeEnabled();
+    fireEvent.click(estimate);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "system-default", replayGainMode: "track", estimateMissingGain: false });
+    expect(screen.getByText(/MP3 files are never changed/)).toBeInTheDocument();
   });
 
   it("saves global sizing and independent per-view overrides", () => {

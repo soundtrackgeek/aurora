@@ -373,6 +373,7 @@ mod tests {
             replay_gain_mode: ReplayGainMode::Off,
             replay_gain_db: None,
             replay_gain_source: None,
+            replay_gain_estimated: false,
             clipping_prevented: false,
             audio_underrun_count: 0,
             realtime_scheduling_denied: false,

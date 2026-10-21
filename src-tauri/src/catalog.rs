@@ -2573,14 +2573,6 @@ fn album_tag_tracks_from_connection(
     Ok(summaries)
 }
 
-pub(crate) fn resolve_audio_path(
-    track_id: &str,
-    track_key: &str,
-    store: &StateStore,
-) -> Result<PathBuf, String> {
-    Ok(resolve_track(track_id, track_key, store)?.audio_path)
-}
-
 pub(crate) fn catalog_tag_values_by_path(
     directory: &str,
     filename: &str,

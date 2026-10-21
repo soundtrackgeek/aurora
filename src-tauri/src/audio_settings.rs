@@ -1,4 +1,4 @@
-use crate::state_sync;
+use crate::{replay_gain::GainPolicy, state_sync};
 use cpal::{
     Device, DeviceId,
     traits::{DeviceTrait, HostTrait},
@@ -29,6 +29,13 @@ pub(crate) enum ReplayGainMode {
 pub(crate) struct AudioSettings {
     pub(crate) output_device_id: String,
     pub(crate) replay_gain_mode: ReplayGainMode,
+    /// Settings saved before 0.38.0 omit this and receive the default.
+    #[serde(default = "estimate_missing_gain_default")]
+    pub(crate) estimate_missing_gain: bool,
+}
+
+fn estimate_missing_gain_default() -> bool {
+    true
 }
 
 impl Default for AudioSettings {
@@ -36,6 +43,16 @@ impl Default for AudioSettings {
         Self {
             output_device_id: SYSTEM_DEFAULT_DEVICE_ID.to_owned(),
             replay_gain_mode: ReplayGainMode::Off,
+            estimate_missing_gain: estimate_missing_gain_default(),
+        }
+    }
+}
+
+impl AudioSettings {
+    pub(crate) fn gain_policy(&self) -> GainPolicy {
+        GainPolicy {
+            mode: self.replay_gain_mode,
+            estimate_missing: self.estimate_missing_gain,
         }
     }
 }
@@ -45,6 +62,8 @@ impl Default for AudioSettings {
 pub(crate) struct AudioSettingsRequest {
     pub(crate) output_device_id: String,
     pub(crate) replay_gain_mode: ReplayGainMode,
+    #[serde(default = "estimate_missing_gain_default")]
+    pub(crate) estimate_missing_gain: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -142,6 +161,7 @@ impl AudioSettingsStore {
         self.settings = AudioSettings {
             output_device_id: request.output_device_id,
             replay_gain_mode: request.replay_gain_mode,
+            estimate_missing_gain: request.estimate_missing_gain,
         };
         if let Err(error) = self.persist() {
             self.settings = previous;
@@ -294,6 +314,38 @@ mod tests {
         let settings = AudioSettings::default();
         assert_eq!(settings.output_device_id, SYSTEM_DEFAULT_DEVICE_ID);
         assert_eq!(settings.replay_gain_mode, ReplayGainMode::Off);
+        assert!(settings.estimate_missing_gain);
+    }
+
+    #[test]
+    fn settings_saved_before_gain_estimates_still_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("aurora-audio.json");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"outputDeviceId":"system-default","replayGainMode":"track"}}"#,
+        )
+        .unwrap();
+        let mut store = AudioSettingsStore::load(path.clone());
+        assert!(store.warning().is_none());
+        assert_eq!(store.settings().replay_gain_mode, ReplayGainMode::Track);
+        assert!(store.settings().estimate_missing_gain);
+
+        store
+            .update(AudioSettingsRequest {
+                output_device_id: SYSTEM_DEFAULT_DEVICE_ID.to_owned(),
+                replay_gain_mode: ReplayGainMode::Album,
+                estimate_missing_gain: false,
+            })
+            .unwrap();
+        let reloaded = AudioSettingsStore::load(path);
+        assert_eq!(
+            reloaded.settings().gain_policy(),
+            GainPolicy {
+                mode: ReplayGainMode::Album,
+                estimate_missing: false,
+            }
+        );
     }
 
     #[test]

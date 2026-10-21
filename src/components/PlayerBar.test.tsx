@@ -51,6 +51,7 @@ function snapshot(positionSeconds: number, currentTrack = track): PlaybackSnapsh
     replayGainMode: "track",
     replayGainDb: -6.4,
     replayGainSource: "track",
+    replayGainEstimated: false,
     clippingPrevented: false,
     audioUnderrunCount: 0,
     realtimeSchedulingDenied: false,
@@ -140,6 +141,14 @@ describe("PlayerBar", () => {
     const audio = screen.getByRole("button", { name: /Open audio settings.*Speakers.*−?6\.4 dB/i });
     fireEvent.click(audio);
     expect(playerProps.onOpenAudioSettings).toHaveBeenCalledOnce();
+    expect(audio).not.toHaveAccessibleName(/est\./);
+  });
+
+  it("labels gain estimated from audio analysis", () => {
+    const playerProps = { ...props(), playback: { ...snapshot(60), replayGainDb: -8.2, replayGainEstimated: true } };
+    render(<PlayerBar {...playerProps} />);
+    const audio = screen.getByRole("button", { name: /Open audio settings.*−?8\.2 dB est\./i });
+    expect(audio).toHaveAttribute("title", expect.stringContaining("estimated from Music Library's audio analysis"));
   });
 
   it("surfaces native audio health diagnostics in the output readout", () => {

@@ -45,6 +45,7 @@ mod single_instance;
 mod snapshot_io;
 mod sonic;
 mod sonic_albums;
+mod sonic_gain;
 mod sonic_index;
 mod sonic_journey;
 #[cfg(test)]

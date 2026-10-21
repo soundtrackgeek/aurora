@@ -14,7 +14,7 @@ function snapshot(eventSequence: number, status: PlaybackSnapshot["status"]): Pl
     eventSequence, status, queue: [], currentIndex: null, currentTrack: null,
     positionSeconds: 0, volume: 0.7, shuffle: false, repeatMode: "off", error: null,
     outputDeviceLabel: null, usingDeviceFallback: false, replayGainMode: "off",
-    replayGainDb: null, replayGainSource: null, clippingPrevented: false,
+    replayGainDb: null, replayGainSource: null, replayGainEstimated: false, clippingPrevented: false,
     audioUnderrunCount: 0, realtimeSchedulingDenied: false,
   };
 }

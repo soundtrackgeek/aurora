@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.38.0] - 2026-10-21
+
+### Added
+- **Estimate from audio analysis when tags are missing** in Settings → Audio, on by default. With ReplayGain set to Track or Album, untagged MP3s use the level stored in Music Library's read-only `music-analysis.sqlite3`.
+- The estimate is calibrated against FFmpeg EBU R128 measurements of 360 random library tracks: `LUFS ≈ 0.88 × level_dBFS − 1.0`, with a cross-validated mean error of 0.89 dB.
+- Estimates target −18 LUFS to match existing ReplayGain frames, and only attenuate (0 to −24 dB), because the analysis has no peak value.
+- Album mode uses a duration-weighted album estimate when at least 80% of the album's MP3s are analyzed.
+- The precedence is: Album tag → Album estimate → Track tag → Track estimate. Stale files, other analysis profiles, near-silent tracks and a missing analysis store fall back to the existing behavior.
+- The player readout shows `est.` with a tooltip, and the playback snapshot reports `replayGainEstimated`.
+
+### Changed
+- Playback resolves the full catalog track, not only its path, so gain lookups can use the catalog directory, filename and album identity. MP3 files are still only read for playback and their ReplayGain frames, never written.
+- Audio settings files saved by earlier versions load unchanged, with the new option on.
+
 ## [0.37.6] - 2026-10-20
 
 ### Fixed

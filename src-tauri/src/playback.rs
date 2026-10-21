@@ -6,7 +6,8 @@ use crate::{
     history::{ActiveHistorySession, HistoryCheckpoint, HistoryStore},
     pcm_buffer::PcmBufferSource,
     playback_persistence::{PlaybackPersistence, PlaybackWrite},
-    replay_gain::{self, ReplayGainAdjustment},
+    replay_gain::{self, GainPolicy, ReplayGainAdjustment},
+    sonic_gain::GainTrack,
     state_store::{StateStore, StoredPlaybackState, StoredQueueEntry},
 };
 use rodio::{
@@ -90,6 +91,7 @@ pub(crate) struct PlaybackSnapshot {
     pub(crate) replay_gain_mode: ReplayGainMode,
     pub(crate) replay_gain_db: Option<f32>,
     pub(crate) replay_gain_source: Option<ReplayGainMode>,
+    pub(crate) replay_gain_estimated: bool,
     pub(crate) clipping_prevented: bool,
     pub(crate) audio_underrun_count: u64,
     pub(crate) realtime_scheduling_denied: bool,
@@ -243,17 +245,26 @@ impl PlaybackMediaCache {
     }
 }
 
+fn gain_track(summary: &TrackSummary) -> GainTrack<'_> {
+    GainTrack {
+        directory: &summary.directory,
+        filename: &summary.filename,
+        album_id: summary.album_id.as_deref(),
+    }
+}
+
 fn prepare_track_source(
     store: &StateStore,
     track_id: &str,
     track_key: &str,
     target_sample_rate: SampleRate,
-    replay_gain_mode: ReplayGainMode,
+    gain_policy: GainPolicy,
     underrun_count: Arc<AtomicU64>,
 ) -> Result<PreparedSource, String> {
-    let audio_path = catalog::resolve_audio_path(track_id, track_key, store)?;
+    let resolved = catalog::resolve_track(track_id, track_key, store)?;
+    let audio_path = &resolved.audio_path;
     let mut media_cache = PlaybackMediaCache::default();
-    let (media, byte_len) = media_cache.open(&audio_path)?;
+    let (media, byte_len) = media_cache.open(audio_path)?;
     let decoder = Decoder::builder()
         .with_data(media)
         .with_byte_len(byte_len)
@@ -262,7 +273,8 @@ fn prepare_track_source(
         .with_gapless(true)
         .build()
         .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
-    let gain = replay_gain::adjustment_for_path(&audio_path, replay_gain_mode);
+    let gain =
+        replay_gain::adjustment_for_track(audio_path, gain_track(&resolved.summary), gain_policy);
     let source = decoder
         .amplify(gain.linear)
         .resample(target_sample_rate, ResampleConfig::balanced());
@@ -640,8 +652,9 @@ impl PlaybackRuntime {
             .get(index)
             .map(|track| (track.id.clone(), track.track_key.clone()))
             .ok_or_else(|| "The playback queue no longer contains this track.".to_owned())?;
-        let audio_path = catalog::resolve_audio_path(&track_id, &track_key, &self.store)?;
-        let (media, byte_len) = self.media_cache.open(&audio_path)?;
+        let resolved = catalog::resolve_track(&track_id, &track_key, &self.store)?;
+        let audio_path = &resolved.audio_path;
+        let (media, byte_len) = self.media_cache.open(audio_path)?;
         let decoder = Decoder::builder()
             .with_data(media)
             .with_byte_len(byte_len)
@@ -650,9 +663,10 @@ impl PlaybackRuntime {
             .with_gapless(true)
             .build()
             .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
-        let gain = replay_gain::adjustment_for_path(
-            &audio_path,
-            self.audio_store.settings().replay_gain_mode,
+        let gain = replay_gain::adjustment_for_track(
+            audio_path,
+            gain_track(&resolved.summary),
+            self.audio_store.settings().gain_policy(),
         );
         let source = decoder
             .amplify(gain.linear)
@@ -956,7 +970,7 @@ impl PlaybackRuntime {
         let track_key = track.track_key.clone();
         let result_track_key = track_key.clone();
         let store = self.store.clone();
-        let replay_gain_mode = self.audio_store.settings().replay_gain_mode;
+        let gain_policy = self.audio_store.settings().gain_policy();
         let underrun_count = Arc::clone(&self.audio_underrun_count);
         let (sender, receiver) = mpsc::sync_channel(1);
         self.preparation_attempted = true;
@@ -968,7 +982,7 @@ impl PlaybackRuntime {
                     &track_id,
                     &track_key,
                     target_sample_rate,
-                    replay_gain_mode,
+                    gain_policy,
                     underrun_count,
                 );
                 let _ = sender.send(result);
@@ -1160,6 +1174,7 @@ impl PlaybackRuntime {
             replay_gain_mode: self.audio_store.settings().replay_gain_mode,
             replay_gain_db: self.current_gain.applied_db,
             replay_gain_source: self.current_gain.source,
+            replay_gain_estimated: self.current_gain.estimated,
             clipping_prevented: self.current_gain.clipping_prevented,
             audio_underrun_count: self.audio_underrun_count.load(Ordering::Relaxed),
             realtime_scheduling_denied: self.realtime_scheduling_denied.load(Ordering::Relaxed),

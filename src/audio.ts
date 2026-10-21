@@ -6,6 +6,7 @@ export type ReplayGainMode = "off" | "track" | "album";
 export interface AudioSettings {
   outputDeviceId: string;
   replayGainMode: ReplayGainMode;
+  estimateMissingGain: boolean;
 }
 
 export interface AudioOutputDevice {
@@ -32,7 +33,7 @@ const previewDevices: AudioOutputDevice[] = [
 ];
 
 let previewStatus: AudioSettingsStatus = {
-  settings: { outputDeviceId: "system-default", replayGainMode: "off" },
+  settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true },
   devices: previewDevices,
   activeDeviceId: "preview-speakers",
   activeDeviceLabel: "Speakers (Realtek Audio)",
@@ -87,7 +88,7 @@ export function previewAudioSnapshot(): Pick<
 
 export function resetAudioPreview(): void {
   previewStatus = {
-    settings: { outputDeviceId: "system-default", replayGainMode: "off" },
+    settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true },
     devices: previewDevices,
     activeDeviceId: "preview-speakers",
     activeDeviceLabel: "Speakers (Realtek Audio)",

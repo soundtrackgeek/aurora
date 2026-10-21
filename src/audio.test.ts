@@ -13,6 +13,7 @@ describe("browser audio settings adapter", () => {
     expect(status.settings).toEqual({
       outputDeviceId: "system-default",
       replayGainMode: "off",
+      estimateMissingGain: true,
     });
     expect(status.activeDeviceLabel).toBe("Speakers (Realtek Audio)");
   });
@@ -21,8 +22,10 @@ describe("browser audio settings adapter", () => {
     const status = await updateAudioSettings({
       outputDeviceId: "preview-dac",
       replayGainMode: "album",
+      estimateMissingGain: false,
     });
     expect(status.settings.replayGainMode).toBe("album");
+    expect(status.settings.estimateMissingGain).toBe(false);
     expect(status.activeDeviceLabel).toBe("USB DAC");
     expect((await loadAudioSettings()).settings.outputDeviceId).toBe("preview-dac");
   });

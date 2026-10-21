@@ -28,6 +28,7 @@ export interface PlaybackSnapshot {
   replayGainMode: ReplayGainMode;
   replayGainDb: number | null;
   replayGainSource: ReplayGainMode | null;
+  replayGainEstimated: boolean;
   clippingPrevented: boolean;
   audioUnderrunCount: number;
   realtimeSchedulingDenied: boolean;
@@ -53,6 +54,7 @@ const emptyPlayback: PlaybackSnapshot = {
   replayGainMode: "off",
   replayGainDb: null,
   replayGainSource: null,
+  replayGainEstimated: false,
   clippingPrevented: false,
   audioUnderrunCount: 0,
   realtimeSchedulingDenied: false,
@@ -97,6 +99,7 @@ function refreshBrowserClock(): void {
     replayGainSource: replayGainMode === "off" || !browserPlayback.currentTrack
       ? null
       : replayGainMode,
+    replayGainEstimated: replayGainMode !== "off" && Boolean(browserPlayback.currentTrack) && audio.settings.estimateMissingGain,
     clippingPrevented: false,
   };
   if (browserPlayback.status !== "playing" || browserPlayback.currentIndex === null) return;
