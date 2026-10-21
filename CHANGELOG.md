@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.39.0] - 2026-10-21
+
+### Added
+- **Raise quiet untagged tracks** in Settings → Audio, on by default and available while estimates are on. Estimated gain is now `clamp(−18 − estimate, −24, +6)` dB, so quiet scores are raised toward −18 LUFS. With the option off, the 0.38.0 attenuation-only behavior applies.
+- A lookahead peak limiter for raised estimates.
+  - It runs in the PCM producer thread, is linked across channels, and limits to a −1 dBFS sample-peak ceiling.
+  - It uses a 5 ms sliding minimum and moving average with a 150 ms release, and emits each frame with the gain computed 5 ms later, so peaks never exceed the ceiling and the gain changes smoothly.
+  - It preserves every sample for gapless playback, and clears its state on seek.
+  - Tagged gains and gains at or below 0 dB bypass it.
+- The player readout shows `est. · limiter` for raised estimates.
+- Tests cover transparency, the ceiling, linked stereo, gain slope, release, seek, the boost cap, and settings saved by 0.37 and 0.38.
+
+### Fixed
+- Correct the 0.38.0 shuffle figure. Attenuation-only leveling reduced the median consecutive-track jump from 3.9 dB to 1.4 dB (not 1.1 dB), and jumps over 6 dB from 32% to 6% (not 7%). With 0.39.0 raising, the figures are 1.1 dB and 1%.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added

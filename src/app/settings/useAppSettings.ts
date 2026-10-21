@@ -91,7 +91,7 @@ export function useAppSettings(onAlbumOrderChanged: () => void) {
       else {
         const message = audio.reason instanceof Error ? audio.reason.message : String(audio.reason);
         setAudioStatus({
-          settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true },
+          settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true, boostQuietEstimates: true },
           devices: [],
           activeDeviceId: null,
           activeDeviceLabel: null,

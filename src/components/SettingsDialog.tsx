@@ -83,6 +83,7 @@ export function SettingsDialog({
   const [outputDeviceId, setOutputDeviceId] = useState(audioStatus.settings.outputDeviceId);
   const [replayGainMode, setReplayGainMode] = useState<ReplayGainMode>(audioStatus.settings.replayGainMode);
   const [estimateMissingGain, setEstimateMissingGain] = useState(audioStatus.settings.estimateMissingGain);
+  const [boostQuietEstimates, setBoostQuietEstimates] = useState(audioStatus.settings.boostQuietEstimates);
   const [displayDraft, setDisplayDraft] = useState<DisplayPreferences>(() => copyDisplayPreferences(displayPreferences));
   const [selectedDisplayView, setSelectedDisplayView] = useState<DisplayViewKey>(activeDisplayView);
   const [metadataStatus, setMetadataStatus] = useState<InboxSettingsStatus | null>(null);
@@ -136,7 +137,8 @@ export function SettingsDialog({
   ));
   const audioDirty = outputDeviceId !== audioStatus.settings.outputDeviceId
     || replayGainMode !== audioStatus.settings.replayGainMode
-    || estimateMissingGain !== audioStatus.settings.estimateMissingGain;
+    || estimateMissingGain !== audioStatus.settings.estimateMissingGain
+    || boostQuietEstimates !== audioStatus.settings.boostQuietEstimates;
   const displayDirty = JSON.stringify(displayDraft) !== JSON.stringify(displayPreferences);
   const discogsDirty = removeDiscogsToken
     || (discogsCredentialMode === "token" ? Boolean(discogsToken.trim()) : Boolean(discogsConsumerKey.trim() && discogsConsumerSecret.trim()));
@@ -154,7 +156,7 @@ export function SettingsDialog({
     if (tab === "display") {
       onSaveDisplay(displayDraft);
     } else if (tab === "audio") {
-      onSaveAudio({ outputDeviceId, replayGainMode, estimateMissingGain });
+      onSaveAudio({ outputDeviceId, replayGainMode, estimateMissingGain, boostQuietEstimates });
     } else if (tab === "shortcuts") {
       onSaveShortcuts({
         enabled,
@@ -226,9 +228,11 @@ export function SettingsDialog({
               outputDeviceId={outputDeviceId}
               replayGainMode={replayGainMode}
               estimateMissingGain={estimateMissingGain}
+              boostQuietEstimates={boostQuietEstimates}
               onOutputDeviceChange={setOutputDeviceId}
               onReplayGainModeChange={setReplayGainMode}
               onEstimateMissingGainChange={setEstimateMissingGain}
+              onBoostQuietEstimatesChange={setBoostQuietEstimates}
             />
           ) : tab === "shortcuts" ? (
             <ShortcutSettingsPanel
@@ -431,17 +435,21 @@ function AudioSettingsPanel({
   outputDeviceId,
   replayGainMode,
   estimateMissingGain,
+  boostQuietEstimates,
   onOutputDeviceChange,
   onReplayGainModeChange,
   onEstimateMissingGainChange,
+  onBoostQuietEstimatesChange,
 }: {
   status: AudioSettingsStatus;
   outputDeviceId: string;
   replayGainMode: ReplayGainMode;
   estimateMissingGain: boolean;
+  boostQuietEstimates: boolean;
   onOutputDeviceChange: (deviceId: string) => void;
   onReplayGainModeChange: (mode: ReplayGainMode) => void;
   onEstimateMissingGainChange: (enabled: boolean) => void;
+  onBoostQuietEstimatesChange: (enabled: boolean) => void;
 }) {
   const selectedIsMissing = outputDeviceId !== "system-default"
     && !status.devices.some((device) => device.id === outputDeviceId);
@@ -496,14 +504,26 @@ function AudioSettingsPanel({
           />
           <span>
             <strong>Estimate from audio analysis when tags are missing</strong>
-            <small>Uses Music Library's stored analysis to turn loud untagged tracks down. MP3 files are never changed.</small>
+            <small>Uses Music Library's stored analysis to level untagged tracks. MP3 files are never changed.</small>
+          </span>
+        </label>
+        <label className="replay-gain-estimate replay-gain-estimate--nested">
+          <input
+            type="checkbox"
+            checked={boostQuietEstimates}
+            disabled={replayGainMode === "off" || !estimateMissingGain}
+            onChange={(event) => onBoostQuietEstimatesChange(event.target.checked)}
+          />
+          <span>
+            <strong>Raise quiet untagged tracks</strong>
+            <small>Up to +6 dB. A peak limiter keeps raised tracks from clipping.</small>
           </span>
         </label>
       </fieldset>
 
       <div className="audio-engine-note">
         <ShieldCheck aria-hidden="true" />
-        <span><strong>Clipping protection is always on</strong><small>Tagged peaks cap positive gain, and estimates only lower the level. Album mode uses the album's tag or estimate before falling back to Track gain.</small></span>
+        <span><strong>Clipping protection is always on</strong><small>Tagged peaks cap positive gain, and raised estimates play through a peak limiter. Album mode uses the album's tag or estimate before falling back to Track gain.</small></span>
       </div>
       <div className="audio-engine-note">
         <Waves aria-hidden="true" />

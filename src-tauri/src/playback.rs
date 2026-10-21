@@ -5,6 +5,7 @@ use crate::{
     catalog::{self, TrackReference, TrackSummary},
     history::{ActiveHistorySession, HistoryCheckpoint, HistoryStore},
     pcm_buffer::PcmBufferSource,
+    peak_limiter::PeakLimiter,
     playback_persistence::{PlaybackPersistence, PlaybackWrite},
     replay_gain::{self, GainPolicy, ReplayGainAdjustment},
     sonic_gain::GainTrack,
@@ -245,6 +246,23 @@ impl PlaybackMediaCache {
     }
 }
 
+/// Gain, then resampling, then the peak limiter for boosted estimates. The
+/// limiter runs in the PCM producer thread that pulls this source.
+fn gain_stage(
+    decoder: impl Source + Send + 'static,
+    gain: &ReplayGainAdjustment,
+    target_sample_rate: SampleRate,
+) -> Box<dyn Source + Send> {
+    let source = decoder
+        .amplify(gain.linear)
+        .resample(target_sample_rate, ResampleConfig::balanced());
+    if gain.limited {
+        Box::new(PeakLimiter::new(source))
+    } else {
+        Box::new(source)
+    }
+}
+
 fn gain_track(summary: &TrackSummary) -> GainTrack<'_> {
     GainTrack {
         directory: &summary.directory,
@@ -275,10 +293,10 @@ fn prepare_track_source(
         .map_err(|error| format!("Aurora could not decode this MP3: {error}"))?;
     let gain =
         replay_gain::adjustment_for_track(audio_path, gain_track(&resolved.summary), gain_policy);
-    let source = decoder
-        .amplify(gain.linear)
-        .resample(target_sample_rate, ResampleConfig::balanced());
-    let source = PcmBufferSource::spawn(Box::new(source), underrun_count)?;
+    let source = PcmBufferSource::spawn(
+        gain_stage(decoder, &gain, target_sample_rate),
+        underrun_count,
+    )?;
     Ok((Box::new(source), gain))
 }
 
@@ -668,11 +686,10 @@ impl PlaybackRuntime {
             gain_track(&resolved.summary),
             self.audio_store.settings().gain_policy(),
         );
-        let source = decoder
-            .amplify(gain.linear)
-            .resample(target_sample_rate, ResampleConfig::balanced());
-        let source =
-            PcmBufferSource::spawn(Box::new(source), Arc::clone(&self.audio_underrun_count))?;
+        let source = PcmBufferSource::spawn(
+            gain_stage(decoder, &gain, target_sample_rate),
+            Arc::clone(&self.audio_underrun_count),
+        )?;
         Ok((Box::new(source), gain))
     }
 

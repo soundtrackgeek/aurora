@@ -10,12 +10,15 @@ pub(crate) struct ReplayGainAdjustment {
     pub(crate) clipping_prevented: bool,
     /// The gain came from Music Library's analysis, not ReplayGain frames.
     pub(crate) estimated: bool,
+    /// A positive estimated gain: playback adds `peak_limiter::PeakLimiter`.
+    pub(crate) limited: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct GainPolicy {
     pub(crate) mode: ReplayGainMode,
     pub(crate) estimate_missing: bool,
+    pub(crate) boost_quiet: bool,
 }
 
 #[derive(Default)]
@@ -62,7 +65,7 @@ fn select(
             .flatten()
             .map(|lufs| {
                 estimated_adjustment(
-                    sonic_gain::attenuation_db(lufs),
+                    sonic_gain::estimate_gain_db(lufs, policy.boost_quiet),
                     if album {
                         ReplayGainMode::Album
                     } else {
@@ -83,13 +86,16 @@ fn select(
     selected.unwrap_or_else(unity)
 }
 
+/// Estimates have no tagged peak, so a boost reports protection as armed.
 fn estimated_adjustment(gain_db: f32, source: ReplayGainMode) -> ReplayGainAdjustment {
+    let limited = gain_db > 0.0;
     ReplayGainAdjustment {
         linear: 10_f32.powf(gain_db / 20.0),
         applied_db: Some(gain_db),
         source: Some(source),
-        clipping_prevented: false,
+        clipping_prevented: limited,
         estimated: true,
+        limited,
     }
 }
 
@@ -142,6 +148,7 @@ fn adjustment(
         source: Some(source),
         clipping_prevented,
         estimated: false,
+        limited: false,
     }
 }
 
@@ -169,10 +176,20 @@ mod tests {
         assert_eq!(parse_number("1.010132"), Some(1.010132));
     }
 
+    /// Attenuation-only estimates, the 0.38.0 behavior.
     fn policy(mode: ReplayGainMode, estimate_missing: bool) -> GainPolicy {
         GainPolicy {
             mode,
             estimate_missing,
+            boost_quiet: false,
+        }
+    }
+
+    fn boosting(mode: ReplayGainMode) -> GainPolicy {
+        GainPolicy {
+            mode,
+            estimate_missing: true,
+            boost_quiet: true,
         }
     }
 
@@ -236,6 +253,37 @@ mod tests {
         // Album tags still win.
         let result = select(tags(None, Some(-6.0)), album, estimates);
         assert!(!result.estimated && result.source == Some(ReplayGainMode::Album));
+    }
+
+    #[test]
+    fn quiet_estimates_are_raised_up_to_six_db_behind_the_limiter() {
+        let track = boosting(ReplayGainMode::Track);
+        let result = select(tags(None, None), track, |_| Some(-21.0));
+        assert!((result.applied_db.unwrap() - 3.0).abs() < 0.001);
+        assert!(result.estimated && result.limited && result.clipping_prevented);
+        assert!((result.linear - 10_f32.powf(0.15)).abs() < 1e-6);
+        let capped = select(tags(None, None), track, |_| Some(-30.0));
+        assert_eq!(capped.applied_db, Some(6.0));
+        // Loud estimates are still only turned down, without the limiter.
+        let loud = select(tags(None, None), track, estimates);
+        assert!((loud.applied_db.unwrap() + 8.0).abs() < 0.001);
+        assert!(!loud.limited && !loud.clipping_prevented);
+    }
+
+    #[test]
+    fn tags_are_never_limited_and_album_boosts_are() {
+        let tagged = select(
+            tags(Some(4.0), None),
+            boosting(ReplayGainMode::Track),
+            estimates,
+        );
+        assert!(!tagged.limited && !tagged.estimated);
+        let album = select(tags(None, None), boosting(ReplayGainMode::Album), |album| {
+            Some(if album { -22.0 } else { -10.0 })
+        });
+        assert_eq!(album.source, Some(ReplayGainMode::Album));
+        assert!((album.applied_db.unwrap() - 4.0).abs() < 0.001);
+        assert!(album.limited);
     }
 
     #[test]

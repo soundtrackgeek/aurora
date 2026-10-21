@@ -16,8 +16,10 @@ const SLOPE: f32 = 0.88;
 const INTERCEPT_LUFS: f32 = -1.0;
 /// Reference implied by the library's existing ReplayGain frames.
 const TARGET_LUFS: f32 = -18.0;
-/// Estimates only attenuate: the analysis has no peak to make a boost safe.
 const FLOOR_DB: f32 = -24.0;
+/// The analysis has no peak, so boosts stay modest and always play through
+/// `peak_limiter`. +6 dB gave the full measured benefit on the sample.
+const MAX_BOOST_DB: f32 = 6.0;
 const SILENCE_DBFS: f32 = -60.0;
 const ALBUM_COVERAGE_PERCENT: usize = 80;
 
@@ -37,8 +39,9 @@ pub(crate) fn estimated_lufs(features: &[f32]) -> Option<f32> {
     (level_dbfs >= SILENCE_DBFS).then_some(SLOPE * level_dbfs + INTERCEPT_LUFS)
 }
 
-pub(crate) fn attenuation_db(lufs: f32) -> f32 {
-    (TARGET_LUFS - lufs).clamp(FLOOR_DB, 0.0)
+pub(crate) fn estimate_gain_db(lufs: f32, allow_boost: bool) -> f32 {
+    let ceiling = if allow_boost { MAX_BOOST_DB } else { 0.0 };
+    (TARGET_LUFS - lufs).clamp(FLOOR_DB, ceiling)
 }
 
 /// Duration-weighted energy mean, the usual approximation of album loudness.
@@ -166,17 +169,20 @@ mod tests {
     }
 
     #[test]
-    fn calibrated_level_maps_to_attenuation_only_gain() {
+    fn calibrated_level_maps_to_bounded_gain() {
         let lufs = estimated_lufs(&features_at(-14.0)).unwrap();
         assert!((lufs + 13.32).abs() < 0.01);
-        assert!((attenuation_db(lufs) + 4.68).abs() < 0.01);
-        // A quiet score is never boosted; a very loud master is turned down.
-        assert_eq!(
-            attenuation_db(estimated_lufs(&features_at(-26.0)).unwrap()),
-            0.0
-        );
-        assert!((attenuation_db(estimated_lufs(&features_at(-4.5)).unwrap()) + 13.04).abs() < 0.01);
-        assert_eq!(attenuation_db(20.0), FLOOR_DB);
+        assert!((estimate_gain_db(lufs, true) + 4.68).abs() < 0.01);
+        // A loud master is turned down whether or not boosts are allowed.
+        let loud = estimated_lufs(&features_at(-4.5)).unwrap();
+        assert!((estimate_gain_db(loud, false) + 13.04).abs() < 0.01);
+        assert_eq!(estimate_gain_db(20.0, true), FLOOR_DB);
+        // A quiet score (−23.88 LUFS) is raised by 5.88 dB, or left alone.
+        let quiet = estimated_lufs(&features_at(-26.0)).unwrap();
+        assert!((estimate_gain_db(quiet, true) - 5.88).abs() < 0.01);
+        assert_eq!(estimate_gain_db(quiet, false), 0.0);
+        // Very quiet material is capped at +6 dB.
+        assert_eq!(estimate_gain_db(-40.0, true), MAX_BOOST_DB);
     }
 
     #[test]

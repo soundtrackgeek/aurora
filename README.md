@@ -1,12 +1,19 @@
 # Aurora
 
+Aurora **0.39.0** also raises quiet untagged tracks, mostly dynamic scores, by up to +6 dB toward −18 LUFS. A lookahead peak limiter keeps them from clipping. In **Settings → Audio**, keep **Raise quiet untagged tracks** on, below the estimate option.
+- The limiter runs only on raised tracks and only touches isolated peaks. In a sample of 70 raised tracks, gain reduction above 1 dB lasted 0.00% of playing time in the typical track and 3.1% at worst.
+- The player shows `+4.2 dB est. · limiter` for a raised track.
+- Nothing is written to MP3 files.
+
+On a random 360-track sample, the median loudness jump between consecutive tracks is now 1.1 dB, and jumps over 6 dB fell to 1% (32% without leveling). See [the peak limiter](docs/audio-output-contract.md#peak-limiter-for-raised-estimates-0390).
+
 Aurora **0.38.0** levels untagged MP3s using Music Library's audio analysis. Few library MP3s carry ReplayGain tags (about 3%), so most tracks used to play at their original level. In **Settings → Audio**, choose ReplayGain **Track** or **Album** and keep **Estimate from audio analysis when tags are missing** on. Untagged tracks then use the level stored by Music Library's analysis, calibrated against EBU R128 loudness (mean error 0.89 dB on a 360-track sample).
 - Estimates target −18 LUFS, the same reference as your existing tags, and only turn loud tracks down, so they never add clipping.
 - Album mode uses an album estimate when at least 80% of the album is analyzed.
 - Tags always win, and the player readout marks estimated gain as `est.`.
 - Nothing is written to MP3 files: Aurora reads the existing databases and applies the gain during playback.
 
-On a random sample, consecutive-track loudness jumps fell from a median of 3.9 dB to 1.1 dB. See [audio output](docs/audio-output-contract.md#estimated-gain-from-audio-analysis-0380).
+On a random sample, consecutive-track loudness jumps fell from a median of 3.9 dB to 1.4 dB (corrected in 0.39.0). See [audio output](docs/audio-output-contract.md#estimated-gain-from-audio-analysis-0380).
 
 Aurora **0.37.6** signs in to Tonehavn with an email link. In **Settings → Connections → Tonehavn account**, enter your server and email, select **Send sign-in link**, then copy the emailed link and paste it into Aurora to complete sign-in. Request the link on the same computer; it expires after 15 minutes and works once. Requires Tonehavn **0.41.0 or newer** with email delivery configured on the PC. Confirmed rating and Love saves use the resulting trusted session.
 

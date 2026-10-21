@@ -14,6 +14,7 @@ describe("browser audio settings adapter", () => {
       outputDeviceId: "system-default",
       replayGainMode: "off",
       estimateMissingGain: true,
+      boostQuietEstimates: true,
     });
     expect(status.activeDeviceLabel).toBe("Speakers (Realtek Audio)");
   });
@@ -23,6 +24,7 @@ describe("browser audio settings adapter", () => {
       outputDeviceId: "preview-dac",
       replayGainMode: "album",
       estimateMissingGain: false,
+      boostQuietEstimates: false,
     });
     expect(status.settings.replayGainMode).toBe("album");
     expect(status.settings.estimateMissingGain).toBe(false);

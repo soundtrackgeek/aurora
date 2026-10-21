@@ -151,6 +151,16 @@ describe("PlayerBar", () => {
     expect(audio).toHaveAttribute("title", expect.stringContaining("estimated from Music Library's audio analysis"));
   });
 
+  it("marks raised estimates as limiter-protected and keeps tagged caps as protected", () => {
+    const raised = { ...props(), playback: { ...snapshot(60), replayGainDb: 4.2, replayGainEstimated: true, clippingPrevented: true } };
+    const { unmount } = render(<PlayerBar {...raised} />);
+    expect(screen.getByRole("button", { name: /\+4\.2 dB est\. · limiter/ })).toBeInTheDocument();
+    unmount();
+    const tagged = { ...props(), playback: { ...snapshot(60), replayGainDb: 3.1, clippingPrevented: true } };
+    render(<PlayerBar {...tagged} />);
+    expect(screen.getByRole("button", { name: /\+3\.1 dB protected/ })).toBeInTheDocument();
+  });
+
   it("surfaces native audio health diagnostics in the output readout", () => {
     const playback = {
       ...snapshot(60),

@@ -18,7 +18,7 @@ const shortcutStatus: GlobalShortcutStatus = {
 };
 
 const audioStatus: AudioSettingsStatus = {
-  settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true },
+  settings: { outputDeviceId: "system-default", replayGainMode: "off", estimateMissingGain: true, boostQuietEstimates: true },
   devices: [
     { id: "speakers", label: "Speakers (Realtek Audio)", isDefault: true },
     { id: "dac", label: "USB DAC", isDefault: false },
@@ -132,7 +132,7 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Album/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "dac", replayGainMode: "album", estimateMissingGain: true });
+    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "dac", replayGainMode: "album", estimateMissingGain: true, boostQuietEstimates: true });
     expect(screen.getByText("Clipping protection is always on")).toBeInTheDocument();
     expect(screen.getByText("Gapless queue transitions")).toBeInTheDocument();
   });
@@ -149,8 +149,27 @@ describe("SettingsDialog", () => {
     fireEvent.click(estimate);
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "system-default", replayGainMode: "track", estimateMissingGain: false });
+    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "system-default", replayGainMode: "track", estimateMissingGain: false, boostQuietEstimates: true });
     expect(screen.getByText(/MP3 files are never changed/)).toBeInTheDocument();
+  });
+
+  it("raises quiet tracks only while estimates are enabled", () => {
+    const onSaveAudio = vi.fn();
+    renderSettings({ initialTab: "audio", onSaveAudio });
+
+    const boost = screen.getByRole("checkbox", { name: /Raise quiet untagged tracks/ });
+    expect(boost).toBeChecked();
+    expect(boost).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: /Album/ }));
+    expect(boost).toBeEnabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Estimate from audio analysis/ }));
+    expect(boost).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Estimate from audio analysis/ }));
+    fireEvent.click(boost);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(onSaveAudio).toHaveBeenCalledWith({ outputDeviceId: "system-default", replayGainMode: "album", estimateMissingGain: true, boostQuietEstimates: false });
+    expect(screen.getByText(/A peak limiter keeps raised tracks from clipping/)).toBeInTheDocument();
   });
 
   it("saves global sizing and independent per-view overrides", () => {

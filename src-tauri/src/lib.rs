@@ -31,6 +31,7 @@ mod media_controls;
 mod musicbrainz;
 mod native_events;
 mod pcm_buffer;
+mod peak_limiter;
 mod playback;
 mod playback_persistence;
 mod playlist_authoring;

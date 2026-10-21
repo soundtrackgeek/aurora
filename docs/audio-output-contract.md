@@ -31,7 +31,7 @@ Audio preferences are stored atomically in `%APPDATA%\com.soundtrackgeek.aurora\
 
 - selected endpoint ID or `system-default`;
 - ReplayGain mode: `off`, `track`, or `album`;
-- `estimateMissingGain` (0.38.0, default `true`). Files saved by earlier versions omit it and load with the default.
+- `estimateMissingGain` (0.38.0, default `true`) and `boostQuietEstimates` (0.39.0, default `true`). Files saved by earlier versions omit them and load with the defaults.
 
 The file is separate from `aurora-state.sqlite3`, Laptop Mode snapshots, and OneDrive. Desktop and Laptop therefore keep independent device choices while sharing the existing catalog and Aurora state workflows.
 
@@ -52,9 +52,9 @@ Mode behavior:
 - **Track:** Track tag → Track estimate → unity.
 - **Album:** Album tag → Album estimate → Track tag → Track estimate → unity.
 
-Estimates are used only when **Estimate from audio analysis when tags are missing** is on. Tags always win.
+Estimates are used only when **Estimate from audio analysis when tags are missing** is on, and raise quiet tracks only when **Raise quiet untagged tracks** is also on. Tags always win.
 
-The requested linear multiplier is `10^(gain_db / 20)`. When a positive multiplier and tagged peak would exceed full scale, Aurora caps it at `1 / peak`. The player reports the effective gain, whether that cap prevented clipping, and whether the gain is estimated (`−8.2 dB est.`). Volume remains an independent user multiplier.
+The requested linear multiplier is `10^(gain_db / 20)`. When a positive multiplier and tagged peak would exceed full scale, Aurora caps it at `1 / peak`. The player reports the effective gain, whether that cap prevented clipping, and whether the gain is estimated (`−8.2 dB est.`). A raised estimate reads `+4.2 dB est. · limiter`. Volume remains an independent user multiplier.
 
 ReplayGain is read-only playback metadata. Aurora does not calculate, add, remove, or rewrite ReplayGain frames, and it does not alter audio bytes.
 
@@ -66,7 +66,7 @@ Music Library's `music-analysis.sqlite3` stores a level for every analyzed MP3: 
   - Cross-validated error: mean 0.89 dB, median 0.67 dB, 95th percentile 2.3 dB.
   - General music averages 0.55 dB of error and scores 0.92 dB, because R128 gating ignores quiet passages.
 - **Target −18 LUFS**, the reference implied by the library's existing ReplayGain frames, so tagged and estimated tracks share one scale.
-- **Attenuation only:** `gain = clamp(−18 − estimate, −24 dB, 0 dB)`. The analysis has no peak value, so an estimate never boosts and never needs clipping protection.
+- **Gain:** `gain = clamp(−18 − estimate, −24 dB, +6 dB)`. With **Raise quiet untagged tracks** off, the upper bound is 0 dB, the 0.38.0 behavior.
 - **Album estimate:** a duration-weighted energy mean of the album's track estimates. It is used only when at least 80% of the album's cataloged MP3s have a current estimate.
 - **No estimate**, so the next rule applies, when:
   - the analysis store is absent;
@@ -75,7 +75,33 @@ Music Library's `music-analysis.sqlite3` stores a level for every analyzed MP3: 
   - the features are invalid;
   - the track is near-silent (below −60 dBFS).
 
-On the calibration sample in random order, attenuation-only estimates reduced the median loudness jump between consecutive tracks from 3.9 dB to 1.1 dB. Jumps over 6 dB fell from 32% of transitions to 7%.
+Effect on the calibration sample played in random order:
+
+| Policy | Median jump between tracks | Jumps over 6 dB |
+| --- | --- | --- |
+| No leveling | 3.9 dB | 32% |
+| Attenuation only (0.38.0) | 1.4 dB | 6% |
+| Raised up to +6 dB with the limiter (0.39.0) | 1.1 dB | 1% |
+
+The 0.38.0 notes quoted 1.1 dB and 7% for attenuation only. Those figures came from an evaluated six-input model, not the level-only model that shipped. The corrected figures are above.
+
+### Peak limiter for raised estimates (0.39.0)
+
+The analysis stores no peak value, so a raised track could exceed full scale. Every positive estimated gain therefore plays through `PeakLimiter`. Tagged gains and gains at or below 0 dB bypass it entirely.
+
+- **Placement:** after gain and resampling, in the PCM producer thread that fills the three-second ring. It never runs in the real-time callback.
+- **Design:** a lookahead brickwall limiter, linked across channels.
+  - Each frame needs `min(1, ceiling / peak)`, with the ceiling at −1 dBFS sample peak (about 1 dB of margin for inter-sample peaks).
+  - That requirement is passed through a 5 ms sliding minimum, then a 5 ms moving average, then a 150 ms release.
+  - Each frame is emitted with the gain computed 5 ms later. The gain at every peak is therefore at or below what the peak needs, and it changes by at most `1 / L` per frame.
+- **Preserved behavior:** every sample is returned in order, including a flush at the end of the track, so length and gapless handoff are unchanged. A seek clears the limiter's state.
+- **Why not rodio's `limit()`:** it is feed-forward without lookahead, so fast transients overshoot during its attack time.
+
+A read-only simulation on the 70 raised tracks in the calibration sample (+6 dB cap) found the limiter only catches isolated transients:
+
+- 43% of raised tracks never engaged it.
+- Gain reduction peaked at 0.4 dB (median), 3.4 dB (90th percentile) and 7.0 dB (worst track).
+- Reduction above 1 dB lasted 0.00% of playing time in the median track, 0.66% at the 90th percentile and 3.1% at worst.
 
 ## Gapless-capable queue handoff
 
@@ -90,7 +116,7 @@ The handoff is capability-based, not an unconditional guarantee. Missing files, 
 
 ## Verification
 
-- Browser interaction covers Audio/Shortcuts navigation, device, ReplayGain and estimate draft/save behavior, and the compact player readout including `est.`.
-- Rust tests cover the calibration formula, the attenuation clamp, silence and invalid vectors, album energy means and the 80% coverage gate, stale-file and wrong-profile rejection, tag-versus-estimate precedence, and loading pre-0.38.0 settings files.
+- Browser interaction covers Audio/Shortcuts navigation, device, ReplayGain and estimate draft/save behavior, and the compact player readout including `est.` and `est. · limiter`.
+- Rust tests cover the calibration formula, the attenuation clamp, silence and invalid vectors, album energy means and the 80% coverage gate, stale-file and wrong-profile rejection, tag-versus-estimate precedence, the +6 dB boost cap, and loading 0.37 and 0.38 settings files. Limiter tests check that quiet audio passes unchanged (including streams shorter than the lookahead), that spikes and square waves never exceed the ceiling, linked stereo gain, the per-frame gain slope, release recovery, seek reset, and order and length through `PcmBufferSource`.
 - Native Windows-only tests enumerate non-empty output endpoints, round-trip their stable IDs, identify the current default, and verify that Aurora can open its stable shared output configuration.
 - Unit tests cover the observed numeric formats, negative gain, positive-gain peak limiting, safe defaults, and invalid endpoint IDs.

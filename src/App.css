@@ -516,6 +516,7 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .replay-gain-estimate { display: flex; align-items: flex-start; gap: 9px; margin-top: 9px; padding: 9px 10px; border: 1px solid rgba(145,175,201,.14); border-radius: 9px; background: rgba(5,13,20,.34); cursor: pointer; }
 .replay-gain-estimate input { flex: 0 0 auto; margin: 2px 0 0; accent-color: #c75eef; }
 .replay-gain-estimate:has(input:disabled) { opacity: .55; cursor: default; }
+.replay-gain-estimate--nested { margin-top: 6px; margin-left: 22px; }
 .replay-gain-estimate strong { color: #e2e7ec; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); font-weight: 570; }
 .replay-gain-estimate small { margin-top: 2px; color: #788692; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); line-height: 1.42; }
 

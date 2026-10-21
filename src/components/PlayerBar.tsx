@@ -166,7 +166,7 @@ export function PlayerBar({
     ? "ReplayGain off"
     : playback.replayGainDb === null
       ? `${playback.replayGainMode === "album" ? "Album" : "Track"} untagged`
-      : `${playback.replayGainDb > 0 ? "+" : ""}${playback.replayGainDb.toFixed(1)} dB${playback.replayGainEstimated ? " est." : ""}${playback.clippingPrevented ? " protected" : ""}`;
+      : `${playback.replayGainDb > 0 ? "+" : ""}${playback.replayGainDb.toFixed(1)} dB${playback.replayGainEstimated ? " est." : ""}${playback.clippingPrevented ? (playback.replayGainEstimated ? " · limiter" : " protected") : ""}`;
   const healthLabel = playback.audioUnderrunCount > 0
     ? ` · ${playback.audioUnderrunCount} audio underrun${playback.audioUnderrunCount === 1 ? "" : "s"}`
     : playback.realtimeSchedulingDenied

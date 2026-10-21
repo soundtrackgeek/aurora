@@ -1363,7 +1363,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.38.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.39.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
