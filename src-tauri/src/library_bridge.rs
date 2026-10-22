@@ -71,6 +71,8 @@ pub struct LibraryCategoryCapability {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryBridgeSupports {
     #[serde(default)]
+    pub hidden_favorites_v1: bool,
+    #[serde(default)]
     pub playlist_authoring: bool,
     #[serde(default)]
     pub smart_playlist_authoring: bool,
@@ -446,6 +448,25 @@ pub(crate) fn save_sonic_journey(
     input: crate::sonic_journey::SaveJourneyRequest,
 ) -> Result<serde_json::Value, String> {
     invoke_bridge(app, "sonicSaveJourney", input, Duration::from_secs(60))
+}
+
+pub(crate) fn hidden_favorites(
+    app: &AppHandle,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let capabilities: LibraryBridgeCapabilities =
+        invoke_bridge(app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT)?;
+    validate_capabilities(&capabilities)?;
+    if !capabilities.supports.hidden_favorites_v1 {
+        return Err("Update Music Library to 0.195.0 or newer to use Hidden favorites.".into());
+    }
+    if input["action"] == "save" {
+        crate::connections::require_music_writes()?;
+    }
+    app.state::<LibrarySyncCoordinator>()
+        .serialize_bridge_work(|| {
+            invoke_bridge(app, "hiddenFavorites", input, Duration::from_secs(5 * 60))
+        })
 }
 
 /// Sends registered plays to Music Library's listening history. Music Library
@@ -1222,7 +1243,10 @@ where
     TRequest: Serialize,
     TResponse: DeserializeOwned,
 {
-    if !matches!(operation, "capabilities" | "sonicAnalyze") {
+    if !matches!(
+        operation,
+        "capabilities" | "sonicAnalyze" | "hiddenFavorites"
+    ) {
         crate::connections::require_music_writes()?;
     }
     let plan_id = serde_json::to_value(&payload)
@@ -1804,6 +1828,7 @@ mod tests {
             bridge_version: PROTOCOL_VERSION,
             categories: Vec::new(),
             supports: LibraryBridgeSupports {
+                hidden_favorites_v1: false,
                 smart_playlist_authoring: false,
                 playlist_authoring: false,
                 selected_album_batch: true,

@@ -1,0 +1,45 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { HiddenFavorites } from "./HiddenFavorites";
+import { operateHiddenFavorites, type HiddenShelf, type SonicTrack } from "../hiddenFavorites";
+vi.mock("../hiddenFavorites", () => ({ operateHiddenFavorites: vi.fn() }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
+const track: SonicTrack = { trackId: 1, trackKey: "hidden", title: "Overlooked song", artist: "Other artist", albumArtist: "Other artist", album: "My album", albumId: "album", filePath: "C:/Music", filename: "song.mp3", rating: 100, seconds: 180, genre: null, loved: false, distance: null };
+const shelf: HiddenShelf = { revision: "revision-1", generatedAt: "2026-10-22T10:00:00Z", profile: "profile", modelVersion: "v1", modelAuc: 0.73, trainingTracks: 500, validationTracks: 100, historySince: 1787000000, historyPlays: 2000, excludedDays: 90, note: "Ranking evidence, not a predicted rating.", suggestions: [{ track, anchors: [{ ...track, trackKey: "a", title: "Favorite one" }, { ...track, trackKey: "b", title: "Favorite two" }], fit: "Strong fit", broader: false, kept: false }], kept: [], message: null };
+it("opens the exact suggestion and anchors and persists keep, dismissal and reviewed playlist actions", async () => {
+  vi.mocked(operateHiddenFavorites).mockResolvedValue(shelf);
+  const open=vi.fn(); const saved=vi.fn(); render(<HiddenFavorites onOpen={open} onSaved={saved} />);
+  const card=await screen.findByRole("article", { name: "Overlooked song by Other artist" });
+  expect(screen.getByText(/No matched play in the last 90 days/)).toBeInTheDocument();
+  expect(screen.getByText("Strong fit · 5★")).toBeInTheDocument();
+  fireEvent.click(within(card).getByRole("button",{name:"Open Overlooked song by Other artist"})); expect(open).toHaveBeenLastCalledWith(track);
+  fireEvent.click(screen.getByRole("button",{name:/Favorite two/})); expect(open).toHaveBeenLastCalledWith(expect.objectContaining({trackKey:"b"}));
+  vi.mocked(operateHiddenFavorites).mockResolvedValue({...shelf,kept:[track],suggestions:[{...shelf.suggestions[0],kept:true}]});
+  fireEvent.click(screen.getByRole("button",{name:"Keep for later"}));
+  await waitFor(()=>expect(operateHiddenFavorites).toHaveBeenLastCalledWith("keep","revision-1","hidden",null));
+  expect(await within(card).findByRole("button",{name:"Kept for later"})).toBeDisabled();
+  fireEvent.click(screen.getByText("Kept for later (1)"));
+  fireEvent.click(screen.getByRole("button",{name:"Save kept tracks as a playlist"}));
+  await waitFor(()=>expect(operateHiddenFavorites).toHaveBeenLastCalledWith("save","revision-1",null,["hidden"]));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Not today"})).toBeEnabled());
+  expect(saved).toHaveBeenCalledOnce();
+  vi.mocked(operateHiddenFavorites).mockResolvedValue({...shelf,suggestions:[],kept:[track]});
+  fireEvent.click(screen.getByRole("button",{name:"Not today"}));
+  expect(await screen.findByRole("status")).toHaveTextContent("Your rating is unchanged");
+  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+});
+it("shows retrieval errors and permits retry without dropping the previous shelf", async () => {
+  vi.mocked(operateHiddenFavorites).mockResolvedValueOnce(shelf).mockRejectedValueOnce(new Error("Update Music Library"));
+  render(<HiddenFavorites onOpen={vi.fn()} />); await screen.findByRole("article");
+  fireEvent.click(screen.getByRole("button",{name:"Find five more"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Update Music Library");
+  expect(screen.getByRole("article")).toBeInTheDocument(); expect(screen.getByRole("button",{name:"Reload shelf"})).toBeEnabled();
+});
+it("discards a response after unmount and supports optional playback", async () => {
+  vi.mocked(operateHiddenFavorites).mockResolvedValueOnce(shelf);
+  const play=vi.fn().mockRejectedValue(new Error("Playback unavailable"));
+  const view=render(<HiddenFavorites onOpen={vi.fn()} onPlay={play} />); await screen.findByRole("article");
+  fireEvent.click(screen.getByRole("button",{name:"Play"})); expect(await screen.findByRole("alert")).toHaveTextContent("Playback unavailable"); expect(play).toHaveBeenCalledWith(track);
+  let finish!: (value:HiddenShelf)=>void; vi.mocked(operateHiddenFavorites).mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+  fireEvent.click(screen.getByRole("button",{name:"Reload shelf"})); view.unmount(); await act(async()=>finish(shelf));
+});

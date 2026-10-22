@@ -17,6 +17,7 @@ mod explorer;
 mod fanart;
 mod file_observations;
 mod genres;
+mod hidden_favorites;
 mod history;
 mod id3_write;
 mod inbox;
@@ -2062,6 +2063,7 @@ pub fn run() {
             sonic_journey,
             sonic_journey_search,
             sonic_save_journey,
+            hidden_favorites::hidden_favorites,
             sonic_analyze_seed,
             tonehavn_status,
             tonehavn_request_email_login,

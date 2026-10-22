@@ -1,5 +1,14 @@
 # Aurora
 
+Aurora **0.40.0** adds **Ratings → Hidden favorites**, beside Tonight's Album.
+Choose **Find hidden favorites** for five tracks from your own collection,
+connected to several favorites, including rated rediscoveries and one broader
+pick. **Play**, **Keep for later**, **Not today**, and save the kept list as a
+regular playlist. Music Library **0.195.0 or newer** owns the shared shelf,
+ratings-based evidence and feedback; use **Reload shelf** to see changes from
+the other app. Available history is stated explicitly and recent matched plays
+are excluded. See [Hidden favorites](docs/hidden-favorites.md).
+
 Aurora **0.39.0** also raises quiet untagged tracks, mostly dynamic scores, by up to +6 dB toward −18 LUFS. A lookahead peak limiter keeps them from clipping. In **Settings → Audio**, keep **Raise quiet untagged tracks** on, below the estimate option.
 - The limiter runs only on raised tracks and only touches isolated peaks. In a sample of 70 raised tracks, gain reduction above 1 dB lasted 0.00% of playing time in the typical track and 3.1% at worst.
 - The player shows `+4.2 dB est. · limiter` for a raised track.

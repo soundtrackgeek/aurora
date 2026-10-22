@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.40.0] - 2026-10-22
+
+### Added
+- **Ratings → Hidden favorites**, next to Tonight's Album: a five-track shelf from Music Library with recognizable favorite anchors, experimental rating-fit evidence, a broader discovery, and explicit listening-history coverage.
+- Direct track/anchor inspection and playback, shared **Keep for later** and **Not today**, reload, and exact reviewed shortlist-to-playlist saving through Music Library 0.195.0's capability-gated bridge. Apply pending rating/ban edits before display and reject stale/changed selections. Shelf feedback does not alter ratings.
+
 ## [0.39.0] - 2026-10-21
 
 ### Added
