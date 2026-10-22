@@ -1,0 +1,30 @@
+.rating-missions { margin: 20px 0; padding: clamp(16px, 2vw, 28px); border: 1px solid var(--border, #8884); border-radius: 14px; background: var(--surface, #88808); color: inherit; }
+.rating-missions header, .rating-missions__controls, .rating-missions__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.rating-missions header { justify-content: space-between; }
+.rating-missions h2 { margin: 6px 0; font-size: clamp(24px, 2.3vw, 34px); }
+.rating-missions p { line-height: 1.6; }
+.rating-missions header p { margin-top: 0; opacity: .8; }
+.rating-missions__kicker { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; opacity: .75; }
+.rating-missions__controls { margin: 20px 0; align-items: end; }
+.rating-missions label { display: grid; gap: 6px; font-size: 12px; }
+.rating-missions button, .rating-missions select { border: 1px solid var(--border, #8885); border-radius: 6px; background: var(--surface, transparent); color: inherit; padding: 9px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+.rating-missions select { min-height: 38px; }
+.rating-missions button:disabled { opacity: .5; cursor: default; }
+.rating-missions button:focus-visible, .rating-missions select:focus-visible, .rating-missions summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.rating-missions__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 14px; margin-top: 20px; }
+.rating-missions__card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px; border: 1px solid var(--border, #8884); border-radius: 9px; }
+.rating-missions__card--stretch { border-style: dashed; }
+.rating-missions__card h3 { font-size: 20px; margin: 0; overflow-wrap: anywhere; }
+.rating-missions__card p { margin: 0; font-size: 13px; }
+.rating-missions__time { font-weight: 600; }
+.rating-missions__card small, .rating-missions__history, .rating-missions details { font-size: 12px; opacity: .8; }
+.rating-missions__actions { margin-top: auto; padding-top: 10px; }
+.rating-missions summary { padding: 6px 0; cursor: pointer; }
+.rating-missions ol { padding-left: 20px; max-height: 320px; overflow: auto; }
+.rating-missions li { margin: 10px 0; }
+.rating-missions li span { display: block; margin-top: 3px; opacity: .75; }
+.rating-missions li button, .rating-missions__anchors button { padding: 0; border: 0; background: transparent; text-align: left; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.rating-missions__current { margin: 20px 0; border-left: 3px solid currentColor; padding-left: 12px; }
+.rating-missions progress { width: 100%; height: 8px; accent-color: currentColor; }
+.rating-missions [role=alert] { color: var(--danger, #f87171); }
+@media (max-width: 600px) { .rating-missions__controls > *, .rating-missions__controls select { width: 100%; } }

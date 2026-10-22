@@ -1,0 +1,54 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { RatingMissions } from "./RatingMissions";
+import { operateRatingMissions, type MissionShelf, type RatingMission, type SonicTrack } from "../ratingMissions";
+vi.mock("../ratingMissions", () => ({ operateRatingMissions: vi.fn() }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
+const track: SonicTrack = { trackId: 1, trackKey: "mission-track", title: "Unheard cue", artist: "Composer", albumArtist: "Composer", album: "An album", albumId: "album", filePath: "C:/Music", filename: "cue.mp3", rating: null, seconds: 180, genre: null, loved: false, distance: null };
+const mission: RatingMission = { id: "mission-1", kind: "finish", title: "An album", reason: "Finish the remaining tracks.", fit: "Possible fit", tracks: [track], anchors: [{ ...track, trackKey: "favorite", title: "Favorite cue", rating: 100 }], seconds: 180, albumTotal: 10, albumRated: 9, completedTracks: 0, status: "choice", startedAt: null, completedAt: null };
+const shelf: MissionShelf = { revision: "revision-1", generatedAt: "2026-10-22T10:00:00Z", minutes: 40, mode: "albums", note: "Audition guidance, never predicted stars.", modelVersion: "v1", modelAuc: .73, trainingTracks: 500, validationTracks: 100, choices: [mission], active: null, startedMissions: 0, completedMissions: 0, completedArtists: 0, completedNeighborhoods: 0, message: null };
+it("reviews the exact tracks, applies time/format only on request, and saves reviewed order", async () => {
+  vi.mocked(operateRatingMissions).mockResolvedValue(shelf);
+  const open=vi.fn(); const saved=vi.fn(); render(<RatingMissions onOpen={open} onSaved={saved} />);
+  const card=await screen.findByRole("article");
+  expect(within(card).getByText("Composer · 9 of 10 tracks rated")).toBeInTheDocument();
+  fireEvent.click(within(card).getByText("Review mission tracks (1)"));
+  fireEvent.click(screen.getByRole("button",{name:"Unheard cue — Composer"})); expect(open).toHaveBeenCalledWith(track);
+  fireEvent.click(screen.getByRole("button",{name:"Favorite cue — Composer"})); expect(open).toHaveBeenLastCalledWith(mission.anchors[0]);
+  fireEvent.change(screen.getByLabelText("Time for a rating mission"),{target:{value:"20"}});
+  fireEvent.change(screen.getByLabelText("Rating mission format"),{target:{value:"mix"}});
+  expect(screen.getByRole("status")).toHaveTextContent("original plan");
+  expect(operateRatingMissions).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button",{name:"Find new missions"}));
+  await waitFor(()=>expect(operateRatingMissions).toHaveBeenLastCalledWith(expect.objectContaining({action:"refresh",minutes:20,mode:"mix"})));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Save mission as playlist"})).toBeEnabled());
+  fireEvent.click(screen.getByRole("button",{name:"Save mission as playlist"}));
+  await waitFor(()=>expect(operateRatingMissions).toHaveBeenLastCalledWith(expect.objectContaining({action:"save",revision:"revision-1",missionId:"mission-1",trackKeys:["mission-track"]})));
+  await waitFor(()=>expect(saved).toHaveBeenCalledOnce());
+});
+it("starts a persisted mission and plays only the freshly reloaded unrated tracks", async () => {
+  vi.mocked(operateRatingMissions).mockResolvedValueOnce(shelf).mockResolvedValueOnce({...shelf,choices:[],active:{...mission,status:"active"},startedMissions:1});
+  const play=vi.fn().mockResolvedValue(undefined); render(<RatingMissions onOpen={vi.fn()} onPlay={play} />);
+  fireEvent.click(await screen.findByRole("button",{name:"Start & play"}));
+  await waitFor(()=>expect(play).toHaveBeenCalledWith([track]));
+  expect(screen.getByRole("progressbar")).toHaveAttribute("value","0");
+  vi.mocked(operateRatingMissions).mockResolvedValue({...shelf,choices:[],active:{...mission,status:"completed",tracks:[{...track,rating:20}],completedTracks:1,seconds:0},startedMissions:1,completedMissions:1});
+  fireEvent.click(screen.getByRole("button",{name:"Play remaining"}));
+  await screen.findByText(/Mission completed/); expect(play).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button",{name:"Play remaining"})).toBeDisabled();
+  expect(screen.getByText(/1 of 1 started missions completed/)).toBeInTheDocument();
+});
+it("preserves the previous plan on failure and prevents a second active mission", async () => {
+  vi.mocked(operateRatingMissions).mockResolvedValueOnce({...shelf,active:{...mission,id:"active",status:"active"}}).mockRejectedValueOnce(new Error("Update Music Library"));
+  render(<RatingMissions onOpen={vi.fn()} />); await screen.findAllByRole("article");
+  expect(screen.getByRole("button",{name:"Start mission"})).toBeDisabled();
+  fireEvent.click(screen.getByRole("button",{name:"Find new missions"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Update Music Library");
+  expect(screen.getAllByRole("article")).toHaveLength(2);
+});
+it("discards delayed responses after unmount", async () => {
+  vi.mocked(operateRatingMissions).mockResolvedValueOnce(shelf);
+  const view=render(<RatingMissions onOpen={vi.fn()} />); await screen.findByRole("article");
+  let finish!:(value:MissionShelf)=>void; vi.mocked(operateRatingMissions).mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+  fireEvent.click(screen.getByRole("button",{name:"Reload progress"})); view.unmount(); await act(async()=>finish(shelf));
+});

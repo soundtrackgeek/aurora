@@ -38,6 +38,7 @@ mod playback_persistence;
 mod playlist_authoring;
 mod playlists;
 mod publishers;
+mod rating_missions;
 mod ratings;
 mod remote_affinity;
 mod replay_gain;
@@ -2064,6 +2065,7 @@ pub fn run() {
             sonic_journey_search,
             sonic_save_journey,
             hidden_favorites::hidden_favorites,
+            rating_missions::rating_missions,
             sonic_analyze_seed,
             tonehavn_status,
             tonehavn_request_email_login,

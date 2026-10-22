@@ -1,5 +1,13 @@
 # Aurora
 
+Aurora **0.41.0** adds **Ratings → What should I rate next?** Choose your time
+and an album or mixed mission for three ways into your unrated backlog: likely
+fit, close to completion, and a deliberate stretch. **Start & play** queues the
+reviewed remaining tracks; use your usual rating controls, then **Reload progress**.
+Music Library **0.196.0 or newer** owns missions, sonic ranking, shared completion
+and playlist writing. Pending Aurora ratings update the display; shared completion
+waits for catalog sync. See [rating missions](docs/rating-missions.md).
+
 Aurora **0.40.0** adds **Ratings → Hidden favorites**, beside Tonight's Album.
 Choose **Find hidden favorites** for five tracks from your own collection,
 connected to several favorites, including rated rediscoveries and one broader

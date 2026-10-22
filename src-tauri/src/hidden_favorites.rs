@@ -4,7 +4,7 @@ use crate::{catalog, state_store::StateStore, tag_model::LoveState};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
-fn current(track: &mut Value, store: &StateStore, suggestion: bool) -> bool {
+pub(crate) fn current(track: &mut Value, store: &StateStore, suggestion: bool) -> bool {
     let Some(key) = track["trackKey"].as_str() else {
         return false;
     };

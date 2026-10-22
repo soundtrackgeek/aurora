@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.41.0] - 2026-10-22
+
+### Added
+- **Ratings → What should I rate next?** with time-bounded album and mixed audition missions from Music Library 0.196.0: likely fit, close to completion and deliberate stretch, exact track/anchor review, shared active mission and real-rating progress.
+- Start-and-play and freshly reloaded remaining-track playback through the normal queue, reviewed mission-to-playlist saving, completion/artist/anchor counters, and pending rating/ban projection. Capability and revision guards explain when Music Library or the catalog must be updated; missions never predict or assign ratings.
+
 ## [0.40.0] - 2026-10-22
 
 ### Added

@@ -1363,7 +1363,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.40.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.41.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1662,6 +1662,7 @@ function App() {
                 <RatingsRoute
                   tonight={{ onPlay: playTonightAlbum, onOpen: goToRatingAlbum, onSettings: () => openSettings("connections"), playbackBusy: ratingsQueueBusy }}
                   hiddenFavorites={{ onSaved: () => setPlaylistsReloadToken(t => t + 1), onOpen: track => selectTrack(journeyPlaybackTracks([track])[0]), onPlay: async track => { if (!await startPlaylistQueue(journeyPlaybackTracks([track]), 0)) throw new Error("Could not start this track. Check playback and try again."); } }}
+                  ratingMissions={{ onSaved: () => setPlaylistsReloadToken(t => t + 1), onOpen: track => selectTrack(journeyPlaybackTracks([track])[0]), onPlay: async tracks => { if (!await startPlaylistQueue(journeyPlaybackTracks(tracks), 0)) throw new Error("Could not start this mission. Check playback and try again."); } }}
                   overview={ratingsOverview}
                   page={ratingsPage}
                   selectedAlbum={selectedRatingAlbum}
