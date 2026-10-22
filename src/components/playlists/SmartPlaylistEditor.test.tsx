@@ -19,3 +19,13 @@ it("preserves advanced rules and the original edit revision across background re
   fireEvent.click(screen.getByRole("button",{name:"Save Smart playlist"}));
   await waitFor(()=>expect(saveSmartPlaylist).toHaveBeenCalledWith(expect.objectContaining({expectedUpdatedAt:"before",settings:{trackLimit:25,refreshPolicy:"library"},request:expect.objectContaining({filters:{albumRatingMin:90,albumRatingMax:94,billboardRankMax:10,albumArtist:{operator:"equals",value:"Pet Shop Boys"}}})})));
 });
+
+it("round-trips seed audio identities and native filters when editing Sonic Smart rules",async()=>{
+  vi.mocked(saveSmartPlaylist).mockResolvedValue({id:7});
+  const sonic={version:1,profile:"bliss-0.13.0-symphonia-0.6.1-v2-full-mp3",seeds:[{trackKey:"file:seed",title:"Seed song",artist:"Seed artist",audioHash:"original-audio"}],maxDistance:0.15,maxPerArtist:2,ordering:"nearest"};
+  render(<SmartPlaylistEditor id={7} revision="original" name="Sonic" request={{...emptySharedRequest(),filters:{yearFrom:1980,billboardRankMax:10}}} settings={{trackLimit:30,refreshPolicy:"manual",sonic}} onSaved={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByLabelText("Match",{exact:true})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Maximum songs per track artist"),{target:{value:"3"}});
+  fireEvent.click(screen.getByRole("button",{name:"Save Smart playlist"}));
+  await waitFor(()=>expect(saveSmartPlaylist).toHaveBeenCalledWith(expect.objectContaining({expectedUpdatedAt:"original",settings:{trackLimit:30,refreshPolicy:"manual",sonic:{...sonic,maxPerArtist:3}},request:expect.objectContaining({filters:{yearFrom:1980,billboardRankMax:10}})})));
+});

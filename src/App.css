@@ -674,3 +674,9 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
   .saved-playlists__tracks .saved-playlists__duration, .saved-playlists__tracks .saved-playlists__row-play { display: none; }
   .history-row:has(.add-to-playlist) { grid-template-columns: minmax(120px,1fr) 70px 64px; }
 }
+
+.sonic-smart-rules { margin: 18px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.sonic-smart-rules label { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; }
+.sonic-smart-rules input { max-width: 100%; min-width: 0; width: auto; }
+.sonic-smart-rules li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0; }
+.sonic-smart-rules li span { flex: 1; min-width: 120px; overflow-wrap: anywhere; }

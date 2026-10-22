@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Track } from "../../library";
-import { authorPlaylist, exportPlaylist, previewPlaylistImport, savePlaylistImport, loadMusicLibraryPlaylist } from "../../playlists";
+import { authorPlaylist, exportPlaylist, previewPlaylistImport, savePlaylistImport, loadMusicLibraryPlaylist, refreshSmartPlaylist } from "../../playlists";
 import { PlaylistsPage } from "./PlaylistsPage";
 
 vi.mock("../../playlists", () => ({
-  loadMusicLibraryPlaylist: vi.fn(),
+  loadMusicLibraryPlaylist: vi.fn(), refreshSmartPlaylist: vi.fn(),
   authorPlaylist: vi.fn(), exportPlaylist: vi.fn(), previewPlaylistImport: vi.fn(), savePlaylistImport: vi.fn(),
 }));
 afterEach(cleanup);
@@ -89,4 +89,17 @@ it("previews import before saving and confirms shared deletion",async()=>{
   fireEvent.click(screen.getByRole("button",{name:"Delete shared playlist"}));
   await waitFor(()=>expect(authorPlaylist).toHaveBeenLastCalledWith({action:"delete",id:3,expectedUpdatedAt:"rev",name:"Saved"}));
   await waitFor(()=>expect(select).toHaveBeenLastCalledWith(null));
+});
+
+it("refreshes sonic membership without calling playback and shows retained-result errors",async()=>{
+  vi.mocked(loadMusicLibraryPlaylist).mockResolvedValue({id:3,name:"Sound",description:"Sonic Smart",trackCount:2,missingCount:0,tracks,revision:"old",refreshError:"Sound example 1 needs current analysis"});
+  vi.mocked(refreshSmartPlaylist).mockResolvedValue();
+  const play=vi.fn(async()=>true);
+  render(<PlaylistsPage active playlists={[{id:3,name:"Sound",description:"",trackCount:2,updatedAt:"old",smart:true}]} selectedId={3} listLoading={false} listError={null} onSelect={vi.fn()} onRefresh={vi.fn()} onPlay={play} />);
+  expect(await screen.findByText("Sound example 1 needs current analysis")).toBeInTheDocument();
+  vi.mocked(loadMusicLibraryPlaylist).mockResolvedValue({id:3,name:"Sound",description:"Refreshed sound",trackCount:1,missingCount:0,tracks:[tracks[1]],revision:"new"});
+  fireEvent.click(screen.getByRole("button",{name:"Refresh rules"}));
+  await waitFor(()=>expect(refreshSmartPlaylist).toHaveBeenCalledWith(3));
+  await waitFor(()=>expect(screen.getByText("Refreshed sound")).toBeInTheDocument());
+  expect(play).not.toHaveBeenCalled();
 });

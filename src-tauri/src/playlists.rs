@@ -29,6 +29,7 @@ pub(crate) struct SavedPlaylistDetail {
     tracks: Vec<TrackSummary>,
     request: Option<serde_json::Value>,
     smart_settings: Option<serde_json::Value>,
+    refresh_error: Option<String>,
     next_cursor: Option<i64>,
     revision: String,
     positions: Vec<i64>,
@@ -195,6 +196,19 @@ fn detail_on(
         &format!("SELECT json_extract(playlist_json,'$.mixtape') IS NULL AND {smart}=0 FROM saved_playlists WHERE id=?1"),
         [id], |row| row.get(0),
     ).map_err(|e| format!("Could not read playlist editing permissions: {e}"))?;
+    let refresh_error = if smart_expression(connection)? != "0" {
+        connection
+            .query_row(
+                "SELECT last_error FROM playlist_automations WHERE saved_playlist_id=?1",
+                [id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten()
+    } else {
+        None
+    };
     Ok(SavedPlaylistDetail {
         id,
         name,
@@ -214,6 +228,7 @@ fn detail_on(
         revision,
         positions,
         editable,
+        refresh_error,
     })
 }
 
@@ -296,7 +311,7 @@ mod tests {
     fn pages_all_entries_and_seeded_shuffle_without_loss_and_rejects_stale_revision() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE saved_playlists (id INTEGER PRIMARY KEY, name TEXT, playlist_json TEXT, updated_at TEXT);
-            CREATE TABLE playlist_automations (saved_playlist_id INTEGER PRIMARY KEY, smart INTEGER);
+            CREATE TABLE playlist_automations (saved_playlist_id INTEGER PRIMARY KEY, smart INTEGER, last_error TEXT);
             CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT, album_artist_display TEXT, album TEXT,
               release_year INTEGER, normalized_rating INTEGER, rating_raw TEXT, love TEXT, time_seconds INTEGER,
               canonical_genre TEXT, album_id TEXT, file_path TEXT, filename TEXT, import_run_id INTEGER,
@@ -310,7 +325,10 @@ mod tests {
         }
         connection.execute("INSERT INTO saved_playlists VALUES (1,'Shared',?1,'v1')",[serde_json::json!({"tracks":items,"request":{"view":"tracks"},"smartSettings":{"trackLimit":250,"refreshPolicy":"manual"}}).to_string()]).unwrap();
         connection
-            .execute("INSERT INTO playlist_automations VALUES (1,1)", [])
+            .execute(
+                "INSERT INTO playlist_automations VALUES (1,1,'Sound example 1 needs analysis')",
+                [],
+            )
             .unwrap();
         connection.pragma_update(None, "query_only", true).unwrap();
         assert!(list_on(&connection).unwrap()[0].smart);
@@ -320,6 +338,10 @@ mod tests {
             let mut lengths = Vec::new();
             loop {
                 let page = detail_on(&connection, 1, None, after, Some("v1"), seed).unwrap();
+                assert_eq!(
+                    page.refresh_error.as_deref(),
+                    Some("Sound example 1 needs analysis")
+                );
                 lengths.push(page.tracks.len());
                 ids.extend(
                     page.tracks

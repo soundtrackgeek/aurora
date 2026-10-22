@@ -293,7 +293,9 @@ pub(crate) fn search(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let mut q = c.prepare(&format!("SELECT {SELECT} {JOIN} WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3' AND (t.title LIKE ?2 ESCAPE '\\' OR t.display_artist LIKE ?2 ESCAPE '\\' OR t.album_artist_display LIKE ?2 ESCAPE '\\') ORDER BY t.id DESC LIMIT 100")).map_err(|e| e.to_string())?;
+    // Keep the literal catalog text filter ahead of the analysis joins. An
+    // analysis-first plan otherwise looks up every analyzed path before sorting.
+    let mut q = c.prepare(&format!("SELECT {SELECT} FROM tracks t CROSS JOIN sonic.sonic_tracks s ON s.directory=t.file_path AND s.filename=t.filename JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile WHERE s.profile=?1 AND lower(t.filename) LIKE '%.mp3' AND (t.title LIKE ?2 ESCAPE '\\' OR t.display_artist LIKE ?2 ESCAPE '\\' OR t.album_artist_display LIKE ?2 ESCAPE '\\') ORDER BY t.id DESC LIMIT 100")).map_err(|e| e.to_string())?;
     let mut tracks = Vec::new();
     for entry in q
         .query_map(params![PROFILE, pattern], row)

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.43.0] - 2026-10-22
+
+### Added
+- **Sonic Smart playlists** in the shared Smart editor: analyzed-track example search, 1–8 positive examples, acoustic distance and per-track-artist limits, nearest-example ordering, metadata filters and explicit unrated-only selection. Preserve seed audio identity and edit revision.
+- Require Music Library 0.198.0 and `sonicSmartPlaylistsV1` before saving a sound recipe, and display persisted refresh errors with retained membership. Refresh updates playlist details without calling playback.
+
+### Changed
+- Filter analyzed-song example searches through catalog metadata before joining audio features, preserving literal text matching and current-file validation.
+
 ## [0.42.0] - 2026-10-22
 
 ### Added

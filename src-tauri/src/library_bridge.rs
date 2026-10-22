@@ -79,6 +79,8 @@ pub struct LibraryBridgeSupports {
     #[serde(default)]
     pub smart_playlist_authoring: bool,
     #[serde(default)]
+    pub sonic_smart_playlists_v1: bool,
+    #[serde(default)]
     pub selected_album_batch: bool,
     pub single_album: bool,
     pub batch_folders: bool,
@@ -506,6 +508,16 @@ pub(crate) fn playlist_operation(
 ) -> Result<serde_json::Value, String> {
     let capabilities: LibraryBridgeCapabilities =
         invoke_bridge(app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT)?;
+    if operation == "playlistSaveSmart"
+        && input
+            .pointer("/settings/sonic")
+            .is_some_and(|v| !v.is_null())
+        && !capabilities.supports.sonic_smart_playlists_v1
+    {
+        return Err(
+            "Update Music Library to 0.198.0 or newer to save Sonic Smart playlists.".into(),
+        );
+    }
     if !(if operation == "playlistAuthor" {
         capabilities.supports.playlist_authoring
     } else {
@@ -1852,6 +1864,7 @@ mod tests {
                 hidden_favorites_v1: false,
                 rating_missions_v1: false,
                 smart_playlist_authoring: false,
+                sonic_smart_playlists_v1: false,
                 playlist_authoring: false,
                 selected_album_batch: true,
                 single_album: true,

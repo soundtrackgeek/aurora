@@ -16,6 +16,7 @@ export interface SavedPlaylistDetail extends Omit<SavedPlaylistSummary, "updated
   tracks: Track[];
   request?: SharedPlaylistRequest | null;
   smartSettings?: SmartPlaylistSettings | null;
+  refreshError?: string | null;
   nextCursor?: number | null;
   revision?: string;
   positions?: number[];
@@ -30,7 +31,12 @@ export interface SharedPlaylistRequest {
   limit: number;
   offset: number;
 }
-export interface SmartPlaylistSettings { trackLimit: number; refreshPolicy: "library" | "manual"; }
+export interface SonicPlaylistRecipe {
+  version: number; profile: string;
+  seeds: { trackKey: string; title: string; artist: string; audioHash?: string | null }[];
+  maxDistance: number; maxPerArtist: number; ordering: string;
+}
+export interface SmartPlaylistSettings { trackLimit: number; refreshPolicy: "library" | "manual"; sonic?: SonicPlaylistRecipe | null; }
 export interface PlaylistPageContext { id: number; cursor: number | null; revision: string; shuffleSeed?: number; }
 
 export interface PlaylistImportPreview { path: string; fingerprint: string; name: string; trackCount: number; samples: string[]; }

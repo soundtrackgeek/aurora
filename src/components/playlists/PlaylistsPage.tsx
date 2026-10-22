@@ -133,6 +133,7 @@ export function PlaylistsPage({ active, playlists, selectedId, listLoading, list
         {selected && <header><h2>{selected.name}</h2><p>{detail?.description || selected.description}</p><small>{formatCount(selected.trackCount)} saved songs{detail?.missingCount ? ` · ${formatCount(detail.missingCount)} unavailable in the current catalog` : ""}</small></header>}
         {loading && <p role="status">Loading songs…</p>}
         {error && <p role="alert" className="error-message">{error}</p>}
+        {detail?.id === selectedId && detail?.refreshError && <p role="status" className="error-message">{detail.refreshError}</p>}
         {queueMessage && <p role="status" className="error-message">{queueMessage}</p>}
         {!selected && playlists.length > 0 && <p>Choose a playlist to see its songs.</p>}
         {detail && detail.id === selectedId && !loading && <>

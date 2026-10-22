@@ -1,5 +1,13 @@
 # Aurora
 
+Aurora **0.43.0** adds **Sonic Smart playlists** to Playlists → Create Smart
+playlist / Edit rules. Enable **Sounds like these examples**, choose 1–8 analyzed
+songs, set the distance and artist cap, and combine them with metadata rules.
+Music Library 0.198.0 owns evaluation and publication through a capability-gated
+bridge. Missing seeds retain the previous result and show the refresh error;
+refreshing never starts or replaces playback. Negative examples, sound nudges and
+learned tags remain future work.
+
 Aurora 0.42.0 adds **Explore its sound** to album inspectors in Albums,
 Publishers, Ratings and Years. Hear one to three real representative tracks,
 play a sound group, expand its track list, or try the album’s strongest contrast.
