@@ -3,6 +3,21 @@ import { browserPreview, isTauriRuntime, type Track } from "./library";
 export interface SonicRequest { seedKey: string; seedAlbumId?: string | null; minimumCoverage?: number; excludeKeys: string[]; limit: number; minimumRating: number | null; sameGenre: boolean; radio: boolean; }
 export interface SonicAlbum { albumId: string; title: string; albumArtist: string; genre: string | null; totalTracks: number; analyzedTracks: number; distance: number | null; }
 export interface SonicAlbumMatches { seed: SonicAlbum | null; seedReady: boolean; analyzedAlbums: number; albums: SonicAlbum[]; }
+export interface SideTrack { trackKey: string; albumId: string; title: string; artist: string; }
+export interface AlbumSide { representative: SideTrack; tracks: SideTrack[]; }
+export interface SideAlbumMatch { album: SonicAlbum; matchingTrack: SideTrack; distance: number; }
+export interface AlbumSidesResponse { version: string; totalTracks: number; analyzedTracks: number; ready: boolean; sides: AlbumSide[]; contrastingTrack: SideTrack | null; selectedKey: string | null; matches: SideAlbumMatch[]; searchLimited: boolean; }
+export async function exploreAlbumSound(albumId: string, strandKey: string | null = null): Promise<AlbumSidesResponse> {
+  if (isTauriRuntime()) return invoke("sonic_album_sides", { request: { albumId, strandKey } });
+  const all = browserPreview.tracks.filter(t => t.albumId === albumId);
+  const usable = all.filter(t => t.sonicAnalyzed && t.loveState !== "banned");
+  const ready = all.length > 0 && all.length === usable.length;
+  const sideTrack = (t: Track): SideTrack => ({ trackKey: t.trackKey, albumId: t.albumId!, title: t.title, artist: t.displayArtist || t.artist });
+  const albums = strandKey ? await sonicAlbumMatches(albumId, 100) : null;
+  return { version: "Browser demonstration", totalTracks: all.length, analyzedTracks: usable.length, ready,
+    sides: ready ? [{ representative: sideTrack(usable[0]), tracks: usable.map(sideTrack) }] : [], contrastingTrack: null, selectedKey: strandKey,
+    matches: ready ? (albums?.albums ?? []).flatMap(album => { const track = browserPreview.tracks.find(t => t.albumId === album.albumId && t.loveState !== "banned"); return track ? [{ album, matchingTrack: sideTrack(track), distance: 0.2 }] : []; }) : [], searchLimited: true };
+}
 export async function sonicAlbumMatches(albumId: string, minimumCoverage: number): Promise<SonicAlbumMatches> {
   if (isTauriRuntime()) return invoke("sonic_album_matches", { request: { albumId, minimumCoverage, limit: 20 } });
   const groups = new Map<string, Track[]>();

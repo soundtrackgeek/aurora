@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.42.0] - 2026-10-22
+
+### Added
+- **An album’s many sides → Explore its sound** in album inspectors: real representative tracks, group counts and playback, expandable neighboring tracks, and the strongest contrast. Short or uniform albums retain one entry point.
+- Discover other albums through the chosen sound, with matching-cue playback and album navigation. Reuse Music Library’s versioned calculation and existing track index; require complete fresh analysis, respect pending bans, exclude identical seed audio, and discard results after album navigation. No new scan is needed.
+
 ## [0.41.1] - 2026-10-22
 
 ### Fixed

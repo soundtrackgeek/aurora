@@ -1,5 +1,6 @@
 //! App-independent result contract. No decoder, SQLite, or Bliss dependency.
 use serde::{Deserialize, Serialize};
+pub mod album_sides;
 pub mod index;
 
 pub const PROFILE: &str = "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3";

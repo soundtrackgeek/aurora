@@ -1,5 +1,20 @@
 # Aurora
 
+Aurora 0.42.0 adds **Explore its sound** to album inspectors in Albums,
+Publishers, Ratings and Years. Hear one to three real representative tracks,
+play a sound group, expand its track list, or try the album’s strongest contrast.
+**Find this sound on other albums** finds albums containing a matching cue and
+lets you hear that cue directly. Complete usable analysis is required, and
+coverage stays visible. Existing Music Library analysis is reused.
+If the shared sound index is not ready, album groups stay available and
+discovery asks you to retry after Music Library prepares the index.
+
+Groups are whole-track acoustic neighborhoods. They do not label moods,
+instruments or sections. Discovery checks up to 120 candidate albums from a
+bounded track neighborhood and returns up to 12 complete albums; identical
+audio to the seed, bans and stale files are excluded. The browser demonstration
+is illustrative. See [the shared behavior and limits](https://github.com/soundtrackgeek/music_backup_v5/blob/master/docs/album-many-sides.md).
+
 Aurora **0.41.1** fixes a macOS release verification timeout in the album/artist
 navigation tests. Back restoration and artist-to-album opening are checked
 separately with controlled loading, including a simulated six-second catalog

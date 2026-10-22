@@ -1,4 +1,5 @@
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
+import { AlbumSidesPanel } from "./components/AlbumSidesPanel";
 import { SonicJourneyPanel } from "./components/SonicJourneyPanel";
 import { useSonicJourney } from "./useSonicJourney";
 import { journeyPlaybackTracks } from "./sonicJourney";
@@ -901,9 +902,16 @@ function App() {
     await playback.play(tracks, tracks[0].id);
   }
   function albumSonicPanel(albumId: string) {
-    return <SonicAlbumPanel key={albumId} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlayAlbum={playSonicAlbum}
+    return <><AlbumSidesPanel key={`sides-${albumId}`} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlay={async selected => {
+      const detail = await loadAlbumDetail(selected[0].albumId);
+      const keys = new Set(selected.map(t => t.trackKey));
+      const tracks = detail.tracks.filter(t => keys.has(t.trackKey) && t.loveState !== "banned");
+      if (tracks.length !== keys.size) throw new Error("Some selected tracks are no longer available. Explore the album again.");
+      endGenreQueue();
+      await playback.play(tracks, tracks[0].id);
+    }} /><SonicAlbumPanel key={albumId} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlayAlbum={playSonicAlbum}
       radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop}
-      onRadio={(album, rating, genre, coverage) => { endGenreQueue(); void sonicRadio.startAlbum(album, rating, genre, coverage); }} />;
+      onRadio={(album, rating, genre, coverage) => { endGenreQueue(); void sonicRadio.startAlbum(album, rating, genre, coverage); }} /></>;
   }
 
   function openTrackAlbum(track: Track) {
@@ -1363,7 +1371,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.41.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.42.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

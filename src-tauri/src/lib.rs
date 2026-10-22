@@ -47,6 +47,7 @@ mod shortcuts;
 mod single_instance;
 mod snapshot_io;
 mod sonic;
+mod sonic_album_sides;
 mod sonic_albums;
 mod sonic_gain;
 mod sonic_index;
@@ -881,6 +882,18 @@ async fn sonic_album_matches(
 ) -> Result<sonic_albums::SonicAlbumMatches, String> {
     tauri::async_runtime::spawn_blocking(move || {
         sonic::album_query(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sonic_album_sides(
+    app: AppHandle,
+    request: sonic_album_sides::AlbumSidesRequest,
+) -> Result<sonic_album_sides::AlbumSidesResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic::album_sides_query(request, &app.state::<StateStore>())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2061,6 +2074,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sonic_matches,
             sonic_album_matches,
+            sonic_album_sides,
             sonic_journey,
             sonic_journey_search,
             sonic_save_journey,

@@ -1,0 +1,16 @@
+.album-sides-panel { min-width: 0; }
+.album-sides-heading h3 { margin-top: 5px; }
+.album-sides-eyebrow { display: block; color: var(--muted); font-size: 10px; line-height: 1.5; letter-spacing: .08em; text-transform: uppercase; }
+.album-sides-groups { display: grid; gap: 12px; margin-top: 16px; }
+.album-sides-group, .album-sides-contrast, .album-sides-match { border-top: 1px solid var(--border); padding-top: 14px; min-width: 0; }
+.album-sides-panel h4 { font-size: 14px; line-height: 1.5; margin: 5px 0; overflow-wrap: anywhere; }
+.album-sides-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.album-sides-panel button { max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.album-sides-panel button:focus-visible, .album-sides-panel summary:focus-visible { outline: 2px solid var(--accent, #bcb1e6); outline-offset: 3px; }
+.album-sides-panel details { margin: 12px 0; font-size: 12px; }
+.album-sides-panel summary { cursor: pointer; line-height: 1.5; }
+.album-sides-panel ul { list-style: none; padding: 0; }
+.album-sides-panel li { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+.album-sides-panel li span { overflow-wrap: anywhere; min-width: 0; }
+.album-sides-contrast, .album-sides-results { margin-top: 20px; }
+.album-sides-note { margin-top: 18px; }

@@ -109,6 +109,13 @@ pub(crate) fn album_query(
         .is_file();
     crate::sonic_albums::query(&c, has_analysis, &request, &ban_overrides(Some(store))?)
 }
+pub(crate) fn album_sides_query(
+    request: crate::sonic_album_sides::AlbumSidesRequest,
+    store: &StateStore,
+) -> Result<crate::sonic_album_sides::AlbumSidesResponse, String> {
+    let (c, has) = journey_catalog()?;
+    crate::sonic_album_sides::query(&c, has, &request, &ban_overrides(Some(store))?)
+}
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SonicResponse {
