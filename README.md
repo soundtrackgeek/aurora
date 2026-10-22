@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.41.1** fixes a macOS release verification timeout in the album/artist
+navigation tests. Back restoration and artist-to-album opening are checked
+separately with controlled loading, including a simulated six-second catalog
+response, while keeping the normal test timeout. The rating missions from
+0.41.0 are unchanged.
+
 Aurora **0.41.0** adds **Ratings → What should I rate next?** Choose your time
 and an album or mixed mission for three ways into your unrated backlog: likely
 fit, close to completion, and a deliberate stretch. **Start & play** queues the

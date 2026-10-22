@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.41.1] - 2026-10-22
+
+### Fixed
+- macOS release verification timing out in the album → artist → album navigation test. Separate Back restoration and artist-album opening, explicitly settle lazy routes and scheduled work, and scope DOM queries. Cover a pending response that finishes after Back and a simulated six-second catalog response with controlled timers instead of increasing the test timeout.
+
 ## [0.41.0] - 2026-10-22
 
 ### Added

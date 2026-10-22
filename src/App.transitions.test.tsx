@@ -8,11 +8,14 @@ import * as shortcuts from "./shortcuts";
 // Canvas playback rendering is unrelated to album request/commit ordering.
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
 
-// The saving-state checks exercise rendered controls, not cold route compilation.
-beforeAll(async () => { await import("./app/routes/LibraryRoute"); });
+// These checks exercise request ordering and navigation, not cold transforms.
+beforeAll(async () => {
+  await Promise.all([import("./app/routes/LibraryRoute"), import("./app/routes/ArtistRoute")]);
+});
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   localStorage.clear();
 });
@@ -144,18 +147,59 @@ it("reveals artist intelligence without waiting for the catalog summary", async 
   expect(await screen.findByLabelText("Local catalog summary")).toHaveTextContent("94");
 });
 
-it("opens an album artist page and returns to the same Albums results", async () => {
-  render(<App />);
-  await openAlbums();
-  const cover = await screen.findByRole("button", { name: /^Viva la Vida cover/ });
-  fireEvent.click(cover);
-  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+async function settleNavigation() {
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+async function openVivaDetails() {
+  vi.useFakeTimers();
+  await act(async () => { render(<App />); });
+  await settleNavigation();
+  const main = within(screen.getByRole("main"));
+  expect(main.getByRole("region", { name: "Library overview" })).toBeVisible();
+  const primary = within(screen.getByRole("navigation", { name: "Primary" }));
+  fireEvent.click(primary.getByRole("button", { name: "Albums" }));
+  await settleNavigation();
+  fireEvent.click(main.getByRole("button", { name: /^Viva la Vida cover/ }));
+  await settleNavigation();
+  return { main, primary, details: main.getByRole("complementary", { name: "Viva la Vida album details" }) };
+}
+
+it("opens an album artist page and returns to the same Albums results before artist loading finishes", async () => {
+  const artistDetail = await library.loadArtistDetail("Coldplay");
+  let finish!: (detail: library.ArtistDetail) => void;
+  vi.spyOn(library, "loadArtistDetail").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { main, primary, details } = await openVivaDetails();
   fireEvent.click(within(details).getByRole("button", { name: "Open artist page for Coldplay" }));
-  expect(await screen.findByRole("article", { name: "Coldplay artist page" }, { timeout: 5000 })).toBeInTheDocument();
+  await settleNavigation();
+  const page = within(main.getByRole("article", { name: "Coldplay artist page" }));
+  expect(page.queryByLabelText("Local catalog summary")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue("");
-  fireEvent.click(screen.getByRole("button", { name: "Back to Albums" }));
-  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeInTheDocument();
-  fireEvent.click(within(screen.getByRole("complementary", { name: "Viva la Vida album details" })).getByRole("button", { name: "Open artist page for Coldplay" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Open Viva la Vida" }));
-  expect(await screen.findByRole("complementary", { name: "Viva la Vida album details" })).toBeInTheDocument();
+  fireEvent.click(main.getByRole("button", { name: "Back to Albums" }));
+  await settleNavigation();
+  expect(primary.getByRole("button", { name: "Albums" })).toHaveAttribute("aria-current", "page");
+  expect(main.getByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
+  await act(async () => { finish(artistDetail); });
+  expect(main.queryByRole("article", { name: "Coldplay artist page" })).not.toBeInTheDocument();
+  expect(main.getByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
+});
+
+it("opens the artist's album after a catalog response slower than the test's wall-clock budget", async () => {
+  const loadArtistDetail = library.loadArtistDetail;
+  vi.spyOn(library, "loadArtistDetail").mockImplementation(async artist => {
+    await new Promise<void>(resolve => window.setTimeout(resolve, 6000));
+    return loadArtistDetail(artist);
+  });
+  const { main, details } = await openVivaDetails();
+  fireEvent.click(within(details).getByRole("button", { name: "Open artist page for Coldplay" }));
+  await settleNavigation();
+  const page = within(main.getByRole("article", { name: "Coldplay artist page" }));
+  expect(page.queryByRole("button", { name: "Open Viva la Vida" })).not.toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  fireEvent.click(page.getByRole("button", { name: "Open Viva la Vida" }));
+  await settleNavigation();
+  expect(main.getByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
