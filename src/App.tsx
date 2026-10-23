@@ -5,6 +5,7 @@ import { useSonicJourney } from "./useSonicJourney";
 import { journeyPlaybackTracks } from "./sonicJourney";
 import type { SonicAlbum } from "./sonic";
 import { SonicPanel } from "./components/SonicPanel";
+import { SonicWorldsPanel } from "./components/SonicWorldsPanel";
 import { useSonicRadio } from "./app/domains/useSonicRadio";
 import {
   Activity,
@@ -213,6 +214,7 @@ function App() {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [playlistDraft, setPlaylistDraft] = useState<PlaylistDraft | null>(null);
   const [playlistSelection, setPlaylistSelection] = useState<PlaylistSelection | null>(null);
+  const [worldSeed, setWorldSeed] = useState<Track | null>(null);
   const [contextTags, setContextTags] = useState<PlaylistSelection | null>(null);
   const [playlistSaveMessage, setPlaylistSaveMessage] = useState<string | null>(null);
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
@@ -1371,7 +1373,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.44.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.45.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1917,7 +1919,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
-            <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
+            <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} onWorlds={setWorldSeed} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
             <SonicJourneyPanel journey={sonicJourney} currentTrack={{ trackKey: inspectorTrack.trackKey, title: inspectorTrack.title, artist: displayTrackArtist(inspectorTrack) }} onPlay={async tracks => { if (!await startPlaylistQueue(journeyPlaybackTracks(tracks), 0)) throw new Error("Could not start the journey. Check the playback error and try again."); }} />
             <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit your library selection without leaving Aurora.</span></div>
@@ -1971,6 +1973,7 @@ function App() {
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />
 
+      {worldSeed && <SonicWorldsPanel key={worldSeed.trackKey} track={worldSeed} onClose={() => setWorldSeed(null)} playing={playback.state.status === "playing"} playbackError={playback.error} onPause={() => { if (playback.state.status === "playing") void playback.toggle(); }} onPlay={(track, queue) => { endGenreQueue(); sonicRadio.stop(); void playback.play(queue, track.id); }} />}
       {addFolderOpen && (
         <Suspense fallback={<div className="modal-backdrop"><div className="settings-loading" role="status">Opening album intake…</div></div>}>
           <AddFolderDialog

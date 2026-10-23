@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.45.0] - 2026-10-23
+
+### Added
+- **Same sound, different world**: a three-track listening challenge from the track inspector, with decade, album-artist and genre boundaries and Stay close / Either / Cross borders controls. Play candidates without losing the seed, reveal metadata connections, rotate the round and save exact reviewed discoveries through Music Library.
+- Bounded indexed retrieval with current-file/analysis checks, pending genre and ban edits, unknown-metadata rejection, identical-audio exclusion and a conservative distance ceiling. Report sparse matches and unavailable indexes without weakening the chosen rule or scanning the whole library.
+
 ## [0.44.0] - 2026-10-23
 
 ### Added

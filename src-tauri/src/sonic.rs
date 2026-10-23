@@ -125,7 +125,7 @@ pub(crate) struct SonicResponse {
     pub tracks: Vec<TrackSummary>,
 }
 
-const SELECT: &str = "t.id,t.title,t.album_artist_display,t.album,t.release_year,t.normalized_rating,t.love,t.time_seconds,t.canonical_genre,NULL,t.album_id,t.file_path,t.filename,t.import_run_id,t.display_artist AS display_artist,t.year AS original_year,t.publisher AS publisher";
+pub(crate) const SELECT: &str = "t.id,t.title,t.album_artist_display,t.album,t.release_year,t.normalized_rating,t.love,t.time_seconds,t.canonical_genre,NULL,t.album_id,t.file_path,t.filename,t.import_run_id,t.display_artist AS display_artist,t.year AS original_year,t.publisher AS publisher";
 
 /// Search only reads existing profile results; an empty projection makes
 /// sonic:no work before the first analysis without creating a results store.

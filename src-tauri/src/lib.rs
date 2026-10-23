@@ -54,6 +54,7 @@ mod sonic_index;
 mod sonic_journey;
 #[cfg(test)]
 mod sonic_performance;
+mod sonic_worlds;
 mod state_store;
 mod state_sync;
 mod tag_model;
@@ -873,6 +874,18 @@ async fn sonic_matches(
     tauri::async_runtime::spawn_blocking(move || sonic::query(request, &app.state::<StateStore>()))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sonic_worlds(
+    app: AppHandle,
+    request: sonic_worlds::WorldRequest,
+) -> Result<sonic_worlds::WorldResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sonic_worlds::query(request, &app.state::<StateStore>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2073,6 +2086,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             sonic_matches,
+            sonic_worlds,
             sonic_album_matches,
             sonic_album_sides,
             sonic_journey,

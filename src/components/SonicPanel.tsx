@@ -3,8 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { analyzeSonicSeed, sonicMatches, type SonicResponse } from "../sonic";
 import { displayTrackArtist, type Track } from "../library";
 import "./SonicPanel.css";
-interface Props { track: Track; onPlay: (track: Track, queue: Track[]) => void; onRadio: (track: Track, minimumRating: number | null, sameGenre: boolean) => void; radioBusy: boolean; radioMessage: string | null; onStopRadio: () => void; radioActive: boolean; }
-export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, onStopRadio, radioActive }: Props) {
+interface Props { track: Track; onPlay: (track: Track, queue: Track[]) => void; onRadio: (track: Track, minimumRating: number | null, sameGenre: boolean) => void; radioBusy: boolean; radioMessage: string | null; onStopRadio: () => void; radioActive: boolean; onWorlds: (track: Track) => void; }
+export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, onStopRadio, radioActive, onWorlds }: Props) {
   const [response, setResponse] = useState<SonicResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +25,7 @@ export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, on
   }
   return <section className="sonic-panel" aria-label="More like this">
     <h3>More like this</h3><p>Find music in your library by its sound.</p>
+    <button type="button" onClick={() => onWorlds(track)}>Same sound, different world</button>
     <div className="sonic-filters"><label>Minimum rating <select value={minimumRating ?? ""} disabled={busy} onChange={e => { setMinimumRating(e.target.value ? Number(e.target.value) : null); setResponse(null); }}><option value="">Any</option><option value="3">3 stars</option><option value="4">4 stars</option><option value="5">5 stars</option></select></label><label><input type="checkbox" checked={sameGenre} disabled={busy} onChange={e => { setSameGenre(e.target.checked); setResponse(null); }} />Same genre</label></div>
     <div className="sonic-actions"><button type="button" disabled={busy} onClick={() => void load()}>{busy ? "Working…" : "Find similar"}</button><button type="button" disabled={radioBusy || busy} onClick={() => onRadio(track, minimumRating, sameGenre)}>Start sonic radio</button>{radioActive && <button type="button" onClick={onStopRadio}>Stop radio</button>}</div>
     {response && <p>{response.analyzed.toLocaleString()} of {response.total.toLocaleString()} tracks analyzed. Matches cover analyzed music.</p>}

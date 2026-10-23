@@ -1,5 +1,13 @@
 # Aurora
 
+Aurora **0.45.0** adds **Same sound, different world** under a track inspector's
+**More like this** panel. Choose decade, album artist or catalog genre, then
+**Stay close**, **Either**, or **Cross borders**. Audition up to three nearby
+sounds, reveal their connections, and save the reviewed discoveries to Music
+Library playlists. The challenge keeps its seed while you play candidates.
+Names are concealed in the dialog; system media controls may reveal them.
+See [behavior and limits](docs/same-sound-different-world.md).
+
 Aurora **0.43.0** adds **Sonic Smart playlists** to Playlists → Create Smart
 playlist / Edit rules. Enable **Sounds like these examples**, choose 1–8 analyzed
 songs, set the distance and artist cap, and combine them with metadata rules.
