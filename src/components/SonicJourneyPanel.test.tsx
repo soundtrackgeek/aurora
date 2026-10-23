@@ -14,7 +14,7 @@ it("builds a five-stop journey, preserves reviewed order for save/play, and inva
   let reviewed: backend.JourneyTrack[] = [];
   vi.mocked(backend.buildSonicJourney).mockImplementation(async request => {
     reviewed = request.stopKeys.flatMap((key, i) => [ ...(i ? [track(100 + i * 2), track(101 + i * 2)] : []), stops.find(t => t.trackKey === key)! ]);
-    return { complete: true, analyzed: 120, stopsReady: request.stopKeys.map(() => true), tracks: reviewed };
+    return { timing: null, complete: true, analyzed: 120, stopsReady: request.stopKeys.map(() => true), tracks: reviewed };
   });
   const play = vi.fn().mockResolvedValue(undefined), saved = vi.fn(); render(<Harness onPlay={play} onSaved={saved} />);
   await choose(); fireEvent.click(screen.getByLabelText("Move Song 2 earlier"));
@@ -29,7 +29,7 @@ it("builds a five-stop journey, preserves reviewed order for save/play, and inva
   fireEvent.click(screen.getByLabelText("Remove Song 3")); expect(screen.queryByText("Save journey playlist")).not.toBeInTheDocument();
 });
 it("reports unanalyzed stops and insufficient bridges without offering an incomplete playlist", async () => {
-  vi.mocked(backend.buildSonicJourney).mockResolvedValueOnce({ complete: false, analyzed: 8, stopsReady: [true, false, true, true, true], tracks: [] }).mockResolvedValue({ complete: false, analyzed: 8, stopsReady: [true, true, true, true, true], tracks: [] });
+  vi.mocked(backend.buildSonicJourney).mockResolvedValueOnce({ timing: null, complete: false, analyzed: 8, stopsReady: [true, false, true, true, true], tracks: [] }).mockResolvedValue({ timing: null, complete: false, analyzed: 8, stopsReady: [true, true, true, true, true], tracks: [] });
   render(<Harness />); await choose(); fireEvent.click(screen.getByText("Build sonic journey")); await screen.findByText(/Stops 2 need current audio analysis/); expect(screen.queryByText("Save journey playlist")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Build sonic journey")); await screen.findByText(/Not enough eligible connecting tracks/);
 });
@@ -39,6 +39,24 @@ it("discards a late build after the journey settings change", async () => {
   const { result } = renderHook(() => useSonicJourney());
   act(() => result.current.add(stops[0])); act(() => result.current.add(stops[1]));
   act(() => { void result.current.build(); }); act(() => result.current.changeConnecting(1));
-  await act(async () => complete({ complete: true, analyzed: 12, stopsReady: [true, true], tracks: stops }));
+  await act(async () => complete({ timing: null, complete: true, analyzed: 12, stopsReady: [true, true], tracks: stops }));
   expect(result.current.result).toBeNull(); expect(result.current.busy).toBe(false); expect(result.current.connecting).toBe(1);
+});
+it("previews the actual timed journey and saves that order with its album and budgets", async () => {
+  const reviewed = [stops[0], track(21), stops[1], stops[2], stops[3], stops[4]];
+  vi.mocked(backend.buildSonicJourney).mockResolvedValue({ complete: true, analyzed: 90, stopsReady: stops.map(() => true), tracks: reviewed, timing: { totalSeconds: 1080, totalBytes: 10485760, shortfallSeconds: 2220, albumTrackKeys: ["key2", "key3"] } });
+  render(<Harness />); await choose();
+  fireEvent.change(screen.getByLabelText("Journey length"), { target: { value: "time" } });
+  fireEvent.change(screen.getByLabelText("Keep a whole album at an interior stop"), { target: { value: "key2" } });
+  fireEvent.click(screen.getByText("Build sonic journey"));
+  await screen.findByText("18:00 playing time");
+  expect(screen.getByText(/37:00 unused/)).toBeInTheDocument();
+  expect(backend.buildSonicJourney).toHaveBeenCalledWith(expect.objectContaining({ targetSeconds: 3300, maxMib: 512, albumStopKey: "key2" }));
+  fireEvent.click(screen.getByText("Save journey playlist"));
+  await screen.findByText("Saved journey in Playlists.");
+  expect(backend.saveSonicJourney).toHaveBeenCalledWith(expect.objectContaining({ targetSeconds: 3300 }), reviewed, "Sonic journey");
+  fireEvent.change(screen.getByLabelText("Time budget · minutes"), { target: { value: "40" } });
+  expect(screen.queryByText("Save journey playlist")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Time budget · minutes"), { target: { value: "" } });
+  expect(screen.getByText("Build sonic journey")).toBeDisabled();
 });

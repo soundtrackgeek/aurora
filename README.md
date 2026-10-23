@@ -807,3 +807,15 @@ Frontend verification uses two test workers to avoid CPU contention on shared re
 Chart song matching tries the full artist/title first, then existing title aliases, then a fallback that removes balanced parenthetical groups from either the chart title or the library title. For example, `In And Out Of Love (Edit)` can match `In And Out Of Love` by Bon Jovi, and `We Don't Need Another Hero (Thunderdome)` can match the shorter Tina Turner title. Artist matching remains required; printed chart titles and audio-file tags are unchanged.
 
 An exact title always takes priority. Different parenthetical versions are not matched to each other by stripping both titles; a bare title that could select several different versions stays unmatched. Duplicate copies of the same title retain the usual album preference. Empty or malformed parenthetical titles do not gain fallback matches.
+
+### A journey that fits your time
+
+Open **Track sidebar > Sonic journey > Fit my time**, choose 1-720 minutes and
+optional source-audio storage, then add the beginning, middle and ending tracks.
+An interior stop can include its whole album. The preview shows actual time,
+unused time, file bytes and the ending. Play preserves the preview order; save
+requires Music Library 0.199.0 with `timedSonicJourneysV1`. Identical analyzed
+audio cannot repeat. Tonehavn 0.52.0 can carry the published playlist through
+Trip Tape. The planner packs a bounded sonic shortlist, without cutting tracks
+or promising a globally optimal route, semantic moods or beat-matched handoffs.
+Existing playback gain settings apply; no estimated leveling is introduced.

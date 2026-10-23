@@ -4,6 +4,10 @@ export interface JourneyChoice { trackKey: string; title: string; artist: string
 export function useSonicJourney(onSaved?: () => void) {
   const [stops, setStops] = useState<JourneyChoice[]>([]);
   const [connecting, setConnecting] = useState(3);
+  const [timed, setTimed] = useState(false);
+  const [minutes, setMinutes] = useState(55);
+  const [maxMib, setMaxMib] = useState<number | null>(512);
+  const [albumStopKey, setAlbumStopKey] = useState<string | null>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [sameGenre, setSameGenre] = useState(false);
   const [text, setText] = useState("");
@@ -18,13 +22,17 @@ export function useSonicJourney(onSaved?: () => void) {
   useEffect(() => { const guard = serial; return () => { guard.current++; }; }, []);
   function invalidate() { serial.current++; setResult(null); setMessage(null); setError(null); setBusy(false); }
   function add(track: JourneyChoice) { if (stops.length >= 10 || stops.some(s => s.trackKey === track.trackKey)) return; invalidate(); setStops([...stops, track]); }
-  function remove(index: number) { invalidate(); setStops(stops.filter((_, i) => i !== index)); }
-  function move(index: number, delta: number) { const next = [...stops]; const target = index + delta; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; invalidate(); setStops(next); }
-  const request: JourneyRequest = { stopKeys: stops.map(s => s.trackKey), connectingTracks: connecting, minimumRating: rating, sameGenre };
+  function remove(index: number) { invalidate(); setStops(stops.filter((_, i) => i !== index)); setAlbumStopKey(null); }
+  function move(index: number, delta: number) { const next = [...stops]; const target = index + delta; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; invalidate(); setStops(next); setAlbumStopKey(null); }
+  const request: JourneyRequest = { stopKeys: stops.map(s => s.trackKey), connectingTracks: connecting, minimumRating: rating, sameGenre, ...(timed ? { targetSeconds: minutes * 60, maxMib, albumStopKey } : {}) };
   async function run(action: () => Promise<void>) { const id = ++serial.current; setBusy(true); setError(null); setMessage(null); try { await action(); } catch (e) { if (id === serial.current) setError(e instanceof Error ? e.message : String(e)); } finally { if (id === serial.current) setBusy(false); } }
   async function search() { const id = serial.current + 1; await run(async () => { const next = await searchJourneyTracks(text); if (id === serial.current) { setChoices(next); setSearched(true); } }); }
   async function build() { const id = serial.current + 1; setResult(null); await run(async () => { const next = await buildSonicJourney(request); if (id === serial.current) setResult(next); }); }
   async function save() { if (!result?.complete) return; const id = serial.current + 1; await run(async () => { const next = await saveSonicJourney(request, result.tracks, name); if (id === serial.current) { setMessage(next); onSaved?.(); } }); }
-  return { stops, connecting, rating, sameGenre, text, choices, searched, result, busy, message, error, name, setName, add, remove, move, search, build, save, run,
+  return { stops, connecting, timed, minutes, maxMib, albumStopKey, rating, sameGenre, text, choices, searched, result, busy, message, error, name, setName, add, remove, move, search, build, save, run,
+    changeTimed: (value: boolean) => { invalidate(); setTimed(value); },
+    changeMinutes: (value: number) => { invalidate(); setMinutes(value); },
+    changeMaxMib: (value: number | null) => { invalidate(); setMaxMib(value); },
+    changeAlbum: (value: string | null) => { invalidate(); setAlbumStopKey(value); },
     changeConnecting: (value: number) => { invalidate(); setConnecting(value); }, changeRating: (value: number | null) => { invalidate(); setRating(value); }, changeGenre: (value: boolean) => { invalidate(); setSameGenre(value); }, changeText: (value: string) => { serial.current++; setBusy(false); setText(value); setChoices([]); setSearched(false); } };
 }

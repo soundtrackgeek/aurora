@@ -81,6 +81,8 @@ pub struct LibraryBridgeSupports {
     #[serde(default)]
     pub sonic_smart_playlists_v1: bool,
     #[serde(default)]
+    pub timed_sonic_journeys_v1: bool,
+    #[serde(default)]
     pub selected_album_batch: bool,
     pub single_album: bool,
     pub batch_folders: bool,
@@ -451,6 +453,16 @@ pub(crate) fn save_sonic_journey(
     app: &AppHandle,
     input: crate::sonic_journey::SaveJourneyRequest,
 ) -> Result<serde_json::Value, String> {
+    if input.journey.target_seconds.is_some() {
+        let capabilities: LibraryBridgeCapabilities =
+            invoke_bridge(app, "capabilities", EmptyPayload {}, CAPABILITIES_TIMEOUT)?;
+        validate_capabilities(&capabilities)?;
+        if !capabilities.supports.timed_sonic_journeys_v1 {
+            return Err(
+                "Update Music Library to 0.199.0 or newer to save timed sonic journeys.".into(),
+            );
+        }
+    }
     invoke_bridge(app, "sonicSaveJourney", input, Duration::from_secs(60))
 }
 
@@ -1865,6 +1877,7 @@ mod tests {
                 rating_missions_v1: false,
                 smart_playlist_authoring: false,
                 sonic_smart_playlists_v1: false,
+                timed_sonic_journeys_v1: false,
                 playlist_authoring: false,
                 selected_album_batch: true,
                 single_album: true,

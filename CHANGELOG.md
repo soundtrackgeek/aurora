@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.44.0] - 2026-10-23
+
+### Added
+- **Fit my time** in Sonic journey: complete tracks within a time/audio budget, chosen beginning/middle/ending stops, one indivisible album block, actual duration and unused time. Exclude identical analyzed recordings and preserve the reviewed order for playback and saving.
+- Shared Music Library duration planner and `timedSonicJourneysV1` capability check before saving timed plans. Music Library 0.199.0 owns saved catalog playlists; Tonehavn Trip Tape can carry their published order.
+
 ## [0.43.0] - 2026-10-22
 
 ### Added

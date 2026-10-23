@@ -1,13 +1,14 @@
 {
   "repository": "https://github.com/soundtrackgeek/music_backup_v5",
-  "revision": "19589ec03d0e93b769882a13ed5e6edf497f05f4",
+  "revision": "37f53f013ecd78870e8bde7001d3e833e57b3801",
   "directory": "crates/sonic-core",
   "normalization": "UTF-8 with LF line endings",
   "sha256": {
     "Cargo.toml": "bc82d673e927efee62eec4579f7c3b13dbdf2fc8749002f1e18a91432fafd5a8",
-    "src/lib.rs": "939d39fe7004edf818c82b481aba30c26f229f122428cb92118819d2ae8ca448",
+    "src/lib.rs": "28c6059550797bcfdf583fe945f11a15854bb5dc598a60aa52b9296fc96ccfd3",
     "src/index.rs": "f6881b9907faa986282ccb1abf8867d2e51d7517d0b3b370a7e5f4507cfa0c79",
     "LICENSE": "75739b1437876daeb2fdf80a3b20914be194ad557e358744b6c7859f36445930",
-    "src/album_sides.rs": "a949359da69393271b07ddff0806ced15050bb0befbe522ca631b26ad24907d9"
+    "src/album_sides.rs": "a949359da69393271b07ddff0806ced15050bb0befbe522ca631b26ad24907d9",
+    "src/timed_journey.rs": "5f374223b50a69a747e2bd14182725c4eb3d60f26bd9bdc4fa8b254fbf375bc5"
   }
 }

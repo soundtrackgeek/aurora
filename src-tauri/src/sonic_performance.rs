@@ -60,6 +60,9 @@ fn sonic_performance_proof() {
                         &crate::sonic_journey::JourneyRequest {
                             stop_keys: stops.clone(),
                             connecting_tracks: 3,
+                            target_seconds: None,
+                            max_mib: None,
+                            album_stop_key: None,
                             minimum_rating: None,
                             same_genre: false,
                         },

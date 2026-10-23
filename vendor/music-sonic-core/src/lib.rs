@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 pub mod album_sides;
 pub mod index;
+pub mod timed_journey;
 
 pub const PROFILE: &str = "bliss-0.13.0-symphonia-0.6.1-v2-full-mp3";
 pub const DIMENSIONS: usize = 23;

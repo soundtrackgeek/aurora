@@ -5,6 +5,7 @@ use music_sonic_core::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+mod timed;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -14,6 +15,13 @@ pub(crate) struct JourneyRequest {
     /// Catalog scale, 0–100. Applies to connectors, not explicitly chosen stops.
     pub minimum_rating: Option<i32>,
     pub same_genre: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_mib: Option<u32>,
+    /// Expand one interior stop to its complete catalog album, in disc/track order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_stop_key: Option<String>,
 }
 impl JourneyRequest {
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -28,6 +36,21 @@ impl JourneyRequest {
         {
             return Err(
                 "Choose 2–10 different stops and 1–10 connecting tracks between stops.".into(),
+            );
+        }
+        if self
+            .target_seconds
+            .is_some_and(|s| !(60..=43_200).contains(&s))
+            || self.max_mib.is_some_and(|s| !(1..=16_384).contains(&s))
+            || self.target_seconds.is_none()
+                && (self.max_mib.is_some() || self.album_stop_key.is_some())
+            || self
+                .album_stop_key
+                .as_ref()
+                .is_some_and(|key| !self.stop_keys[1..self.stop_keys.len() - 1].contains(key))
+        {
+            return Err(
+                "Use 1–720 minutes, 1–16384 MiB and an interior stop for a whole album.".into(),
             );
         }
         Ok(())
@@ -60,6 +83,15 @@ pub(crate) struct JourneyResponse {
     pub analyzed: usize,
     pub complete: bool,
     pub tracks: Vec<JourneyTrack>,
+    pub timing: Option<JourneyTiming>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JourneyTiming {
+    pub total_seconds: u32,
+    pub total_bytes: u64,
+    pub shortfall_seconds: u32,
+    pub album_track_keys: Vec<String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -75,9 +107,10 @@ struct Entry {
     size: u64,
     modified: String,
     banned: bool,
+    audio_hash: String,
 }
 pub(crate) type Overrides = HashMap<String, (bool, Option<i32>)>;
-const SELECT: &str = "t.id,COALESCE(t.title,''),COALESCE(NULLIF(t.display_artist,''),t.album_artist_display,''),COALESCE(t.album,''),COALESCE(t.album_id,''),COALESCE(t.album_artist_display,''),t.file_path,t.filename,t.canonical_genre,t.normalized_rating,COALESCE(t.time_seconds,0),COALESCE(t.love,''),a.features,s.size,s.modified";
+const SELECT: &str = "t.id,COALESCE(t.title,''),COALESCE(NULLIF(t.display_artist,''),t.album_artist_display,''),COALESCE(t.album,''),COALESCE(t.album_id,''),COALESCE(t.album_artist_display,''),t.file_path,t.filename,t.canonical_genre,t.normalized_rating,COALESCE(t.time_seconds,0),COALESCE(t.love,''),a.features,s.size,s.modified,s.audio_hash";
 const JOIN: &str = "FROM sonic.sonic_tracks s JOIN tracks t ON t.file_path=s.directory AND t.filename=s.filename JOIN sonic.sonic_audio a ON a.audio_hash=s.audio_hash AND a.profile=s.profile";
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let directory: String = r.get(6)?;
@@ -104,6 +137,7 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         size: r.get::<_, i64>(13)?.max(0) as u64,
         modified: r.get(14)?,
         banned: love == "B",
+        audio_hash: r.get(15)?,
     })
 }
 fn apply(entry: &mut Entry, overrides: &Overrides) {
@@ -161,11 +195,15 @@ pub(crate) fn query_indexed(
     indexed: bool,
 ) -> Result<JourneyResponse, String> {
     request.validate()?;
+    if request.target_seconds.is_some() {
+        return timed::query(c, has_analysis, request, overrides, indexed);
+    }
     let mut response = JourneyResponse {
         stops_ready: vec![false; request.stop_keys.len()],
         analyzed: 0,
         complete: false,
         tracks: vec![],
+        timing: None,
     };
     if !has_analysis {
         return Ok(response);
@@ -320,6 +358,9 @@ pub(crate) fn reviewed(
     overrides: &Overrides,
 ) -> Result<Vec<JourneyTrack>, String> {
     request.validate()?;
+    if request.target_seconds.is_some() {
+        return timed::reviewed(c, request, keys, overrides);
+    }
     if keys.len() != request.count()
         || keys.iter().collect::<HashSet<_>>().len() != keys.len()
         || keys.iter().any(|k| k.is_empty() || k.len() > 4096)
@@ -420,8 +461,79 @@ mod tests {
             connecting_tracks: 1,
             minimum_rating: Some(80),
             same_genre: true,
+            target_seconds: None,
+            max_mib: None,
+            album_stop_key: None,
         };
         (dir, c, request)
+    }
+    #[test]
+    fn timed_journey_keeps_album_whole_and_validates_reviewed_budgets_and_twins() {
+        let (_dir, c, mut request) = fixture();
+        c.execute_batch("ALTER TABLE tracks ADD COLUMN disc_number INTEGER; ALTER TABLE tracks ADD COLUMN track_number INTEGER; UPDATE tracks SET album_id='other',track_number=id; UPDATE tracks SET album_id='block' WHERE id BETWEEN 4 AND 6;").unwrap();
+        request.stop_keys = vec![
+            request.stop_keys[0].clone(),
+            request.stop_keys[1].clone(),
+            request.stop_keys[3].clone(),
+        ];
+        request.target_seconds = Some(1261);
+        request.max_mib = Some(1);
+        request.album_stop_key = Some(request.stop_keys[1].clone());
+        let response = query(&c, true, &request, &Overrides::new()).unwrap();
+        let timing = response.timing.unwrap();
+        assert_eq!(timing.total_seconds, 1260);
+        assert_eq!(timing.shortfall_seconds, 1);
+        assert_eq!(timing.total_bytes, 7 * 256);
+        let keys = response
+            .tracks
+            .iter()
+            .map(|t| t.track_key.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(keys.first(), request.stop_keys.first());
+        assert_eq!(keys.last(), request.stop_keys.last());
+        assert_eq!(timing.album_track_keys.len(), 3);
+        let start = keys
+            .iter()
+            .position(|k| k == &timing.album_track_keys[0])
+            .unwrap();
+        assert_eq!(&keys[start..start + 3], &timing.album_track_keys);
+        assert_eq!(
+            reviewed(&c, &request, &keys, &Overrides::new())
+                .unwrap()
+                .len(),
+            7
+        );
+        let mut reordered = keys.clone();
+        reordered.swap(start, start + 1);
+        assert!(reviewed(&c, &request, &reordered, &Overrides::new()).is_err());
+        c.execute("UPDATE tracks SET time_seconds=5000 WHERE id=1", [])
+            .unwrap();
+        assert!(reviewed(&c, &request, &keys, &Overrides::new()).is_err());
+        c.execute("UPDATE tracks SET time_seconds=180 WHERE id=1", [])
+            .unwrap();
+        c.execute(
+            "UPDATE sonic.sonic_tracks SET audio_hash='0.mp3' WHERE track_key=?1",
+            [request.stop_keys.last().unwrap()],
+        )
+        .unwrap();
+        assert!(
+            query(&c, true, &request, &Overrides::new())
+                .unwrap_err()
+                .contains("same recording")
+        );
+    }
+    #[test]
+    fn timed_journey_rejects_unknown_duration_and_incomplete_album() {
+        let (_dir, c, mut request) = fixture();
+        request.target_seconds = Some(900);
+        c.execute("UPDATE tracks SET time_seconds=0 WHERE id=1", [])
+            .unwrap();
+        assert!(query(&c, true, &request, &Overrides::new()).is_err());
+        c.execute("UPDATE tracks SET time_seconds=180 WHERE id=1", [])
+            .unwrap();
+        c.execute_batch("ALTER TABLE tracks ADD COLUMN disc_number INTEGER; ALTER TABLE tracks ADD COLUMN track_number INTEGER;").unwrap();
+        request.album_stop_key = Some(request.stop_keys[1].clone());
+        assert!(query(&c, true, &request, &Overrides::new()).is_err());
     }
     #[test]
     fn five_stop_journey_rebinds_current_ids_and_saves_the_reviewed_order() {
