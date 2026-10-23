@@ -14,6 +14,7 @@ export type RepeatMode = "off" | "all" | "one";
 
 export interface PlaybackSnapshot {
   eventSequence?: number;
+  blindTastingLabel?: string | null;
   queue: Track[];
   currentIndex: number | null;
   currentTrack: Track | null;
@@ -140,6 +141,15 @@ export async function rebindPlaybackCatalog(): Promise<PlaybackCatalogRebind> {
     playback: cloneBrowserPlayback(),
     catalogRevision: "0:0:",
   };
+}
+
+export async function blindTastingPlayback(track?: Track, label?: string): Promise<PlaybackSnapshot> {
+  if (isTauriRuntime()) return command("playback_blind_tasting", { trackReference: track ? { id: track.id, trackKey: track.trackKey } : null, label: label ?? null });
+  if (track) {
+    const result = await playTrackQueue([track], track.id);
+    browserPlayback = { ...result, blindTastingLabel: label, replayGainMode: "track" };
+  } else browserPlayback = { ...browserPlayback, status: "stopped", blindTastingLabel: null };
+  return cloneBrowserPlayback();
 }
 
 export async function playTrackQueue(tracks: Track[], startTrackId: string): Promise<PlaybackSnapshot> {

@@ -827,3 +827,8 @@ audio cannot repeat. Tonehavn 0.52.0 can carry the published playlist through
 Trip Tape. The planner packs a bounded sonic shortlist, without cutting tracks
 or promising a globally optimal route, semantic moods or beat-matched handoffs.
 Existing playback gain settings apply; no estimated leveling is introduced.
+
+
+### Blind tasting
+
+Listen to a familiar seed and two concealed acoustic neighbors in Aurora or Tonehavn, then reveal, save a discovery or hear its album. Choices do not become ratings. Tonehavn iPhone can retain and download one round for offline play; new rounds and playlist saves need a connection. See [Blind tasting](docs/blind-tasting.md) for entry points, level handling and verification limits.

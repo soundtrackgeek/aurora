@@ -118,14 +118,25 @@ mod platform {
                 .as_ref()
                 .map(|track| MetadataProjection {
                     track_key: track.track_key.clone(),
-                    title: track.title.clone(),
-                    artist: track
-                        .display_artist
-                        .as_deref()
-                        .filter(|artist| !artist.trim().is_empty())
-                        .unwrap_or(&track.artist)
-                        .to_owned(),
-                    album: track.album.clone(),
+                    title: snapshot
+                        .blind_tasting_label
+                        .clone()
+                        .unwrap_or_else(|| track.title.clone()),
+                    artist: if snapshot.blind_tasting_label.is_some() {
+                        "Blind tasting".into()
+                    } else {
+                        track
+                            .display_artist
+                            .as_deref()
+                            .filter(|artist| !artist.trim().is_empty())
+                            .unwrap_or(&track.artist)
+                            .to_owned()
+                    },
+                    album: if snapshot.blind_tasting_label.is_some() {
+                        String::new()
+                    } else {
+                        track.album.clone()
+                    },
                 });
             if metadata == self.metadata {
                 return Ok(());
@@ -325,14 +336,25 @@ mod platform {
 
             let metadata = MetadataProjection {
                 track_key: track.track_key.clone(),
-                title: track.title.clone(),
-                artist: track
-                    .display_artist
-                    .as_deref()
-                    .filter(|artist| !artist.trim().is_empty())
-                    .unwrap_or(&track.artist)
-                    .to_owned(),
-                album: track.album.clone(),
+                title: snapshot
+                    .blind_tasting_label
+                    .clone()
+                    .unwrap_or_else(|| track.title.clone()),
+                artist: if snapshot.blind_tasting_label.is_some() {
+                    "Blind tasting".into()
+                } else {
+                    track
+                        .display_artist
+                        .as_deref()
+                        .filter(|artist| !artist.trim().is_empty())
+                        .unwrap_or(&track.artist)
+                        .to_owned()
+                },
+                album: if snapshot.blind_tasting_label.is_some() {
+                    String::new()
+                } else {
+                    track.album.clone()
+                },
                 duration_seconds: track.duration_seconds,
             };
             if self.metadata.as_ref() != Some(&metadata) {

@@ -1291,6 +1291,18 @@ async fn playback_rebind_catalog(app: AppHandle) -> Result<PlaybackCatalogRebind
 }
 
 #[tauri::command]
+async fn playback_blind_tasting(
+    app: AppHandle,
+    track_reference: Option<TrackReference>,
+    label: Option<String>,
+) -> Result<PlaybackSnapshot, String> {
+    with_playback_snapshot(app, "playback_blind_tasting", move |runtime| {
+        runtime.blind_tasting(track_reference, label)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn playback_replace_queue(
     app: AppHandle,
     track_references: Vec<TrackReference>,
@@ -2177,6 +2189,7 @@ pub fn run() {
             cancel_playback_shutdown,
             playback_rebind_catalog,
             playback_replace_queue,
+            playback_blind_tasting,
             playback_append_queue,
             playback_enqueue,
             desktop_reveal::reveal_catalog_item,

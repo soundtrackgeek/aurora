@@ -359,6 +359,7 @@ mod tests {
     fn snapshot() -> PlaybackSnapshot {
         PlaybackSnapshot {
             event_sequence: 0,
+            blind_tasting_label: None,
             queue: vec![],
             current_index: None,
             current_track: None,

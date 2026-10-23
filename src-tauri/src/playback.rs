@@ -78,6 +78,7 @@ impl RepeatMode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PlaybackSnapshot {
     pub(crate) event_sequence: u64,
+    pub(crate) blind_tasting_label: Option<String>,
     pub(crate) queue: Vec<TrackSummary>,
     pub(crate) current_index: Option<usize>,
     pub(crate) current_track: Option<TrackSummary>,
@@ -464,6 +465,7 @@ pub(crate) struct PlaybackRuntime {
     history_threshold_seconds: u32,
     persistence: PlaybackPersistence,
     closing: bool,
+    blind_tasting_label: Option<String>,
     last_saved_position_bucket: u64,
 }
 
@@ -574,6 +576,7 @@ impl PlaybackRuntime {
             history_threshold_seconds,
             persistence,
             closing: false,
+            blind_tasting_label: None,
             last_saved_position_bucket: (position_seconds / PLAYBACK_STATE_CHECKPOINT_SECONDS)
                 .floor() as u64,
         })
@@ -684,8 +687,11 @@ impl PlaybackRuntime {
         let gain = replay_gain::adjustment_for_track(
             audio_path,
             gain_track(&resolved.summary),
-            self.audio_store.settings().gain_policy(),
+            self.gain_policy(),
         );
+        if self.blind_tasting_label.is_some() && gain.applied_db.is_none() {
+            return Err("Track normalization is unavailable for this recording.".into());
+        }
         let source = PcmBufferSource::spawn(
             gain_stage(decoder, &gain, target_sample_rate),
             Arc::clone(&self.audio_underrun_count),
@@ -987,7 +993,7 @@ impl PlaybackRuntime {
         let track_key = track.track_key.clone();
         let result_track_key = track_key.clone();
         let store = self.store.clone();
-        let gain_policy = self.audio_store.settings().gain_policy();
+        let gain_policy = self.gain_policy();
         let underrun_count = Arc::clone(&self.audio_underrun_count);
         let (sender, receiver) = mpsc::sync_channel(1);
         self.preparation_attempted = true;
@@ -1171,6 +1177,7 @@ impl PlaybackRuntime {
         timing.finish(true);
         let mut snapshot = PlaybackSnapshot {
             event_sequence: 0,
+            blind_tasting_label: self.blind_tasting_label.clone(),
             queue: self.queue.clone(),
             current_index: self.current_index,
             current_track: self.current_track().cloned(),
@@ -1200,10 +1207,54 @@ impl PlaybackRuntime {
         snapshot
     }
 
+    fn gain_policy(&self) -> GainPolicy {
+        if self.blind_tasting_label.is_some() {
+            GainPolicy {
+                mode: ReplayGainMode::Track,
+                estimate_missing: true,
+                boost_quiet: true,
+            }
+        } else {
+            self.audio_store.settings().gain_policy()
+        }
+    }
+
+    pub(crate) fn blind_tasting(
+        &mut self,
+        track: Option<TrackReference>,
+        label: Option<String>,
+    ) -> Result<PlaybackSnapshot, String> {
+        if label
+            .as_deref()
+            .is_some_and(|s| !["Seed", "Candidate A", "Candidate B"].contains(&s))
+            || track.is_some() != label.is_some()
+        {
+            return Err("Invalid tasting playback request".into());
+        }
+        self.stop()?;
+        self.blind_tasting_label = label;
+        if let Some(track) = track {
+            let label = self.blind_tasting_label.take();
+            // The override must be set before loading audio or publishing metadata.
+            self.replace_queue_inner(vec![track.clone()], track.track_key, label)
+        } else {
+            self.clear_queue()
+        }
+    }
+
     pub(crate) fn replace_queue(
         &mut self,
         track_references: Vec<TrackReference>,
         start_track_key: String,
+    ) -> Result<PlaybackSnapshot, String> {
+        self.replace_queue_inner(track_references, start_track_key, None)
+    }
+
+    fn replace_queue_inner(
+        &mut self,
+        track_references: Vec<TrackReference>,
+        start_track_key: String,
+        label: Option<String>,
     ) -> Result<PlaybackSnapshot, String> {
         self.ensure_not_closing()?;
         self.synchronize_audio_runtime();
@@ -1215,6 +1266,7 @@ impl PlaybackRuntime {
         self.capture_position();
         self.observe_history();
         self.finish_history("skipped");
+        self.blind_tasting_label = label;
         self.queue = queue;
         self.priority_next_end = None;
         self.current_index = Some(start_index);
@@ -1892,6 +1944,56 @@ mod tests {
             filename: format!("track-{index}.mp3"),
             catalog_import_run_id: 1,
         }
+    }
+
+    #[test]
+    fn tasting_policy_is_temporary_and_end_clears_the_audition() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = HistoryStore::new(
+            directory.path().join("history.sqlite3"),
+            directory.path().join("remote"),
+            "tasting-test".into(),
+            "Test".into(),
+        )
+        .unwrap();
+        let store = StateStore::new(directory.path().join("state.sqlite3")).unwrap();
+        let mut runtime = PlaybackRuntime::new(
+            store,
+            history,
+            AudioSettingsStore::load(directory.path().join("audio.json")),
+        )
+        .unwrap();
+        let normal = runtime.gain_policy();
+        assert!(
+            runtime
+                .blind_tasting(None, Some("Candidate A".into()))
+                .is_err()
+        );
+        assert!(
+            runtime
+                .blind_tasting(None, Some("leaking title".into()))
+                .is_err()
+        );
+        runtime.blind_tasting_label = Some("Candidate A".into());
+        runtime.queue = vec![queue_track(1)];
+        runtime.current_index = Some(0);
+        assert_eq!(runtime.gain_policy().mode, ReplayGainMode::Track);
+        assert!(runtime.gain_policy().estimate_missing);
+        assert!(runtime.gain_policy().boost_quiet);
+        assert_eq!(
+            runtime.snapshot().blind_tasting_label.as_deref(),
+            Some("Candidate A")
+        );
+        let ended = runtime.blind_tasting(None, None).unwrap();
+        assert!(ended.blind_tasting_label.is_none());
+        assert!(ended.current_track.is_none());
+        assert!(ended.queue.is_empty());
+        assert_eq!(runtime.gain_policy().mode, normal.mode);
+        assert_eq!(
+            runtime.gain_policy().estimate_missing,
+            normal.estimate_missing
+        );
+        assert_eq!(runtime.gain_policy().boost_quiet, normal.boost_quiet);
     }
 
     #[test]

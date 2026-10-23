@@ -3,8 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { analyzeSonicSeed, sonicMatches, type SonicResponse } from "../sonic";
 import { displayTrackArtist, type Track } from "../library";
 import "./SonicPanel.css";
-interface Props { track: Track; onPlay: (track: Track, queue: Track[]) => void; onRadio: (track: Track, minimumRating: number | null, sameGenre: boolean) => void; radioBusy: boolean; radioMessage: string | null; onStopRadio: () => void; radioActive: boolean; onWorlds: (track: Track) => void; }
-export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, onStopRadio, radioActive, onWorlds }: Props) {
+interface Props { track: Track; onPlay: (track: Track, queue: Track[]) => void; onRadio: (track: Track, minimumRating: number | null, sameGenre: boolean) => void; radioBusy: boolean; radioMessage: string | null; onStopRadio: () => void; radioActive: boolean; onWorlds: (track: Track) => void; onTasting?: (track: Track) => void; }
+export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, onStopRadio, radioActive, onWorlds, onTasting }: Props) {
   const [response, setResponse] = useState<SonicResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +24,7 @@ export function SonicPanel({ track, onPlay, onRadio, radioBusy, radioMessage, on
     finally { if (id === serial.current && selection.current === key) setBusy(false); }
   }
   return <section className="sonic-panel" aria-label="More like this">
+    {onTasting && <button type="button" onClick={() => onTasting(track)}>Blind tasting</button>}
     <h3>More like this</h3><p>Find music in your library by its sound.</p>
     <button type="button" onClick={() => onWorlds(track)}>Same sound, different world</button>
     <div className="sonic-filters"><label>Minimum rating <select value={minimumRating ?? ""} disabled={busy} onChange={e => { setMinimumRating(e.target.value ? Number(e.target.value) : null); setResponse(null); }}><option value="">Any</option><option value="3">3 stars</option><option value="4">4 stars</option><option value="5">5 stars</option></select></label><label><input type="checkbox" checked={sameGenre} disabled={busy} onChange={e => { setSameGenre(e.target.checked); setResponse(null); }} />Same genre</label></div>

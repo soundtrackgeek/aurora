@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.46.0] - 2026-10-23
+
+### Added
+- **Blind tasting** from a track: two concealed, randomized acoustic neighbors, temporary track normalization, anonymous media controls, preference/reveal, explicit playlist save and full-album listening. Normal audio preferences and ratings remain unchanged.
+- Regression coverage and shared documentation for the paired Tonehavn web/iPhone experience, including offline and device-verification limits.
+
 ## [0.45.0] - 2026-10-23
 
 ### Added
