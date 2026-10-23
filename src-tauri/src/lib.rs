@@ -49,6 +49,7 @@ mod snapshot_io;
 mod sonic;
 mod sonic_album_sides;
 mod sonic_albums;
+mod sonic_atlas;
 mod sonic_gain;
 mod sonic_index;
 mod sonic_journey;
@@ -2099,6 +2100,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sonic_matches,
             sonic_worlds,
+            sonic_atlas::sonic_atlas,
             sonic_album_matches,
             sonic_album_sides,
             sonic_journey,

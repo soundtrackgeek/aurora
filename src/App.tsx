@@ -6,6 +6,7 @@ import { journeyPlaybackTracks } from "./sonicJourney";
 import type { SonicAlbum } from "./sonic";
 import { SonicPanel } from "./components/SonicPanel";
 import { BlindTasting } from "./components/BlindTasting";
+import { SonicAtlas } from "./components/SonicAtlas";
 import { SonicWorldsPanel } from "./components/SonicWorldsPanel";
 import { useSonicRadio } from "./app/domains/useSonicRadio";
 import {
@@ -217,6 +218,7 @@ function App() {
   const [playlistSelection, setPlaylistSelection] = useState<PlaylistSelection | null>(null);
   const [tastingSeed, setTastingSeed] = useState<Track | null>(null);
   const [worldSeed, setWorldSeed] = useState<Track | null>(null);
+  const [atlasSeed, setAtlasSeed] = useState<Track | null>(null);
   const [contextTags, setContextTags] = useState<PlaylistSelection | null>(null);
   const [playlistSaveMessage, setPlaylistSaveMessage] = useState<string | null>(null);
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
@@ -1375,7 +1377,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.46.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.47.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1921,7 +1923,7 @@ function App() {
               <div><dt>Your listening time</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? formatDuration(Math.round(trackHistory.value.listenedSeconds)) : "—"}</dd></div>
               <div><dt>Last listened</dt><dd>{trackHistory?.trackKey === inspectorTrack.trackKey ? historyDateLabel(trackHistory.value.lastListenedAtMs) : "—"}</dd></div>
             </dl>
-            <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} onWorlds={setWorldSeed} onTasting={track => { endGenreQueue(); sonicRadio.stop(); setTastingSeed(track); }} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
+            <SonicPanel key={inspectorTrack.trackKey} track={inspectorTrack} onAtlas={setAtlasSeed} onWorlds={setWorldSeed} onTasting={track => { endGenreQueue(); sonicRadio.stop(); setTastingSeed(track); }} radioBusy={sonicRadio.busy} radioMessage={sonicRadio.message} radioActive={Boolean(sonicRadio.session)} onStopRadio={sonicRadio.stop} onPlay={playTrack} onRadio={(track, rating, genre) => { endGenreQueue(); void sonicRadio.start(track, rating, genre); }} />
             <SonicJourneyPanel journey={sonicJourney} currentTrack={{ trackKey: inspectorTrack.trackKey, title: inspectorTrack.title, artist: displayTrackArtist(inspectorTrack) }} onPlay={async tracks => { if (!await startPlaylistQueue(journeyPlaybackTracks(tracks), 0)) throw new Error("Could not start the journey. Check the playback error and try again."); }} />
             <TrackChartInfo artist={displayTrackArtist(inspectorTrack)} title={inspectorTrack.title} />
             <div className="readonly-note"><BadgeCheck aria-hidden="true" /><span><strong>Verified file writes</strong>Use the Tags tab to edit your library selection without leaving Aurora.</span></div>
@@ -1975,6 +1977,7 @@ function App() {
         onToggleQueue={() => setQueueOpen((open) => !open)}
       />
 
+      {atlasSeed && <SonicAtlas key={atlasSeed.trackKey} initialSeed={atlasSeed} playing={playback.state.status === "playing"} onPause={() => { if (playback.state.status === "playing") void playback.toggle(); }} onClose={() => setAtlasSeed(null)} onOpenAlbum={track => openTrackAlbum(journeyPlaybackTracks([track])[0])} onSaved={() => setPlaylistsReloadToken(t => t + 1)} onPlay={async tracks => { endGenreQueue(); sonicRadio.stop(); if (!await startPlaylistQueue(journeyPlaybackTracks(tracks), 0)) throw new Error("Could not play the region. Check playback and try again."); }} />}
       {tastingSeed && <BlindTasting seed={tastingSeed} playback={playback.state} onSnapshot={playback.applySnapshot} onPause={() => void playback.toggle()} onSeek={seconds => void playback.seek(seconds)} onAlbum={async tracks => { if (!await startPlaylistQueue(tracks, 0)) throw new Error("Album playback failed"); }} onClose={() => setTastingSeed(null)} />}
       {worldSeed && <SonicWorldsPanel key={worldSeed.trackKey} track={worldSeed} onClose={() => setWorldSeed(null)} playing={playback.state.status === "playing"} playbackError={playback.error} onPause={() => { if (playback.state.status === "playing") void playback.toggle(); }} onPlay={(track, queue) => { endGenreQueue(); sonicRadio.stop(); void playback.play(queue, track.id); }} />}
       {addFolderOpen && (

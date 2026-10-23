@@ -1,5 +1,12 @@
 # Aurora
 
+## Playable sonic atlas (0.47.0)
+
+Open a track inspector → Explore sonic atlas to navigate stable local sound regions, play entry points or whole regions, open albums, recenter and go back, and save reviewed playlists through Music Library 0.201.0 or newer.
+
+Music Library owns the saved map, progress and playlist writes; Aurora supplies playback and navigation. Reload counts keeps positions and region membership fixed. Rebuild neighborhood explicitly updates the sound selection. Each atlas covers up to 180 distinct recordings, with bounded indexed retrieval, fresh analysis checks, readable brightness/average-level axes and numbered regions. The map does not establish mood, genre, musical key or LUFS. See [behavior, evidence and limits](docs/sonic-atlas.md).
+
+
 Aurora **0.45.0** adds **Same sound, different world** under a track inspector's
 **More like this** panel. Choose decade, album artist or catalog genre, then
 **Stay close**, **Either**, or **Cross borders**. Audition up to three nearby

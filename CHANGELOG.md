@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.47.0] - 2026-10-23
+
+### Added
+- **Playable sonic atlas**: Open a track inspector → Explore sonic atlas to navigate stable local sound regions, play entry points or whole regions, open albums, recenter and go back, and save reviewed playlists through Music Library 0.201.0 or newer.
+- Explicit rebuilds, revision checks, recording freshness validation and unavailable states preserve reviewed regions. Two readable axes describe the map; full-profile sound distance selects neighbors and regions. Counts cover the bounded neighborhood, and absent history never implies unheard music.
+
 ## [0.46.0] - 2026-10-23
 
 ### Added
