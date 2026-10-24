@@ -12,6 +12,75 @@ afterEach(() => {
 });
 
 describe("Inbox", () => {
+  it.each([false, true])("keeps the album list in place after a tag save (navigate during save: %s)", async (navigateDuringSave) => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const base = snapshot.albums[0];
+    const albums = Array.from({ length: 65 }, (_, index) => {
+      const album = `Scroll album ${index + 1}`;
+      const path = `C:\\Music\\Inbox\\${album}`;
+      return { ...base, id: `scroll-${index}`, album, path, tracks: base.tracks.map((track) => ({ ...track, album, path: track.path.replace(base.path, path) })) };
+    });
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    let finish!: (result: inboxAdapter.InboxTagApplyResult) => void;
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    const row = await screen.findByRole("row", { name: "Scroll album 50 by Baltimoore" });
+    const table = within(screen.getByRole("region", { name: "Staged albums" })).getByRole("table");
+    const scroller = table.parentElement!;
+    scroller.scrollTop = 2_400;
+    fireEvent.scroll(scroller);
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Album" }), { target: { value: "Corrected album" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 10 MP3s" }));
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ albumPath: albums[49].path, fields: ["album"] }));
+    if (navigateDuringSave) {
+      scroller.scrollTop = 2_800;
+      fireEvent.scroll(scroller);
+      fireEvent.click(screen.getByRole("row", { name: "Scroll album 60 by Baltimoore" }));
+    }
+    const edited = { ...albums[49], album: "Corrected album", modifiedAtMs: Date.now(), tracks: albums[49].tracks.map((track) => ({ ...track, album: "Corrected album" })) };
+    load.mockResolvedValue({ ...snapshot, albums: [edited, ...albums.filter((album) => album.id !== edited.id)] });
+    await act(async () => { finish({ changedTracks: 10, renamedTracks: 0, albumPath: edited.path }); });
+    expect(await screen.findByRole("row", { name: "Corrected album by Baltimoore" })).toBe(row);
+    expect(within(table).getAllByRole("row")[50]).toBe(row);
+    expect(scroller.scrollTop).toBe(navigateDuringSave ? 2_800 : 2_400);
+    expect(screen.getByRole("row", { name: navigateDuringSave ? "Scroll album 60 by Baltimoore" : "Corrected album by Baltimoore" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("tab", { name: "Tags" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.focus(window);
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+    expect(within(table).getAllByRole("row")[50]).toBe(row);
+  });
+
+  it("retains the album position and selection when Auto-Tagger renames its folder", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const base = snapshot.albums[0];
+    const albums = ["first", "editing", "last"].map((id) => ({ ...base, id, path: `C:\\Music\\Inbox\\${id}` }));
+    const load = vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums });
+    const renamed = { ...albums[1], id: "renamed", path: "C:\\Music\\Inbox\\Baltimoore - Freak (1990)" };
+    vi.spyOn(inboxAdapter, "applyInboxTags").mockImplementation(async () => {
+      load.mockResolvedValue({ ...snapshot, albums: [renamed, albums[0], albums[2]] });
+      return { changedTracks: 10, renamedTracks: 10, albumPath: renamed.path };
+    });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    const rows = await screen.findAllByRole("row", { name: "Freak by Baltimoore" });
+    fireEvent.click(rows[1]);
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply & rename" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Apply & rename" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Album Auto-Tagger" })).not.toBeInTheDocument());
+    expect(await screen.findByTitle(renamed.path)).toBeInTheDocument();
+    const refreshedRows = screen.getAllByRole("row", { name: "Freak by Baltimoore" });
+    expect(refreshedRows[1]).toHaveAttribute("aria-current", "true");
+    expect(refreshedRows[1]).toHaveAttribute("aria-selected", "true");
+    expect(refreshedRows[0]).toBe(rows[0]);
+    expect(refreshedRows[2]).toBe(rows[2]);
+    fireEvent.click(refreshedRows[2], { shiftKey: true });
+    expect(refreshedRows[0]).toHaveAttribute("aria-selected", "false");
+    expect(refreshedRows[1]).toHaveAttribute("aria-selected", "true");
+    expect(refreshedRows[2]).toHaveAttribute("aria-selected", "true");
+  });
+
   it("expires action banners after five seconds and reopens their results from History", async () => {
     vi.useFakeTimers();
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);

@@ -51,6 +51,7 @@ import type { EditableTagField, EditableTagValues } from "../../tags";
 import { loadGenreNames } from "../../genres";
 import { formatDuration } from "../../library";
 import { reconcileInboxTracks, type InboxTrackMatchStatus } from "../../inboxMatching";
+import { mergeRefreshedInboxAlbums } from "../../inboxRefresh";
 import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
 import { LibraryIntakeActivity } from "./LibraryIntakeActivity";
@@ -140,21 +141,30 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [historyOpen, setHistoryOpen] = useState(false);
   const { progress: moveProgress, reset: resetMoveProgress } = useLibraryIntakeProgress();
 
-  const refresh = useCallback(async (quiet = false) => {
+  const refresh = useCallback(async (quiet = false, renamedAlbum?: { id: string; path: string }) => {
     if (!quiet) setLoadState("loading");
     try {
       const next = await loadInboxSnapshot();
-      setSnapshot(next);
+      const renamed = renamedAlbum && next.albums.find((album) => album.path === renamedAlbum.path);
+      const identityChange = renamed && { from: renamedAlbum.id, to: renamed.id };
+      const currentId = (id: string | null) => id === identityChange?.from ? identityChange.to : id;
+      setSnapshot((current) => ({ ...next, albums: mergeRefreshedInboxAlbums(current?.albums ?? [], next.albums, identityChange) }));
       setError(null);
       setLoadState("ready");
-      setSelectedAlbumId((current) => current && next.albums.some((album) => album.id === current) ? current : next.albums[0]?.id ?? null);
+      setSelectedAlbumId((current) => {
+        const id = currentId(current);
+        return id && next.albums.some((album) => album.id === id) ? id : next.albums[0]?.id ?? null;
+      });
       setSelectedAlbumIds((current) => {
         const availableIds = new Set(next.albums.map((album) => album.id));
-        const retained = new Set([...current].filter((id) => availableIds.has(id)));
+        const retained = new Set([...current].map((id) => currentId(id) ?? id).filter((id) => availableIds.has(id)));
         if (!retained.size && next.albums[0]) retained.add(next.albums[0].id);
         return retained;
       });
-      setAlbumSelectionAnchorId((current) => current && next.albums.some((album) => album.id === current) ? current : next.albums[0]?.id ?? null);
+      setAlbumSelectionAnchorId((current) => {
+        const id = currentId(current);
+        return id && next.albums.some((album) => album.id === id) ? id : next.albums[0]?.id ?? null;
+      });
       setSelectedFolder((current) => current && next.settings.monitoredFolders.includes(current) ? current : null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -523,7 +533,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </aside>
       </div>
 
-      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async (message) => { notify(message); setTaggerAlbum(null); await refresh(); }} /> : null}
+      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async (message, path) => { notify(message); setTaggerAlbum(null); await refresh(false, { id: taggerAlbum.id, path }); }} /> : null}
       {intakeScope ? <InboxLibraryIntakeDialog
         scopeLabel={intakeScope.label}
         targets={intakeScope.targets}
@@ -535,7 +545,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   );
 }
 
-function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; tracks: InboxTrack[]; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: (message: string) => void | Promise<void> }) {
+function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; tracks: InboxTrack[]; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: (message: string, albumPath: string) => void | Promise<void> }) {
   const [artist, setArtist] = useState(album.artist ?? "");
   const [title, setTitle] = useState(album.album ?? album.folderName);
   const [candidates, setCandidates] = useState<ReleaseCandidate[]>([]);
@@ -722,7 +732,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
       });
       await onApplied(result.removedTracks
         ? `Auto-tagged the selected edition and moved ${result.removedTracks} unmatched ${result.removedTracks === 1 ? "track" : "tracks"} to Aurora recovery${result.recoveryPath ? ` at ${result.recoveryPath}` : ""}.`
-        : `Auto-tagged ${result.changedTracks} ${result.changedTracks === 1 ? "track" : "tracks"}${result.renamedTracks ? " and renamed the album" : ""}.`);
+        : `Auto-tagged ${result.changedTracks} ${result.changedTracks === 1 ? "track" : "tracks"}${result.renamedTracks ? " and renamed the album" : ""}.`, result.albumPath);
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); setBusy(null); }
   }
 

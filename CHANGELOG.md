@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.47.3] - 2026-10-24
+
+### Fixed
+- Preserve Inbox album order and scroll position after saving tags: refresh existing rows in place instead of moving recently edited albums to the top. Keep the latest selection when a save finishes after you have moved on.
+- Retain the edited album's position, selection and Shift-selection anchor when Auto-Tagger renames its folder. Remove departed albums and append new arrivals without reordering the remaining rows.
+
 ## [0.47.2] - 2026-10-24
 
 ### Fixed

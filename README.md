@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.47.3** keeps your place in Inbox after saving album tags. Refreshes
+update existing rows without moving edited albums to the top; the current
+selection and scroll position stay where you left them, including when you
+continue browsing during a save. Auto-Tagger folder renames keep the album in
+its existing position. Newly discovered albums are appended during the session.
+
 Aurora **0.47.2** clears Inbox action messages after five seconds. Open the
 compact **History** button to review the latest 100 results and errors, newest
 first with timestamps, for the current app session. Dismiss a banner early with
