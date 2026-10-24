@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as artworkSelection from "../../artworkSelection";
 import * as inboxAdapter from "../../inbox";
@@ -7,10 +7,61 @@ import { Inbox } from "./Inbox";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("Inbox", () => {
+  it("expires action banners after five seconds and reopens their results from History", async () => {
+    vi.useFakeTimers();
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByRole("row", { name: /Freak by/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Message history (0)" }));
+    expect(screen.getByText("No messages yet. Results from Inbox actions will appear here.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close message history" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Rename Ctrl R" })); });
+    const message = "10 tracks renamed with the album folder.";
+    expect(screen.getByText(message)).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(4_999));
+    expect(screen.getByText(message)).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    const historyButton = screen.getByRole("button", { name: "Message history (1)" });
+    fireEvent.click(historyButton);
+    expect(historyButton).toHaveAttribute("aria-expanded", "true");
+    const history = screen.getByRole("region", { name: "Inbox message history" });
+    expect(within(history).getByText(message)).toBeInTheDocument();
+    expect(history.querySelector("time")).toHaveAttribute("datetime");
+    fireEvent.click(historyButton);
+    expect(screen.queryByRole("region", { name: "Inbox message history" })).not.toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Rename Ctrl R" })); });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Message history (2)" }));
+    expect(within(screen.getByRole("region", { name: "Inbox message history" })).getAllByText(message)).toHaveLength(2);
+  });
+
+  it("keeps partial rename failures through refresh and expiry while configuration warnings remain visible", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, settings: { ...snapshot.settings, warning: "Check the monitored folder." } });
+    vi.spyOn(inboxAdapter, "renameInboxAlbums").mockResolvedValue({ renamedTracks: 1, renamedAlbums: 1, renamedFolders: 0, failures: [{ albumPath: snapshot.albums[0].path, message: "File is locked." }] });
+    vi.useFakeTimers();
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByRole("row", { name: /Freak by/ })).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Rename Ctrl R" })); });
+    expect(screen.getByRole("alert")).toHaveTextContent("File is locked.");
+    expect(screen.getByText("1 track renamed across 1 album.")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Check the monitored folder.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Message history (2)" }));
+    const entries = within(screen.getByRole("region", { name: "Inbox message history" })).getAllByRole("listitem");
+    expect(entries[0]).toHaveTextContent("File is locked.");
+    expect(entries[1]).toHaveTextContent("1 track renamed across 1 album.");
+  });
+
   it("shows the missing first track and blocks intake until a rescan confirms it is present", async () => {
     const snapshot = await inboxAdapter.loadInboxSnapshot();
     const first = snapshot.albums[0];

@@ -2,6 +2,12 @@
 
 Aurora 0.24.6 provides Inbox as a device-local preparation area. Its files are ordinary audio folders outside Aurora's catalog until conversion and an explicit Music Library intake succeed.
 
+## Action messages
+
+- Completed rename, track-total, cover-repair, conversion, auto-tag and intake results, plus operation errors, enter one Inbox message history. Each banner expires five seconds after its own result arrives, including repeated identical messages; closing a banner dismisses it early. Up to three recent banners are shown at once.
+- **History** opens a bounded, scrollable list of the latest 100 messages with local timestamps, newest first. Expiry and dismissal leave history intact. History stays in memory while Inbox is mounted (including ordinary navigation away and back), and resets on app restart or reload; it is not a durable audit log.
+- Rescans do not erase operation results or partial failures. Scan errors, settings warnings, readiness issues and in-progress operation displays keep their existing lifetime.
+
 ## Monitoring and identity
 
 - Inbox stores at most ten canonical folder paths in `%APPDATA%\com.soundtrackgeek.aurora\aurora-inbox.json`. The setting is device-local and is not copied into Aurora's shared state or OneDrive snapshots.

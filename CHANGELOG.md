@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.2] - 2026-10-24
+
+### Fixed
+- Inbox action banners expire independently after five seconds, with at most three visible at once and optional early dismissal. Partial-operation errors survive the following rescan.
+
+### Added
+- A compact Inbox History button opens the latest 100 action results and errors with timestamps, newest first, for the current app session. Expired and dismissed messages remain available there; scan and configuration warnings stay visible while unresolved.
+
 ## [0.47.1] - 2026-10-24
 
 ### Fixed

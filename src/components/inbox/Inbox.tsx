@@ -55,6 +55,8 @@ import { InboxTagEditor } from "./InboxTagEditor";
 import { InboxLibraryIntakeDialog, type InboxLibraryIntakeTarget } from "./InboxLibraryIntakeDialog";
 import { LibraryIntakeActivity } from "./LibraryIntakeActivity";
 import { useLibraryIntakeProgress } from "./useLibraryIntakeProgress";
+import { useInboxMessages } from "./useInboxMessages";
+import { InboxMessageHistoryButton, InboxMessages } from "./InboxMessages";
 import { applyWindowsSelection } from "../explorer/windowsSelection";
 import "./Inbox.css";
 
@@ -126,20 +128,16 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [moveCategory, setMoveCategory] = useState<LibraryIntakeCategoryId | "">("");
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
-  const [moveMessage, setMoveMessage] = useState<string | null>(null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
-  const [renameMessage, setRenameMessage] = useState<string | null>(null);
   const [trackTotalsBusy, setTrackTotalsBusy] = useState(false);
-  const [trackTotalsMessage, setTrackTotalsMessage] = useState<string | null>(null);
   const [coverBusy, setCoverBusy] = useState(false);
-  const [coverMessage, setCoverMessage] = useState<string | null>(null);
   const [convertBusy, setConvertBusy] = useState(false);
-  const [convertMessage, setConvertMessage] = useState<string | null>(null);
   const [excludedTrackPaths, setExcludedTrackPaths] = useState<Set<string>>(new Set());
   const [inspectorView, setInspectorView] = useState<"album" | "tags">("album");
   const [intakeScope, setIntakeScope] = useState<{ label: string; targets: InboxLibraryIntakeTarget[] } | null>(null);
-  const [intakeMessage, setIntakeMessage] = useState<string | null>(null);
+  const { messages, notify, dismiss } = useInboxMessages();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { progress: moveProgress, reset: resetMoveProgress } = useLibraryIntakeProgress();
 
   const refresh = useCallback(async (quiet = false) => {
@@ -197,7 +195,6 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setExcludedTrackPaths(new Set());
     setMovePreview(null);
     setReplacementConfirmed(false);
-    setMoveMessage(null);
     if (folderAlbums[0]?.losslessTrackCount) setInspectorView("album");
   }
 
@@ -218,7 +215,6 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     setExcludedTrackPaths(new Set());
     setMovePreview(null);
     setReplacementConfirmed(false);
-    setMoveMessage(null);
     if (albums.some((candidate) => selection.selectedKeys.has(candidate.id) && candidate.losslessTrackCount > 0)) setInspectorView("album");
   }
 
@@ -238,52 +234,49 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const renameSelectedAlbums = useCallback(async (albumsToRename: InboxAlbum[]) => {
     if (!albumsToRename.length) return;
     setRenameBusy(true);
-    setRenameMessage(null);
-    setError(null);
     try {
       const result = await renameInboxAlbums(albumsToRename.map((album) => album.path));
       if (result.renamedAlbums) {
         if (albumsToRename.length === 1 && result.failures.length === 0) {
-          setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed${result.renamedFolders ? " with the album folder" : ""}.`);
+          notify(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed${result.renamedFolders ? " with the album folder" : ""}.`);
         } else {
-          setRenameMessage(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed across ${result.renamedAlbums} ${result.renamedAlbums === 1 ? "album" : "albums"}${result.renamedFolders ? ` with ${result.renamedFolders} album ${result.renamedFolders === 1 ? "folder" : "folders"} renamed` : ""}.`);
+          notify(`${result.renamedTracks} ${result.renamedTracks === 1 ? "track" : "tracks"} renamed across ${result.renamedAlbums} ${result.renamedAlbums === 1 ? "album" : "albums"}${result.renamedFolders ? ` with ${result.renamedFolders} album ${result.renamedFolders === 1 ? "folder" : "folders"} renamed` : ""}.`);
         }
       }
       if (result.failures.length) {
         const firstFailure = result.failures[0];
         const failedAlbum = albumsToRename.find((album) => album.path === firstFailure.albumPath);
-        setError(`${result.failures.length} ${result.failures.length === 1 ? "album" : "albums"} could not be renamed. ${failedAlbum?.album ?? failedAlbum?.folderName ?? leafName(firstFailure.albumPath)}: ${firstFailure.message}`);
+        notify(`${result.failures.length} ${result.failures.length === 1 ? "album" : "albums"} could not be renamed. ${failedAlbum?.album ?? failedAlbum?.folderName ?? leafName(firstFailure.albumPath)}: ${firstFailure.message}`, "error");
       }
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setRenameBusy(false);
     }
-  }, [refresh]);
+  }, [notify, refresh]);
 
   async function fillSelectedTrackTotals() {
     if (trackTotalsDisabled) return;
     const targets = [...selectedAlbums];
     setTrackTotalsBusy(true);
-    setTrackTotalsMessage(null);
-    setError(null);
     setMovePreview(null);
     setReplacementConfirmed(false);
-    setMoveMessage(null);
     try {
       const result = await fillInboxTrackTotals(targets.map((album) => album.path));
       await refresh();
-      setTrackTotalsMessage(result.changedTracks
-        ? `Filled missing track totals in ${result.changedTracks} ${result.changedTracks === 1 ? "track" : "tracks"} across ${result.changedAlbums} ${result.changedAlbums === 1 ? "album" : "albums"}.`
-        : result.failures.length ? null : "All selected albums already have track totals.");
+      if (result.changedTracks) {
+        notify(`Filled missing track totals in ${result.changedTracks} ${result.changedTracks === 1 ? "track" : "tracks"} across ${result.changedAlbums} ${result.changedAlbums === 1 ? "album" : "albums"}.`);
+      } else if (!result.failures.length) {
+        notify("All selected albums already have track totals.");
+      }
       if (result.failures.length) {
         const first = result.failures[0];
         const album = targets.find((target) => target.path === first.albumPath);
-        setError(`${result.failures.length} ${result.failures.length === 1 ? "album" : "albums"} could not have track totals filled. ${album?.album ?? leafName(first.albumPath)}: ${first.message}`);
+        notify(`${result.failures.length} ${result.failures.length === 1 ? "album" : "albums"} could not have track totals filled. ${album?.album ?? leafName(first.albumPath)}: ${first.message}`, "error");
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setTrackTotalsBusy(false);
     }
@@ -311,7 +304,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
       await addInboxMonitorFolder(folder);
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     }
   }
 
@@ -321,24 +314,22 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
       if (selectedFolder === folder) selectFolder(null);
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     }
   }
 
   async function repairAlbumCover() {
     if (!selectedAlbum || coverBusy) return;
     setCoverBusy(true);
-    setCoverMessage(null);
-    setError(null);
     try {
       const imagePath = selectedAlbum.artworkPresent ? null : await selectInboxCoverImage();
       if (!selectedAlbum.artworkPresent && !imagePath) return;
       const result = await embedInboxAlbumCover(selectedAlbum.path, imagePath);
-      setCoverMessage(`Embedded the album cover in ${result.trackCount} ${result.trackCount === 1 ? "track" : "tracks"}${result.changedTracks < result.trackCount ? `; ${result.changedTracks} needed updating` : ""}.`);
+      notify(`Embedded the album cover in ${result.trackCount} ${result.trackCount === 1 ? "track" : "tracks"}${result.changedTracks < result.trackCount ? `; ${result.changedTracks} needed updating` : ""}.`);
       setMovePreview(null);
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setCoverBusy(false);
     }
@@ -347,21 +338,19 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   async function convertSelectedAlbum() {
     if (!selectedAlbum || !selectedAlbum.losslessTrackCount || convertBusy) return;
     setConvertBusy(true);
-    setConvertMessage(null);
-    setError(null);
     try {
       const result = await convertInboxLossless(selectedAlbum.path);
       if (result.convertedTracks) {
-        setConvertMessage(`${result.convertedTracks} ${result.convertedTracks === 1 ? "track" : "tracks"} converted to 320 kbps MP3; ${result.deletedSources} source ${result.deletedSources === 1 ? "file" : "files"} deleted.`);
+        notify(`${result.convertedTracks} ${result.convertedTracks === 1 ? "track" : "tracks"} converted to 320 kbps MP3; ${result.deletedSources} source ${result.deletedSources === 1 ? "file" : "files"} deleted.`);
       }
       if (result.failures.length) {
         const first = result.failures[0];
-        setError(`${result.failures.length} ${result.failures.length === 1 ? "track" : "tracks"} could not be converted. ${first.fileName}: ${first.message}`);
+        notify(`${result.failures.length} ${result.failures.length === 1 ? "track" : "tracks"} could not be converted. ${first.fileName}: ${first.message}`, "error");
       }
       setMovePreview(null);
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setConvertBusy(false);
     }
@@ -404,13 +393,12 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   async function previewMove() {
     if (!selectedAlbum || !moveCategory) return;
     setMoveBusy(true);
-    setMoveMessage(null);
     resetMoveProgress();
     try {
       setMovePreview(await libraryIntakeAdapter.preview({ sourcePath: selectedAlbum.path, category: moveCategory }));
       setReplacementConfirmed(false);
     } catch (nextError) {
-      setMoveMessage(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setMoveBusy(false);
     }
@@ -419,17 +407,16 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   async function applyMove() {
     if (!movePreview || (movePreview.albums.some((album) => album.action === "replace") && !replacementConfirmed)) return;
     setMoveBusy(true);
-    setMoveMessage(null);
     resetMoveProgress();
     try {
       const result = await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
       await onCatalogChanged();
       setMovePreview(null);
       setMoveCategory("");
-      setMoveMessage(`${result.albumCount} ${result.albumCount === 1 ? "album" : "albums"} moved and cataloged.`);
+      notify(`${result.albumCount} ${result.albumCount === 1 ? "album" : "albums"} moved and cataloged.`);
       await refresh();
     } catch (nextError) {
-      setMoveMessage(nextError instanceof Error ? nextError.message : String(nextError));
+      notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
       setMoveBusy(false);
     }
@@ -449,15 +436,12 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
           <button type="button" disabled={!selectedAlbums.length || renameBusy || convertBusy || coverBusy || moveBusy || trackTotalsBusy} title="Move only selected albums to the library. Ctrl-click to toggle albums; Shift-click to select a range." onClick={openSelectedAlbumsIntake}><FolderInput /> Move selected{selectedAlbums.length ? ` (${selectedAlbums.length})` : ""}</button>
           <button type="button" disabled={!selectedAlbums.length || selectedAlbumsHaveLossless || renameBusy || trackTotalsBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename{selectedAlbums.length > 1 ? ` ${selectedAlbums.length} albums` : ""} <kbd>Ctrl R</kbd></button>
           <button type="button" className="button button--primary" disabled={!selectedAlbum || selectedAlbumHasLossless || !selectedTracks.length || renameBusy || trackTotalsBusy} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag {selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl Shift T</kbd></button>
+          <InboxMessageHistoryButton count={messages.length} open={historyOpen} onToggle={() => setHistoryOpen((current) => !current)} />
         </div>
       </header>
 
       {error ? <p className="inbox-banner" role="alert"><AlertTriangle />{error}</p> : null}
-      {renameMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{renameMessage}</p> : null}
-      {trackTotalsMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{trackTotalsMessage}</p> : null}
-      {coverMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{coverMessage}</p> : null}
-      {convertMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{convertMessage}</p> : null}
-      {intakeMessage ? <p className="inbox-banner inbox-banner--success" role="status"><CheckCircle2 />{intakeMessage}</p> : null}
+      <InboxMessages messages={messages} historyOpen={historyOpen} onCloseHistory={() => setHistoryOpen(false)} onDismiss={dismiss} />
       {snapshot.settings.warning ? <p className="inbox-banner" role="status"><AlertTriangle />{snapshot.settings.warning}</p> : null}
 
       <div className="inbox-workspace">
@@ -533,20 +517,19 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
               {moveBusy ? <LibraryIntakeActivity mode={movePreview ? "apply" : "preview"} progress={moveProgress} /> : null}
               {movePreview?.albums.some((album) => album.action === "replace") ? <label className="inbox-move__replacement"><AlertTriangle /><span><strong>Replace existing release</strong><small>{movePreview.albums[0].existingTrackCount} existing → {movePreview.albums[0].trackCount} new tracks · old release preserved for recovery</small></span><input type="checkbox" aria-label="Confirm replacement" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /></label> : null}
-              {moveMessage ? <p className="inbox-move__message" role="status">{moveMessage}</p> : null}
               <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || trackTotalsBusy || !selectedAlbum.readiness.ready || Boolean(movePreview?.albums.some((album) => album.action === "replace") && !replacementConfirmed)} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview?.albums.some((album) => album.action === "replace") ? "Replace and catalog" : movePreview ? "Move and catalog" : "Preview move"}</button>
             </section>
           </> : <div className="inbox-inspector__empty"><InboxIcon /><span>Select an album to review it.</span></div>}
         </aside>
       </div>
 
-      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async (message) => { setIntakeMessage(message); setTaggerAlbum(null); await refresh(); }} /> : null}
+      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async (message) => { notify(message); setTaggerAlbum(null); await refresh(); }} /> : null}
       {intakeScope ? <InboxLibraryIntakeDialog
         scopeLabel={intakeScope.label}
         targets={intakeScope.targets}
         onClose={() => setIntakeScope(null)}
         onApplied={async () => { await onCatalogChanged(); await refresh(); }}
-        onCompleted={setIntakeMessage}
+        onCompleted={notify}
       /> : null}
     </section>
   );

@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.47.2** clears Inbox action messages after five seconds. Open the
+compact **History** button to review the latest 100 results and errors, newest
+first with timestamps, for the current app session. Dismiss a banner early with
+its close button; it stays in History. Scan and configuration warnings remain
+visible while they need attention.
+
 Aurora **0.47.1** keeps its local state database open between background saves to
 avoid repeated WAL cleanup locks competing with rating writes. Inspecting or
 retrying a track completes an interrupted rating journal after checking the
