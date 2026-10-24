@@ -1,5 +1,12 @@
 # Aurora
 
+Aurora **0.47.1** keeps its local state database open between background saves to
+avoid repeated WAL cleanup locks competing with rating writes. Inspecting or
+retrying a track completes an interrupted rating journal after checking the
+installed MP3, retained original, other tags and audio; the verified rating is
+queued for Music Library sync without rewriting the audio. Database contention
+can originate inside Aurora even when Music Library is closed.
+
 ## Playable sonic atlas (0.47.0)
 
 Open a track inspector → Explore sonic atlas to navigate stable local sound regions, play entry points or whole regions, open albums, recenter and go back, and save reviewed playlists through Music Library 0.201.0 or newer.

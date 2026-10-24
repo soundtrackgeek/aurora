@@ -423,7 +423,7 @@ impl TagService {
     pub(crate) fn new(store: StateStore) -> Result<Self, String> {
         let service = Self { store };
         if !crate::connections::network_mode() {
-            service.recover_interrupted_operations()?;
+            service.recover_interrupted_operations(None)?;
             let _ = service.store.cleanup_completed_tag_backups();
         }
         Ok(service)
@@ -434,6 +434,9 @@ impl TagService {
         track_id: &str,
         track_key: &str,
     ) -> Result<TrackTagSnapshot, String> {
+        if !crate::connections::network_mode() {
+            self.recover_interrupted_operations(Some(track_key))?;
+        }
         let resolved = catalog::resolve_track(track_id, track_key, &self.store)?;
         let values = read_tag_values_from_path(&resolved.audio_path)?;
         self.snapshot_with_values(resolved, values, None)
@@ -644,7 +647,7 @@ impl TagService {
                     }
                     let mut rollback_errors = Vec::new();
                     if write_error.installed {
-                        let recovered = self.recover_interrupted_operations();
+                        let recovered = self.recover_interrupted_operations(None);
                         match recovered.and_then(|()| self.undo(&track_id, &track_key).map(|_| ()))
                         {
                             Ok(()) => {}
@@ -1260,6 +1263,16 @@ impl TagService {
         request.expected.validate()?;
         request.desired.validate()?;
         let resolved = catalog::resolve_track(&request.track_id, &request.track_key, &self.store)?;
+        self.update_resolved(request, resolved, &mut timing)
+    }
+
+    fn update_resolved(
+        &self,
+        request: TagEditRequest,
+        resolved: ResolvedTrack,
+        timing: &mut crate::timing::Span,
+    ) -> Result<TrackTagSnapshot, String> {
+        self.recover_interrupted_operations(Some(&request.track_key))?;
         timing.stage("read_original");
         let original_fingerprint = FileFingerprint::read(&resolved.audio_path)?;
         let (mut tag, version) = read_tag_for_write(&resolved.audio_path)?;
@@ -1271,18 +1284,19 @@ impl TagService {
             );
         }
         let current = read_tag_values(&tag)?;
+        // A retry may carry the pre-save values after the MP3 was installed but
+        // its journal failed. An already-satisfied request is safe to confirm.
+        if current == request.desired {
+            let result = self.snapshot_with_values(resolved, current, None);
+            timing.finish(result.is_ok());
+            return result;
+        }
         if current != request.expected {
             return Err(
                 "This MP3 changed outside Aurora after the editor opened. Reload its tags before saving."
                     .to_owned(),
             );
         }
-        if current == request.desired {
-            let result = self.snapshot_with_values(resolved, current, None);
-            timing.finish(result.is_ok());
-            return result;
-        }
-
         let preserved_frames = non_target_frames(&tag);
         let target_path_text = resolved.audio_path.to_string_lossy().into_owned();
         timing.stage("journal_begin");
@@ -1649,8 +1663,21 @@ impl TagService {
         })
     }
 
-    fn recover_interrupted_operations(&self) -> Result<(), String> {
-        for operation in self.store.interrupted_operations()? {
+    fn recover_interrupted_operations(&self, track_key: Option<&str>) -> Result<(), String> {
+        // TagService callers are serialized. Retrying an installed rating must
+        // finish its journal and catalog sync even when the MP3 already has the
+        // desired value; otherwise the no-change save can leave it stranded.
+        for operation in self
+            .store
+            .interrupted_operations()?
+            .into_iter()
+            .filter(|op| track_key.is_none_or(|key| op.track_key == key))
+        {
+            let _write_exclusion = operation
+                .target_path
+                .is_file()
+                .then(|| open_write_exclusion(&operation.target_path))
+                .transpose()?;
             match operation.status.as_str() {
                 "prepared" => {
                     if operation
@@ -4693,6 +4720,99 @@ mod tests {
         let _ = fs::remove_file(&state_path);
         let _ = fs::remove_file(PathBuf::from(format!("{}-wal", state_path.display())));
         let _ = fs::remove_file(PathBuf::from(format!("{}-shm", state_path.display())));
+    }
+
+    #[test]
+    fn retry_recovers_only_the_selected_installed_rating_without_rewriting_audio() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("state.sqlite3")).unwrap();
+        let service = TagService::new(store.clone()).unwrap();
+        let mut targets = Vec::new();
+        for key in ["selected", "unrelated"] {
+            let target = root.path().join(format!("{key}.mp3"));
+            write_fixture(&target, Version::Id3v23);
+            let (mut tag, version) = read_tag_for_write(&target).unwrap();
+            let before = read_tag_values(&tag).unwrap();
+            let after = TagValues {
+                rating: Some(4.0),
+                ..before.clone()
+            };
+            let operation = store
+                .begin_tag_operation(
+                    key,
+                    &target.to_string_lossy(),
+                    &before,
+                    &after,
+                    &FileFingerprint::read(&target).unwrap().to_string(),
+                )
+                .unwrap();
+            let (working, backup) = operation_paths(&target, operation).unwrap();
+            store
+                .set_operation_paths(
+                    operation,
+                    &working.to_string_lossy(),
+                    &backup.to_string_lossy(),
+                )
+                .unwrap();
+            fs::copy(&target, &working).unwrap();
+            apply_tag_changes(&mut tag, version, &before, &after).unwrap();
+            tag.write_to_path(&working, version).unwrap();
+            replace_file_atomic(&target, &working, Some(&backup)).unwrap();
+            store.mark_operation(operation, "replaced", None).unwrap();
+            targets.push((target, backup));
+        }
+        let installed = fs::read(&targets[0].0).unwrap();
+        let original_backup = fs::read(&targets[0].1).unwrap();
+        let before = read_tag_values_from_path(&targets[0].1).unwrap();
+        let after = read_tag_values_from_path(&targets[0].0).unwrap();
+        let mut resolved = resolved_track_fixture("1", "selected", "album");
+        resolved.audio_path = targets[0].0.clone();
+        resolved.summary.directory = root.path().to_string_lossy().into_owned();
+        resolved.summary.filename = "selected.mp3".into();
+        resolved.catalog_values = before.clone();
+        let result = service
+            .update_resolved(
+                TagEditRequest {
+                    track_id: "1".into(),
+                    track_key: "selected".into(),
+                    expected: before.clone(),
+                    desired: after.clone(),
+                },
+                resolved.clone(),
+                &mut crate::timing::Span::new("test.rating_retry", ""),
+            )
+            .unwrap();
+        assert_eq!(result.tag_state.values, after);
+        let pending = store.interrupted_operations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].track_key, "unrelated");
+        let overlays = store.all_overlays().unwrap();
+        assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].track_key, "selected");
+        assert_eq!(overlays[0].values.rating, Some(4.0));
+        assert_eq!(store.pending_library_folder_sync(2).unwrap().len(), 1);
+        let error = service
+            .update_resolved(
+                TagEditRequest {
+                    track_id: "1".into(),
+                    track_key: "selected".into(),
+                    expected: before,
+                    desired: TagValues {
+                        rating: Some(5.0),
+                        ..after
+                    },
+                },
+                resolved,
+                &mut crate::timing::Span::new("test.stale_rating", ""),
+            )
+            .unwrap_err();
+        assert!(error.contains("changed outside Aurora"));
+        service
+            .recover_interrupted_operations(Some("selected"))
+            .unwrap();
+        assert_eq!(fs::read(&targets[0].0).unwrap(), installed);
+        assert_eq!(fs::read(&targets[0].1).unwrap(), original_backup);
+        assert_eq!(store.pending_library_folder_sync(2).unwrap().len(), 1);
     }
 
     #[test]

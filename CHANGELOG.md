@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.1] - 2026-10-24
+
+### Fixed
+- Keep a shared idle WAL connection alive for the local state store, avoiding exclusive final-close checkpoints between rating, playback and snapshot operations; configure journal mode once at startup.
+- Inspecting or retrying a track reconciles its interrupted tag operation with the existing file-verification safeguards and queues catalog sync, including saves whose MP3 already contains the requested rating. Recovery leaves unrelated pending tracks alone.
+- Add regression coverage for WAL lifetime, rating completion alongside snapshot readers, and idempotent recovery of an installed rating without changing MP3 or backup bytes.
+
 ## [0.47.0] - 2026-10-23
 
 ### Added

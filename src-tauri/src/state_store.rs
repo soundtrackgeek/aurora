@@ -7,6 +7,7 @@ use std::{
     collections::HashSet,
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -86,6 +87,11 @@ pub(crate) struct PendingLibraryFolderSync {
 #[derive(Clone)]
 pub(crate) struct StateStore {
     path: PathBuf,
+    // Keep WAL open between short-lived worker connections. Closing the last
+    // connection checkpoints under an exclusive lock and can race the next
+    // rating, playback save, or snapshot reader. Clones share this lifetime;
+    // the idle connection never holds a transaction or serializes callers.
+    _wal_anchor: Arc<Mutex<Connection>>,
 }
 
 impl StateStore {
@@ -95,13 +101,28 @@ impl StateStore {
             .ok_or_else(|| "Aurora's state path has no parent directory.".to_owned())?;
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create Aurora's state directory: {error}"))?;
-        let store = Self { path };
-        store.migrate()?;
-        Ok(store)
+        let mut anchor = Self::open_connection(&path)?;
+        let mode: String = anchor
+            .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+            .map_err(|error| format!("Could not enable durable state journaling: {error}"))?;
+        if mode != "wal" {
+            return Err("Aurora's state database could not enable WAL journaling.".to_owned());
+        }
+        // Use this connection for migration so it actually opens WAL. Setting
+        // journal_mode alone leaves SQLite's WAL handle lazily unopened.
+        Self::migrate(&mut anchor)?;
+        Ok(Self {
+            path,
+            _wal_anchor: Arc::new(Mutex::new(anchor)),
+        })
     }
 
     pub(crate) fn open(&self) -> Result<Connection, String> {
-        let connection = Connection::open(&self.path)
+        Self::open_connection(&self.path)
+    }
+
+    fn open_connection(path: &Path) -> Result<Connection, String> {
+        let connection = Connection::open(path)
             .map_err(|error| format!("Could not open Aurora's state database: {error}"))?;
         connection
             .busy_timeout(Duration::from_secs(5))
@@ -109,9 +130,6 @@ impl StateStore {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(|error| format!("Could not enable state integrity checks: {error}"))?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .map_err(|error| format!("Could not enable durable state journaling: {error}"))?;
         Ok(connection)
     }
 
@@ -123,8 +141,7 @@ impl StateStore {
         &self.path
     }
 
-    fn migrate(&self) -> Result<(), String> {
-        let mut connection = self.open()?;
+    fn migrate(connection: &mut Connection) -> Result<(), String> {
         let current: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|error| format!("Could not read Aurora's state schema: {error}"))?;
@@ -1945,6 +1962,63 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEMP_STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn workers_keep_wal_open_until_the_last_store_clone_closes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("state.sqlite3");
+        let wal = root.path().join("state.sqlite3-wal");
+        let store = StateStore::new(path.clone()).unwrap();
+        let worker = store.clone();
+        drop(store);
+        for position in 1..=3 {
+            worker
+                .save(&StoredPlaybackState {
+                    position_seconds: f64::from(position),
+                    ..StoredPlaybackState::default()
+                })
+                .unwrap();
+            assert!(wal.is_file(), "worker close must not tear down WAL");
+        }
+        drop(worker);
+        assert!(!wal.exists(), "final close still checkpoints and cleans up");
+        let reopened = StateStore::new(path).unwrap();
+        assert_eq!(reopened.load().unwrap().position_seconds, 3.0);
+    }
+
+    #[test]
+    fn snapshot_reader_does_not_block_rating_journal_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new(root.path().join("state.sqlite3")).unwrap();
+        let before = TagValues {
+            rating: None,
+            love_state: LoveState::Neutral,
+            release_year: None,
+        };
+        let after = TagValues {
+            rating: Some(4.0),
+            ..before.clone()
+        };
+        let operation = store
+            .begin_tag_operation("track", "track.mp3", &before, &after, "fixture")
+            .unwrap();
+        let reader = store.open().unwrap();
+        reader
+            .execute_batch("BEGIN; SELECT * FROM tag_edit_operations;")
+            .unwrap();
+        store
+            .finish_tag_operation(operation, "track", "album", "track.mp3", &before, &after, 1)
+            .unwrap();
+        assert!(store.interrupted_operations().unwrap().is_empty());
+        assert_eq!(store.all_overlays().unwrap()[0].values, after);
+        assert_eq!(
+            store.pending_library_folder_sync(1).unwrap()[0]
+                .filename
+                .as_deref(),
+            Some("track.mp3")
+        );
+        reader.execute_batch("ROLLBACK").unwrap();
+    }
 
     fn temporary_state_path() -> PathBuf {
         let unique = SystemTime::now()
