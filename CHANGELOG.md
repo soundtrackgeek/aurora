@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.47.6] - 2026-10-25
+
+### Fixed
+- Inbox Auto-Tagger: choosing another edition no longer lets slow results overwrite fields you already started editing. A green **Status: OK** / red **Status: Updating** indicator shows when the edition has finished loading, the form and track table are locked while it loads, and out-of-date responses from earlier selections are ignored.
+
 ## [0.47.5] - 2026-10-25
 
 ### Changed

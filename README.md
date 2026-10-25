@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora **0.47.6** adds a **Status: OK / Status: Updating** indicator to the Inbox
+Album Auto-Tagger. While an edition is loading (MusicBrainz can be slow), the
+form and track table are locked, so edits are no longer silently overwritten
+when the data arrives, and stale responses from earlier picks are discarded.
+
 Aurora **0.47.5** shows Music Library's named catalog steps while an album is
 added, and pairs with Music Library **0.202.0**, which adds new albums without
 rewriting the whole catalog. Update Music Library to get the faster imports;

@@ -19,7 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addInboxMonitorFolder,
   applyInboxTags,
@@ -569,6 +569,8 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
+  const loadRequest = useRef(0);
+  const updating = busy !== null;
   const reconciliation = useMemo(
     () => reconcileInboxTracks(
       tracks,
@@ -613,18 +615,21 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   }, [tracks]);
 
   const performSearch = useCallback(async (searchArtist: string, searchTitle: string) => {
+    const request = ++loadRequest.current;
     setBusy("search"); setError(null); setDetail(null); setSelectedCandidate(null);
     try {
       const result = await searchInboxReleases(searchArtist, searchTitle, tracks.length, preferOriginalEdition);
+      if (request !== loadRequest.current) return;
       setCandidates(result.candidates); setWarnings(result.warnings);
       if (result.candidates[0]) {
         setSelectedCandidate(result.candidates[0]);
         setBusy("detail");
         const next = await loadInboxReleaseDetail(result.candidates[0]);
+        if (request !== loadRequest.current) return;
         setDetail(next); hydrateDetail(next);
       }
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
-    finally { setBusy(null); }
+    } catch (nextError) { if (request === loadRequest.current) setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+    finally { if (request === loadRequest.current) setBusy(null); }
   }, [hydrateDetail, preferOriginalEdition, tracks.length]);
 
   useEffect(() => {
@@ -634,10 +639,12 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); }; window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [busy, onClose]);
 
   async function chooseCandidate(candidate: ReleaseCandidate) {
+    if (busy === "apply") return;
+    const request = ++loadRequest.current;
     setSelectedCandidate(candidate); setBusy("detail"); setError(null);
-    try { const next = await loadInboxReleaseDetail(candidate); setDetail(next); hydrateDetail(next); }
-    catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
-    finally { setBusy(null); }
+    try { const next = await loadInboxReleaseDetail(candidate); if (request !== loadRequest.current) return; setDetail(next); hydrateDetail(next); }
+    catch (nextError) { if (request === loadRequest.current) setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+    finally { if (request === loadRequest.current) setBusy(null); }
   }
 
   function toggleField(field: EditableTagField) { setFields((current) => { const next = new Set(current); if (next.has(field)) next.delete(field); else next.add(field); return next; }); }
@@ -747,17 +754,18 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
       {!discogsConfigured ? <div className="inbox-provider-note"><AlertTriangle /><span><strong>Discogs is not connected.</strong><small>MusicBrainz results are still available.</small></span><button type="button" onClick={() => { onClose(); onOpenSettings(); }}><Settings /> Connect</button></div> : null}
       {warnings.map((warning) => <p className="inbox-tagger__warning" key={warning}><AlertTriangle />{warning}</p>)}
       {error ? <p className="inbox-tagger__error" role="alert"><AlertTriangle />{error}</p> : null}
+      <p className={`inbox-tagger__status ${updating ? "is-updating" : "is-ok"}`} role="status">{updating ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Check aria-hidden="true" />}Status: {updating ? "Updating" : "OK"}{updating ? <small>{busy === "apply" ? "Applying tags…" : "Loading the selected edition — fields are locked until it finishes."}</small> : null}</p>
     </div>
     <div className="inbox-tagger__body">
       <section className="inbox-candidates" aria-label="Release matches"><table><thead><tr><th>Source</th><th>Score</th><th>Album</th><th>Artist</th><th>Original</th><th>Edition</th><th>Tracks</th><th>Format</th><th>Publisher</th></tr></thead><tbody>
         {candidates.map((candidate) => <tr key={`${candidate.source}:${candidate.id}`} className={selectedCandidate?.id === candidate.id && selectedCandidate.source === candidate.source ? "is-selected" : ""} onClick={() => void chooseCandidate(candidate)}><td><span className={`provider provider--${candidate.source}`}>{sourceLabel(candidate.source)}</span></td><td>{candidate.score}%</td><td>{candidate.title}</td><td>{candidate.artist}</td><td>{candidate.originalYear ?? "—"}</td><td>{candidate.year ?? "—"}</td><td>{candidate.trackCount ?? "—"}{candidate.trackCount !== null ? candidate.trackCount === tracks.length ? " · exact" : ` · ${Math.abs(tracks.length - candidate.trackCount)} ${tracks.length > candidate.trackCount ? "extra" : "missing"}` : ""}</td><td>{candidate.format ?? "—"}</td><td>{candidate.publisher ?? "—"}</td></tr>)}
         {!candidates.length && busy !== "search" ? <tr><td colSpan={9}>No release matches found. Broaden the artist or album spelling.</td></tr> : null}
       </tbody></table></section>
-      <div className="inbox-tagger__editor">
+      <div className="inbox-tagger__editor" inert={updating}>
         <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><datalist id="inbox-auto-tagger-genre-suggestions">{genreSuggestions.map((genre) => <option value={genre} key={genre} />)}</datalist><label className="inbox-release-form__disc-total">Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__disc-override">Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__album-artist">Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label className="inbox-release-form__album">Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label className="inbox-release-form__publisher">Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label className="inbox-release-form__year">Original year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__release-year">Release year<input inputMode="numeric" value={values.releaseYear} onChange={(event) => setValues((current) => ({ ...current, releaseYear: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__genre">Genre<input list="inbox-auto-tagger-genre-suggestions" value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label></div></section>
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
-      <section className="inbox-track-compare">
+      <section className="inbox-track-compare" inert={updating}>
         {detail ? <div className="inbox-reconciliation-summary" role="status"><strong>{reconciliation.matchedCount} of {detail.tracks.length} release tracks matched</strong><span>{reconciliation.extraCount ? `${reconciliation.extraCount} extra local ${reconciliation.extraCount === 1 ? "track" : "tracks"}` : "No extra local tracks"}{reconciliation.missingCount || reconciliation.ambiguousCount ? ` · ${reconciliation.missingCount + reconciliation.ambiguousCount} unresolved` : ""}</span>{reconciliation.extraCount && !reconciliation.cleanupSafe ? <small>Choose an unmatched file and confirm any true match before removing extras.</small> : null}</div> : null}
         <table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Status</th><th>Action</th></tr></thead><tbody>{detail ? reconciliation.rows.map((match, rowIndex) => {
           const track = match.localIndex === null ? null : tracks[match.localIndex];
