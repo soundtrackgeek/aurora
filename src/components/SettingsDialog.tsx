@@ -37,7 +37,7 @@ import {
   type DisplayViewKey,
   type TextSize,
 } from "../displayPreferences";
-import { loadInboxSettings, updateDiscogsCredentials, updateLastFmCredentials, type InboxSettingsStatus } from "../inbox";
+import { loadInboxSettings, MAX_MUSICBRAINZ_RETRIES, updateDiscogsCredentials, updateLastFmCredentials, updateMusicbrainzRetries, type InboxSettingsStatus } from "../inbox";
 
 import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
 import { JevSettingsPanel } from "./JevSettingsPanel";
@@ -95,6 +95,7 @@ export function SettingsDialog({
   const [lastFmApiKey, setLastFmApiKey] = useState("");
   const [lastFmSharedSecret, setLastFmSharedSecret] = useState("");
   const [removeLastFmCredentials, setRemoveLastFmCredentials] = useState(false);
+  const [musicbrainzRetriesDraft, setMusicbrainzRetriesDraft] = useState<number | null>(null);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
 
@@ -143,7 +144,8 @@ export function SettingsDialog({
   const discogsDirty = removeDiscogsToken
     || (discogsCredentialMode === "token" ? Boolean(discogsToken.trim()) : Boolean(discogsConsumerKey.trim() && discogsConsumerSecret.trim()));
   const lastFmDirty = removeLastFmCredentials || Boolean(lastFmApiKey.trim() && lastFmSharedSecret.trim());
-  const metadataDirty = discogsDirty || lastFmDirty;
+  const retriesDirty = musicbrainzRetriesDraft !== null && musicbrainzRetriesDraft !== metadataStatus?.musicbrainzRetries;
+  const metadataDirty = discogsDirty || lastFmDirty || retriesDirty;
   const metadataValidationError = Boolean(lastFmApiKey.trim()) !== Boolean(lastFmSharedSecret.trim())
     ? "Enter both the Last.fm API key and shared secret."
     : null;
@@ -178,10 +180,14 @@ export function SettingsDialog({
           ? { mode: "clear" }
           : { mode: "save", apiKey: lastFmApiKey, sharedSecret: lastFmSharedSecret })).then(() => undefined);
       }
+      if (retriesDirty && musicbrainzRetriesDraft !== null) {
+        save = save.then(() => updateMusicbrainzRetries(musicbrainzRetriesDraft)).then(() => undefined);
+      }
       void save
         .then(loadInboxSettings)
         .then((status) => {
           setMetadataStatus(status);
+          setMusicbrainzRetriesDraft(null);
           setDiscogsToken("");
           setDiscogsConsumerKey("");
           setDiscogsConsumerSecret("");
@@ -263,6 +269,8 @@ export function SettingsDialog({
               onLastFmApiKeyChange={(value) => { setLastFmApiKey(value); setRemoveLastFmCredentials(false); }}
               onLastFmSharedSecretChange={(value) => { setLastFmSharedSecret(value); setRemoveLastFmCredentials(false); }}
               onRemoveLastFmCredentialsChange={setRemoveLastFmCredentials}
+              musicbrainzRetries={musicbrainzRetriesDraft ?? metadataStatus?.musicbrainzRetries ?? 5}
+              onMusicbrainzRetriesChange={setMusicbrainzRetriesDraft}
             />
           )}
           {((tab === "shortcuts" && validationError) || activeError) && (
@@ -302,6 +310,8 @@ function MetadataSettingsPanel({
   onLastFmApiKeyChange,
   onLastFmSharedSecretChange,
   onRemoveLastFmCredentialsChange,
+  musicbrainzRetries,
+  onMusicbrainzRetriesChange,
 }: {
   status: InboxSettingsStatus | null;
   token: string;
@@ -320,6 +330,8 @@ function MetadataSettingsPanel({
   onLastFmApiKeyChange: (value: string) => void;
   onLastFmSharedSecretChange: (value: string) => void;
   onRemoveLastFmCredentialsChange: (value: boolean) => void;
+  musicbrainzRetries: number;
+  onMusicbrainzRetriesChange: (value: number) => void;
 }) {
   return (
     <div className="metadata-settings">
@@ -356,6 +368,12 @@ function MetadataSettingsPanel({
       </section>
       <FanartSettingsPanel />
       <div className="metadata-settings__note"><ShieldCheck aria-hidden="true" /><span><strong>MusicBrainz needs no key.</strong><small>Aurora identifies itself and observes MusicBrainz's one-request-per-second limit.</small></span></div>
+      <section className="display-settings__section" aria-labelledby="musicbrainz-settings-heading">
+        <header>
+          <span><Tags aria-hidden="true" /><span><strong id="musicbrainz-settings-heading">MusicBrainz retries</strong><small>MusicBrainz often answers 503 when busy. Aurora waits 2 seconds and tries again automatically.</small></span></span>
+        </header>
+        <label className="metadata-auth-mode"><span>Automatic retries</span><select value={musicbrainzRetries} disabled={!status} onChange={(event) => onMusicbrainzRetriesChange(Number(event.target.value))}>{Array.from({ length: MAX_MUSICBRAINZ_RETRIES + 1 }, (_, count) => <option key={count} value={count}>{count === 0 ? "Off" : count === 1 ? "1 retry" : `${count} retries`}</option>)}</select></label>
+      </section>
     </div>
   );
 }

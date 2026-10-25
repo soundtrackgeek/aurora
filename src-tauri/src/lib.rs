@@ -275,19 +275,38 @@ fn update_last_fm_credentials(
 }
 
 #[tauri::command]
+fn update_musicbrainz_retries(app: AppHandle, retries: u8) -> Result<InboxSettingsStatus, String> {
+    app.state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())?
+        .set_musicbrainz_retries(retries)
+}
+
+fn musicbrainz_retries(app: &AppHandle) -> Result<u8, String> {
+    app.state::<InboxState>()
+        .lock()
+        .map_err(|_| "Aurora's Inbox stopped unexpectedly.".to_owned())
+        .map(|runtime| runtime.musicbrainz_retries())
+}
+
+#[tauri::command]
 async fn search_inbox_releases(
+    app: AppHandle,
     request: ReleaseSearchRequest,
 ) -> Result<ReleaseSearchResult, String> {
-    tauri::async_runtime::spawn_blocking(move || inbox::search_releases(request))
+    let retries = musicbrainz_retries(&app)?;
+    tauri::async_runtime::spawn_blocking(move || inbox::search_releases(request, retries))
         .await
         .map_err(|error| format!("Aurora's metadata search stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
 async fn inbox_release_detail(
+    app: AppHandle,
     request: ReleaseDetailRequest,
 ) -> Result<ReleaseCandidateDetail, String> {
-    tauri::async_runtime::spawn_blocking(move || inbox::release_detail(request))
+    let retries = musicbrainz_retries(&app)?;
+    tauri::async_runtime::spawn_blocking(move || inbox::release_detail(request, retries))
         .await
         .map_err(|error| format!("Aurora's release lookup stopped unexpectedly: {error}"))?
 }
@@ -2240,6 +2259,7 @@ pub fn run() {
             remove_inbox_monitor_folder,
             update_discogs_credentials,
             update_last_fm_credentials,
+            update_musicbrainz_retries,
             search_inbox_releases,
             inbox_release_detail,
             apply_inbox_tags,

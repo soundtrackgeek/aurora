@@ -5,6 +5,7 @@ import type { EditableTagField, EditableTagValues } from "./tags";
 
 export interface InboxSettingsStatus {
   monitoredFolders: string[];
+  musicbrainzRetries: number;
   discogsConfigured: boolean;
   discogsAuthMode: "token" | "consumer" | null;
   discogsIncompleteConsumerKey: boolean;
@@ -200,6 +201,7 @@ const previewTracks = [
 
 let previewSettings: InboxSettingsStatus = {
   monitoredFolders: ["C:\\Music\\Inbox", "D:\\Bandcamp"],
+  musicbrainzRetries: 5,
   discogsConfigured: true,
   discogsAuthMode: "token",
   discogsIncompleteConsumerKey: false,
@@ -316,6 +318,16 @@ export async function updateDiscogsCredentials(request: DiscogsCredentialsReques
     return previewSettings;
   }
   return invoke<InboxSettingsStatus>("update_discogs_credentials", { request });
+}
+
+export const MAX_MUSICBRAINZ_RETRIES = 10;
+
+export async function updateMusicbrainzRetries(retries: number): Promise<InboxSettingsStatus> {
+  if (!isTauriRuntime()) {
+    previewSettings = { ...previewSettings, musicbrainzRetries: retries };
+    return previewSettings;
+  }
+  return invoke<InboxSettingsStatus>("update_musicbrainz_retries", { retries });
 }
 
 export type LastFmCredentialsRequest =

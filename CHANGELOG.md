@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.48.0] - 2026-10-25
+
+### Added
+- Inbox Auto-Tagger retries MusicBrainz automatically when it is busy: a 503 (also 429, 502, 504, timeouts and connection errors) is retried after 2 seconds, up to 5 times by default, for both release searches and release lookups. Each retry still honours the one-request-per-second limit, and the final error says how many retries were used.
+- **Settings → Metadata → MusicBrainz retries** sets the retry count (Off, or 1–10). Existing Inbox settings files keep working and get the default.
+
 ## [0.47.6] - 2026-10-25
 
 ### Fixed

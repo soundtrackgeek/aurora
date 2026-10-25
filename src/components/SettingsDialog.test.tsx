@@ -200,6 +200,7 @@ describe("SettingsDialog", () => {
   it("saves a complete Last.fm credential pair from Metadata settings", async () => {
     const status: inbox.InboxSettingsStatus = {
       monitoredFolders: [],
+      musicbrainzRetries: 5,
       discogsConfigured: false,
       discogsAuthMode: null,
       discogsIncompleteConsumerKey: false,

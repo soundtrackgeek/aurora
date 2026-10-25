@@ -35,6 +35,9 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 const SETTINGS_VERSION: u8 = 1;
+const DEFAULT_MUSICBRAINZ_RETRIES: u8 = 5;
+const MAX_MUSICBRAINZ_RETRIES: u8 = 10;
+const MUSICBRAINZ_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_MONITORED_FOLDERS: usize = 10;
 const MAX_SCANNED_DIRECTORIES: usize = 50_000;
 const DISCOGS_SERVICE: &str = "Aurora";
@@ -49,10 +52,25 @@ const USER_AGENT: &str = concat!(
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct InboxSettings {
     monitored_folders: Vec<String>,
+    #[serde(default = "default_musicbrainz_retries")]
+    musicbrainz_retries: u8,
+}
+
+impl Default for InboxSettings {
+    fn default() -> Self {
+        Self {
+            monitored_folders: Vec::new(),
+            musicbrainz_retries: DEFAULT_MUSICBRAINZ_RETRIES,
+        }
+    }
+}
+
+fn default_musicbrainz_retries() -> u8 {
+    DEFAULT_MUSICBRAINZ_RETRIES
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -82,6 +100,7 @@ struct CachedAudioQuality {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InboxSettingsStatus {
     monitored_folders: Vec<String>,
+    musicbrainz_retries: u8,
     discogs_configured: bool,
     discogs_auth_mode: Option<DiscogsAuthMode>,
     discogs_incomplete_consumer_key: bool,
@@ -446,6 +465,7 @@ impl InboxRuntime {
         let auth = discogs_auth();
         InboxSettingsStatus {
             monitored_folders: self.settings.monitored_folders.clone(),
+            musicbrainz_retries: self.settings.musicbrainz_retries,
             discogs_configured: auth.is_some(),
             discogs_auth_mode: auth.as_ref().map(|value| match value {
                 DiscogsAuth::Token(_) => DiscogsAuthMode::Token,
@@ -511,6 +531,24 @@ impl InboxRuntime {
             return Ok(self.status());
         }
         self.settings.monitored_folders.push(value);
+        self.persist()?;
+        Ok(self.status())
+    }
+
+    pub(crate) fn musicbrainz_retries(&self) -> u8 {
+        self.settings.musicbrainz_retries
+    }
+
+    pub(crate) fn set_musicbrainz_retries(
+        &mut self,
+        retries: u8,
+    ) -> Result<InboxSettingsStatus, String> {
+        if retries > MAX_MUSICBRAINZ_RETRIES {
+            return Err(format!(
+                "MusicBrainz retries must be between 0 and {MAX_MUSICBRAINZ_RETRIES}."
+            ));
+        }
+        self.settings.musicbrainz_retries = retries;
         self.persist()?;
         Ok(self.status())
     }
@@ -635,11 +673,12 @@ pub(crate) fn save_discogs_credentials(request: DiscogsCredentialsRequest) -> Re
 
 pub(crate) fn search_releases(
     request: ReleaseSearchRequest,
+    musicbrainz_retries: u8,
 ) -> Result<ReleaseSearchResult, String> {
     validate_query(&request.artist, "artist")?;
     validate_query(&request.album, "album")?;
     let mut warnings = Vec::new();
-    let mut candidates = match search_musicbrainz(&request) {
+    let mut candidates = match search_musicbrainz(&request, musicbrainz_retries) {
         Ok(rows) => rows,
         Err(error) => {
             warnings.push(error);
@@ -677,10 +716,11 @@ pub(crate) fn search_releases(
 
 pub(crate) fn release_detail(
     request: ReleaseDetailRequest,
+    musicbrainz_retries: u8,
 ) -> Result<ReleaseCandidateDetail, String> {
     validate_identifier(&request.id)?;
     match request.source {
-        MetadataSource::Musicbrainz => musicbrainz_detail(&request.id),
+        MetadataSource::Musicbrainz => musicbrainz_detail(&request.id, musicbrainz_retries),
         MetadataSource::Discogs => discogs_detail(&request.id),
     }
 }
@@ -2569,21 +2609,70 @@ fn inspect_audio_quality(
     quality
 }
 
-fn search_musicbrainz(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandidate>, String> {
-    wait_for_musicbrainz();
+fn is_transient_musicbrainz_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 502 | 503 | 504)
+}
+
+/// GETs a MusicBrainz JSON document, retrying transient overload responses
+/// (503 and friends) after a short pause. Every attempt goes back through the
+/// shared one-request-per-second limiter.
+fn musicbrainz_get_json(
+    url: &str,
+    query: &[(&str, &str)],
+    retries: u8,
+    failure: &str,
+    invalid: &str,
+) -> Result<Value, String> {
+    let client = http_client()?;
+    let mut attempt = 0u8;
+    loop {
+        wait_for_musicbrainz();
+        let outcome = client
+            .get(url)
+            .query(query)
+            .send()
+            .and_then(|response| response.error_for_status());
+        match outcome {
+            Ok(response) => {
+                return response
+                    .json()
+                    .map_err(|error| format!("{invalid}: {error}"));
+            }
+            Err(error) => {
+                let transient = error.status().is_some_and(is_transient_musicbrainz_status)
+                    || error.is_timeout()
+                    || error.is_connect();
+                if transient && attempt < retries.min(MAX_MUSICBRAINZ_RETRIES) {
+                    attempt += 1;
+                    thread::sleep(MUSICBRAINZ_RETRY_DELAY);
+                    continue;
+                }
+                return Err(if attempt > 0 {
+                    format!("{failure}: {error} (gave up after {attempt} retries)")
+                } else {
+                    format!("{failure}: {error}")
+                });
+            }
+        }
+    }
+}
+
+fn search_musicbrainz(
+    request: &ReleaseSearchRequest,
+    retries: u8,
+) -> Result<Vec<ReleaseCandidate>, String> {
     let query = format!(
         "artist:\"{}\" AND release:\"{}\"",
         escape_lucene(&request.artist),
         escape_lucene(&request.album),
     );
-    let value: Value = http_client()?
-        .get("https://musicbrainz.org/ws/2/release/")
-        .query(&[("query", query.as_str()), ("limit", "10"), ("fmt", "json")])
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("MusicBrainz search failed: {error}"))?
-        .json()
-        .map_err(|error| format!("MusicBrainz returned invalid data: {error}"))?;
+    let value = musicbrainz_get_json(
+        "https://musicbrainz.org/ws/2/release/",
+        &[("query", query.as_str()), ("limit", "10"), ("fmt", "json")],
+        retries,
+        "MusicBrainz search failed",
+        "MusicBrainz returned invalid data",
+    )?;
     Ok(value
         .get("releases")
         .and_then(Value::as_array)
@@ -2674,23 +2763,21 @@ fn search_discogs(request: &ReleaseSearchRequest) -> Result<Vec<ReleaseCandidate
         .collect())
 }
 
-fn musicbrainz_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
-    wait_for_musicbrainz();
+fn musicbrainz_detail(id: &str, retries: u8) -> Result<ReleaseCandidateDetail, String> {
     let url = format!("https://musicbrainz.org/ws/2/release/{id}");
-    let value: Value = http_client()?
-        .get(url)
-        .query(&[
+    let value = musicbrainz_get_json(
+        &url,
+        &[
             (
                 "inc",
                 "recordings+artist-credits+labels+release-groups+genres",
             ),
             ("fmt", "json"),
-        ])
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("MusicBrainz release lookup failed: {error}"))?
-        .json()
-        .map_err(|error| format!("MusicBrainz returned invalid release data: {error}"))?;
+        ],
+        retries,
+        "MusicBrainz release lookup failed",
+        "MusicBrainz returned invalid release data",
+    )?;
     let media = value
         .get("media")
         .and_then(Value::as_array)
@@ -3215,6 +3302,31 @@ fn parse_duration_ms(value: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use id3::frame::{Picture, PictureType};
+
+    #[test]
+    fn retries_only_transient_musicbrainz_statuses() {
+        for code in [429u16, 502, 503, 504] {
+            assert!(is_transient_musicbrainz_status(
+                reqwest::StatusCode::from_u16(code).unwrap()
+            ));
+        }
+        for code in [400u16, 401, 403, 404, 500] {
+            assert!(!is_transient_musicbrainz_status(
+                reqwest::StatusCode::from_u16(code).unwrap()
+            ));
+        }
+    }
+
+    #[test]
+    fn inbox_settings_without_retry_field_use_default() {
+        let file: InboxSettingsFile =
+            serde_json::from_str(r#"{"version":1,"settings":{"monitoredFolders":["C:\\Inbox"]}}"#)
+                .unwrap();
+        assert_eq!(
+            file.settings.musicbrainz_retries,
+            DEFAULT_MUSICBRAINZ_RETRIES
+        );
+    }
     use id3::{Tag, TagLike, Version};
     use std::io::Cursor;
 

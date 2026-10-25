@@ -71,7 +71,7 @@ describe("album moves across navigation", () => {
     const preview = mode === "remove"
       ? vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockReturnValue(pendingPreview.promise)
       : vi.spyOn(ingest.libraryIntakeAdapter, "previewMoveToInbox").mockReturnValue(pendingPreview.promise);
-    vi.spyOn(inbox, "loadInboxSettings").mockResolvedValue({ monitoredFolders: ["C:\\Inbox"], discogsConfigured: false, discogsAuthMode: null, discogsIncompleteConsumerKey: false, lastFmConfigured: false, lastFmSecretConfigured: false, warning: null });
+    vi.spyOn(inbox, "loadInboxSettings").mockResolvedValue({ monitoredFolders: ["C:\\Inbox"], musicbrainzRetries: 5, discogsConfigured: false, discogsAuthMode: null, discogsIncompleteConsumerKey: false, lastFmConfigured: false, lastFmSecretConfigured: false, warning: null });
     const pendingApply = deferred<ingest.LibraryIntakeApplyResult>();
     const apply = vi.spyOn(ingest.libraryIntakeAdapter, "apply").mockReturnValue(pendingApply.promise);
     const onRemoved = vi.fn().mockResolvedValue(undefined);

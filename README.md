@@ -1,5 +1,11 @@
 # Aurora
 
+Aurora **0.48.0** retries MusicBrainz automatically in the Inbox Album
+Auto-Tagger. When MusicBrainz answers `503 Service Temporarily Unavailable`
+(or 429/502/504, or a timeout), Aurora waits 2 seconds and tries again, up to 5
+times by default. Change it under **Settings → Metadata → MusicBrainz retries**
+(Off, or 1–10 retries). Release lookups use the same setting.
+
 Aurora **0.47.6** adds a **Status: OK / Status: Updating** indicator to the Inbox
 Album Auto-Tagger. While an edition is loading (MusicBrainz can be slow), the
 form and track table are locked, so edits are no longer silently overwritten
