@@ -33,6 +33,8 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  // True once the albums are in the library and only Aurora's own refresh remains.
+  const [refreshing, setRefreshing] = useState(false);
   const { progress, reset: resetProgress } = useLibraryIntakeProgress();
 
   const albumCount = useMemo(() => targets.reduce((total, target) => total + target.albumCount, 0), [targets]);
@@ -66,18 +68,29 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
     setBusy("apply");
     setError(null);
     resetProgress();
+    let result;
     try {
-      const result = await applyReviewedTargets(targets, destinations, previews);
-      const completedAlbums = result.albumCount;
-      await onApplied();
-      const summary = intakeCompletionMessage(completedAlbums, result.coverImportStatus);
-      onCompleted(result.cleanupWarnings.length ? `${summary} ${result.cleanupWarnings.join(" ")}` : summary);
-      onClose();
+      result = await applyReviewedTargets(targets, destinations, previews);
     } catch (nextError) {
       setPreviews(null);
-      const detail = nextError instanceof Error ? nextError.message : String(nextError);
-      setError(detail);
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setBusy(null);
+      return;
+    }
+    // The albums are in the library from here on: say so now rather than after the
+    // refresh, which can wait on other parts of Aurora (such as the playback engine).
+    const summary = intakeCompletionMessage(result.albumCount, result.coverImportStatus);
+    onCompleted(result.cleanupWarnings.length ? `${summary} ${result.cleanupWarnings.join(" ")}` : summary);
+    setRefreshing(true);
+    try {
+      await onApplied();
+      onClose();
+    } catch (refreshError) {
+      setPreviews(null);
+      const detail = refreshError instanceof Error ? refreshError.message : String(refreshError);
+      setError(`The albums were added to your library, but Aurora could not refresh its view of them: ${detail} Closing and reopening Aurora will reload the library.`);
     } finally {
+      setRefreshing(false);
       setBusy(null);
     }
   }
@@ -87,7 +100,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       <header>
         <span className="inbox-intake-dialog__mark"><FolderInput /></span>
         <div><h2 id="inbox-intake-title">Add {scopeLabel} to library</h2><p>{albumCount} {albumCount === 1 ? "album" : "albums"} will use Music Library's reviewed mover and cover workflow.</p></div>
-        <button type="button" aria-label="Close Add to Library" disabled={Boolean(busy)} onClick={onClose}><X /></button>
+        <button type="button" aria-label="Close Add to Library" disabled={Boolean(busy) && !refreshing} onClick={onClose}><X /></button>
         {targets.length > 1 ? <label className="inbox-intake-dialog__bulk">
           <span><strong>Destination for all albums</strong><small>Set all {albumCount} albums at once. Adjust individual destinations below if needed.</small></span>
           <select aria-label="Destination for all albums" value={sharedDestination} disabled={Boolean(busy)} onChange={(event) => {
@@ -122,6 +135,7 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
           mode={busy}
           progress={progress}
           targetLabel={targets.length > 1 ? `${albumCount} albums` : targets[0]?.label}
+          refreshing={refreshing}
         /> : null}
         {error ? <p className="inbox-intake-dialog__error" role="alert"><AlertTriangle />{error}</p> : null}
         {replacements.length ? <section className="inbox-intake-dialog__replacements" role="alert">
@@ -134,10 +148,10 @@ export function InboxLibraryIntakeDialog({ scopeLabel, targets, onClose, onAppli
       </div>
 
       <footer>
-        <button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button>
+        <button type="button" className="button button--quiet" disabled={Boolean(busy) && !refreshing} onClick={onClose}>{refreshing ? "Close" : "Cancel"}</button>
         <button type="button" className="button button--primary" disabled={Boolean(busy) || !destinationsSelected || unreadyAlbumCount > 0 || (Boolean(previews) && (!canApply || (replacements.length > 0 && !replacementConfirmed)))} onClick={() => void (previews ? applyTargets() : previewTargets())}>
           {busy ? <LoaderCircle className="is-spinning" /> : previews ? <FolderInput /> : <ArrowRight />}
-          {busy === "preview" ? "Building preview…" : busy === "apply" ? "Adding to library…" : previews ? `Add ${albumCount} ${albumCount === 1 ? "album" : "albums"}` : "Preview destinations"}
+          {busy === "preview" ? "Building preview…" : refreshing ? "Refreshing Aurora…" : busy === "apply" ? "Adding to library…" : previews ? `Add ${albumCount} ${albumCount === 1 ? "album" : "albums"}` : "Preview destinations"}
         </button>
       </footer>
     </section>

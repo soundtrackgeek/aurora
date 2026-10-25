@@ -121,3 +121,37 @@ it("does not fall back to individual imports when the helper needs updating", as
   expect(individual).not.toHaveBeenCalled();
   expect(apply).not.toHaveBeenCalled();
 });
+
+it("announces the move as soon as it is confirmed and lets the user close while Aurora refreshes", async () => {
+  vi.spyOn(libraryIntakeAdapter, "previewSelection").mockImplementation(async (request) => preview(request));
+  vi.spyOn(libraryIntakeAdapter, "apply").mockResolvedValue({
+    planId: "batch-1", sessionId: 1, status: "completed", albumCount: 6, trackCount: 6, movedAlbumCount: 6,
+    importRunId: 9, backupPath: null, cleanupWarnings: [], albums: [],
+  });
+  const onClose = vi.fn();
+  const onCompleted = vi.fn();
+  render(<InboxLibraryIntakeDialog scopeLabel="selected albums" targets={targets} onClose={onClose} onApplied={() => new Promise(() => {})} onCompleted={onCompleted} />);
+  fireEvent.change(screen.getByRole("combobox", { name: "Destination for all albums" }), { target: { value: "general" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add 6 albums" }));
+  expect(await screen.findByText(/Refreshing Aurora's view of it/)).toBeVisible();
+  expect(onCompleted).toHaveBeenCalledWith(expect.stringContaining("6 albums moved"));
+  expect(screen.getByRole("button", { name: "Refreshing Aurora…" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("tells the user the albums were added when only the refresh fails", async () => {
+  vi.spyOn(libraryIntakeAdapter, "previewSelection").mockImplementation(async (request) => preview(request));
+  vi.spyOn(libraryIntakeAdapter, "apply").mockResolvedValue({
+    planId: "batch-1", sessionId: 1, status: "completed", albumCount: 6, trackCount: 6, movedAlbumCount: 6,
+    importRunId: 9, backupPath: null, cleanupWarnings: [], albums: [],
+  });
+  const onClose = vi.fn();
+  render(<InboxLibraryIntakeDialog scopeLabel="selected albums" targets={targets} onClose={onClose} onApplied={() => Promise.reject(new Error("Playback is busy."))} onCompleted={vi.fn()} />);
+  fireEvent.change(screen.getByRole("combobox", { name: "Destination for all albums" }), { target: { value: "general" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview destinations" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add 6 albums" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The albums were added to your library, but Aurora could not refresh its view of them: Playback is busy.");
+  expect(onClose).not.toHaveBeenCalled();
+});

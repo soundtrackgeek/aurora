@@ -129,6 +129,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [moveCategory, setMoveCategory] = useState<LibraryIntakeCategoryId | "">("");
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
+  const [moveRefreshing, setMoveRefreshing] = useState(false);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [trackTotalsBusy, setTrackTotalsBusy] = useState(false);
@@ -420,6 +421,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     resetMoveProgress();
     try {
       const result = await libraryIntakeAdapter.apply({ planId: movePreview.planId, sessionId: movePreview.sessionId });
+      setMoveRefreshing(true);
       await onCatalogChanged();
       setMovePreview(null);
       setMoveCategory("");
@@ -428,6 +430,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     } catch (nextError) {
       notify(nextError instanceof Error ? nextError.message : String(nextError), "error");
     } finally {
+      setMoveRefreshing(false);
       setMoveBusy(false);
     }
   }
@@ -525,7 +528,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             </> : null}
             <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); setReplacementConfirmed(false); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
               {movePreview ? <div className="inbox-move__preview"><Check /><span><strong>{movePreview.trackCount} tracks verified</strong><small>{movePreview.category.destinationRoot}</small></span></div> : null}
-              {moveBusy ? <LibraryIntakeActivity mode={movePreview ? "apply" : "preview"} progress={moveProgress} /> : null}
+              {moveBusy ? <LibraryIntakeActivity mode={movePreview ? "apply" : "preview"} progress={moveProgress} refreshing={moveRefreshing} /> : null}
               {movePreview?.albums.some((album) => album.action === "replace") ? <label className="inbox-move__replacement"><AlertTriangle /><span><strong>Replace existing release</strong><small>{movePreview.albums[0].existingTrackCount} existing → {movePreview.albums[0].trackCount} new tracks · old release preserved for recovery</small></span><input type="checkbox" aria-label="Confirm replacement" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} /></label> : null}
               <button type="button" className="button button--primary" disabled={!moveCategory || moveBusy || trackTotalsBusy || !selectedAlbum.readiness.ready || Boolean(movePreview?.albums.some((album) => album.action === "replace") && !replacementConfirmed)} onClick={() => void (movePreview ? applyMove() : previewMove())}>{moveBusy ? <LoaderCircle className="is-spinning" /> : <ArrowRight />}{movePreview?.albums.some((album) => album.action === "replace") ? "Replace and catalog" : movePreview ? "Move and catalog" : "Preview move"}</button>
             </section>

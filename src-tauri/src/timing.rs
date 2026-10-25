@@ -137,7 +137,17 @@ impl Span {
         self.outcome = if success { "success" } else { "error" };
     }
 
+    /// Records a point-in-time observation (a progress message, an I/O sample)
+    /// inside the current stage without ending it.
+    pub(crate) fn note(&self, detail: &str) {
+        self.emit_with("note", detail.chars().take(512).collect());
+    }
+
     fn emit(&self, event: &'static str) {
+        self.emit_with(event, self.context.clone());
+    }
+
+    fn emit_with(&self, event: &'static str, context: String) {
         if let Some(sender) = &self.sender {
             enqueue(
                 sender,
@@ -148,7 +158,7 @@ impl Span {
                     version: env!("CARGO_PKG_VERSION"),
                     span_id: self.id,
                     operation: self.operation,
-                    context: self.context.clone(),
+                    context,
                     stage: self.stage,
                     event,
                     elapsed_ms: self.start.elapsed().as_millis() as u64,
@@ -227,6 +237,22 @@ mod tests {
         let last = records.last().unwrap();
         assert_eq!(last["stage"], "playback_lock_held");
         assert_eq!(last["event"], "returned_without_success");
+    }
+
+    #[test]
+    fn notes_record_observations_inside_the_current_stage() {
+        let (sender, receiver) = mpsc::sync_channel(16);
+        {
+            let mut span = Span::with_sender("bridge.process", "applyBatch plan", Some(sender));
+            span.stage("cataloging");
+            span.note("searchIndex: Rebuilding the search index");
+            span.finish(true);
+        }
+        let events: Vec<Event> = receiver.try_iter().collect();
+        let note = events.iter().find(|event| event.event == "note").unwrap();
+        assert_eq!(note.stage, "cataloging");
+        assert_eq!(note.context, "searchIndex: Rebuilding the search index");
+        assert_eq!(events.last().unwrap().context, "applyBatch plan");
     }
 
     #[test]

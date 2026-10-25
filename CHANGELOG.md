@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.47.4] - 2026-10-25
+
+### Changed
+- Add to Library no longer looks stuck on "Finish". The step list now has a separate **Refresh** step for Aurora's own catalog and playback refresh after the move, the Catalog step shows live elapsed time and says plainly that Music Library reports no finer progress, and Music Library's finer catalog steps (backup, search index, statistics, charts, commit) are shown under Catalog instead of resetting the list.
+- The move is announced as soon as Music Library confirms it. The dialog can be closed while Aurora refreshes, and a refresh failure now says the albums were added instead of reporting the whole move as failed.
+
+### Added
+- Diagnostics: `aurora-timing.jsonl` now records every Music Library progress message with its time, a Music Library read/write sample every ten seconds during an import, and Aurora's own post-bridge work (receipt validation and added-date recording). Use these to see where the Catalog stage spends its time.
+
 ## [0.47.3] - 2026-10-24
 
 ### Fixed

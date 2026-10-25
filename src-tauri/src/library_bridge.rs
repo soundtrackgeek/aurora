@@ -31,6 +31,7 @@ const APPLY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STALLED_PROGRESS_NOTICE_INTERVAL: Duration = Duration::from_secs(15);
+const IO_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_SYNC_FOLDERS: usize = 32;
 const ABANDONED_INBOX_TEMP_AGE_MS: u64 = 5 * 60 * 1_000;
 const MAX_INTAKE_CLEANUP_ENTRIES: usize = 100_000;
@@ -723,8 +724,13 @@ pub async fn apply_library_intake_batch(
                 },
                 APPLY_TIMEOUT,
             )?;
+            let mut after = crate::timing::Span::new("applyBatch.after_bridge", &request.plan_id);
+            after.stage("validate_receipt");
             validate_apply_result(&result, &request)?;
-            if let Err(error) = record_album_additions(&app, &result) {
+            after.stage("record_additions");
+            let recorded = record_album_additions(&app, &result);
+            after.finish(recorded.is_ok());
+            if let Err(error) = recorded {
                 result.status = LibraryIntakeApplyStatus::CompletedWithWarnings;
                 result.cleanup_warnings.push(format!(
                     "Music was added, but Aurora could not record its added date: {error}"
@@ -1396,12 +1402,37 @@ fn wait_for_child(
         "bridge.process",
         &format!("{operation} {}", plan_id.unwrap_or_default()),
     );
+    let mut last_noted_step = String::new();
+    let mut last_io_sample = Instant::now();
+    let mut last_io = child_io_bytes(child);
     loop {
+        if operation == "applyBatch" && last_io_sample.elapsed() >= IO_SAMPLE_INTERVAL {
+            // Music Library reports few steps inside its catalog stage, so record what
+            // the process is physically doing: heavy writes are a copy or rewrite, none
+            // is waiting or computing.
+            let io = child_io_bytes(child);
+            if let (Some((read, written)), Some((previous_read, previous_written))) = (io, last_io)
+            {
+                timing.note(&format!(
+                    "bridge i/o over {}s: read {} MB, wrote {} MB",
+                    last_io_sample.elapsed().as_secs(),
+                    read.saturating_sub(previous_read) / (1024 * 1024),
+                    written.saturating_sub(previous_written) / (1024 * 1024),
+                ));
+            }
+            last_io = io;
+            last_io_sample = Instant::now();
+        }
         if let Ok(bytes) = fs::read(progress_path)
             && bytes != last_progress
             && let Ok(mut progress) = serde_json::from_slice::<LibraryIntakeProgress>(&bytes)
         {
             progress.plan_id = plan_id.map(str::to_owned);
+            let step = format!("{}: {}", progress.stage, progress.message);
+            if step != last_noted_step {
+                timing.note(&step);
+                last_noted_step = step;
+            }
             if let Some(app) = app {
                 if progress.stage != last_progress_stage {
                     timing.stage(match progress.stage.as_str() {
@@ -1464,6 +1495,24 @@ fn wait_for_child(
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn child_io_bytes(child: &Child) -> Option<(u64, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Threading::{GetProcessIoCounters, IO_COUNTERS};
+
+    let mut counters = IO_COUNTERS::default();
+    // SAFETY: the handle belongs to a live `Child` borrowed for this call and
+    // `counters` is a valid out-pointer.
+    unsafe { GetProcessIoCounters(HANDLE(child.as_raw_handle()), &mut counters) }.ok()?;
+    Some((counters.ReadTransferCount, counters.WriteTransferCount))
+}
+
+#[cfg(not(windows))]
+fn child_io_bytes(_child: &Child) -> Option<(u64, u64)> {
+    None
 }
 
 /// Music Library publishes the catalog commit and then keeps working (search

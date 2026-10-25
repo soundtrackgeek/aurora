@@ -1,5 +1,12 @@
 # Aurora
 
+Aurora **0.47.4** makes Add to Library explain what it is doing. After the files
+are moved, a separate **Refresh** step covers Aurora's own catalog and playback
+update, the Catalog step shows elapsed time, and the dialog can be closed while
+the refresh finishes. `aurora-timing.jsonl` now records Music Library's progress
+messages and read/write activity during an import, so slow Catalog steps can be
+diagnosed.
+
 Aurora **0.47.3** keeps your place in Inbox after saving album tags. Refreshes
 update existing rows without moving edited albums to the top; the current
 selection and scroll position stay where you left them, including when you
