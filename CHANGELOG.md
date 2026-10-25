@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.47.5] - 2026-10-25
+
+### Changed
+- Add to Library shows Music Library's named catalog steps (recovery copy, catalog rows, search, charts, commit, wish list) instead of one long "Catalog" wait. The "reports no finer progress" note now appears only when Music Library reports just the generic stage.
+- Pairs with Music Library 0.202.0, which makes an add-only import insert just the new albums instead of rewriting the whole 1.1-million-track catalog (the 8-minute catalog stage measured in 0.47.4 diagnostics), and refreshes smart playlists in the background. Older Music Library versions keep working with the previous, slower behavior.
+
 ## [0.47.4] - 2026-10-25
 
 ### Changed

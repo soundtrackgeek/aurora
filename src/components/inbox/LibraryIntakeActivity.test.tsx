@@ -44,10 +44,19 @@ describe("LibraryIntakeActivity", () => {
     vi.useRealTimers();
   });
 
-  it.each(["searchIndex", "statistics", "committing", "somethingNew"])("keeps the %s step under Catalog", (stage) => {
+  it.each(["backingUp", "catalogRows", "searchIndex", "charts", "committing", "somethingNew"])("keeps the %s step under Catalog", (stage) => {
     render(<LibraryIntakeActivity mode="apply" progress={{ ...cataloging, stage }} />);
     expect(screen.getByText("Catalog")).toHaveClass("is-active");
     expect(screen.getByText("Validate")).toHaveClass("is-complete");
+  });
+
+  it("does not claim progress is unavailable once Music Library names its catalog steps", () => {
+    vi.useFakeTimers();
+    render(<LibraryIntakeActivity mode="apply" progress={{ ...cataloging, stage: "searchIndex", message: "Adding the new albums to search." }} />);
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect(screen.getByText("Adding the new albums to search.")).toBeInTheDocument();
+    expect(screen.queryByText(/reports no finer progress/)).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("shows a separate refresh step once the bridge has finished", () => {

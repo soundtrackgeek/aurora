@@ -49,7 +49,8 @@ export function LibraryIntakeActivity({
     ? Math.min(100, Math.round((progress.processedBytes / progress.totalBytes) * 100))
     : null;
   const seconds = useSecondsInStep(`${mode}:${activeStage}`);
-  const cataloging = mode === "apply" && !refreshing && activeStage === "cataloging";
+  // Only the generic stage lacks detail; named catalog steps already say what is happening.
+  const cataloging = mode === "apply" && !refreshing && progress?.stage === "cataloging";
   const message = refreshing
     ? "Added to library. Refreshing Aurora's view of it."
     : progress?.message ?? (mode === "preview"

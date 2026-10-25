@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora **0.47.5** shows Music Library's named catalog steps while an album is
+added, and pairs with Music Library **0.202.0**, which adds new albums without
+rewriting the whole catalog. Update Music Library to get the faster imports;
+older versions keep working at the previous speed.
+
 Aurora **0.47.4** makes Add to Library explain what it is doing. After the files
 are moved, a separate **Refresh** step covers Aurora's own catalog and playback
 update, the Catalog step shows elapsed time, and the dialog can be closed while
