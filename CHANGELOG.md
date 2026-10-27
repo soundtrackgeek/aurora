@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.49.0] - 2026-10-27
+
+### Added
+- Inbox Auto-Tagger can tag several selected albums as one release. Select CD1 and CD2 (or any disc folders) and press **Ctrl+T** (Ctrl+Shift+T still works) or **Auto-tag**: the discs are ordered by disc number or folder name, matched against a single release, tagged folder by folder, and merged into one album folder when **Rename after tagging** is on.
+
 ## [0.48.0] - 2026-10-25
 
 ### Added

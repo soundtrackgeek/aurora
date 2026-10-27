@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora **0.49.0** lets the Inbox Album Auto-Tagger treat several selected albums as one release. Select
+the disc folders of a multi-disc album (for example **CD1** and **CD2**) with Ctrl-click or Shift-click and press
+**Ctrl+T**: Aurora orders the discs, matches the combined track list against one MusicBrainz or Discogs release,
+writes each disc folder, and merges the folders in a single rename.
+
 Aurora **0.48.0** retries MusicBrainz automatically in the Inbox Album
 Auto-Tagger. When MusicBrainz answers `503 Service Temporarily Unavailable`
 (or 429/502/504, or a timeout), Aurora waits 2 seconds and tries again, up to 5
@@ -646,7 +651,7 @@ Aurora is a fast, local-first Windows 11 explorer and player for a personal musi
 - A dedicated **Inbox** between Universe and Observatory. Up to ten device-local folders are scanned every 15 seconds and whenever Aurora regains focus; folders containing MP3s become staged albums without entering the Music Library catalog.
 - Inbox album rows and the selected-album inspector show the first usable embedded front cover found in track order, serve bounded WebP thumbnails through the local cover protocol, and fall back to the existing disc mark when the album has no usable embedded image.
 - Inbox readiness reports missing or inconsistent album identity, track titles, track/disc numbering, genre, publisher context, and embedded front art before promotion. Every MP3 must contain exactly one valid front cover with image bytes matching the rest of the album. The inspector reports embedded coverage and can propagate the displayed cover across every track or let the user choose a JPG, PNG, GIF, BMP, or WebP when no embedded source exists.
-- `Ctrl+Shift+T` opens a dense Album Auto-Tagger that searches concrete MusicBrainz and Discogs releases, compares their track lists, allows per-field inclusion and manual Genre/title correction, and applies one verified album batch. Background Inbox rescans preserve the open tagger's selected release and comparison state.
+- `Ctrl+T` (or `Ctrl+Shift+T`) opens a dense Album Auto-Tagger that searches concrete MusicBrainz and Discogs releases, compares their track lists, allows per-field inclusion and manual Genre/title correction, and applies one verified album batch. With several albums selected (such as CD1 and CD2) they are tagged together as one release, ordered by disc. Background Inbox rescans preserve the open tagger's selected release and comparison state.
 - Auto-Tagger renaming is enabled by default for a full album, and `Ctrl+R` applies the same rename rules to manually tagged Inbox albums. Album folders become `Album Artist - Album (Year)`; tracks become `Disc-01 - Artist - Title.mp3` when a disc tag exists or `01 - Artist - Title.mp3` when it does not. Inbox track checkboxes can scope Auto-Tagger to one CD at a time, with Disc # and total overrides for separate CD1/CD2 releases. Windows-invalid characters and collisions are handled safely, and Discogs vinyl positions such as A1/A2/B1 are normalized to continuous 01/02/03 numbering.
 - MusicBrainz requests use Aurora's identifying User-Agent and a process-wide one-request-per-second gate. Discogs accepts either a personal access token or a consumer key plus secret stored only in the operating-system credential vault; saved values are never returned to React or written to Aurora JSON/SQLite state. Debug builds may read `DISCOGS` and `DISCOGS_SECRET` (or `DISCOGS_TOKEN`) from the ignored `.env.local` for local endpoint testing.
 - Inbox tag and artwork writes stay outside the catalog workflow: Rust canonicalizes every selected album path, stages same-folder MP3 copies, verifies parsed tags or the exact front-cover digest plus preserved non-cover frames and post-ID3 audio SHA-256, creates safety backups, installs atomically, and restores earlier tracks if a later write fails.

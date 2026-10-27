@@ -329,7 +329,7 @@ describe("Inbox", () => {
       "src",
       "/__aurora-preview-cover/preview-freak?size=128",
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Auto-tag.*Ctrl T/ })).toBeEnabled());
 
     fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
 
@@ -570,6 +570,43 @@ describe("Inbox", () => {
     expect(screen.getByRole("button", { name: "Apply to 2 tracks" })).toBeEnabled();
   });
 
+  it("auto-tags selected CD folders as one release with Ctrl+T, writing each disc and merging folders once", async () => {
+    const snapshot = await inboxAdapter.loadInboxSnapshot();
+    const base = snapshot.albums[0];
+    const detail = await inboxAdapter.loadInboxReleaseDetail((await inboxAdapter.searchInboxReleases("Baltimoore", "Freak", 10, true)).candidates[0]);
+    const disc = (id: string, folderName: string, discNumber: number, slice: [number, number]) => {
+      const path = `C:\\Music\\Inbox\\${folderName}`;
+      const tracks = base.tracks.slice(...slice).map((track) => ({ ...track, discNumber, path: track.path.replace(base.path, path) }));
+      return { ...base, id, album: folderName, folderName, path, trackCount: tracks.length, tracks };
+    };
+    const cd1 = disc("disc-1", "Freak CD1", 1, [0, 5]);
+    const cd2 = disc("disc-2", "Freak CD2", 2, [5, 10]);
+    // Listed CD2-first, like the Inbox's newest-first order.
+    vi.spyOn(inboxAdapter, "loadInboxSnapshot").mockResolvedValue({ ...snapshot, albums: [cd2, cd1] });
+    vi.spyOn(inboxAdapter, "loadInboxReleaseDetail").mockResolvedValue({ ...detail, tracks: detail.tracks.map((track, index) => ({ ...track, discNumber: index < 5 ? 1 : 2, discTotal: 2 })), discTotal: 2 });
+    const apply = vi.spyOn(inboxAdapter, "applyInboxTags").mockImplementation(async (request) => ({
+      changedTracks: request.tracks.length,
+      renamedTracks: 0,
+      albumPath: request.albumPath,
+    }));
+    const rename = vi.spyOn(inboxAdapter, "renameInboxAlbums").mockResolvedValue({ renamedTracks: 10, renamedAlbums: 2, renamedFolders: 1, failures: [] });
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /Freak CD2/ }));
+    fireEvent.click(screen.getByRole("row", { name: /Freak CD1/ }), { ctrlKey: true });
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true });
+
+    expect(await screen.findByRole("dialog", { name: "Album Auto-Tagger" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Release title 10")).toHaveValue(detail.tracks[9].title));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply & rename" }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(apply.mock.calls.map(([request]) => request.albumPath)).toEqual([cd1.path, cd2.path]);
+    expect(apply.mock.calls.every(([request]) => request.tracks.length === 5 && !request.renameAfterApply)).toBe(true);
+    expect(rename).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledWith([cd1.path, cd2.path]);
+  });
+
   it("prefers an original edition and moves a confidently unmatched bonus track only after review", async () => {
     const searchResult = await inboxAdapter.searchInboxReleases("Baltimoore", "Freak", 10, true);
     const candidate = { ...searchResult.candidates[0], year: 2008, originalYear: 1990, trackCount: 9 };
@@ -595,7 +632,7 @@ describe("Inbox", () => {
 
     await screen.findByRole("heading", { name: "Inbox" });
     const autoTag = await waitFor(() => {
-      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl T/u });
       expect(button).toBeEnabled();
       return button;
     });
@@ -650,7 +687,7 @@ describe("Inbox", () => {
 
     await screen.findByRole("heading", { name: "Inbox" });
     const autoTag = await waitFor(() => {
-      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl T/u });
       expect(button).toBeEnabled();
       return button;
     });
@@ -683,7 +720,7 @@ describe("Inbox", () => {
 
     await screen.findByRole("heading", { name: "Inbox" });
     const autoTag = await waitFor(() => {
-      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl Shift T/u });
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl T/u });
       expect(button).toBeEnabled();
       return button;
     });

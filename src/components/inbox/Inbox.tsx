@@ -125,7 +125,8 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<ReadonlySet<string>>(new Set());
   const [albumSelectionAnchorId, setAlbumSelectionAnchorId] = useState<string | null>(null);
-  const [taggerAlbum, setTaggerAlbum] = useState<InboxAlbum | null>(null);
+  const [taggerAlbums, setTaggerAlbums] = useState<InboxAlbum[]>([]);
+  const taggerOpen = taggerAlbums.length > 0;
   const [moveCategory, setMoveCategory] = useState<LibraryIntakeCategoryId | "">("");
   const [movePreview, setMovePreview] = useState<LibraryIntakePreview | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
@@ -194,7 +195,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   const selectedAlbumHasLossless = Boolean(selectedAlbum?.losslessTrackCount);
   const selectedAlbumsHaveLossless = selectedAlbums.some((album) => album.losslessTrackCount > 0);
   const selectedAlbumsMissingTotals = selectedAlbums.filter((album) => album.tracks.some((track) => track.trackTotal === null));
-  const trackTotalsDisabled = !selectedAlbumsMissingTotals.length || selectedAlbumsHaveLossless || trackTotalsBusy || renameBusy || convertBusy || coverBusy || moveBusy || Boolean(taggerAlbum) || Boolean(intakeScope);
+  const trackTotalsDisabled = !selectedAlbumsMissingTotals.length || selectedAlbumsHaveLossless || trackTotalsBusy || renameBusy || convertBusy || coverBusy || moveBusy || taggerOpen || Boolean(intakeScope);
 
   function selectFolder(folder: string | null) {
     const folderAlbums = snapshot?.albums.filter((album) => !folder || albumInFolder(album, folder)) ?? [];
@@ -238,9 +239,18 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     [excludedTrackPaths, selectedAlbumTrackRows],
   );
   const taggerTracks = useMemo(
-    () => taggerAlbum?.tracks.filter((track) => track.format === "MP3" && !excludedTrackPaths.has(track.path)) ?? [],
-    [excludedTrackPaths, taggerAlbum],
+    () => taggerAlbums.flatMap((album) => album.tracks.filter((track) => track.format === "MP3" && !excludedTrackPaths.has(track.path))),
+    [excludedTrackPaths, taggerAlbums],
   );
+  // Several selected albums (e.g. CD1 + CD2 folders) are auto-tagged as one release, ordered by disc.
+  const taggableAlbums = useMemo(
+    () => selectedAlbums.length > 1 ? orderDiscAlbums(selectedAlbums) : selectedAlbum ? [selectedAlbum] : [],
+    [selectedAlbum, selectedAlbums],
+  );
+  const taggableTrackCount = selectedAlbums.length > 1
+    ? taggableAlbums.reduce((total, album) => total + album.tracks.filter((track) => track.format === "MP3" && !excludedTrackPaths.has(track.path)).length, 0)
+    : selectedTracks.length;
+  const taggableHaveLossless = selectedAlbums.length > 1 ? selectedAlbumsHaveLossless : selectedAlbumHasLossless;
 
   const renameSelectedAlbums = useCallback(async (albumsToRename: InboxAlbum[]) => {
     if (!albumsToRename.length) return;
@@ -296,17 +306,17 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   useEffect(() => {
     function handleInboxShortcut(event: KeyboardEvent) {
       if (trackTotalsBusy) return;
-      if (event.ctrlKey && event.shiftKey && event.key.toLocaleLowerCase() === "t" && selectedAlbum && !selectedAlbumHasLossless && selectedTracks.length) {
+      if (event.ctrlKey && event.key.toLocaleLowerCase() === "t" && taggableAlbums.length && !taggableHaveLossless && taggableTrackCount && !taggerOpen) {
         event.preventDefault();
-        setTaggerAlbum(selectedAlbum);
-      } else if (event.ctrlKey && !event.shiftKey && event.key.toLocaleLowerCase() === "r" && selectedAlbums.length && !selectedAlbumsHaveLossless && !taggerAlbum && !renameBusy) {
+        setTaggerAlbums(taggableAlbums);
+      } else if (event.ctrlKey && !event.shiftKey && event.key.toLocaleLowerCase() === "r" && selectedAlbums.length && !selectedAlbumsHaveLossless && !taggerOpen && !renameBusy) {
         event.preventDefault();
         void renameSelectedAlbums(selectedAlbums);
       }
     }
     window.addEventListener("keydown", handleInboxShortcut);
     return () => window.removeEventListener("keydown", handleInboxShortcut);
-  }, [renameBusy, renameSelectedAlbums, selectedAlbum, selectedAlbumHasLossless, selectedAlbums, selectedAlbumsHaveLossless, selectedTracks.length, taggerAlbum, trackTotalsBusy]);
+  }, [renameBusy, renameSelectedAlbums, selectedAlbums, selectedAlbumsHaveLossless, taggableAlbums, taggableHaveLossless, taggableTrackCount, taggerOpen, trackTotalsBusy]);
 
   async function addFolder() {
     try {
@@ -448,7 +458,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
           <button type="button" disabled={trackTotalsDisabled} title="Fill missing track totals from all local MP3s in each selected album, counted separately per numbered disc. Existing totals are kept." onClick={() => void fillSelectedTrackTotals()}>{trackTotalsBusy ? <LoaderCircle className="is-spinning" /> : <Check />} {trackTotalsBusy ? "Filling track totals…" : `Fill track totals${selectedAlbums.length > 1 ? ` (${selectedAlbums.length})` : ""}`}</button>
           <button type="button" disabled={!selectedAlbums.length || renameBusy || convertBusy || coverBusy || moveBusy || trackTotalsBusy} title="Move only selected albums to the library. Ctrl-click to toggle albums; Shift-click to select a range." onClick={openSelectedAlbumsIntake}><FolderInput /> Move selected{selectedAlbums.length ? ` (${selectedAlbums.length})` : ""}</button>
           <button type="button" disabled={!selectedAlbums.length || selectedAlbumsHaveLossless || renameBusy || trackTotalsBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}>{renameBusy ? <LoaderCircle className="is-spinning" /> : <FilePenLine />} Rename{selectedAlbums.length > 1 ? ` ${selectedAlbums.length} albums` : ""} <kbd>Ctrl R</kbd></button>
-          <button type="button" className="button button--primary" disabled={!selectedAlbum || selectedAlbumHasLossless || !selectedTracks.length || renameBusy || trackTotalsBusy} onClick={() => selectedAlbum && setTaggerAlbum(selectedAlbum)}><Tags /> Auto-tag {selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl Shift T</kbd></button>
+          <button type="button" className="button button--primary" disabled={!taggableAlbums.length || taggableHaveLossless || !taggableTrackCount || renameBusy || trackTotalsBusy} title={taggableAlbums.length > 1 ? "Auto-tag the selected albums (for example CD1 and CD2) as one release." : undefined} onClick={() => setTaggerAlbums(taggableAlbums)}><Tags /> Auto-tag {taggableAlbums.length > 1 ? `${taggableAlbums.length} discs` : selectedAlbum && selectedTracks.length !== selectedAlbum.trackCount ? `${selectedTracks.length} tracks` : ""} <kbd>Ctrl T</kbd></button>
           <InboxMessageHistoryButton count={messages.length} open={historyOpen} onToggle={() => setHistoryOpen((current) => !current)} />
         </div>
       </header>
@@ -523,7 +533,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
             {!selectedAlbumHasLossless && !selectedAlbum.artworkReady ? <button type="button" className="inbox-autotag inbox-artwork" disabled={coverBusy || trackTotalsBusy} onClick={() => void repairAlbumCover()}>{coverBusy ? <LoaderCircle className="is-spinning" /> : <ImagePlus />}<span><strong>{selectedAlbum.artworkPresent ? "Embed cover in all tracks" : "Choose album cover"}</strong><small>{selectedAlbum.artworkPresent ? `Use the displayed cover for all ${selectedAlbum.trackCount} MP3s` : "Select a JPG, PNG, GIF, BMP, or WebP image"}</small></span></button> : null}
             {!selectedAlbumHasLossless ? <>
             <section className="inbox-track-selection"><header><h3>Tracks to tag</h3><span><button type="button" onClick={() => setExcludedTrackPaths(new Set())}>All</button><button type="button" onClick={() => setExcludedTrackPaths(new Set(selectedAlbum.tracks.map((track) => track.path)))}>None</button></span></header><div>{selectedAlbum.tracks.map((track, index) => <label key={track.path}><input type="checkbox" checked={!excludedTrackPaths.has(track.path)} onChange={() => setExcludedTrackPaths((current) => { const next = new Set(current); if (next.has(track.path)) next.delete(track.path); else next.add(track.path); return next; })} /><span>{track.discNumber ? `${track.discNumber}-` : ""}{String(track.trackNumber ?? index + 1).padStart(2, "0")}</span><strong>{track.title ?? track.fileName}</strong></label>)}</div><small>{selectedTracks.length} of {selectedAlbum.trackCount} selected</small></section>
-            <button type="button" className="inbox-autotag" disabled={!selectedTracks.length || trackTotalsBusy} onClick={() => setTaggerAlbum(selectedAlbum)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl Shift T</kbd></button>
+            <button type="button" className="inbox-autotag" disabled={!taggableTrackCount || trackTotalsBusy} onClick={() => setTaggerAlbums(taggableAlbums)}><Tags /><span><strong>Album Auto-Tagger</strong><small>{taggableAlbums.length > 1 ? `Match ${taggableAlbums.length} selected discs as one release` : selectedTracks.length === selectedAlbum.trackCount ? "Match the full album" : `Match ${selectedTracks.length} selected tracks`}</small></span><kbd>Ctrl T</kbd></button>
             <button type="button" className="inbox-autotag inbox-rename" disabled={!selectedAlbums.length || selectedAlbumsHaveLossless || renameBusy || trackTotalsBusy} onClick={() => void renameSelectedAlbums(selectedAlbums)}><FilePenLine /><span><strong>Rename from tags</strong><small>{selectedAlbums.length > 1 ? `Standardize ${selectedAlbums.length} selected album folders and track filenames` : "Standardize the album folder and track filenames"}</small></span><kbd>Ctrl R</kbd></button>
             </> : null}
             <section className="inbox-move"><h3>Move to library</h3><p>Uses the same reviewed, preview-first flow as Add Music.</p><select aria-label="Library destination" value={moveCategory} onChange={(event) => { setMoveCategory(event.target.value as LibraryIntakeCategoryId | ""); setMovePreview(null); setReplacementConfirmed(false); }}><option value="">Select destination…</option>{libraryIntakeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select>
@@ -536,7 +546,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
         </aside>
       </div>
 
-      {taggerAlbum ? <AlbumAutoTagger album={taggerAlbum} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbum(null)} onApplied={async (message, path) => { notify(message); setTaggerAlbum(null); await refresh(false, { id: taggerAlbum.id, path }); }} /> : null}
+      {taggerOpen ? <AlbumAutoTagger albums={taggerAlbums} tracks={taggerTracks} discogsConfigured={snapshot.settings.discogsConfigured} onOpenSettings={onOpenMetadataSettings} onClose={() => setTaggerAlbums([])} onApplied={async (message, path) => { notify(message); const focusId = taggerAlbums[0].id; setTaggerAlbums([]); await refresh(false, { id: focusId, path }); }} /> : null}
       {intakeScope ? <InboxLibraryIntakeDialog
         scopeLabel={intakeScope.label}
         targets={intakeScope.targets}
@@ -548,7 +558,24 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
   );
 }
 
-function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onClose, onApplied }: { album: InboxAlbum; tracks: InboxTrack[]; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: (message: string, albumPath: string) => void | Promise<void> }) {
+function discOrderKey(album: InboxAlbum): number {
+  const discs = album.tracks.map((track) => track.discNumber).filter((value): value is number => value !== null);
+  return discs.length ? Math.min(...discs) : Number.POSITIVE_INFINITY;
+}
+
+/** Orders multi-disc folders (CD1, CD2, …) by their disc tag, falling back to a natural folder-name sort. */
+function orderDiscAlbums(albums: readonly InboxAlbum[]): InboxAlbum[] {
+  return [...albums].sort((left, right) => {
+    const leftKey = discOrderKey(left);
+    const rightKey = discOrderKey(right);
+    if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+    return left.folderName.localeCompare(right.folderName, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
+function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, onClose, onApplied }: { albums: InboxAlbum[]; tracks: InboxTrack[]; discogsConfigured: boolean; onOpenSettings: () => void; onClose: () => void; onApplied: (message: string, albumPath: string) => void | Promise<void> }) {
+  const album = albums[0];
+  const totalAlbumTracks = albums.reduce((total, candidate) => total + candidate.tracks.length, 0);
   const [artist, setArtist] = useState(album.artist ?? "");
   const [title, setTitle] = useState(album.album ?? album.folderName);
   const [candidates, setCandidates] = useState<ReleaseCandidate[]>([]);
@@ -562,7 +589,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const [manualMatches, setManualMatches] = useState<Map<number, number>>(() => new Map());
   const [manualDrafts, setManualDrafts] = useState<Map<number, number>>(() => new Map());
   const [confirmRemoval, setConfirmRemoval] = useState(false);
-  const [renameAfterApply, setRenameAfterApply] = useState(tracks.length === album.tracks.length);
+  const [renameAfterApply, setRenameAfterApply] = useState(tracks.length === totalAlbumTracks);
   const [discNumber, setDiscNumber] = useState("");
   const [discTotal, setDiscTotal] = useState("");
   const [busy, setBusy] = useState<"search" | "detail" | "apply" | null>(null);
@@ -702,7 +729,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
   const selectedRemovalCount = removeExtraPaths.size;
   const allExtrasSelected = reconciliation.extraCount > 0 && selectedRemovalCount === reconciliation.extraCount;
   const willRename = renameAfterApply
-    && tracks.length === album.tracks.length
+    && tracks.length === totalAlbumTracks
     && (reconciliation.extraCount === 0 || allExtrasSelected);
 
   async function apply() {
@@ -713,10 +740,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
     }
     setBusy("apply"); setError(null);
     try {
-      const result = await applyInboxTags({
-        albumPath: album.path,
-        fields: [...fields],
-        tracks: reconciliation.rows.flatMap((match) => {
+      const trackUpdates = reconciliation.rows.flatMap((match) => {
           if (match.localIndex === null || match.releaseIndex === null || (match.status !== "exact" && match.status !== "likely" && match.status !== "confirmed")) return [];
           const track = tracks[match.localIndex];
           const releaseTrack = detail.tracks[match.releaseIndex];
@@ -736,13 +760,39 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
             discTotal: discTotal ? Number(discTotal) : releaseTrack?.discTotal ?? detail.discTotal ?? null,
           };
           return [{ path: track.path, values: next }];
-        }),
-        renameAfterApply: willRename,
-        removeTrackPaths: [...removeExtraPaths],
       });
-      await onApplied(result.removedTracks
-        ? `Auto-tagged the selected edition and moved ${result.removedTracks} unmatched ${result.removedTracks === 1 ? "track" : "tracks"} to Aurora recovery${result.recoveryPath ? ` at ${result.recoveryPath}` : ""}.`
-        : `Auto-tagged ${result.changedTracks} ${result.changedTracks === 1 ? "track" : "tracks"}${result.renamedTracks ? " and renamed the album" : ""}.`, result.albumPath);
+      // Each disc folder is written separately, in disc order; one release can span several Inbox albums.
+      const ownerPath = new Map(albums.flatMap((candidate) => candidate.tracks.map((track) => [track.path, candidate.path] as const)));
+      const results: Awaited<ReturnType<typeof applyInboxTags>>[] = [];
+      let mergedRenames = 0;
+      for (const target of albums) {
+        const targetUpdates = trackUpdates.filter((update) => ownerPath.get(update.path) === target.path);
+        const targetRemovals = [...removeExtraPaths].filter((path) => ownerPath.get(path) === target.path);
+        if (!targetUpdates.length && !targetRemovals.length) continue;
+        results.push(await applyInboxTags({
+          albumPath: target.path,
+          fields: [...fields],
+          tracks: targetUpdates,
+          // Disc folders must be renamed together so Aurora can merge them into one album folder.
+          renameAfterApply: willRename && albums.length === 1,
+          removeTrackPaths: targetRemovals,
+        }));
+      }
+      if (willRename && albums.length > 1) {
+        const renameResult = await renameInboxAlbums(albums.map((candidate) => candidate.path));
+        if (renameResult.failures.length) {
+          throw new Error(`Tags were applied, but the discs could not be renamed: ${renameResult.failures[0].message}`);
+        }
+        mergedRenames = renameResult.renamedTracks;
+      }
+      const changedTracks = results.reduce((total, result) => total + result.changedTracks, 0);
+      const renamedTracks = mergedRenames + results.reduce((total, result) => total + result.renamedTracks, 0);
+      const removedTracks = results.reduce((total, result) => total + (result.removedTracks ?? 0), 0);
+      const recoveryPath = results.find((result) => result.recoveryPath)?.recoveryPath;
+      const discNote = albums.length > 1 ? ` across ${albums.length} discs` : "";
+      await onApplied(removedTracks
+        ? `Auto-tagged the selected edition${discNote} and moved ${removedTracks} unmatched ${removedTracks === 1 ? "track" : "tracks"} to Aurora recovery${recoveryPath ? ` at ${recoveryPath}` : ""}.`
+        : `Auto-tagged ${changedTracks} ${changedTracks === 1 ? "track" : "tracks"}${discNote}${renamedTracks ? (albums.length > 1 ? " and renamed the albums" : " and renamed the album") : ""}.`, results[0]?.albumPath ?? album.path);
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); setBusy(null); }
   }
 
@@ -779,7 +829,7 @@ function AlbumAutoTagger({ album, tracks, discogsConfigured, onOpenSettings, onC
       </section>
     </div>
     </div>
-    <footer><label className="inbox-rename-option"><input type="checkbox" checked={renameAfterApply} disabled={Boolean(busy) || tracks.length !== album.tracks.length || (reconciliation.extraCount > 0 && !allExtrasSelected)} onChange={(event) => setRenameAfterApply(event.target.checked)} /><span><strong>Rename after tagging</strong><small>{tracks.length !== album.tracks.length ? "Tag all album tracks before renaming" : reconciliation.extraCount > 0 && !allExtrasSelected ? "Select every extra track for recovery before renaming" : "Album Artist - Album (Original year) · 1-01 or 01 - Artist - Title"}</small></span></label><span className="inbox-tagger__source">{detail ? `${sourceLabel(detail.candidate.source)} release ${detail.candidate.id}` : "Choose a release to review its tags."}</span><button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button><button type="button" className="button button--primary" disabled={!detail || fields.size === 0 || reconciliation.matchedCount === 0 || Boolean(busy)} onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : selectedRemovalCount ? <Trash2 /> : <Check />} {selectedRemovalCount ? `${willRename ? "Apply, rename & move" : "Apply & move"} ${selectedRemovalCount} ${selectedRemovalCount === 1 ? "extra" : "extras"}` : willRename ? "Apply & rename" : `Apply to ${reconciliation.matchedCount} tracks`}</button></footer>
+    <footer><label className="inbox-rename-option"><input type="checkbox" checked={renameAfterApply} disabled={Boolean(busy) || tracks.length !== totalAlbumTracks || (reconciliation.extraCount > 0 && !allExtrasSelected)} onChange={(event) => setRenameAfterApply(event.target.checked)} /><span><strong>Rename after tagging</strong><small>{tracks.length !== totalAlbumTracks ? "Tag all album tracks before renaming" : reconciliation.extraCount > 0 && !allExtrasSelected ? "Select every extra track for recovery before renaming" : "Album Artist - Album (Original year) · 1-01 or 01 - Artist - Title"}</small></span></label><span className="inbox-tagger__source">{detail ? `${sourceLabel(detail.candidate.source)} release ${detail.candidate.id}` : "Choose a release to review its tags."}</span><button type="button" className="button button--quiet" disabled={Boolean(busy)} onClick={onClose}>Cancel</button><button type="button" className="button button--primary" disabled={!detail || fields.size === 0 || reconciliation.matchedCount === 0 || Boolean(busy)} onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : selectedRemovalCount ? <Trash2 /> : <Check />} {selectedRemovalCount ? `${willRename ? "Apply, rename & move" : "Apply & move"} ${selectedRemovalCount} ${selectedRemovalCount === 1 ? "extra" : "extras"}` : willRename ? "Apply & rename" : `Apply to ${reconciliation.matchedCount} tracks`}</button></footer>
     {confirmRemoval ? <div className="inbox-extra-confirmation-backdrop" role="presentation"><dialog className="inbox-extra-confirmation" open role="alertdialog" aria-modal="true" aria-labelledby="inbox-extra-confirmation-title" aria-describedby="inbox-extra-confirmation-description" onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); setConfirmRemoval(false); } }}><span className="inbox-extra-confirmation__icon"><Trash2 aria-hidden="true" /></span><div><h3 id="inbox-extra-confirmation-title">Move {selectedRemovalCount} unmatched {selectedRemovalCount === 1 ? "track" : "tracks"} out of this album?</h3><p id="inbox-extra-confirmation-description">Aurora will copy and verify {selectedRemovalCount === 1 ? "this MP3" : "these MP3s"} in its recovery folder before removing {selectedRemovalCount === 1 ? "it" : "them"} from the Inbox album. Tagging and renaming roll back if removal fails.</p><ul>{[...removeExtraPaths].map((path) => <li key={path}>{leafName(path)}</li>)}</ul></div><div className="inbox-extra-confirmation__actions"><button type="button" disabled={Boolean(busy)} onClick={() => setConfirmRemoval(false)}>Cancel</button><button type="button" className="is-destructive" disabled={Boolean(busy)} autoFocus onClick={() => void apply()}>{busy === "apply" ? <LoaderCircle className="is-spinning" /> : <Trash2 />}Move to recovery</button></div></dialog></div> : null}
   </section></div>;
 }
