@@ -731,8 +731,9 @@ pub(crate) fn apply_tags(
     recovery_root: &Path,
     monitored_roots: &[PathBuf],
 ) -> Result<InboxTagApplyResult, String> {
-    if (request.fields.is_empty() && cover.is_none())
-        || (request.tracks.is_empty() && cover.is_none())
+    // An album that only loses unmatched tracks (a multi-disc release) has no tag edits of its own.
+    let removal_only = request.tracks.is_empty() && !request.remove_track_paths.is_empty();
+    if cover.is_none() && !removal_only && (request.fields.is_empty() || request.tracks.is_empty())
     {
         return Err(
             "Choose at least one field, track, or replacement album cover before applying tags."
@@ -795,7 +796,7 @@ pub(crate) fn apply_tags(
         patches.keys().cloned().collect::<Vec<_>>()
     };
     targets.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
-    if targets.is_empty() {
+    if targets.is_empty() && removal_targets.is_empty() {
         return Err("The Inbox album contains no MP3 files.".to_owned());
     }
     let expected_artwork_fingerprint = cover.map(canonical_front_cover_fingerprint);
@@ -3878,6 +3879,40 @@ mod tests {
             Some("Heavy Metal".to_owned())
         );
         fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn tag_apply_moves_extras_from_an_album_with_no_tag_edits() {
+        let root = tempfile::tempdir().expect("temporary Inbox root");
+        let album = root.path().join("Bonus Disc");
+        let recovery = root.path().join("recovery");
+        fs::create_dir_all(&album).expect("create album");
+        let extra = album.join("01 Cover.mp3");
+        write_artwork_fixture(&extra, 1, Some(1));
+
+        let result = apply_tags(
+            InboxTagApplyRequest {
+                album_path: path_text(&album).expect("album path"),
+                fields: vec![EditableTagField::Genre],
+                tracks: Vec::new(),
+                rename_after_apply: false,
+                remove_track_paths: vec![path_text(&extra).expect("extra path")],
+                artwork_token: None,
+            },
+            None,
+            &recovery,
+            &[],
+        )
+        .expect("remove extras without tagging");
+
+        assert_eq!(result.changed_tracks, 0);
+        assert_eq!(result.removed_tracks, 1);
+        assert!(!extra.exists());
+        assert!(
+            PathBuf::from(result.recovery_path.expect("recovery path"))
+                .join("01 Cover.mp3")
+                .is_file()
+        );
     }
 
     #[test]

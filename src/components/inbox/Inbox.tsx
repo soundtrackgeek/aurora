@@ -764,6 +764,8 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
       // Each disc folder is written separately, in disc order; one release can span several Inbox albums.
       const ownerPath = new Map(albums.flatMap((candidate) => candidate.tracks.map((track) => [track.path, candidate.path] as const)));
       const results: Awaited<ReturnType<typeof applyInboxTags>>[] = [];
+      // Folders emptied by removing their extras (an expanded 2CD edition trimmed to one disc) have nothing left to rename.
+      const survivingAlbums = albums.filter((candidate) => candidate.tracks.some((track) => !removeExtraPaths.has(track.path)));
       let mergedRenames = 0;
       for (const target of albums) {
         const targetUpdates = trackUpdates.filter((update) => ownerPath.get(update.path) === target.path);
@@ -774,12 +776,12 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
           fields: [...fields],
           tracks: targetUpdates,
           // Disc folders must be renamed together so Aurora can merge them into one album folder.
-          renameAfterApply: willRename && albums.length === 1,
+          renameAfterApply: willRename && survivingAlbums.length === 1 && survivingAlbums[0].path === target.path,
           removeTrackPaths: targetRemovals,
         }));
       }
-      if (willRename && albums.length > 1) {
-        const renameResult = await renameInboxAlbums(albums.map((candidate) => candidate.path));
+      if (willRename && survivingAlbums.length > 1) {
+        const renameResult = await renameInboxAlbums(survivingAlbums.map((candidate) => candidate.path));
         if (renameResult.failures.length) {
           throw new Error(`Tags were applied, but the discs could not be renamed: ${renameResult.failures[0].message}`);
         }

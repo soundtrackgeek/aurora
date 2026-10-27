@@ -1,5 +1,9 @@
 # Aurora
 
+Aurora **0.49.1** fixes trimming an expanded edition down to one disc in the Inbox Album Auto-Tagger: extras that live
+in another disc folder can now be moved to recovery (previously the apply failed with "Choose at least one field, track, or
+replacement album cover"), and the emptied folder is skipped when renaming.
+
 Aurora **0.49.0** lets the Inbox Album Auto-Tagger treat several selected albums as one release. Select
 the disc folders of a multi-disc album (for example **CD1** and **CD2**) with Ctrl-click or Shift-click and press
 **Ctrl+T**: Aurora orders the discs, matches the combined track list against one MusicBrainz or Discogs release,

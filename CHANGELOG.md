@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.49.1] - 2026-10-27
+
+### Fixed
+- Inbox Auto-Tagger: moving unmatched tracks to recovery no longer fails with "Choose at least one field, track, or replacement album cover before applying tags." when the extras are in a different disc folder than the matched tracks (for example trimming an expanded 2CD edition to a 1CD release). Folders emptied this way are no longer included in the rename step.
+
 ## [0.49.0] - 2026-10-27
 
 ### Added
