@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.49.3] - 2026-10-28
+
+### Changed
+- Inbox Auto-Tagger: pressing Enter in the Album artist or Album field now runs Find, so a corrected title no longer needs an extra click on the button.
+
 ## [0.49.2] - 2026-10-28
 
 ### Fixed

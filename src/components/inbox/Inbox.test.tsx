@@ -736,6 +736,28 @@ describe("Inbox", () => {
     expect(screen.getByRole("button", { name: "Apply & rename" })).toBeEnabled();
   });
 
+  it("searches again when Enter is pressed in the Album field", async () => {
+    const search = vi.spyOn(inboxAdapter, "searchInboxReleases");
+    render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Inbox" });
+    const autoTag = await waitFor(() => {
+      const button = screen.getByRole("button", { name: /Auto-tag.*Ctrl T/u });
+      expect(button).toBeEnabled();
+      return button;
+    });
+    fireEvent.click(autoTag);
+    await waitFor(() => expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling"));
+    expect(search).toHaveBeenCalledTimes(1);
+
+    const album = within(screen.getByRole("dialog", { name: "Album Auto-Tagger" }).querySelector<HTMLElement>(".inbox-tagger__search")!).getByRole("textbox", { name: "Album" });
+    fireEvent.change(album, { target: { value: "Wrecked Again" } });
+    fireEvent.submit(album);
+
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    expect(search).toHaveBeenLastCalledWith(expect.any(String), "Wrecked Again", expect.anything(), expect.anything());
+  });
+
   it("requires readiness before previewing a library move", async () => {
     render(<Inbox onOpenMetadataSettings={vi.fn()} onCatalogChanged={vi.fn()} />);
 

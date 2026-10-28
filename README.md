@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.49.3** lets you press Enter in the Inbox Auto-Tagger's Album artist or Album field to run Find, instead of clicking the button.
+
 Aurora **0.49.2** fixes missing Chart info for tracks whose chart titles carry a subtitle. A track tagged "Silent Running" now
 also gets the peaks printed as "Silent Running (On Dangerous Ground)" on Billboard annual, the US weekly charts and Official UK,
 matching the tracklist badges. Live, remix and other version titles stay separate recordings. Album chart ranks for artists the
