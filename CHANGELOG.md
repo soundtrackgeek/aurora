@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.49.2] - 2026-10-28
+
+### Fixed
+- Track Chart info now merges the chart's printed subtitle into the library title. A track tagged "Silent Running" found only the chart rows printed exactly that way, so Billboard annual, the US weekly charts and the best Official UK run, all printed "Silent Running (On Dangerous Ground)", were missing from the sidebar even though the tracklist badges showed them. The sidebar now also reads chart titles that are the library title plus a parenthetical subtitle and keeps the best peak. Live, remix, edit, version, instrumental, acoustic and similar variants are other recordings and stay out, and a longer title such as "Silent Running Blues" never matches.
+
+### Added
+- A test covering subtitle merging across the Official UK, Billboard annual and published US charts, and excluding live recordings and longer titles.
+
 ## [0.49.1] - 2026-10-27
 
 ### Fixed

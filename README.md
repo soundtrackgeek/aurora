@@ -1,5 +1,10 @@
 # Aurora
 
+Aurora **0.49.2** fixes missing Chart info for tracks whose chart titles carry a subtitle. A track tagged "Silent Running" now
+also gets the peaks printed as "Silent Running (On Dangerous Ground)" on Billboard annual, the US weekly charts and Official UK,
+matching the tracklist badges. Live, remix and other version titles stay separate recordings. Album chart ranks for artists the
+library credits with "+" (such as Mike + The Mechanics) come from Music Library 0.203.3, which now also reads "+" as "&".
+
 Aurora **0.49.1** fixes trimming an expanded edition down to one disc in the Inbox Album Auto-Tagger: extras that live
 in another disc folder can now be moved to recovery (previously the apply failed with "Choose at least one field, track, or
 replacement album cover"), and the emptied folder is skipped when renaming.

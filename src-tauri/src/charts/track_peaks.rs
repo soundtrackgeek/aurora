@@ -126,6 +126,152 @@ fn lead_credit_book_peaks(
     Ok(Vec::new())
 }
 
+/// Published-book counterpart of `subtitled_chart_peak`, one peak per chart.
+fn subtitled_book_peaks(
+    connection: &Connection,
+    artist: &str,
+    titles: &[String],
+) -> Result<Vec<TrackChartPeak>, String> {
+    let mut statement = connection.prepare(
+        "SELECT b.chart, e.title, MIN(CASE WHEN CAST(e.peak_position AS INTEGER) > 0 THEN MIN(e.position, CAST(e.peak_position AS INTEGER)) ELSE e.position END)
+         FROM published_chart_entries e JOIN published_chart_books b ON b.id = e.book_id
+         WHERE e.artist_group_key = ?1 AND e.title_key >= ?2 AND e.title_key < ?3 AND e.position > 0
+         GROUP BY b.chart, e.title",
+    ).map_err(|e| e.to_string())?;
+    let mut charts = std::collections::BTreeMap::<String, i64>::new();
+    for group_artist in std::iter::once(artist_group_key(artist)).chain(main_performers(artist)) {
+        for title in titles {
+            let (from, to) = credit_prefix(title);
+            let rows = statement
+                .query_map([&group_artist, &from, &to], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for (chart, printed, peak) in rows {
+                if is_subtitled_title(&printed, title) {
+                    let best = charts.entry(chart).or_insert(peak);
+                    *best = (*best).min(peak);
+                }
+            }
+        }
+    }
+    Ok(charts
+        .into_iter()
+        .map(|(label, peak)| TrackChartPeak {
+            label,
+            peak,
+            country: "US",
+        })
+        .collect())
+}
+
+/// Charts print a subtitle in parentheses ("Silent Running (On Dangerous
+/// Ground)") that library titles often drop. A different recording of the song
+/// ("Song (Live)", "Song (Remix)") is not the same chart run.
+fn is_recording_variant(subtitle_title: &str) -> bool {
+    const VARIANT_WORDS: [&str; 16] = [
+        "live",
+        "remix",
+        "mix",
+        "edit",
+        "version",
+        "instrumental",
+        "acoustic",
+        "demo",
+        "dub",
+        "extended",
+        "mono",
+        "stereo",
+        "reprise",
+        "unplugged",
+        "remastered",
+        "reissue",
+    ];
+    catalog_chart_key(subtitle_title)
+        .split(' ')
+        .any(|word| VARIANT_WORDS.contains(&word))
+}
+
+/// True when a printed chart title is the library title plus a parenthetical
+/// subtitle, like the track badges' `parenthetical_key` fallback.
+fn is_subtitled_title(printed: &str, title_key: &str) -> bool {
+    without_parentheses(printed).is_some_and(|base| catalog_chart_key(&base) == title_key)
+        && !is_recording_variant(printed)
+}
+
+fn table_has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+}
+
+/// Weekly and annual tables only store folded title keys, so a chart title with
+/// a subtitle is found by its key prefix and confirmed against the printed
+/// title. Artists match exactly or by lead performer, as in the other lookups.
+fn subtitled_chart_peak(
+    connection: &Connection,
+    table: &str,
+    artists: &[String],
+    performers: &[String],
+    titles: &[String],
+) -> Result<Option<i64>, String> {
+    if !table_has_column(connection, table, "title")? {
+        return Ok(None);
+    }
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT artist_key, title, MIN(rank) FROM {table}
+             WHERE artist_key >= ?1 AND artist_key < ?2
+               AND title_key >= ?3 AND title_key < ?4 AND rank > 0
+             GROUP BY artist_key, title"
+        ))
+        .map_err(|e| format!("Could not read track chart peaks: {e}"))?;
+    let mut ranges = artists
+        .iter()
+        .map(|artist| (artist.clone(), format!("{artist}\u{1}"), None))
+        .collect::<Vec<_>>();
+    ranges.extend(performers.iter().map(|performer| {
+        let (from, to) = credit_prefix(performer);
+        (from, to, Some(performer))
+    }));
+    let mut best: Option<i64> = None;
+    for (from, to, lead) in ranges {
+        for title in titles {
+            let (title_from, title_to) = credit_prefix(title);
+            let rows = statement
+                .query_map([&from, &to, &title_from, &title_to], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for (artist_key, printed, peak) in rows {
+                let artist_matches = lead.is_none_or(|performer| {
+                    main_performers(&artist_key).first() == Some(performer)
+                });
+                if artist_matches && is_subtitled_title(&printed, title) {
+                    best = Some(best.map_or(peak, |current| current.min(peak)));
+                }
+            }
+        }
+    }
+    Ok(best)
+}
+
 fn query(
     connection: &Connection,
     artist: &str,
@@ -176,6 +322,12 @@ fn query(
         if peak.is_none() {
             peak = lead_credit_peak(connection, table, &performers, &titles)?;
         }
+        // The same song also charts under its printed subtitle; keep the best run.
+        if let Some(subtitled) =
+            subtitled_chart_peak(connection, table, &artists, &performers, &titles)?
+        {
+            peak = Some(peak.map_or(subtitled, |exact| exact.min(subtitled)));
+        }
         if let Some(peak) = peak {
             peaks.push(TrackChartPeak {
                 label: if *source == ChartSource::Billboard {
@@ -195,6 +347,7 @@ fn query(
     if table_exists(connection, "published_chart_books")?
         && table_exists(connection, "published_chart_entries")?
     {
+        let book_start = peaks.len();
         // Keyed archives merge printed spellings (Hall & Oates vs Hall / Oates);
         // archives from older Music Library versions only match exact spellings.
         let keyed = published_identity_keys(connection)?;
@@ -245,6 +398,18 @@ fn query(
         }
         if keyed && !found {
             peaks.extend(lead_credit_book_peaks(connection, &performers, &titles)?);
+        }
+        if keyed {
+            for subtitled in subtitled_book_peaks(connection, artist, &titles)? {
+                match peaks[book_start..]
+                    .iter_mut()
+                    .find(|existing| existing.label == subtitled.label)
+                {
+                    Some(existing) => existing.peak = existing.peak.min(subtitled.peak),
+                    None => peaks.push(subtitled),
+                }
+            }
+            peaks[book_start..].sort_by_key(|peak| peak.label.to_lowercase());
         }
     }
     Ok(peaks)
@@ -430,6 +595,47 @@ mod tests {
         // A different artist who merely shares a name prefix never matches.
         assert!(
             query(&connection, "Andy Gib", "I Can't Help It")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn chart_subtitles_merge_into_the_library_title_but_other_recordings_do_not() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE official_uk_single_chart_entries (artist_key TEXT, title TEXT, title_key TEXT, rank INTEGER);
+            INSERT INTO official_uk_single_chart_entries VALUES
+              ('mike and the mechanics','SILENT RUNNING','silent running',61),
+              ('mike and the mechanics','SILENT RUNNING (ON DANGEROUS GROUND)','silent running on dangerous ground',21),
+              ('mike and the mechanics','SILENT RUNNING (LIVE)','silent running live',3),
+              ('mike and the mechanics','SILENT RUNNING BLUES','silent running blues',2),
+              ('mike and the mechanics','LOVE STORY (REMIX)','love story remix',1);
+            CREATE TABLE billboard_single_chart_entries (artist_key TEXT, title TEXT, title_key TEXT, rank INTEGER);
+            INSERT INTO billboard_single_chart_entries VALUES ('mike the mechanics','Silent Running (On Dangerous Ground)','silent running on dangerous ground',69);
+            CREATE TABLE published_chart_books (id INTEGER, chart TEXT);
+            INSERT INTO published_chart_books VALUES (1,'Billboard Hot 100'),(2,'Mainstream Rock Tracks');
+            CREATE TABLE published_chart_identity (id INTEGER PRIMARY KEY, key_version INTEGER);
+            INSERT INTO published_chart_identity VALUES (1, 1);
+            CREATE TABLE published_chart_entries (book_id INTEGER, artist TEXT, title TEXT, position INTEGER, peak_position TEXT, artist_group_key TEXT, title_key TEXT);
+            INSERT INTO published_chart_entries VALUES
+              (1,'Mike + The Mechanics','Silent Running (On Dangerous Ground)',6,'6','mike the mechanics','silent running on dangerous ground'),
+              (2,'Mike + The Mechanics','Silent Running (On Dangerous Ground)',1,'1','mike the mechanics','silent running on dangerous ground'),
+              (1,'Mike + The Mechanics','Silent Running (Live)',1,'1','mike the mechanics','silent running live');").unwrap();
+        let peaks = query(&connection, "Mike + The Mechanics", "Silent Running").unwrap();
+        assert_eq!(
+            peaks
+                .iter()
+                .map(|p| (p.label.as_str(), p.peak, p.country))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Official UK", 21, "UK"),
+                ("Billboard annual", 69, "US"),
+                ("Billboard Hot 100", 6, "US"),
+                ("Mainstream Rock Tracks", 1, "US")
+            ]
+        );
+        assert!(
+            query(&connection, "Mike + The Mechanics", "Love Story")
                 .unwrap()
                 .is_empty()
         );
