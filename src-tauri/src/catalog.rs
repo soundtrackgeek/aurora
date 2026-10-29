@@ -1845,6 +1845,30 @@ fn track_album_level_predicate(
     ))
 }
 
+/// In track searches, `love:` checks the track's own heart: a loved track
+/// counts as 1 and any other track as 0, so `love:1` finds loved tracks and
+/// `love:0` finds the rest.
+fn track_loved_range_predicate(
+    track_alias: &str,
+    from: Option<u32>,
+    to: Option<u32>,
+    params: &mut Vec<Value>,
+) -> String {
+    let loved = format!(
+        "(CASE WHEN upper(trim(COALESCE({track_alias}.love, ''))) = 'L' THEN 1 ELSE 0 END)"
+    );
+    let mut predicates = Vec::new();
+    if let Some(from) = from {
+        params.push(Value::Integer(i64::from(from)));
+        predicates.push(format!("{loved} >= ?"));
+    }
+    if let Some(to) = to {
+        params.push(Value::Integer(i64::from(to)));
+        predicates.push(format!("{loved} <= ?"));
+    }
+    format!("({})", predicates.join(" AND "))
+}
+
 fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
     let queries = group
         .alternatives
@@ -1902,7 +1926,12 @@ pub(crate) fn push_track_search_predicates(
                 .filter_map(|alternative| non_prefix_predicate("t", alternative, params)),
         );
         alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
-            track_album_level_predicate("t", &alternative.matcher, params)
+            match &alternative.matcher {
+                CatalogSearchMatch::LovedTracksRange { from, to } => {
+                    Some(track_loved_range_predicate("t", *from, *to, params))
+                }
+                matcher => track_album_level_predicate("t", matcher, params),
+            }
         }));
         alternatives.extend(group.alternatives.iter().filter_map(|alternative| {
             extended_search_predicate("t", false, &alternative.matcher, params)

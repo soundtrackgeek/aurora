@@ -2645,6 +2645,35 @@ mod tests {
     }
 
     #[test]
+    fn track_love_search_checks_each_track_not_its_album() {
+        let connection = fixture();
+        let search = |query: &str| {
+            let mut titles = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    search: Some(query.to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .expect("track love search")
+            .items
+            .into_iter()
+            .map(|track| track.title)
+            .collect::<Vec<_>>();
+            titles.sort();
+            titles
+        };
+
+        assert_eq!(search("aartist:sigur rós AND love:1"), ["Sæglópur"]);
+        assert_eq!(
+            search("aartist:sigur rós AND love:0"),
+            ["Hoppípolla", "Svefn-g-englar"]
+        );
+        assert!(search("love:2..").is_empty());
+    }
+
+    #[test]
     fn track_search_fields_map_to_distinct_catalog_columns_and_combine() {
         let connection = fixture();
         let page = track_page_from_connection(

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.50.1] - 2026-10-29
+
+### Fixed
+- Songs search: `love:1` now finds loved songs and `love:0` the songs that aren't loved. Before, `love:` counted loved tracks per album, so `aartist:madonna AND love:1` listed every song on any album with one loved song. Albums and Artists still count loved tracks per album.
+
 ## [0.50.0] - 2026-10-29
 
 ### Added
