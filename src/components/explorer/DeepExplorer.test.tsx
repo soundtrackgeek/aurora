@@ -651,4 +651,43 @@ describe("DeepExplorer", () => {
     fireEvent.doubleClick(trackRow);
     expect(onActivateTrack).toHaveBeenCalledWith(tracks[0]);
   });
+
+  describe("song columns", () => {
+    afterEach(() => window.localStorage.clear());
+
+    it("keeps chart ranks out of the title and hides Charts and Publisher by default", () => {
+      render(<DeepExplorer {...explorerProps({ trackChartRanks: { "track-1": [{ source: "billboard", label: "Billboard Hot 100", shortLabel: "BB", rank: 2 }] } as DeepExplorerProps["trackChartRanks"] })} />);
+      const table = screen.getByRole("grid", { name: "Library tracks" });
+      expect(within(table).queryByLabelText(/Chart rankings/)).not.toBeInTheDocument();
+      expect(within(table).queryByRole("columnheader", { name: /Publisher/ })).not.toBeInTheDocument();
+      expect(within(table).getByRole("button", { name: "Love" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Choose columns" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Charts" }));
+      expect(within(table).getByLabelText(/Chart rankings: Billboard Hot 100 number 2/)).toBeInTheDocument();
+      expect(JSON.parse(window.localStorage.getItem("aurora:songs-columns:v1")!).hidden).toEqual(["publisher"]);
+    });
+
+    it("sorts by clicking a column header and flips direction on the second click", () => {
+      const onFiltersChange = vi.fn();
+      const { rerender } = render(<DeepExplorer {...explorerProps({ onFiltersChange })} />);
+      fireEvent.click(screen.getByRole("button", { name: "Rating" }));
+      expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "ratingDesc" });
+
+      rerender(<DeepExplorer {...explorerProps({ onFiltersChange, filters: { ...filters, sort: "ratingDesc" } })} />);
+      expect(screen.getByRole("columnheader", { name: /Rating/ })).toHaveAttribute("aria-sort", "descending");
+      fireEvent.click(screen.getByRole("button", { name: "Rating" }));
+      expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "ratingAsc" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Love" }));
+      expect(onFiltersChange).toHaveBeenLastCalledWith({ ...filters, sort: "loveDesc" });
+    });
+
+    it("restores a saved column order after reopening", () => {
+      window.localStorage.setItem("aurora:songs-columns:v1", JSON.stringify({ order: ["artist", "love", "title", "album", "year", "genre", "publisher", "charts", "time", "plays", "rating"], hidden: ["publisher", "charts"], widths: { artist: 240 } }));
+      render(<DeepExplorer {...explorerProps()} />);
+      const headers = within(screen.getByRole("grid", { name: "Library tracks" })).getAllByRole("columnheader").map((header) => header.textContent);
+      expect(headers.slice(1, 4)).toEqual(["Artist", "Love", "Title"]);
+    });
+  });
 });

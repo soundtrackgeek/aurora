@@ -5,6 +5,8 @@ import {
   AudioLines,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  Columns3Cog,
   Disc3,
   Gauge,
   FolderOutput,
@@ -22,6 +24,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -31,6 +34,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
@@ -45,6 +49,19 @@ import "./DeepExplorer.css";
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import { PlaylistAuthoringContext } from "../playlists/playlistAuthoringContext";
 import { nextRandomSortSeed } from "../../randomSort";
+import {
+  clampTrackColumnWidth,
+  defaultTrackColumnLayout,
+  loadTrackColumnLayout,
+  moveTrackColumn,
+  saveTrackColumnLayout,
+  setTrackColumnWidth,
+  toggleTrackColumn,
+  trackColumnDefinition,
+  visibleTrackColumns,
+  type TrackColumnId,
+  type TrackColumnLayout,
+} from "./trackColumns";
 
 export type ExplorerView = "tracks" | "albums" | "artists";
 export type ExplorerRatingFilter = "all" | "unrated" | 0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 3.5 | 4 | 4.5 | 5;
@@ -65,6 +82,16 @@ export type ExplorerSort =
   | "releaseYearDesc"
   | "ratingAsc"
   | "ratingDesc"
+  | "genreAsc"
+  | "genreDesc"
+  | "publisherAsc"
+  | "publisherDesc"
+  | "durationAsc"
+  | "durationDesc"
+  | "playsAsc"
+  | "playsDesc"
+  | "loveAsc"
+  | "loveDesc"
   | "trackCountAsc"
   | "trackCountDesc";
 export type ExplorerLoadState = "loading" | "ready" | "error";
@@ -160,7 +187,7 @@ const viewTabs: ReadonlyArray<{ id: ExplorerView; label: string; icon: typeof Mu
   { id: "artists", label: "Artists", icon: UsersRound },
 ];
 
-type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "releaseYear" | "rating" | "trackCount" | "random";
+type ExplorerSortCriterion = "added" | "title" | "artist" | "album" | "year" | "releaseYear" | "genre" | "publisher" | "duration" | "plays" | "rating" | "love" | "trackCount" | "random";
 
 interface ExplorerSortOption {
   value: ExplorerSortCriterion;
@@ -178,7 +205,12 @@ const sortOptions: Record<ExplorerView, readonly ExplorerSortOption[]> = {
     { value: "album", primary: "albumAsc", primaryLabel: "Album · A–Z", reverse: "albumDesc", reverseLabel: "Album · Z–A" },
     { value: "year", primary: "yearDesc", primaryLabel: "Year · newest", reverse: "yearAsc", reverseLabel: "Year · oldest" },
     { value: "releaseYear", primary: "releaseYearDesc", primaryLabel: "Release year · newest", reverse: "releaseYearAsc", reverseLabel: "Release year · oldest" },
+    { value: "genre", primary: "genreAsc", primaryLabel: "Genre · A–Z", reverse: "genreDesc", reverseLabel: "Genre · Z–A" },
+    { value: "publisher", primary: "publisherAsc", primaryLabel: "Publisher · A–Z", reverse: "publisherDesc", reverseLabel: "Publisher · Z–A" },
+    { value: "duration", primary: "durationDesc", primaryLabel: "Time · longest", reverse: "durationAsc", reverseLabel: "Time · shortest" },
+    { value: "plays", primary: "playsDesc", primaryLabel: "Plays · most", reverse: "playsAsc", reverseLabel: "Plays · fewest" },
     { value: "rating", primary: "ratingDesc", primaryLabel: "Rating · high first", reverse: "ratingAsc", reverseLabel: "Rating · low first" },
+    { value: "love", primary: "loveDesc", primaryLabel: "Love · loved first", reverse: "loveAsc", reverseLabel: "Love · banned first" },
     { value: "random", primary: "random", primaryLabel: "Random", reverse: "random", reverseLabel: "Random" },
   ],
   albums: [
@@ -389,6 +421,115 @@ function AlbumRatingStars({ rating }: { rating: number | null }) {
   );
 }
 
+type TrackTableColumnId = TrackColumnId | "track";
+
+const compactColumns: readonly TrackTableColumnId[] = ["title", "track", "time", "rating", "love"];
+
+const columnSortCriterion: Partial<Record<TrackColumnId, ExplorerSortCriterion>> = {
+  title: "title",
+  artist: "artist",
+  album: "album",
+  year: "year",
+  genre: "genre",
+  publisher: "publisher",
+  time: "duration",
+  plays: "plays",
+  rating: "rating",
+  love: "love",
+};
+
+function columnLabel(id: TrackTableColumnId): string {
+  return id === "track" ? "Track" : trackColumnDefinition(id).label;
+}
+
+function columnClassName(id: TrackTableColumnId): string | undefined {
+  const classes: string[] = [`deep-explorer-col--${id}`];
+  if (id === "track" || id === "year") classes.push("deep-explorer-table__position");
+  if (id === "time") classes.push("deep-explorer-table__time");
+  if (id === "rating") classes.push("deep-explorer-table__rating");
+  if (id === "love") classes.push("deep-explorer-table__love");
+  if (id === "charts") classes.push("deep-explorer-table__charts");
+  if (id === "track" || trackColumnDefinition(id).numeric) classes.push("is-numeric");
+  return classes.join(" ");
+}
+
+function TrackColumnsMenu({
+  layout,
+  anchor,
+  onChange,
+  onClose,
+}: {
+  layout: TrackColumnLayout;
+  anchor: DOMRect;
+  onChange: (layout: TrackColumnLayout) => void;
+  onClose: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const visibleCount = visibleTrackColumns(layout).length;
+
+  useEffect(() => {
+    rootRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+    function closeOnOutsidePointer(event: PointerEvent) {
+      const target = event.target as Element | null;
+      if (rootRef.current?.contains(target) || target?.closest?.(".deep-explorer-columns-button")) return;
+      onClose();
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    function closeOnOutsideScroll(event: Event) {
+      if (!rootRef.current?.contains(event.target as Node)) onClose();
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("scroll", closeOnOutsideScroll, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("scroll", closeOnOutsideScroll, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="deep-explorer-columns-menu"
+      role="dialog"
+      aria-label="Song columns"
+      ref={rootRef}
+      // Fixed to the window so the scrolling song list never clips it, even with only a few rows.
+      style={{
+        top: `${anchor.bottom + 4}px`,
+        right: `${Math.max(8, window.innerWidth - anchor.right)}px`,
+        maxHeight: `${Math.max(160, window.innerHeight - anchor.bottom - 16)}px`,
+      }}
+    >
+      <strong>Columns</strong>
+      <span className="deep-explorer-columns-menu__hint">Drag headers to reorder · drag edges to resize</span>
+      {layout.order.map((id) => {
+        const shown = !layout.hidden.includes(id);
+        return (
+          <label key={id}>
+            <input
+              type="checkbox"
+              checked={shown}
+              disabled={shown && visibleCount <= 1}
+              onChange={() => onChange(toggleTrackColumn(layout, id))}
+            />
+            {trackColumnDefinition(id).label}
+          </label>
+        );
+      })}
+      <div className="deep-explorer-columns-menu__actions">
+        <button type="button" onClick={() => onChange({ ...layout, widths: {} })}>Reset widths</button>
+        <button type="button" onClick={() => onChange(defaultTrackColumnLayout())}>Reset all</button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function TrackTable({
   tracks,
   selectedTrackId,
@@ -404,6 +545,10 @@ function TrackTable({
   onSelectionGesture,
   compact = false,
   chartRanks,
+  columnLayout,
+  onColumnLayoutChange,
+  sort,
+  onSortChange,
 }: {
   tracks: readonly Track[];
   selectedTrackId: string | null;
@@ -419,9 +564,38 @@ function TrackTable({
   onSelectionGesture?: (track: Track, index: number, modifiers: { ctrl: boolean; shift: boolean }) => void;
   compact?: boolean;
   chartRanks?: Readonly<Record<string, readonly CatalogChartRank[]>>;
+  columnLayout?: TrackColumnLayout;
+  onColumnLayoutChange?: (layout: TrackColumnLayout) => void;
+  sort?: ExplorerSort;
+  onSortChange?: (sort: ExplorerSort) => void;
 }) {
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const colRefs = useRef(new Map<TrackTableColumnId, HTMLTableColElement>());
+  const suppressHeaderClickRef = useRef(false);
+  const [columnsMenuAnchor, setColumnsMenuAnchor] = useState<DOMRect | null>(null);
+  const columnsMenuOpen = columnsMenuAnchor !== null;
+  const [dragState, setDragState] = useState<{ id: TrackColumnId; dropIndex: number; indicatorLeft: number } | null>(null);
   const selectionIsVisible = tracks.some((track) => multiSelectedTrackKeys?.has(track.trackKey) || track.id === selectedTrackId);
+  const customizable = Boolean(columnLayout && onColumnLayoutChange && !compact);
+  const columns: readonly TrackTableColumnId[] = customizable && columnLayout ? visibleTrackColumns(columnLayout) : compactColumns;
+  const widths = customizable ? columnLayout?.widths ?? {} : {};
+
+  function columnWidth(id: TrackTableColumnId, override?: Partial<Record<TrackColumnId, number>>): number | null {
+    if (!customizable || id === "track") return null;
+    return override?.[id] ?? widths[id] ?? trackColumnDefinition(id).defaultWidth;
+  }
+
+  const flexColumn = columns.find((id) => columnWidth(id) === null) ?? null;
+
+  function tableMinWidth(override?: Partial<Record<TrackColumnId, number>>): number {
+    const fixed = columns.reduce((sum, id) => sum + (columnWidth(id, override) ?? 0), 0);
+    // Signal stripe, playlist button and a usable minimum for the flexible column.
+    return fixed + 6 + 44 + (flexColumn ? trackColumnDefinition(flexColumn as TrackColumnId).minWidth : 0);
+  }
+
+  const closeColumnsMenu = useCallback(() => setColumnsMenuAnchor(null), []);
 
   function selectTrack(track: Track, index: number, event?: Pick<MouseEvent | KeyboardEvent, "ctrlKey" | "metaKey" | "shiftKey">) {
     onSelectTrack(track);
@@ -453,23 +627,314 @@ function TrackTable({
     }
   }
 
+  function headerCells(): HTMLElement[] {
+    return [...(tableRef.current?.querySelectorAll<HTMLElement>("thead th[data-column]") ?? [])];
+  }
+
+  function startColumnDrag(event: ReactPointerEvent<HTMLButtonElement>, id: TrackColumnId) {
+    if (!customizable || event.button !== 0) return;
+    const startX = event.clientX;
+    const target = event.currentTarget;
+    let dragging = false;
+    let dropIndex = columns.indexOf(id);
+
+    function dropTarget(clientX: number): { index: number; left: number } {
+      const cells = headerCells();
+      const wrapLeft = wrapRef.current?.getBoundingClientRect().left ?? 0;
+      for (let index = 0; index < cells.length; index += 1) {
+        const rect = cells[index].getBoundingClientRect();
+        if (clientX < rect.left + rect.width / 2) return { index, left: rect.left - wrapLeft };
+      }
+      const last = cells[cells.length - 1]?.getBoundingClientRect();
+      return { index: cells.length, left: (last ? last.right : 0) - wrapLeft };
+    }
+
+    function move(moveEvent: PointerEvent) {
+      if (!dragging && Math.abs(moveEvent.clientX - startX) < 6) return;
+      dragging = true;
+      const next = dropTarget(moveEvent.clientX);
+      dropIndex = next.index;
+      setDragState({ id, dropIndex: next.index, indicatorLeft: next.left });
+    }
+
+    function finish() {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", finish);
+      target.removeEventListener("pointercancel", cancel);
+      setDragState(null);
+      if (!dragging || !columnLayout || !onColumnLayoutChange) return;
+      suppressHeaderClickRef.current = true;
+      window.setTimeout(() => { suppressHeaderClickRef.current = false; }, 0);
+      onColumnLayoutChange(moveTrackColumn(columnLayout, id, dropIndex));
+    }
+
+    function cancel() {
+      dragging = false;
+      finish();
+    }
+
+    target.setPointerCapture?.(event.pointerId);
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", finish);
+    target.addEventListener("pointercancel", cancel);
+  }
+
+  function startColumnResize(event: ReactPointerEvent<HTMLSpanElement>, id: TrackColumnId) {
+    if (!columnLayout || !onColumnLayoutChange || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const header = handle.closest("th");
+    const startX = event.clientX;
+    const startWidth = header?.getBoundingClientRect().width ?? columnWidth(id) ?? 120;
+    let width = startWidth;
+
+    function move(moveEvent: PointerEvent) {
+      width = clampTrackColumnWidth(id, startWidth + moveEvent.clientX - startX);
+      // Update the DOM directly while dragging so the 50+ rows do not re-render on every pixel.
+      const col = colRefs.current.get(id);
+      if (col) col.style.width = `${width}px`;
+      if (tableRef.current) tableRef.current.style.minWidth = `${tableMinWidth({ [id]: width })}px`;
+    }
+
+    function finish() {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      suppressHeaderClickRef.current = true;
+      window.setTimeout(() => { suppressHeaderClickRef.current = false; }, 0);
+      if (columnLayout && onColumnLayoutChange) onColumnLayoutChange(setTrackColumnWidth(columnLayout, id, width));
+    }
+
+    handle.setPointerCapture?.(event.pointerId);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
+  function resetColumnWidth(id: TrackColumnId) {
+    if (!columnLayout || !onColumnLayoutChange) return;
+    const nextWidths = { ...columnLayout.widths };
+    delete nextWidths[id];
+    onColumnLayoutChange({ ...columnLayout, widths: nextWidths });
+  }
+
+  function headerKeyDown(event: KeyboardEvent<HTMLButtonElement>, id: TrackColumnId) {
+    if (!columnLayout || !onColumnLayoutChange || !event.altKey) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const index = columns.indexOf(id);
+    const target = event.key === "ArrowLeft" ? Math.max(0, index - 1) : Math.min(columns.length, index + 2);
+    onColumnLayoutChange(moveTrackColumn(columnLayout, id, target));
+    window.requestAnimationFrame(() => {
+      tableRef.current?.querySelector<HTMLButtonElement>(`th[data-column="${id}"] .deep-explorer-th-button`)?.focus();
+    });
+  }
+
+  function renderHeader(id: TrackTableColumnId) {
+    const label = columnLabel(id);
+    const criterion = id === "track" ? undefined : columnSortCriterion[id];
+    const option = criterion ? sortOptions.tracks.find((candidate) => candidate.value === criterion) : undefined;
+    const sortable = Boolean(option && onSortChange && sort && !compact);
+    const direction = sortable && option && sort
+      ? sort === option.primary
+        ? (option.primary.endsWith("Desc") ? "descending" : "ascending")
+        : sort === option.reverse
+          ? (option.reverse.endsWith("Desc") ? "descending" : "ascending")
+          : null
+      : null;
+    if (!customizable || id === "track") {
+      return (
+        <th key={id} className={columnClassName(id)}>
+          {id === "love" ? <span className="sr-only">Love</span> : label}
+        </th>
+      );
+    }
+    const SortIcon = direction === "ascending" ? ChevronUp : ChevronDown;
+    return (
+      <th
+        key={id}
+        data-column={id}
+        className={`${columnClassName(id)}${dragState?.id === id ? " is-dragging" : ""}`}
+        aria-sort={direction ?? (sortable ? "none" : undefined)}
+      >
+        <button
+          type="button"
+          className={`deep-explorer-th-button${direction ? " is-sorted" : ""}`}
+          title={sortable ? `Sort by ${label} · drag to move` : `Drag to move ${label}`}
+          onPointerDown={(event) => startColumnDrag(event, id)}
+          onKeyDown={(event) => headerKeyDown(event, id)}
+          onClick={() => {
+            if (suppressHeaderClickRef.current) {
+              suppressHeaderClickRef.current = false;
+              return;
+            }
+            if (sortable && option && sort && onSortChange) onSortChange(nextSort("tracks", sort, option.value));
+          }}
+        >
+          <span>{label}</span>
+          {direction ? <SortIcon aria-hidden="true" /> : null}
+        </button>
+        <span
+          className="deep-explorer-col-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize ${label} column`}
+          title="Drag to resize · double-click to reset"
+          onPointerDown={(event) => startColumnResize(event, id)}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={() => resetColumnWidth(id)}
+        />
+      </th>
+    );
+  }
+
+  function renderCell(id: TrackTableColumnId, track: Track, busy: boolean) {
+    const className = columnClassName(id);
+    switch (id) {
+      case "title":
+        return (
+          <td key={id} className={className}>
+            <span className="deep-explorer-track-title">
+              <Artwork track={track} />
+              <span>
+                <span className="deep-explorer-track-heading">
+                  <strong title={track.title}>{track.title}</strong>
+                  {compact ? <CatalogChartRanks kind="track" ranks={chartRanks?.[track.id]} /> : null}
+                  {compact && track.lastFmAlbumRank ? (
+                    <span
+                      className="deep-explorer-track-popular"
+                      aria-label={`Number ${track.lastFmAlbumRank} of this album's top 3 Last.fm tracks`}
+                      title={`#${track.lastFmAlbumRank} on Last.fm`}
+                    >
+                      🔥
+                    </span>
+                  ) : null}
+                  {compact ? <small className="deep-explorer-track-artist">[{displayTrackArtist(track)}]</small> : null}
+                </span>
+                {track.tagSyncState ? <small>Pending tag import</small> : null}
+              </span>
+            </span>
+          </td>
+        );
+      case "artist":
+        return <td key={id} className={className}>{displayTrackArtist(track)}</td>;
+      case "album":
+        return <td key={id} className={className}>{track.album}</td>;
+      case "track":
+        return (
+          <td key={id} className={className}>
+            {track.trackNumber === null || track.trackNumber === undefined ? "—" : String(track.trackNumber).padStart(2, "0")}
+          </td>
+        );
+      case "year":
+        return <td key={id} className={className}>{track.originalYear ?? "—"}</td>;
+      case "genre":
+        return <td key={id} className={className}>{track.genre ?? "—"}</td>;
+      case "publisher":
+        return <td key={id} className={className}>{track.publisher ?? "—"}</td>;
+      case "charts":
+        return <td key={id} className={className}><CatalogChartRanks kind="track" ranks={chartRanks?.[track.id]} /></td>;
+      case "time":
+        return <td key={id} className={className}>{formatDuration(track.durationSeconds)}</td>;
+      case "plays":
+        return <td key={id} className={className}>{track.playCount === null ? "—" : formatCount(track.playCount)}</td>;
+      case "rating":
+        return (
+          <td key={id} className={className}>
+            {onRatingChange ? (
+              <InlineRatingControl trackKey={track.trackKey}
+                title={track.title}
+                rating={track.rating}
+                busy={busy}
+                onRatingChange={(rating) => {
+                  if (rating !== null) onRatingChange(track, rating);
+                }}
+              />
+            ) : (
+              <StaticRating rating={track.rating} />
+            )}
+          </td>
+        );
+      case "love":
+        return (
+          <td key={id} className={className}>
+            {onLoveChange ? (
+              <InlineLoveControl
+                title={track.title}
+                loveState={track.loveState}
+                busy={busy}
+                onLoveChange={(loveState) => onLoveChange(track, loveState)}
+              />
+            ) : (
+              <Heart className={track.loved ? "is-loved" : undefined} aria-label={track.loved ? "Loved" : "Not loved"} />
+            )}
+          </td>
+        );
+    }
+  }
+
+  const showSpacer = customizable && flexColumn === null;
+
   return (
-    <div className={`deep-explorer-table-wrap${compact ? " is-compact" : ""}`}>
-      <table className="deep-explorer-table" role="grid" aria-label={compact ? "Album tracks" : "Library tracks"}>
+    <div
+      ref={wrapRef}
+      className={`deep-explorer-table-wrap${compact ? " is-compact" : ""}${customizable ? " is-customizable" : ""}${dragState ? " is-reordering" : ""}`}
+    >
+      <table
+        ref={tableRef}
+        className="deep-explorer-table"
+        role="grid"
+        aria-label={compact ? "Album tracks" : "Library tracks"}
+        style={customizable ? { minWidth: `${tableMinWidth()}px` } : undefined}
+      >
+        <colgroup>
+          <col className="deep-explorer-col--signal" />
+          {columns.map((id) => {
+            const width = columnWidth(id);
+            return (
+              <col
+                key={id}
+                className={`deep-explorer-col--${id}`}
+                ref={(node) => {
+                  if (node) colRefs.current.set(id, node);
+                  else colRefs.current.delete(id);
+                }}
+                style={width === null ? undefined : { width: `${width}px` }}
+              />
+            );
+          })}
+          {showSpacer ? <col className="deep-explorer-col--spacer" /> : null}
+          <col className="deep-explorer-col--playlist" />
+          {onDeleteTrack ? <col className="deep-explorer-col--delete" /> : null}
+        </colgroup>
         <thead>
           <tr>
             <th aria-label="Selection" />
-            <th>Title</th>
-            <th>Artist</th>
-            <th>Album</th>
-            <th className="deep-explorer-table__position is-numeric">{compact ? "Track" : "Year"}</th>
-            <th>Genre</th>
-            <th>Publisher</th>
-            <th className="deep-explorer-table__time is-numeric">Time</th>
-            <th className="is-numeric">Plays</th>
-            <th>Rating</th>
-            <th aria-label="Love" />
-            <th className="deep-explorer-table__playlist" aria-label="Add to playlist" />
+            {columns.map((id) => renderHeader(id))}
+            {showSpacer ? <th aria-hidden="true" /> : null}
+            <th className="deep-explorer-table__playlist">
+              {customizable && columnLayout && onColumnLayoutChange ? (
+                <>
+                  <button
+                    type="button"
+                    className="deep-explorer-columns-button"
+                    aria-label="Choose columns"
+                    aria-expanded={columnsMenuOpen}
+                    title="Choose columns"
+                    onClick={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setColumnsMenuAnchor((current) => (current ? null : rect));
+                    }}
+                  >
+                    <Columns3Cog aria-hidden="true" />
+                  </button>
+                  {columnsMenuAnchor ? (
+                    <TrackColumnsMenu layout={columnLayout} anchor={columnsMenuAnchor} onChange={onColumnLayoutChange} onClose={closeColumnsMenu} />
+                  ) : null}
+                </>
+              ) : <span className="sr-only">Add to playlist</span>}
+            </th>
             {onDeleteTrack ? <th className="deep-explorer-table__delete-heading" aria-label="Delete" /> : null}
           </tr>
         </thead>
@@ -499,67 +964,8 @@ function TrackTable({
                   <span aria-hidden="true" />
                   {current ? <span className="sr-only">{playbackActive ? "Currently playing" : "Current playback track"}</span> : null}
                 </td>
-                <td>
-                  <span className="deep-explorer-track-title">
-                    <Artwork track={track} />
-                    <span>
-                      <span className="deep-explorer-track-heading">
-                        <strong>{track.title}</strong>
-                        <CatalogChartRanks kind="track" ranks={chartRanks?.[track.id]} />
-                        {compact && track.lastFmAlbumRank ? (
-                          <span
-                            className="deep-explorer-track-popular"
-                            aria-label={`Number ${track.lastFmAlbumRank} of this album's top 3 Last.fm tracks`}
-                            title={`#${track.lastFmAlbumRank} on Last.fm`}
-                          >
-                            🔥
-                          </span>
-                        ) : null}
-                        {compact ? <small className="deep-explorer-track-artist">[{displayTrackArtist(track)}]</small> : null}
-                      </span>
-                      {track.tagSyncState ? <small>Pending tag import</small> : null}
-                    </span>
-                  </span>
-                </td>
-                <td>{displayTrackArtist(track)}</td>
-                <td>{track.album}</td>
-                <td className="deep-explorer-table__position is-numeric">
-                  {compact
-                    ? track.trackNumber === null || track.trackNumber === undefined
-                      ? "—"
-                      : String(track.trackNumber).padStart(2, "0")
-                    : track.originalYear ?? "—"}
-                </td>
-                <td>{track.genre ?? "—"}</td>
-                <td>{track.publisher ?? "—"}</td>
-                <td className="deep-explorer-table__time is-numeric">{formatDuration(track.durationSeconds)}</td>
-                <td className="is-numeric">{track.playCount === null ? "—" : formatCount(track.playCount)}</td>
-                <td className="deep-explorer-table__rating">
-                  {onRatingChange ? (
-                    <InlineRatingControl trackKey={track.trackKey}
-                      title={track.title}
-                      rating={track.rating}
-                      busy={busy}
-                      onRatingChange={(rating) => {
-                        if (rating !== null) onRatingChange(track, rating);
-                      }}
-                    />
-                  ) : (
-                    <StaticRating rating={track.rating} />
-                  )}
-                </td>
-                <td className="deep-explorer-table__love">
-                  {onLoveChange ? (
-                    <InlineLoveControl
-                      title={track.title}
-                      loveState={track.loveState}
-                      busy={busy}
-                      onLoveChange={(loveState) => onLoveChange(track, loveState)}
-                    />
-                  ) : (
-                    <Heart className={track.loved ? "is-loved" : undefined} aria-label={track.loved ? "Loved" : "Not loved"} />
-                  )}
-                </td>
+                {columns.map((id) => renderCell(id, track, busy))}
+                {showSpacer ? <td aria-hidden="true" /> : null}
                 <td className="deep-explorer-table__playlist"><AddToPlaylistButton track={track} label={track.title} /></td>
                 {onDeleteTrack ? (
                   <td className="deep-explorer-table__delete">
@@ -581,6 +987,7 @@ function TrackTable({
           })}
         </tbody>
       </table>
+      {dragState ? <span className="deep-explorer-col-drop-indicator" style={{ left: `${dragState.indicatorLeft}px` }} aria-hidden="true" /> : null}
     </div>
   );
 }
@@ -1148,6 +1555,11 @@ export function DeepExplorer(props: DeepExplorerProps) {
     return next.selectedKeys.has(album.id);
   }
 
+  const [trackColumnLayout, setTrackColumnLayout] = useState<TrackColumnLayout>(() => loadTrackColumnLayout());
+  useEffect(() => {
+    saveTrackColumnLayout(trackColumnLayout);
+  }, [trackColumnLayout]);
+
   function updateFilters(patch: Partial<ExplorerFilters>) {
     onFiltersChange({ ...filters, ...patch });
   }
@@ -1231,6 +1643,10 @@ export function DeepExplorer(props: DeepExplorerProps) {
             multiSelectedTrackKeys={selectedTrackKeys}
             onSelectionGesture={selectTracks}
             chartRanks={trackChartRanks}
+            columnLayout={trackColumnLayout}
+            onColumnLayoutChange={setTrackColumnLayout}
+            sort={filters.sort}
+            onSortChange={(sort) => updateFilters({ sort, ...(sort === "random" ? { randomSeed: nextRandomSortSeed(filters.randomSeed) } : {}) })}
           />
         ) : view === "albums" ? (
           <AlbumGrid

@@ -61,6 +61,16 @@ pub(crate) enum TrackSort {
     ReleaseYearDesc,
     RatingAsc,
     RatingDesc,
+    GenreAsc,
+    GenreDesc,
+    PublisherAsc,
+    PublisherDesc,
+    DurationAsc,
+    DurationDesc,
+    PlaysAsc,
+    PlaysDesc,
+    LoveAsc,
+    LoveDesc,
     Random,
 }
 
@@ -565,6 +575,66 @@ fn track_sort(sort: TrackSort) -> SortDefinition<'static> {
             expression: TRACK_RATING_EXPRESSION,
             descending: true,
             cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::GenreAsc => SortDefinition {
+            cursor_tag: "track-genre-asc",
+            expression: "(COALESCE(t.canonical_genre, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
+            descending: false,
+            cursor_kind: CursorKind::Text,
+        },
+        TrackSort::GenreDesc => SortDefinition {
+            cursor_tag: "track-genre-desc",
+            expression: "(COALESCE(t.canonical_genre, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
+        TrackSort::PublisherAsc => SortDefinition {
+            cursor_tag: "track-publisher-asc",
+            expression: "(COALESCE(t.publisher, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
+            descending: false,
+            cursor_kind: CursorKind::Text,
+        },
+        TrackSort::PublisherDesc => SortDefinition {
+            cursor_tag: "track-publisher-desc",
+            expression: "(COALESCE(t.publisher, '') || char(31) || COALESCE(t.title, '')) COLLATE NOCASE",
+            descending: true,
+            cursor_kind: CursorKind::Text,
+        },
+        TrackSort::DurationAsc => SortDefinition {
+            cursor_tag: "track-duration-asc",
+            expression: "CAST(t.time_seconds AS INTEGER)",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::DurationDesc => SortDefinition {
+            cursor_tag: "track-duration-desc",
+            expression: "CAST(t.time_seconds AS INTEGER)",
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::PlaysAsc => SortDefinition {
+            cursor_tag: "track-plays-asc",
+            expression: "l.play_count",
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::PlaysDesc => SortDefinition {
+            cursor_tag: "track-plays-desc",
+            expression: "l.play_count",
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        TrackSort::LoveAsc => SortDefinition {
+            cursor_tag: "track-love-asc",
+            expression: "CASE upper(trim(COALESCE(t.love, ''))) WHEN 'L' THEN 2 WHEN 'B' THEN 0 ELSE 1 END",
+            descending: false,
+            cursor_kind: CursorKind::Integer,
+        },
+        TrackSort::LoveDesc => SortDefinition {
+            cursor_tag: "track-love-desc",
+            expression: "CASE upper(trim(COALESCE(t.love, ''))) WHEN 'L' THEN 2 WHEN 'B' THEN 0 ELSE 1 END",
+            descending: true,
+            cursor_kind: CursorKind::Integer,
         },
     }
 }
@@ -3776,6 +3846,84 @@ mod tests {
         assert_eq!(detail.tracks[0].title, "Sæglópur");
         assert_eq!(detail.album.total_tracks, 1);
         assert_eq!(detail.album.duration_seconds, 473);
+    }
+
+    #[test]
+    fn column_sorts_page_through_every_track_once() {
+        let connection = fixture();
+        for sort in [
+            TrackSort::GenreAsc,
+            TrackSort::GenreDesc,
+            TrackSort::PublisherAsc,
+            TrackSort::PublisherDesc,
+            TrackSort::DurationAsc,
+            TrackSort::DurationDesc,
+            TrackSort::PlaysAsc,
+            TrackSort::PlaysDesc,
+            TrackSort::LoveAsc,
+            TrackSort::LoveDesc,
+        ] {
+            let full = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    page_size: Some(100),
+                    sort: Some(sort),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .expect("full page");
+            let mut paged = Vec::new();
+            let mut cursor = None;
+            loop {
+                let page = track_page_from_connection(
+                    &connection,
+                    TrackPageRequest {
+                        page_size: Some(1),
+                        cursor: cursor.take(),
+                        sort: Some(sort),
+                        ..TrackPageRequest::default()
+                    },
+                    None,
+                )
+                .expect("single-row page");
+                paged.extend(page.items.into_iter().map(|track| track.id));
+                match page.next_cursor {
+                    Some(next) => cursor = Some(next),
+                    None => break,
+                }
+            }
+            let expected = full
+                .items
+                .iter()
+                .map(|track| track.id.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(paged, expected, "{sort:?} pages must match one full page");
+        }
+        let loved_first = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                page_size: Some(100),
+                sort: Some(TrackSort::LoveDesc),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("love page");
+        let states = loved_first
+            .items
+            .iter()
+            .map(|track| track.love_state)
+            .collect::<Vec<_>>();
+        let first_not_loved = states
+            .iter()
+            .position(|state| *state != LoveState::Loved)
+            .unwrap_or(states.len());
+        assert!(
+            states[first_not_loved..]
+                .iter()
+                .all(|state| *state != LoveState::Loved)
+        );
     }
 
     #[test]

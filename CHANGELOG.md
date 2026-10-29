@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.50.0] - 2026-10-29
+
+### Added
+- Songs: click a column header to sort by it; clicking again reverses the direction. Genre, Publisher, Time, Plays and Love are new sort choices (also in the Sort menu), sorted by the catalog so paging stays correct.
+- Songs: a columns button at the right end of the header shows or hides any column, with **Reset widths** and **Reset all**. **Publisher** and the new **Charts** column are hidden by default.
+- Songs: drag a header to reorder columns (Alt+Left/Right moves the focused header from the keyboard), and drag a header's right edge to resize it; double-click the edge to reset that width.
+- The Songs column order, visibility and widths are saved on this computer and restored when Aurora starts.
+- Love has a column heading so it can be sorted.
+
+### Changed
+- Songs no longer show chart ranks beside the title, where they hid long song names; they live in the optional Charts column. Opened albums keep their inline chart badges.
+- Narrow windows no longer hide Songs columns automatically; the list scrolls sideways instead, and you choose which columns to show.
+
 ## [0.49.3] - 2026-10-28
 
 ### Changed

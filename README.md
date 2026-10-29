@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.50.0** gives the Songs list proper columns. Chart ranks no longer crowd song titles: they have their own **Charts** column, hidden by default like **Publisher**. Use the columns button at the right end of the header to show or hide any column, drag a header to move it (for example Artist first), drag a header's right edge to resize it (double-click the edge to reset), and click a header to sort by it, including the new Genre, Publisher, Time, Plays and **Love** sorts. Your column layout is saved and comes back the next time you open Aurora.
+
 Aurora **0.49.3** lets you press Enter in the Inbox Auto-Tagger's Album artist or Album field to run Find, instead of clicking the button.
 
 Aurora **0.49.2** fixes missing Chart info for tracks whose chart titles carry a subtitle. A track tagged "Silent Running" now

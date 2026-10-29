@@ -157,7 +157,17 @@ export type TrackSort =
   | "releaseYearAsc"
   | "releaseYearDesc"
   | "ratingAsc"
-  | "ratingDesc";
+  | "ratingDesc"
+  | "genreAsc"
+  | "genreDesc"
+  | "publisherAsc"
+  | "publisherDesc"
+  | "durationAsc"
+  | "durationDesc"
+  | "playsAsc"
+  | "playsDesc"
+  | "loveAsc"
+  | "loveDesc";
 
 export interface TrackPageRequest {
   pageSize?: number;
@@ -575,11 +585,25 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
         case "releaseYearDesc": return compareNullableNumber(left.releaseYear, right.releaseYear, true) || compareText(left.id, right.id, true);
         case "ratingAsc": return compareNullableNumber(left.rating, right.rating) || compareText(left.id, right.id);
         case "ratingDesc": return compareNullableNumber(left.rating, right.rating, true) || compareText(left.id, right.id, true);
+        case "genreAsc": return compareText(left.genre ?? "", right.genre ?? "") || compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "genreDesc": return compareText(left.genre ?? "", right.genre ?? "", true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "publisherAsc": return compareText(left.publisher ?? "", right.publisher ?? "") || compareText(left.title, right.title) || compareText(left.id, right.id);
+        case "publisherDesc": return compareText(left.publisher ?? "", right.publisher ?? "", true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
+        case "durationAsc": return compareNullableNumber(left.durationSeconds, right.durationSeconds) || compareText(left.id, right.id);
+        case "durationDesc": return compareNullableNumber(left.durationSeconds, right.durationSeconds, true) || compareText(left.id, right.id, true);
+        case "playsAsc": return compareNullableNumber(left.playCount, right.playCount) || compareText(left.id, right.id);
+        case "playsDesc": return compareNullableNumber(left.playCount, right.playCount, true) || compareText(left.id, right.id, true);
+        case "loveAsc": return loveRank(left) - loveRank(right) || compareText(left.id, right.id);
+        case "loveDesc": return loveRank(right) - loveRank(left) || compareText(left.id, right.id, true);
         case "oldest": return compareText(left.id, right.id);
         default: return compareText(left.id, right.id, true);
       }
     });
   return { items: items.slice(0, request.pageSize ?? 50), nextCursor: null, totalCount: items.length };
+}
+
+function loveRank(track: Track): number {
+  return track.loveState === "loved" ? 2 : track.loveState === "banned" ? 0 : 1;
 }
 
 function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
