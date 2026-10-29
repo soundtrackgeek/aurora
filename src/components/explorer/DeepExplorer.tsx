@@ -838,7 +838,7 @@ function TrackTable({
       case "time":
         return <td key={id} className={className}>{formatDuration(track.durationSeconds)}</td>;
       case "plays":
-        return <td key={id} className={className}>{track.playCount === null ? "—" : formatCount(track.playCount)}</td>;
+        return <td key={id} className={className}>{formatCount(track.registeredPlays ?? 0)}</td>;
       case "rating":
         return (
           <td key={id} className={className}>

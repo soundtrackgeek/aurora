@@ -1318,6 +1318,7 @@ mod tests {
             directory: r"D:\MUSIC\Artist".to_owned(),
             filename: "song.mp3".to_owned(),
             catalog_import_run_id: 1,
+            registered_plays: None,
         }
     }
 

@@ -47,7 +47,10 @@ export interface Track {
   canUndoTagEdit: boolean;
   durationSeconds: number | null;
   genre: string | null;
+  /** Last.fm global scrobbles (inspector only), never the user's own plays. */
   playCount: number | null;
+  /** The user's registered Aurora plays across devices (Songs Plays column). */
+  registeredPlays?: number | null;
   trackNumber?: number | null;
   trackTotal?: number | null;
   discNumber?: number | null;
@@ -121,6 +124,8 @@ function previewTrack(track: PreviewTrack): Track {
   return {
     ...track,
     trackKey: `preview:${track.id}`,
+    // Demo history: reuse the sample counts as the viewer's own plays.
+    registeredPlays: track.registeredPlays ?? track.playCount ?? 0,
     loveState: track.loved ? "loved" : "neutral",
     tagSyncState: null,
     canUndoTagEdit: false,
@@ -591,8 +596,8 @@ function previewTrackPage(request: TrackPageRequest): TrackPage {
         case "publisherDesc": return compareText(left.publisher ?? "", right.publisher ?? "", true) || compareText(left.title, right.title, true) || compareText(left.id, right.id, true);
         case "durationAsc": return compareNullableNumber(left.durationSeconds, right.durationSeconds) || compareText(left.id, right.id);
         case "durationDesc": return compareNullableNumber(left.durationSeconds, right.durationSeconds, true) || compareText(left.id, right.id, true);
-        case "playsAsc": return compareNullableNumber(left.playCount, right.playCount) || compareText(left.id, right.id);
-        case "playsDesc": return compareNullableNumber(left.playCount, right.playCount, true) || compareText(left.id, right.id, true);
+        case "playsAsc": return compareNullableNumber(left.registeredPlays ?? 0, right.registeredPlays ?? 0) || compareText(left.id, right.id);
+        case "playsDesc": return compareNullableNumber(left.registeredPlays ?? 0, right.registeredPlays ?? 0, true) || compareText(left.id, right.id, true);
         case "loveAsc": return loveRank(left) - loveRank(right) || compareText(left.id, right.id);
         case "loveDesc": return loveRank(right) - loveRank(left) || compareText(left.id, right.id, true);
         case "oldest": return compareText(left.id, right.id);

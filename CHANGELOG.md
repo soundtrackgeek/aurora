@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.50.2] - 2026-10-29
+
+### Fixed
+- Songs: the **Plays** column now shows your own registered plays from Listening history (all devices), and the Plays sort uses them. It used to show Last.fm's global scrobble count, so songs you had played, such as Madonna's *Like a Prayer* tracks, showed "—".
+
 ## [0.50.1] - 2026-10-29
 
 ### Fixed

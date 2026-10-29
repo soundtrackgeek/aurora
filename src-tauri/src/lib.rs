@@ -561,7 +561,13 @@ async fn explore_tracks(
 ) -> Result<TrackPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        explorer::load_track_page(request, &store, local_only.unwrap_or(false))
+        let registered_plays = app.state::<HistoryStore>().registered_plays_by_track()?;
+        explorer::load_track_page(
+            request,
+            &store,
+            local_only.unwrap_or(false),
+            &registered_plays,
+        )
     })
     .await
     .map_err(|error| format!("The track explorer stopped unexpectedly: {error}"))?

@@ -1943,6 +1943,7 @@ mod tests {
             directory: "D:\\MUSIC".to_owned(),
             filename: format!("track-{index}.mp3"),
             catalog_import_run_id: 1,
+            registered_plays: None,
         }
     }
 

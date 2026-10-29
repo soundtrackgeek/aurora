@@ -614,15 +614,15 @@ fn track_sort(sort: TrackSort) -> SortDefinition<'static> {
         },
         TrackSort::PlaysAsc => SortDefinition {
             cursor_tag: "track-plays-asc",
-            expression: "l.play_count",
+            expression: "COALESCE(rp.plays, 0)",
             descending: false,
-            cursor_kind: CursorKind::NullableInteger,
+            cursor_kind: CursorKind::Integer,
         },
         TrackSort::PlaysDesc => SortDefinition {
             cursor_tag: "track-plays-desc",
-            expression: "l.play_count",
+            expression: "COALESCE(rp.plays, 0)",
             descending: true,
-            cursor_kind: CursorKind::NullableInteger,
+            cursor_kind: CursorKind::Integer,
         },
         TrackSort::LoveAsc => SortDefinition {
             cursor_tag: "track-love-asc",
@@ -666,6 +666,66 @@ fn register_random_order(connection: &Connection, seed: u32) -> Result<(), Strin
             },
         )
         .map_err(|error| format!("Could not prepare random sorting: {error}"))
+}
+
+/// Songs show the user's own registered plays, which live in the listening
+/// history databases. They are copied into a temp table keyed like history
+/// (`normalize_track_key`) so the page can sort and paginate on them in SQL.
+fn prepare_registered_track_plays(connection: &Connection) -> Result<(), String> {
+    with_temp_writes(connection, || {
+        connection.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS aurora_registered_track_plays (
+               track_key TEXT PRIMARY KEY, plays INTEGER NOT NULL) WITHOUT ROWID",
+        )
+    })
+    .map_err(|error| format!("Could not prepare registered plays: {error}"))?;
+    connection
+        .create_scalar_function(
+            "aurora_track_key",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                let directory = context.get::<Option<String>>(0)?.unwrap_or_default();
+                let filename = context.get::<Option<String>>(1)?.unwrap_or_default();
+                Ok(crate::catalog::normalize_track_key(&directory, &filename))
+            },
+        )
+        .map_err(|error| format!("Could not prepare registered plays: {error}"))
+}
+
+fn load_registered_track_plays(
+    connection: &Connection,
+    plays: &std::collections::HashMap<String, i64>,
+) -> Result<(), String> {
+    prepare_registered_track_plays(connection)?;
+    with_temp_writes(connection, || {
+        connection.execute_batch("DELETE FROM temp.aurora_registered_track_plays")?;
+        let mut statement = connection
+            .prepare("INSERT OR REPLACE INTO temp.aurora_registered_track_plays VALUES (?1, ?2)")?;
+        for (key, count) in plays {
+            statement.execute(rusqlite::params![key, count])?;
+        }
+        Ok(())
+    })
+    .map_err(|error| format!("Could not store registered plays: {error}"))
+}
+
+/// Temp tables are connection-private, so they may be written while the
+/// catalog's `query_only` guard protects the real data. Restores the guard.
+fn with_temp_writes<T>(
+    connection: &Connection,
+    write: impl FnOnce() -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    let query_only: bool = connection.pragma_query_value(None, "query_only", |row| row.get(0))?;
+    if query_only {
+        connection.pragma_update(None, "query_only", false)?;
+    }
+    let result = write();
+    if query_only {
+        connection.pragma_update(None, "query_only", true)?;
+    }
+    result
 }
 
 fn filtered_row_count(
@@ -763,8 +823,9 @@ fn track_page_from_connection(
         &params,
         "track",
     )?;
+    prepare_registered_track_plays(connection)?;
     let mut sql = format!(
-        "SELECT {TRACK_COLUMNS}, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)){predicates}",
+        "SELECT {TRACK_COLUMNS}, COALESCE(rp.plays, 0) AS registered_plays, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) LEFT JOIN temp.aurora_registered_track_plays AS rp ON rp.track_key = aurora_track_key(t.file_path, t.filename){predicates}",
         sort.expression
     );
     push_keyset(
@@ -1254,9 +1315,11 @@ pub(crate) fn load_track_page(
     request: TrackPageRequest,
     store: &StateStore,
     local_only: bool,
+    registered_plays: &std::collections::HashMap<String, i64>,
 ) -> Result<TrackPage, String> {
     let connection = open_catalog(&default_catalog_path()?)?;
     prepare_search_state(&connection, store, local_only)?;
+    load_registered_track_plays(&connection, registered_plays)?;
     let mut page = track_page_from_connection(&connection, request, None)?;
     crate::catalog::apply_saved_overlays(&mut page.items, store)?;
     crate::file_observations::apply_genres(&connection, &mut page.items)?;
@@ -2642,6 +2705,64 @@ mod tests {
                 .iter()
                 .all(|track| track.original_year == Some(1999))
         );
+    }
+
+    #[test]
+    fn track_plays_show_and_sort_by_registered_history_not_lastfm() {
+        let connection = fixture();
+        connection
+            .execute_batch(
+                "INSERT INTO lastfm_track_popularity VALUES ('daft punk', 'digital love', 900000);",
+            )
+            .unwrap();
+        // History keys are lower-case; the catalog stores mixed-case paths.
+        let plays = std::collections::HashMap::from([
+            ("h:\\music\\sigur rós\\02.mp3".to_owned(), 3_i64),
+            ("h:\\music\\sigur rós\\01.mp3".to_owned(), 1_i64),
+        ]);
+        load_registered_track_plays(&connection, &plays).unwrap();
+        let page = |sort, cursor| {
+            track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    sort: Some(sort),
+                    page_size: Some(2),
+                    cursor,
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .unwrap()
+        };
+        let first = page(TrackSort::PlaysDesc, None);
+        let summary = |page: &TrackPage| {
+            page.items
+                .iter()
+                .map(|track| (track.title.clone(), track.registered_plays))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            summary(&first),
+            [
+                ("Hoppípolla".to_owned(), Some(3)),
+                ("Sæglópur".to_owned(), Some(1))
+            ]
+        );
+        let second = page(TrackSort::PlaysDesc, first.next_cursor.clone());
+        assert!(
+            second
+                .items
+                .iter()
+                .all(|track| track.registered_plays == Some(0))
+        );
+        assert_eq!(second.items.len(), 2);
+        let digital_love = second
+            .items
+            .iter()
+            .find(|track| track.title == "Digital Love")
+            .unwrap();
+        // Last.fm popularity stays available separately for the inspector.
+        assert_eq!(digital_love.play_count, Some(900000));
     }
 
     #[test]

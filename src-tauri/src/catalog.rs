@@ -68,7 +68,11 @@ pub(crate) struct TrackSummary {
     pub(crate) can_undo_tag_edit: bool,
     pub(crate) duration_seconds: Option<i64>,
     pub(crate) genre: Option<String>,
+    /// Last.fm global scrobbles, not the user's own plays.
     pub(crate) play_count: Option<i64>,
+    /// The user's registered Aurora plays; only set by the Songs explorer.
+    #[serde(default)]
+    pub(crate) registered_plays: Option<i64>,
     pub(crate) track_number: Option<u32>,
     pub(crate) track_total: Option<u32>,
     pub(crate) disc_number: Option<u32>,
@@ -457,6 +461,10 @@ pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
         duration_seconds: row.get(7)?,
         genre: row.get(8)?,
         play_count: row.get(9)?,
+        registered_plays: match row.as_ref().column_index("registered_plays") {
+            Ok(index) => row.get(index)?,
+            Err(_) => None,
+        },
         track_number: optional_u32(row, "track_number")?,
         track_total: optional_u32(row, "track_total")?,
         disc_number: optional_u32(row, "disc_number")?,
@@ -2938,6 +2946,7 @@ mod tests {
             directory: "D:\\MUSIC".to_owned(),
             filename: "track.mp3".to_owned(),
             catalog_import_run_id: 1,
+            registered_plays: None,
         };
         let mut stale_rating_update = edited.clone();
         stale_rating_update.title = "Stale title".to_owned();

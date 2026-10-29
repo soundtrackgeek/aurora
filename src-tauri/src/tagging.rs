@@ -3474,6 +3474,7 @@ mod tests {
                 directory: r"D:\Music\Fixture".to_owned(),
                 filename: "01.mp3".to_owned(),
                 catalog_import_run_id: 1,
+                registered_plays: None,
             },
             audio_path: PathBuf::from(r"D:\Music\Fixture\01.mp3"),
             catalog_values: values,

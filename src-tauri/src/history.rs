@@ -1471,6 +1471,39 @@ impl HistoryStore {
         Ok(plays)
     }
 
+    /// Registered plays per track identity, summed across every history source.
+    pub(crate) fn registered_plays_by_track(&self) -> Result<HashMap<String, i64>, String> {
+        let mut plays = HashMap::<String, i64>::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection
+                .prepare(
+                    "SELECT track_key, COUNT(*) FROM listening_sessions
+                     WHERE registered_play = 1 GROUP BY track_key",
+                )
+                .map_err(|error| format!("Could not prepare registered track plays: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| format!("Could not read registered track plays: {error}"))?;
+            for row in rows {
+                let (key, count) = row.map_err(|error| error.to_string())?;
+                let total = plays.entry(key).or_default();
+                *total = total.saturating_add(count);
+            }
+        }
+        Ok(plays)
+    }
+
     pub(crate) fn last_listened_for_keys(
         &self,
         keys: &[String],
@@ -2666,6 +2699,7 @@ mod tests {
             directory: r"D:\MUSIC\Artist".to_owned(),
             filename: "Track.mp3".to_owned(),
             catalog_import_run_id: 1,
+            registered_plays: None,
         }
     }
 

@@ -416,6 +416,7 @@ mod tests {
                 },
                 &store,
                 true,
+                &Default::default(),
             )
             .unwrap();
             let fixture = json!({"artist": artist, "discovery": discovery, "artwork": artwork, "detail": detail, "intelligence": intelligence, "tracks": tracks});

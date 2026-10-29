@@ -154,6 +154,17 @@ describe("DeepExplorer", () => {
     expect(screen.getAllByRole("complementary", { name: "Night Geometry album details" })).toHaveLength(1);
   });
 
+  it("shows the listener's registered plays in the Songs Plays column, not Last.fm scrobbles", () => {
+    const played = { ...tracks[0], playCount: 987_654, registeredPlays: 7 };
+    const unplayed = { ...tracks[0], id: "track-9", trackKey: "file:track-9", title: "Never Played", playCount: 123_456, registeredPlays: 0 };
+    render(<DeepExplorer {...explorerProps({ tracks: [played, unplayed] })} />);
+    const playsIndex = screen.getAllByRole("columnheader").findIndex((header) => /^pl/i.test(header.textContent ?? ""));
+    const playsCell = (title: RegExp) => within(screen.getByRole("row", { name: title })).getAllByRole("cell")[playsIndex];
+    expect(playsCell(/Signal One/)).toHaveTextContent(/^7$/);
+    expect(playsCell(/Never Played/)).toHaveTextContent(/^0$/);
+    expect(screen.queryByText(/987/)).not.toBeInTheDocument();
+  });
+
   it("shows total plays and the latest play timestamp for artists with history", () => {
     const noHistoryArtist: Artist = {
       id: "artist-2",

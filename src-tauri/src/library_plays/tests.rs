@@ -32,6 +32,7 @@ fn track(directory: &str) -> TrackSummary {
         directory: directory.to_owned(),
         filename: "01.mp3".to_owned(),
         catalog_import_run_id: 1,
+        registered_plays: None,
     }
 }
 
