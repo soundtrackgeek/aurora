@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime, type Track } from "./library";
+import { exploreTracks, isTauriRuntime, type Track } from "./library";
 
 export type ChartKind = "singles" | "albums";
 export type ChartSource = "officialUk" | "vgLista" | "tiISkuddet" | "norsktoppen" | "billboard" | "auroraScore" | "publishedUs";
@@ -386,4 +386,45 @@ export async function loadTrackChartPeaks(artist: string, title: string): Promis
     { label: "Radio Songs", peak: 1, country: "US" },
   ];
   return invoke<TrackChartPeak[]>("track_chart_peaks", { artist, title });
+}
+
+export interface ArtistChartPeak {
+  label: string;
+  country: "US" | "UK" | "NO";
+  peak: number;
+  /** Weeks on a weekly chart, or years on an annual chart. */
+  weeks: number;
+  annual: boolean;
+}
+export interface ArtistChartItem {
+  title: string;
+  bestPeak: number;
+  firstYear: number | null;
+  trackId: string | null;
+  albumId: string | null;
+  peaks: ArtistChartPeak[];
+}
+export interface ArtistChartHistory { singles: ArtistChartItem[]; albums: ArtistChartItem[] }
+
+/** Every chart run of one artist, merged per song and per album. */
+export async function loadArtistChartHistory(artist: string): Promise<ArtistChartHistory> {
+  if (!isTauriRuntime()) {
+    const { items: tracks } = await exploreTracks({ artist, pageSize: 8, sort: "albumAsc" }, { localOnly: true });
+    const albums = [...new Map(tracks.map((track) => [track.albumId, track])).values()];
+    return {
+      singles: tracks.slice(0, 4).map((track, index) => ({
+        title: track.title, bestPeak: index + 1, firstYear: track.releaseYear ?? null, trackId: track.id, albumId: null,
+        peaks: [
+          { label: "VG Lista", country: "NO", peak: index + 1, weeks: 12 - index, annual: false },
+          { label: "Official UK", country: "UK", peak: index + 8, weeks: 6, annual: false },
+          ...(index === 0 ? [{ label: "Billboard Hot 100", country: "US", peak: 14, weeks: 9, annual: false } as const] : []),
+        ],
+      })),
+      albums: albums.slice(0, 3).map((track, index) => ({
+        title: track.album, bestPeak: index + 2, firstYear: track.releaseYear ?? null, trackId: null, albumId: track.albumId,
+        peaks: [{ label: "VG Lista", country: "NO", peak: index + 2, weeks: 20 - index * 4, annual: false }, { label: "Billboard annual", country: "US", peak: 60 + index, weeks: 1, annual: true }],
+      })),
+    };
+  }
+  return invoke<ArtistChartHistory>("artist_chart_history", { artist });
 }

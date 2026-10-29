@@ -1,3 +1,4 @@
+pub(crate) mod artist_history;
 mod published;
 pub(crate) mod track_peaks;
 use crate::{

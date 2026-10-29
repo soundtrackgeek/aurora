@@ -10,7 +10,7 @@ pub(crate) struct TrackChartPeak {
     country: &'static str,
 }
 
-fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
+pub(super) fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -21,7 +21,7 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
 }
 
 /// Music Library records a key version once every archive row has identity keys.
-fn published_identity_keys(connection: &Connection) -> Result<bool, String> {
+pub(super) fn published_identity_keys(connection: &Connection) -> Result<bool, String> {
     if !table_exists(connection, "published_chart_identity")? {
         return Ok(false);
     }
@@ -35,7 +35,7 @@ fn published_identity_keys(connection: &Connection) -> Result<bool, String> {
 }
 
 /// Keys that start with "<performer> ": a range seek, since "!" follows " ".
-fn credit_prefix(performer: &str) -> (String, String) {
+pub(super) fn credit_prefix(performer: &str) -> (String, String) {
     (format!("{performer} "), format!("{performer}!"))
 }
 
@@ -174,7 +174,7 @@ fn subtitled_book_peaks(
 /// Charts print a subtitle in parentheses ("Silent Running (On Dangerous
 /// Ground)") that library titles often drop. A different recording of the song
 /// ("Song (Live)", "Song (Remix)") is not the same chart run.
-fn is_recording_variant(subtitle_title: &str) -> bool {
+pub(super) fn is_recording_variant(subtitle_title: &str) -> bool {
     const VARIANT_WORDS: [&str; 16] = [
         "live",
         "remix",
@@ -205,7 +205,11 @@ fn is_subtitled_title(printed: &str, title_key: &str) -> bool {
         && !is_recording_variant(printed)
 }
 
-fn table_has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
+pub(super) fn table_has_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, String> {
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",

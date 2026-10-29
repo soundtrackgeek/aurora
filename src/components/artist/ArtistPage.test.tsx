@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as data from "../../artistPage";
+import * as charts from "../../charts";
 import * as library from "../../library";
 import { ArtistPage } from "./ArtistPage";
 
@@ -76,4 +77,37 @@ it("provides a usable page and retries after independent provider failures", asy
   expect(await screen.findByText("fanart.tv: Artwork offline")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry unavailable data" }));
   await waitFor(() => expect(data.loadArtistArtwork).toHaveBeenLastCalledWith("M83", true));
+});
+
+it("shows loved tracks and a complete chart overview for albums and tracks", async () => {
+  const history: charts.ArtistChartHistory = {
+    singles: [
+      { title: "Late Hit", bestPeak: 1, firstYear: 1990, trackId: null, albumId: null, peaks: [{ label: "VG Lista", country: "NO", peak: 1, weeks: 9, annual: false }] },
+      { title: "Early Song", bestPeak: 24, firstYear: 1985, trackId: null, albumId: null, peaks: [{ label: "Official UK", country: "UK", peak: 24, weeks: 3, annual: false }, { label: "Billboard annual", country: "US", peak: 80, weeks: 1, annual: true }] },
+    ],
+    albums: [{ title: "Charted Album", bestPeak: 3, firstYear: 1986, trackId: null, albumId: null, peaks: [{ label: "VG Lista", country: "NO", peak: 3, weeks: 12, annual: false }] }],
+  };
+  vi.spyOn(charts, "loadArtistChartHistory").mockResolvedValue(history);
+  const lovedTrack = { ...(await library.exploreTracks({ artist: "Coldplay", pageSize: 1 }, { localOnly: true })).items[0], loved: true, loveState: "loved" as const };
+  const explore = library.exploreTracks;
+  vi.spyOn(library, "exploreTracks").mockImplementation((request, options) => request.search === "love:1" ? Promise.resolve({ items: [lovedTrack], nextCursor: null, totalCount: 1 }) : explore(request, options));
+  render(<ArtistPage {...props} artist="Coldplay" />);
+
+  const lovedPanel = await screen.findByRole("region", { name: "Loved tracks" });
+  expect(await within(lovedPanel).findByText(lovedTrack.title)).toBeInTheDocument();
+  expect(within(lovedPanel).getByText("1 loved track in your library")).toBeInTheDocument();
+  fireEvent.click(within(lovedPanel).getByRole("button", { name: "Play all" }));
+  await waitFor(() => expect(props.onPlay).toHaveBeenCalledWith([expect.objectContaining({ title: lovedTrack.title })]));
+
+  const tracksPanel = await screen.findByRole("region", { name: "Charted tracks" });
+  expect(await within(tracksPanel).findByText("2 charted tracks · 1 top 10 · 1 number one")).toBeInTheDocument();
+  const titles = () => within(tracksPanel).getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent);
+  expect(titles()).toEqual(["Early Song", "Late Hit"]);
+  fireEvent.click(within(tracksPanel).getByRole("button", { name: "Peak" }));
+  expect(titles()).toEqual(["Late Hit", "Early Song"]);
+  expect(within(tracksPanel).getByTitle("Billboard annual: peak #80 · 1 year-end chart")).toBeInTheDocument();
+
+  const albumsPanel = screen.getByRole("region", { name: "Charted albums" });
+  expect(within(albumsPanel).getByText(/Not in your library/)).toBeInTheDocument();
+  expect(within(albumsPanel).queryByRole("button", { name: /Charted Album/ })).not.toBeInTheDocument();
 });

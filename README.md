@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.51.0** adds three boxes to artist pages: **Loved tracks** (every song by the artist you have loved, with Play all), and **Charted albums** and **Charted tracks**, a complete chart overview showing each title's best peak and every UK, Norwegian and US chart it reached. Sort them by year or peak, play a charted track, or open a charted album.
+
 Aurora **0.50.2** fixes the Songs **Plays** column: it now shows how many times you played each song, counted from your listening history on all your devices, and **Plays · most** sorts by that. Before, the column showed Last.fm's worldwide scrobble count, so songs you had played showed "—". Last.fm plays are still in the track sidebar.
 
 Aurora **0.50.1** makes `love:` searches in Songs match each song's own heart: `aartist:madonna AND love:1` now lists only the loved Madonna songs instead of every song on an album that has one. In Albums and Artists, `love:` still counts loved tracks per album. Aurora 0.50.0 gave the Songs list proper columns you can sort, show or hide, reorder and resize.

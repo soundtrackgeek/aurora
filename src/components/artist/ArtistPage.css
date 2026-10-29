@@ -82,6 +82,30 @@
 .artist-popular li > a { margin-left: -4px; color: #72849c; }
 .artist-popular li > a svg { width: 12px; height: 12px; }
 .artist-personal li > span:last-child { color: #b0c5df; font-size: 12px; }
+.artist-loved__heart { width: 12px; height: 12px; min-width: 12px; color: #e07ab8; fill: #e07ab8; }
+.artist-personal li > span:last-child { font-variant-numeric: tabular-nums; }
+.artist-loved li > span:last-child { font-size: 10px; color: #8aa2b9; }
+.artist-panel__more { display: block; margin: 4px 0 0; padding: 0; border: 0; background: none; color: #ce8aec; font-size: 11px; }
+.artist-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.artist-chart-sort { display: inline-flex; border: 1px solid #253747; border-radius: 6px; overflow: hidden; }
+.artist-chart-sort button { border: 0; background: none; color: #8aa2b9; font-size: 10px; padding: 4px 9px; }
+.artist-chart-sort button[aria-pressed="true"] { background: #2b1f40; color: #edc8ff; }
+.artist-charted__list { list-style: none; padding: 0; margin: 0 0 10px; }
+.artist-charted__list li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid #182633; }
+.artist-charted__list li:last-child { border: 0; }
+.artist-charted__list li > button, .artist-charted__list li > div { flex: 1; min-width: 0; padding: 0; border: 0; background: none; text-align: left; color: #d6e1ee; }
+.artist-charted__list strong { display: block; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artist-charted__list small { display: block; color: #7f97af; font-size: 10px; margin-top: 4px; }
+.artist-charted__list li.is-missing strong { color: #a3b3c4; }
+.artist-charted__peak { min-width: 38px; padding: 5px 0; border-radius: 6px; text-align: center; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; color: #9fb3c8; background: #122030; border: 1px solid #1f3142; }
+.artist-charted__peak.is-high { color: #e3cdfa; background: #241a37; border-color: #3a2a57; }
+.artist-charted__peak.is-top { color: #1c1206; background: linear-gradient(140deg, #f5d27a, #d9a441); border-color: #f0c766; }
+.artist-chart-peaks { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.artist-chart-peaks > span { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 999px; background: #101c29; border: 1px solid #1e2f40; color: #9fb3c8; font-size: 9.5px; white-space: nowrap; }
+.artist-chart-peaks > span .aurora-country-flag { width: 12px; height: 9px; border-radius: 1px; }
+.artist-chart-peaks b { color: #dfe8f3; font-weight: 600; }
+.artist-chart-peaks > span.is-top { border-color: #6b5426; }
+.artist-chart-peaks > span.is-top b { color: #f5d27a; }
 .artist-empty { color: var(--artist-muted); font-size: 12px; line-height: 1.7; display: flex; gap: 8px; align-items: center; }
 .artist-links { display: flex; flex-wrap: wrap; gap: 14px; }
 .artist-tag-cloud { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -102,6 +126,6 @@
 .artist-notice { background: #20162b; border: 1px solid #573b70; color: #dfc5ed; border-radius: 7px; padding: 12px 16px; font-size: 12px; }
 .artist-settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 @media (max-width: 1350px) { .artist-overview__intro { grid-template-columns: 1fr; } .artist-overview__memory { grid-template-columns: 1.3fr 1fr; } .artist-listening-stats { gap: 8px; } .artist-albums { grid-template-columns: repeat(4, minmax(0, 1fr)); } .artist-similar { grid-template-columns: repeat(4, minmax(0, 1fr)); } .artist-hero__identity { flex-wrap: wrap; } .artist-hero__actions { margin-left: 165px; } .artist-hero { min-height: 270px; } }
-@media (max-width: 1050px) { .artist-overview { grid-template-columns: 1fr; } .artist-overview__intro { grid-template-columns: 1fr 1fr; } .artist-overview__memory { grid-template-columns: 1fr; } .artist-overview__side { grid-template-columns: 1fr 1fr; } .artist-overview__side .artist-panel:first-child { grid-row: span 2; } .artist-hero__portrait { width: 115px; height: 115px; } .artist-hero__actions { margin-left: 140px; } }
+@media (max-width: 1050px) { .artist-overview { grid-template-columns: 1fr; } .artist-charts { grid-template-columns: 1fr; } .artist-overview__intro { grid-template-columns: 1fr 1fr; } .artist-overview__memory { grid-template-columns: 1fr; } .artist-overview__side { grid-template-columns: 1fr 1fr; } .artist-overview__side .artist-panel:first-child { grid-row: span 2; } .artist-hero__portrait { width: 115px; height: 115px; } .artist-hero__actions { margin-left: 140px; } }
 @media (max-width: 700px) { .artist-hero__identity { padding: 25px 20px; gap: 16px; } .artist-hero__portrait { width: 84px; height: 84px; } .artist-hero__copy { flex: 1; } .artist-hero__actions { margin-left: 100px; } .artist-hero h1 { font-size: 30px; } .artist-hero__tags > span { font-size: 9px; } .artist-overview__intro, .artist-overview__side { grid-template-columns: 1fr; } .artist-overview__side .artist-panel:first-child { grid-row: auto; } .artist-tabs { gap: 20px; padding: 0 16px; } .artist-albums, .artist-similar { grid-template-columns: repeat(3, minmax(0, 1fr)); } .artist-page__footer { gap: 12px; } }
 @media (prefers-reduced-motion: reduce) { .artist-page *, .artist-page *::before, .artist-page *::after { animation: none !important; transition: none !important; } }

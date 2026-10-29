@@ -1052,6 +1052,15 @@ async fn track_chart_peaks(
 }
 
 #[tauri::command]
+async fn artist_chart_history(
+    artist: String,
+) -> Result<charts::artist_history::ArtistChartHistory, String> {
+    tauri::async_runtime::spawn_blocking(move || charts::artist_history::load(artist))
+        .await
+        .map_err(|error| format!("The artist-chart worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn catalog_chart_rankings(
     request: CatalogChartRankRequest,
 ) -> Result<CatalogChartRankings, String> {
@@ -2187,6 +2196,7 @@ pub fn run() {
             published_chart_weeks,
             chart_item_detail,
             track_chart_peaks,
+            artist_chart_history,
             catalog_chart_rankings,
             chart_entry_track,
             chart_queue_tracks,

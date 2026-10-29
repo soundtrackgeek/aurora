@@ -1,9 +1,10 @@
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
-import { ArrowLeft, ArrowUpRight, AudioLines, BookOpen, Disc3, Globe2, Headphones, ListMusic, LoaderCircle, Play, RefreshCw, Shuffle, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, AudioLines, BookOpen, Disc3, Globe2, Headphones, Heart, ListMusic, LoaderCircle, Play, RefreshCw, Shuffle, Trophy, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAlbumCoverUrl } from "../../albumArtwork";
 import { artistFacts, biographyText, findArtistTrack, listeningMonths, loadArtistArtwork, loadArtistDiscovery, loadArtistListening, openArtistLink, type ArtistArtwork, type ArtistDiscovery, type ArtistListening } from "../../artistPage";
-import { exploreAlbums, exploreTracks, formatCount, formatDuration, loadArtistDetail, type AlbumSummary, type ArtistDetail, type Track, type TrackPage } from "../../library";
+import { loadArtistChartHistory, loadChartEntryTrack, type ArtistChartHistory, type ArtistChartItem, type ArtistChartPeak } from "../../charts";
+import { exploreAlbums, exploreTracks, formatCount, formatDuration, loadAlbumDetail, loadArtistDetail, type AlbumSummary, type ArtistDetail, type Track, type TrackPage } from "../../library";
 import { loadArtistIntelligence, type ArtistIntelligence } from "../../musicbrainz";
 import { transitionContent } from "../../contentTransition";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -35,6 +36,43 @@ function AlbumTile({ album, onOpen }: { album: AlbumSummary; onOpen: () => void 
 
 function Loading({ children = "Loading…" }: { children?: ReactNode }) { return <p className="artist-empty" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" />{children}</p>; }
 
+const PREVIEW_ROWS = 10;
+type ChartSort = "year" | "peak";
+
+function plural(count: number, one: string, many = `${one}s`) { return `${formatCount(count)} ${count === 1 ? one : many}`; }
+
+function ChartPeakChips({ peaks }: { peaks: ArtistChartPeak[] }) {
+  return <span className="artist-chart-peaks">{peaks.map((peak) => <span key={peak.label} className={peak.peak === 1 ? "is-top" : undefined} title={`${peak.label}: peak #${peak.peak} · ${peak.annual ? plural(peak.weeks, "year-end chart") : plural(peak.weeks, "week")}`}><CountryFlag code={peak.country} name={peak.country} />{peak.label}<b>#{peak.peak}</b></span>)}</span>;
+}
+
+/** A complete chart overview for one kind: every song or album, its best peak, and each chart it reached. */
+function ChartedPanel({ title, icon, kind, items, loading, busy, onActivate }: { title: string; icon: ReactNode; kind: "tracks" | "albums"; items: ArtistChartItem[] | null; loading: boolean; busy: boolean; onActivate: (item: ArtistChartItem) => void }) {
+  const [sort, setSort] = useState<ChartSort>("year");
+  const [expanded, setExpanded] = useState(false);
+  const sorted = [...(items ?? [])].sort((a, b) => sort === "peak"
+    ? a.bestPeak - b.bestPeak || (a.firstYear ?? 9999) - (b.firstYear ?? 9999)
+    : (a.firstYear ?? 9999) - (b.firstYear ?? 9999) || a.bestPeak - b.bestPeak);
+  const shown = expanded ? sorted : sorted.slice(0, PREVIEW_ROWS);
+  const numberOnes = sorted.filter((item) => item.bestPeak === 1).length;
+  const topTens = sorted.filter((item) => item.bestPeak <= 10).length;
+  const inLibrary = (item: ArtistChartItem) => Boolean(kind === "tracks" ? item.trackId : item.albumId);
+  const sortControl = <div className="artist-chart-sort" role="group" aria-label={`Sort ${title.toLowerCase()}`}>{(["year", "peak"] as ChartSort[]).map((option) => <button key={option} aria-pressed={sort === option} onClick={() => setSort(option)}>{option === "year" ? "Year" : "Peak"}</button>)}</div>;
+  return <Panel title={title} icon={icon} className="artist-charted" action={sortControl}>
+    {loading ? <Loading>Reading the chart archives…</Loading> : !sorted.length ? <p className="artist-empty">{kind === "tracks" ? "No charted singles were found for this artist." : "No charted albums were found for this artist."}</p> : <>
+      <p className="artist-section-caption">{plural(sorted.length, kind === "tracks" ? "charted track" : "charted album")} · {formatCount(topTens)} top 10 · {plural(numberOnes, "number one")}</p>
+      <ol className="artist-charted__list">{shown.map((item) => {
+        const local = inLibrary(item);
+        const body = <><strong>{item.title}</strong><small>{item.firstYear ?? "Year unknown"} · {plural(item.peaks.length, "chart")}{!local && kind === "albums" ? " · Not in your library" : ""}</small><ChartPeakChips peaks={item.peaks} /></>;
+        return <li key={`${item.title}:${item.firstYear}`} className={local ? undefined : "is-missing"}>
+          <span className={`artist-charted__peak${item.bestPeak === 1 ? " is-top" : item.bestPeak <= 10 ? " is-high" : ""}`} aria-label={`Best peak ${item.bestPeak}`}>#{item.bestPeak}</span>
+          {kind === "tracks" || local ? <button disabled={busy} onClick={() => onActivate(item)} title={kind === "tracks" ? `Play ${item.title}` : `Open ${item.title}`}>{body}</button> : <div>{body}</div>}
+        </li>;
+      })}</ol>
+      {sorted.length > PREVIEW_ROWS && <button className="artist-panel__more" onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show all ${formatCount(sorted.length)}`}</button>}
+    </>}
+  </Panel>;
+}
+
 export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, onOpenAlbum, onPlay, onSettings }: ArtistPageProps) {
   const [tab, setTab] = useState<Tab>("Overview");
   const [detail, setDetail] = useState<ArtistDetail | null>(null);
@@ -44,6 +82,9 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
   const [artwork, setArtwork] = useState<ArtistArtwork | null>(null);
   const [listening, setListening] = useState<ArtistListening | null>(null);
   const [tracks, setTracks] = useState<TrackPage | null>(null);
+  const [loved, setLoved] = useState<TrackPage | null>(null);
+  const [lovedExpanded, setLovedExpanded] = useState(false);
+  const [charts, setCharts] = useState<{ key: string; history: ArtistChartHistory } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
@@ -67,8 +108,23 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     settle("fanart.tv", () => loadArtistArtwork(artist, refresh > 0), setArtwork);
     settle("Listening history", () => loadArtistListening(artist), setListening);
     settle("Tracks", () => exploreTracks({ artist, pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setTracks);
+    settle("Loved tracks", () => exploreTracks({ artist, search: "love:1", pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setLoved);
     return () => { active = false; };
   }, [artist, refresh, catalogRevision]);
+
+  // Chart archives are keyed by printed artist names, so wait for the library name behind an artist id.
+  const chartArtist = detail?.artist.name ?? (artist.startsWith("artist:") || artist.startsWith("unresolved:") ? null : artist);
+  const chartKey = chartArtist ? JSON.stringify([chartArtist, refresh, catalogRevision]) : null;
+  useEffect(() => {
+    if (!chartArtist || !chartKey) return;
+    let active = true;
+    void loadArtistChartHistory(chartArtist)
+      .then((history) => { if (active) transitionContent(() => { setCharts({ key: chartKey, history }); setErrors((current) => { const next = { ...current }; delete next.Charts; return next; }); }, "artist-detail"); })
+      .catch((error: unknown) => { if (active) setErrors((current) => ({ ...current, Charts: error instanceof Error ? error.message : String(error) })); });
+    return () => { active = false; };
+  }, [chartArtist, chartKey]);
+  const chartHistory = charts && charts.key === chartKey ? charts.history : null;
+  const chartsLoading = !chartHistory && !errors.Charts;
 
   function chooseTab(next: Tab) { transitionContent(() => setTab(next), "artist-detail"); }
   async function play(queue: Track[], shuffle = false) {
@@ -89,6 +145,27 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
       if (track) { if (!await onPlay([track])) setPlayMessage("Playback could not start. Check the player for details."); }
       else setPlayMessage(`“${title}” is not available in your local library.`);
     } catch (error) { if (alive.current) setPlayMessage(error instanceof Error ? error.message : String(error)); }
+    finally { if (alive.current) setBusy(null); }
+  }
+  async function playChartTrack(item: ArtistChartItem) {
+    if (busy) return;
+    const local = item.trackId ? tracks?.items.find((track) => track.id === item.trackId) ?? loved?.items.find((track) => track.id === item.trackId) : undefined;
+    if (local) return play([local]);
+    if (!item.trackId) return playNamed(item.title);
+    setBusy(item.title); setPlayMessage(null);
+    let track: Track | null;
+    try { track = await loadChartEntryTrack(item.trackId); } catch { track = null; }
+    if (!alive.current) return;
+    setBusy(null);
+    return track ? play([track]) : playNamed(item.title);
+  }
+  async function openChartAlbum(item: ArtistChartItem) {
+    if (busy || !item.albumId) return;
+    const local = albums.find((album) => album.id === item.albumId);
+    if (local) return onOpenAlbum(local);
+    setBusy("album");
+    try { const album = await loadAlbumDetail(item.albumId, { localOnly: true }); if (alive.current) onOpenAlbum(album.album); }
+    catch (error) { if (alive.current) setPlayMessage(error instanceof Error ? error.message : String(error)); }
     finally { if (alive.current) setBusy(null); }
   }
   async function moreTracks() {
@@ -182,6 +259,10 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
               </div>
             </div>
             {albumSection}
+            <div className="artist-charts">
+              <ChartedPanel title="Charted albums" icon={<Trophy />} kind="albums" items={chartHistory?.albums ?? null} loading={chartsLoading} busy={Boolean(busy)} onActivate={(item) => void openChartAlbum(item)} />
+              <ChartedPanel title="Charted tracks" icon={<Trophy />} kind="tracks" items={chartHistory?.singles ?? null} loading={chartsLoading} busy={Boolean(busy)} onActivate={(item) => void playChartTrack(item)} />
+            </div>
             {similar}
           </div>
           <div className="artist-overview__side">
@@ -192,6 +273,14 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
             </Panel>
             <Panel title="Most played by you" icon={<Headphones />} action={<small>Last 12 months</small>}>
               {listening?.topTracks.length ? <ol className="artist-personal">{listening.topTracks.map((track, index) => <li key={track.trackKey}><span className="artist-rank">{String(index + 1).padStart(2, "0")}</span><button disabled={Boolean(busy)} onClick={() => void playNamed(track.title)}><strong>{track.title}</strong><small>{track.album}</small></button><span>{formatCount(track.plays)}</span></li>)}</ol> : <p className="artist-empty">Your most played tracks will appear here.</p>}
+            </Panel>
+            <Panel title="Loved tracks" icon={<Heart />} action={loved?.items.length ? <button disabled={Boolean(busy)} onClick={() => void play(loved.items)} title={`Play ${loved.items.length} loved tracks`}>Play all</button> : undefined}>
+              {!loved && !errors["Loved tracks"] ? <Loading>Loading loved tracks…</Loading> : loved?.items.length ? <>
+                <p className="artist-section-caption">{plural(loved.totalCount, "loved track")} in your library</p>
+                <ol className="artist-personal artist-loved">{(lovedExpanded ? loved.items : loved.items.slice(0, PREVIEW_ROWS)).map((track) => <li key={track.trackKey}><Heart className="artist-loved__heart" aria-hidden="true" /><button disabled={Boolean(busy)} onClick={() => void play([track, ...loved.items.filter((t) => t.trackKey !== track.trackKey)])} title={`Play ${track.title}`}><strong>{track.title}</strong><small>{track.album}</small></button><span>{formatDuration(track.durationSeconds)}</span></li>)}</ol>
+                {loved.items.length > PREVIEW_ROWS && <button className="artist-panel__more" onClick={() => setLovedExpanded((value) => !value)}>{lovedExpanded ? "Show fewer" : `Show all ${formatCount(loved.items.length)}`}</button>}
+                {loved.totalCount > loved.items.length && <small className="artist-source-note">Showing the first {formatCount(loved.items.length)}.</small>}
+              </> : <p className="artist-empty">Tracks you love by this artist will appear here.</p>}
             </Panel>
             <Panel title="Links & identity" icon={<Globe2 />}><div className="artist-links">{externalLink(lastfmUrl, "Last.fm")}{intelligence?.identity && externalLink(`https://musicbrainz.org/artist/${intelligence.identity.mbid}`, "MusicBrainz")}{externalLink(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(artist)}`, "Find on Wikipedia")}</div></Panel>
           </div>

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0] - 2026-10-29
+
+### Added
+- Artist pages: a **Loved tracks** box lists every song by the artist you have loved, with **Play all**; click a song to play it followed by the rest.
+- Artist pages: **Charted albums** and **Charted tracks** boxes give a complete chart overview. Each title shows its best peak and every chart it reached (Official UK, VG Lista, Ti i Skuddet, Norsktoppen, Billboard year-end and the published US weekly charts such as the Hot 100), with weeks on chart on hover. Sort by year or by peak; the first ten show and **Show all** lists the rest. Chart titles that differ only by a printed subtitle are merged, while live versions and remixes stay separate. Collaborations the artist leads count too.
+- Click a charted track to play it from your library, or a charted album to open it; albums you don't have are marked "Not in your library".
+
 ## [0.50.2] - 2026-10-29
 
 ### Fixed
