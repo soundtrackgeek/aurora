@@ -728,6 +728,15 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
 
   const selectedRemovalCount = removeExtraPaths.size;
   const allExtrasSelected = reconciliation.extraCount > 0 && selectedRemovalCount === reconciliation.extraCount;
+  const removableExtraPaths = reconciliation.cleanupSafe
+    ? unmatchedLocalIndices.flatMap((localIndex) => (tracks[localIndex] ? [tracks[localIndex].path] : []))
+    : [];
+  const everyRemovableExtraSelected = removableExtraPaths.length > 0 && removableExtraPaths.every((path) => removeExtraPaths.has(path));
+
+  function toggleAllExtras() {
+    setRemoveExtraPaths(everyRemovableExtraSelected ? new Set() : new Set(removableExtraPaths));
+    setConfirmRemoval(false);
+  }
   const willRename = renameAfterApply
     && tracks.length === totalAlbumTracks
     && (reconciliation.extraCount === 0 || allExtrasSelected);
@@ -818,7 +827,7 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
       <section className="inbox-track-compare" inert={updating}>
-        {detail ? <div className="inbox-reconciliation-summary" role="status"><strong>{reconciliation.matchedCount} of {detail.tracks.length} release tracks matched</strong><span>{reconciliation.extraCount ? `${reconciliation.extraCount} extra local ${reconciliation.extraCount === 1 ? "track" : "tracks"}` : "No extra local tracks"}{reconciliation.missingCount || reconciliation.ambiguousCount ? ` · ${reconciliation.missingCount + reconciliation.ambiguousCount} unresolved` : ""}</span>{reconciliation.extraCount && !reconciliation.cleanupSafe ? <small>Choose an unmatched file and confirm any true match before removing extras.</small> : null}</div> : null}
+        {detail ? <div className="inbox-reconciliation-summary" role="status"><strong>{reconciliation.matchedCount} of {detail.tracks.length} release tracks matched</strong><span>{reconciliation.extraCount ? `${reconciliation.extraCount} extra local ${reconciliation.extraCount === 1 ? "track" : "tracks"}` : "No extra local tracks"}{reconciliation.missingCount || reconciliation.ambiguousCount ? ` · ${reconciliation.missingCount + reconciliation.ambiguousCount} unresolved` : ""}</span>{removableExtraPaths.length > 0 ? <button type="button" className="inbox-reconciliation-summary__select-all" aria-pressed={everyRemovableExtraSelected} onClick={toggleAllExtras}>{everyRemovableExtraSelected ? "Clear extra selection" : `Select all extras (${removableExtraPaths.length})`}</button> : null}{reconciliation.extraCount && !reconciliation.cleanupSafe ? <small>Choose an unmatched file and confirm any true match before removing extras.</small> : null}</div> : null}
         <table><thead><tr><th>#</th><th>Your file</th><th>Current title</th><th>Release title</th><th>Status</th><th>Action</th></tr></thead><tbody>{detail ? reconciliation.rows.map((match, rowIndex) => {
           const track = match.localIndex === null ? null : tracks[match.localIndex];
           const releaseTrack = match.releaseIndex === null ? null : detail.tracks[match.releaseIndex];

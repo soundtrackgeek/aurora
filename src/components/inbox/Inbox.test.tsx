@@ -644,7 +644,12 @@ describe("Inbox", () => {
     expect(screen.getByRole("textbox", { name: "Original year" })).toHaveValue("1990");
     expect(screen.getByRole("textbox", { name: "Release year" })).toHaveValue("2008");
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /Remove unmatched.*Shadows/u }));
+    const removeShadows = screen.getByRole("checkbox", { name: /Remove unmatched.*Shadows/u });
+    fireEvent.click(screen.getByRole("button", { name: "Select all extras (1)" }));
+    expect(removeShadows).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Clear extra selection" }));
+    expect(removeShadows).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Select all extras (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply, rename & move 1 extra" }));
     const confirmation = screen.getByRole("alertdialog", { name: "Move 1 unmatched track out of this album?" });
     expect(confirmation).toHaveTextContent("Shadows");

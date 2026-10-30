@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.51.1] - 2026-10-30
+
+### Added
+- Album Auto-Tagger: a **Select all extras** button above the track list ticks every "Extra local" track for removal in one click, so you no longer have to tick each one. Click it again (**Clear extra selection**) to untick them all.
+
 ## [0.51.0] - 2026-10-29
 
 ### Added
