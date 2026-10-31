@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.51.3** moves the **Chart info** section in the track sidebar up so it follows straight after "Last listened", before the sonic tools (Explore sonic atlas, Blind tasting, More like this).
+Aurora **0.51.4** fixes the Album Auto-Tagger **Apply & rename** failing with "The destination album folder already exists" when the target folder was only an empty leftover; empty folders are now reused.
 
 Aurora **0.51.2** removes the small album covers from the Genres page index, so genre names are no longer partly hidden behind them at larger UI sizes. The search box label in that panel is also hidden again.
 

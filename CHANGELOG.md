@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.51.4] - 2026-10-31
+
+### Fixed
+- Album Auto-Tagger: **Apply & rename** no longer fails with "The destination album folder already exists" when the target folder is just an empty leftover. Empty folders are now reused; folders that contain files still block the rename.
+
 ## [0.51.3] - 2026-10-31
 
 ### Changed

@@ -1809,10 +1809,18 @@ fn rename_album_path(
     let destination_folder = parent.join(folder_name);
     let folder_renamed = !path_eq(album, &destination_folder);
     if folder_renamed && destination_folder.exists() {
-        return Err(format!(
-            "The destination album folder already exists: {}",
-            destination_folder.display()
-        ));
+        // An empty leftover folder (e.g. from an earlier merge or move) is not a real
+        // collision; `remove_dir` only succeeds when the folder is empty, so content is safe.
+        let is_empty_directory = destination_folder.is_dir()
+            && fs::read_dir(&destination_folder)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+        if !is_empty_directory || fs::remove_dir(&destination_folder).is_err() {
+            return Err(format!(
+                "The destination album folder already exists: {}",
+                destination_folder.display()
+            ));
+        }
     }
 
     let sequence = now_ms();
