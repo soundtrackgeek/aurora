@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.51.3** moves the **Chart info** section in the track sidebar up so it follows straight after "Last listened", before the sonic tools (Explore sonic atlas, Blind tasting, More like this).
+
 Aurora **0.51.2** removes the small album covers from the Genres page index, so genre names are no longer partly hidden behind them at larger UI sizes. The search box label in that panel is also hidden again.
 
 Aurora **0.51.1** adds a **Select all extras** button to the Inbox Album Auto-Tagger, so when a folder has many "Extra local" tracks you can tick them all for removal in one click instead of one by one.

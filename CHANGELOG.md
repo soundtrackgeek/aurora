@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.51.3] - 2026-10-31
+
+### Changed
+- Track sidebar: **Chart info** now appears right after the track details (after "Last listened"), above the sonic tools, instead of at the bottom of the panel.
+
 ## [0.51.2] - 2026-10-31
 
 ### Fixed
