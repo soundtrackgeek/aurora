@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.51.2] - 2026-10-31
+
+### Fixed
+- Genres: the genre index no longer shows a small album cover beside each genre. At larger UI sizes the cover overlapped the genre name and hid its first letters.
+- Genres: the "Search genres" label no longer shows inside the search box; it stays available to screen readers only.
+
 ## [0.51.1] - 2026-10-30
 
 ### Added

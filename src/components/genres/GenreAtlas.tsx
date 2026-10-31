@@ -1,8 +1,6 @@
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
-import { useAlbumCoverUrl } from "../../albumArtwork";
 import {
   Album,
-  AudioLines,
   ChevronRight,
   Clock3,
   Compass,
@@ -112,18 +110,6 @@ function albumAsTrack(album: GenreAlbum): Track {
   };
 }
 
-function GenreCover({ genre }: { genre: GenreSummary }) {
-  const source = useAlbumCoverUrl(genre.representativeAlbumId, 128);
-  const [failed, setFailed] = useState<string | null>(null);
-  return (
-    <span className="genre-cover" aria-hidden="true">
-      {source && source !== failed
-        ? <img src={source} alt="" onError={() => setFailed(source)} />
-        : <><strong>{genre.name.slice(0, 2).toLocaleUpperCase()}</strong><AudioLines /></>}
-    </span>
-  );
-}
-
 function compactHours(seconds: number): string {
   if (seconds < 3_600) return `${Math.round(Math.max(0, seconds) / 60)}m`;
   const hours = Math.round(Math.max(0, seconds) / 3600);
@@ -208,7 +194,6 @@ function GenreIndex({
                     onClick={() => onSelectGenre(genre.name)}
                     key={genre.name}
                   >
-                    <GenreCover genre={genre} />
                     <span className="genre-index__copy"><strong>{genre.name}</strong><small>{countLabel(genre.trackCount, "track")} · {countLabel(genre.albumCount, "album")}</small></span>
                     <span className="genre-index__signal">{genre.averageRating === null ? "Unrated" : `${genre.averageRating.toFixed(1)} ★`}<small>{genre.plays > 0 ? `${formatCount(genre.plays)} plays` : "unheard"}</small></span>
                     <ChevronRight aria-hidden="true" />

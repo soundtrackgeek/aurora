@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.51.2** removes the small album covers from the Genres page index, so genre names are no longer partly hidden behind them at larger UI sizes. The search box label in that panel is also hidden again.
+
 Aurora **0.51.1** adds a **Select all extras** button to the Inbox Album Auto-Tagger, so when a folder has many "Extra local" tracks you can tick them all for removal in one click instead of one by one.
 
 Aurora **0.51.0** adds three boxes to artist pages: **Loved tracks** (every song by the artist you have loved, with Play all), and **Charted albums** and **Charted tracks**, a complete chart overview showing each title's best peak and every UK, Norwegian and US chart it reached. Sort them by year or peak, play a charted track, or open a charted album.
