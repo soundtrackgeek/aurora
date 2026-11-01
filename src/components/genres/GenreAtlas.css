@@ -15,12 +15,13 @@
 
 .genre-index { position: sticky; top: 0; display: grid; grid-template-rows: auto auto minmax(180px, 1fr); max-height: calc(100vh - 355px); min-height: 520px; overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: rgba(8,14,22,.91); }
 .genre-index > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 14px 10px; }
-.genre-index > header span, .genre-index > header strong { display: block; }
-.genre-index > header span { color: var(--subtle); font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); letter-spacing: .11em; text-transform: uppercase; }
-.genre-index > header strong { margin-top: 3px; font-size: max(var(--aurora-font-min), calc(13px + var(--aurora-font-offset))); font-weight: 500; }
-.genre-index__sort { position: relative; }
+.genre-index > header > div > span, .genre-index > header > div > strong { display: block; }
+.genre-index > header > div > span { color: var(--subtle); font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); letter-spacing: .11em; text-transform: uppercase; }
+.genre-index > header > div > strong { margin-top: 3px; font-size: max(var(--aurora-font-min), calc(13px + var(--aurora-font-offset))); font-weight: 500; }
+.genre-index__sort { position: relative; flex: 0 1 auto; min-width: 0; }
 .genre-index__sort-trigger { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 125px; height: 30px; padding: 0 8px; color: #c7d0da; border: 1px solid var(--border); border-radius: 7px; background: #0d1621; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); cursor: pointer; }
 .genre-index__sort-trigger:focus-visible { border-color: rgba(201,112,238,.65); outline: none; box-shadow: 0 0 0 2px rgba(181,82,221,.13); }
+.genre-index__sort-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .genre-index__sort-trigger svg { width: 13px; height: 13px; flex: 0 0 auto; color: #8996a4; transition: transform 140ms ease; }
 .genre-index__sort-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
 .genre-index__sort-menu { position: absolute; z-index: 20; top: calc(100% + 5px); right: 0; display: grid; min-width: 100%; width: max-content; padding: 4px; border: 1px solid var(--border); border-radius: 7px; background: #0b141e; box-shadow: 0 14px 34px rgba(0,0,0,.42); }

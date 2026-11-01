@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.52.3] - 2026-11-01
+
+### Fixed
+- Genres: the sort button in the genre index no longer shows its label in wide, uppercase letters that spilled outside the button. It now uses normal text and truncates with an ellipsis if space is tight.
+
 ## [0.52.2] - 2026-11-01
 
 ### Fixed
