@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.51.5] - 2026-11-01
+
+### Fixed
+- Tag editor: saving tags could sit on "Saving N MP3s…" indefinitely when the playback engine was hung (for example in an audio-output call). The save now finishes without waiting for the playback engine; the now-playing metadata refresh is applied in the background.
+
+### Changed
+- Diagnostics: the timing log now records a `playback lock held by another call for over 5s` note when a playback command is stuck waiting on the playback lock.
+
 ## [0.51.4] - 2026-10-31
 
 ### Fixed

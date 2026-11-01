@@ -133,6 +133,8 @@ enum AlbumCoverPickerRequest {
     Inbox { album_path: String },
 }
 
+const PLAYBACK_LOCK_STALL_REPORT: std::time::Duration = std::time::Duration::from_secs(5);
+
 async fn with_playback<T: Send + 'static>(
     app: AppHandle,
     name: &'static str,
@@ -143,9 +145,25 @@ async fn with_playback<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(move || {
         timing.stage("playback_lock_wait");
         let state = app.state::<PlaybackState>();
-        let mut runtime = state
-            .lock()
-            .map_err(|_| "Aurora's playback engine stopped unexpectedly.".to_owned())?;
+        let started = std::time::Instant::now();
+        let mut reported = false;
+        let mut runtime = loop {
+            match state.try_lock() {
+                Ok(runtime) => break runtime,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("Aurora's playback engine stopped unexpectedly.".to_owned());
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    // Watchdog: leave a trace in the timing log when another
+                    // playback call has been holding the lock for too long.
+                    if !reported && started.elapsed() >= PLAYBACK_LOCK_STALL_REPORT {
+                        reported = true;
+                        timing.note("playback lock held by another call for over 5s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        };
         timing.stage("playback_lock_held");
         let result = operation(&mut runtime);
         drop(runtime);
@@ -1507,18 +1525,38 @@ async fn track_waveform(
     .await
 }
 
-fn refresh_playback_track_tags(app: &AppHandle, track: &TrackSummary) {
+/// Apply a best-effort playback refresh without letting the caller wait on the
+/// playback lock. If the lock is busy (or hung), the refresh finishes on a
+/// detached thread, so a tag save can never be held hostage by the audio engine.
+fn refresh_playback_detached(
+    app: &AppHandle,
+    refresh: impl FnOnce(&mut PlaybackRuntime) + Send + 'static,
+) {
     let playback = app.state::<PlaybackState>();
-    if let Ok(mut runtime) = playback.lock() {
-        runtime.refresh_track_tags(track);
+    match playback.try_lock() {
+        Ok(mut runtime) => refresh(&mut runtime),
+        Err(std::sync::TryLockError::Poisoned(_)) => {}
+        Err(std::sync::TryLockError::WouldBlock) => {
+            let app = app.clone();
+            let _ = std::thread::Builder::new()
+                .name("aurora-playback-refresh".to_owned())
+                .spawn(move || {
+                    if let Ok(mut runtime) = app.state::<PlaybackState>().lock() {
+                        refresh(&mut runtime);
+                    }
+                });
+        }
     }
 }
 
+fn refresh_playback_track_tags(app: &AppHandle, track: &TrackSummary) {
+    let track = track.clone();
+    refresh_playback_detached(app, move |runtime| runtime.refresh_track_tags(&track));
+}
+
 fn refresh_playback_track_metadata(app: &AppHandle, track: &TrackSummary) {
-    let playback = app.state::<PlaybackState>();
-    if let Ok(mut runtime) = playback.lock() {
-        runtime.refresh_track_metadata(track);
-    }
+    let track = track.clone();
+    refresh_playback_detached(app, move |runtime| runtime.refresh_track_metadata(&track));
 }
 
 #[tauri::command]

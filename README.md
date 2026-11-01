@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.51.5** stops a hung audio engine from freezing tag saves: saving tags no longer waits on the playback engine, and Aurora now logs when a playback call is stuck behind another one for over 5 seconds.
+
 Aurora **0.51.4** fixes the Album Auto-Tagger **Apply & rename** failing with "The destination album folder already exists" when the target folder was only an empty leftover; empty folders are now reused.
 
 Aurora **0.51.2** removes the small album covers from the Genres page index, so genre names are no longer partly hidden behind them at larger UI sizes. The search box label in that panel is also hidden again.
