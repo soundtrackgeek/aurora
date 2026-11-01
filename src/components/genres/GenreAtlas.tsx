@@ -255,10 +255,12 @@ function GenreIndex({
   const visibleLimit = visibility.key === visibilityKey ? visibility.limit : PAGE_SIZE;
   const visible = ordered.slice(0, visibleLimit);
   const latestView = useRef<GenreIndexView>(saved);
-  latestView.current = { sort, reversed, seed: shuffleSeed, limit: visibleLimit, scrollTop: scrollTopRef.current };
   const listShown = state === "ready" && visible.length > 0;
 
-  useEffect(() => { saveGenreIndexView({ ...latestView.current, scrollTop: scrollTopRef.current }); }, [sort, reversed, shuffleSeed, visibleLimit]);
+  useEffect(() => {
+    latestView.current = { sort, reversed, seed: shuffleSeed, limit: visibleLimit, scrollTop: scrollTopRef.current };
+    saveGenreIndexView(latestView.current);
+  }, [sort, reversed, shuffleSeed, visibleLimit]);
   useEffect(() => () => {
     window.clearTimeout(scrollSaveTimer.current);
     saveGenreIndexView({ ...latestView.current, scrollTop: scrollTopRef.current });
