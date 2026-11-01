@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.52.1] - 2026-11-01
+
+### Fixed
+- Release build: fixes a lint error in the Genre Index that stopped the 0.52.0 release builds. This release ships the 0.52.0 Genres changes (reversible, Random and remembered sort).
+- CI: Python is pinned to 3.12.10, the last 3.12 release with Windows binaries; the previously pinned 3.12.13 is not available on the Windows runner.
+
 ## [0.52.0] - 2026-11-01
 
 ### Added
