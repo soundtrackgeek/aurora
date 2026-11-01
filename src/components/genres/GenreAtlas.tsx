@@ -1,6 +1,7 @@
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import {
   Album,
+  ChevronDown,
   ChevronRight,
   Clock3,
   Compass,
@@ -18,14 +19,17 @@ import {
   Timer,
   UsersRound,
 } from "lucide-react";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   type GenreAlbum,
   type GenreDetail,
+  type GenreIndexView,
   type GenreQueueMode,
   type GenreRadioSession,
   type GenreSort,
   type GenreSummary,
+  loadGenreIndexView,
+  saveGenreIndexView,
   sortGenres,
 } from "../../genres";
 import { formatCount, formatDuration, type Track } from "../../library";
@@ -64,14 +68,83 @@ interface GenreAtlasProps {
 const EMPTY_BUSY_TRACK_KEYS: ReadonlySet<string> = new Set();
 const PAGE_SIZE = 120;
 
-const sortOptions: ReadonlyArray<{ value: GenreSort; label: string }> = [
-  { value: "size", label: "Largest worlds" },
-  { value: "rating", label: "Highest rated" },
-  { value: "loved", label: "Most Loved" },
+const sortOptions: ReadonlyArray<{ value: GenreSort; label: string; reverseLabel?: string }> = [
+  { value: "size", label: "Largest worlds", reverseLabel: "Smallest worlds" },
+  { value: "rating", label: "Highest rated", reverseLabel: "Lowest rated" },
+  { value: "loved", label: "Most Loved", reverseLabel: "Least Loved" },
   { value: "recent", label: "Recently heard" },
   { value: "unexplored", label: "Unexplored" },
-  { value: "alphabetical", label: "A–Z" },
+  { value: "alphabetical", label: "A–Z", reverseLabel: "Z–A" },
+  { value: "random", label: "Random" },
 ];
+
+function GenreSortMenu({ sort, reversed, onChange }: {
+  sort: GenreSort;
+  reversed: boolean;
+  onChange: (sort: GenreSort, reversed: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const labelFor = (option: (typeof sortOptions)[number], flipped: boolean) => (flipped && option.reverseLabel) || option.label;
+  const active = sortOptions.find((option) => option.value === sort) ?? sortOptions[0];
+  const activeLabel = labelFor(active, reversed);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    rootRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+    const closeOnOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function choose(option: (typeof sortOptions)[number]) {
+    // Choosing the active, reversible sort again flips its direction.
+    onChange(option.value, option.value === sort && option.reverseLabel ? !reversed : false);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  return (
+    <div className="genre-index__sort" ref={rootRef}>
+      <button
+        type="button"
+        className="genre-index__sort-trigger"
+        ref={triggerRef}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Sort genres: ${activeLabel}`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{activeLabel}</span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="genre-index__sort-menu" role="menu" aria-label="Sort genres">
+          {sortOptions.map((option) => {
+            const isActive = option.value === sort;
+            return (
+              <button type="button" role="menuitemradio" aria-checked={isActive} onClick={() => choose(option)} key={option.value}>
+                {labelFor(option, isActive && reversed)}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const queueActions: ReadonlyArray<{
   mode: GenreQueueMode;
@@ -158,23 +231,67 @@ function GenreIndex({
   onSelectGenre: (genre: string) => void;
   onRetry: () => void;
 }) {
-  const [sort, setSort] = useState<GenreSort>("size");
-  const [visibility, setVisibility] = useState({ key: "", limit: PAGE_SIZE });
+  // Sort choice, revealed row count and scroll position survive leaving the Genres page.
+  const [saved] = useState(loadGenreIndexView);
+  const [sort, setSort] = useState<GenreSort>(saved.sort);
+  const [reversed, setReversed] = useState(saved.reversed);
+  const [shuffleSeed, setShuffleSeed] = useState(saved.seed);
+  const [visibility, setVisibility] = useState(() => ({
+    key: `${search.trim().toLocaleLowerCase()}:${saved.sort}:${saved.reversed}:${saved.seed}`,
+    limit: Math.max(PAGE_SIZE, saved.limit),
+  }));
+  const listRef = useRef<HTMLDivElement>(null);
+  const scrollTopRef = useRef(saved.scrollTop);
+  const scrollRestored = useRef(false);
+  const scrollSaveTimer = useRef<number | undefined>(undefined);
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase());
   const ordered = useMemo(() => {
     const matches = deferredSearch
       ? genres.filter((genre) => genre.name.toLocaleLowerCase().includes(deferredSearch))
       : genres;
-    return sortGenres(matches, sort);
-  }, [deferredSearch, genres, sort]);
-  const visibilityKey = `${deferredSearch}:${sort}`;
+    return sortGenres(matches, sort, reversed, shuffleSeed);
+  }, [deferredSearch, genres, sort, reversed, shuffleSeed]);
+  const visibilityKey = `${deferredSearch}:${sort}:${reversed}:${shuffleSeed}`;
   const visibleLimit = visibility.key === visibilityKey ? visibility.limit : PAGE_SIZE;
   const visible = ordered.slice(0, visibleLimit);
+  const latestView = useRef<GenreIndexView>(saved);
+  latestView.current = { sort, reversed, seed: shuffleSeed, limit: visibleLimit, scrollTop: scrollTopRef.current };
+  const listShown = state === "ready" && visible.length > 0;
+
+  useEffect(() => { saveGenreIndexView({ ...latestView.current, scrollTop: scrollTopRef.current }); }, [sort, reversed, shuffleSeed, visibleLimit]);
+  useEffect(() => () => {
+    window.clearTimeout(scrollSaveTimer.current);
+    saveGenreIndexView({ ...latestView.current, scrollTop: scrollTopRef.current });
+  }, []);
+  // Restore the scroll offset once, as soon as the list first has rows to scroll.
+  useLayoutEffect(() => {
+    if (!listShown || scrollRestored.current || !listRef.current) return;
+    scrollRestored.current = true;
+    listRef.current.scrollTop = saved.scrollTop;
+  }, [listShown, saved.scrollTop]);
+
+  function rememberScroll(element: HTMLDivElement) {
+    scrollTopRef.current = element.scrollTop;
+    window.clearTimeout(scrollSaveTimer.current);
+    scrollSaveTimer.current = window.setTimeout(() => saveGenreIndexView({ ...latestView.current, scrollTop: scrollTopRef.current }), 250);
+  }
+
   return (
     <aside className="genre-index" aria-label="Genre index">
       <header>
         <div><span>Genre index</span><strong>{formatCount(ordered.length)} worlds</strong></div>
-        <label className="genre-index__sort"><span className="sr-only">Sort genres</span><select value={sort} onChange={(event) => setSort(event.currentTarget.value as GenreSort)}>{sortOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+        <GenreSortMenu
+          sort={sort}
+          reversed={reversed}
+          onChange={(nextSort, nextReversed) => {
+            setSort(nextSort);
+            setReversed(nextReversed);
+            if (listRef.current) listRef.current.scrollTop = 0;
+            scrollTopRef.current = 0;
+            // Choosing Random (again) always rolls a fresh order.
+            if (nextSort === "random") setShuffleSeed(Math.floor(Math.random() * 0x7fffffff) + 1);
+          }}
+        />
       </header>
       <label className="genre-index__search">
         <Search aria-hidden="true" />
@@ -185,7 +302,7 @@ function GenreIndex({
         : state === "error" ? <ErrorState message={error} onRetry={onRetry} />
           : visible.length === 0 ? <div className="genre-atlas-feedback"><Search aria-hidden="true" /><strong>No genre matches “{search}”.</strong><button type="button" onClick={() => onSearchChange("")}>Clear search</button></div>
             : <>
-              <div className="genre-index__list">
+              <div className="genre-index__list" ref={listRef} onScroll={(event) => rememberScroll(event.currentTarget)}>
                 {visible.map((genre) => (
                   <button
                     type="button"

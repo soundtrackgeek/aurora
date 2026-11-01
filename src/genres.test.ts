@@ -5,6 +5,8 @@ import {
   loadGenreQueue,
   loadGenreRadioSession,
   saveGenreRadioSession,
+  loadGenreIndexView,
+  saveGenreIndexView,
   sortGenres,
   type GenreSummary,
 } from "./genres";
@@ -63,5 +65,23 @@ describe("genre atlas browser contract", () => {
       lastListenedAtMs: null,
     });
     expect(sortGenres([base("Known", 8, 30), base("Unheard", 0, 0)], "unexplored")[0].name).toBe("Unheard");
+    const trio = [base("B", 2, 5), base("A", 1, 9), base("C", 3, 1)];
+    expect(sortGenres(trio, "alphabetical", true).map((genre) => genre.name)).toEqual(["C", "B", "A"]);
+    expect(sortGenres(trio, "size", true).map((genre) => genre.name)).toEqual(sortGenres(trio, "size").map((genre) => genre.name).reverse());
+    expect(sortGenres(trio, "unexplored", true)).toEqual(sortGenres(trio, "unexplored"));
+    const shuffled = sortGenres(trio, "random", false, 7);
+    expect(shuffled.map((genre) => genre.name).sort()).toEqual(["A", "B", "C"]);
+    expect(sortGenres(trio, "random", false, 7)).toEqual(shuffled);
+  });
+});
+
+describe("genre index view persistence", () => {
+  it("round-trips the saved view and ignores corrupt data", () => {
+    window.localStorage.clear();
+    expect(loadGenreIndexView().sort).toBe("size");
+    saveGenreIndexView({ sort: "rating", reversed: true, seed: 9, limit: 240, scrollTop: 1234 });
+    expect(loadGenreIndexView()).toEqual({ sort: "rating", reversed: true, seed: 9, limit: 240, scrollTop: 1234 });
+    window.localStorage.setItem("aurora.genre-index-view.v1", JSON.stringify({ sort: "bogus" }));
+    expect(loadGenreIndexView().sort).toBe("size");
   });
 });

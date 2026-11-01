@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0] - 2026-11-01
+
+### Added
+- Genres: the genre index sort is now a menu like the Album view's Sort control. Choosing the active **Largest worlds**, **Highest rated**, **Most Loved** or **A–Z** option again reverses it (**Smallest worlds**, **Lowest rated**, **Least Loved**, **Z–A**).
+- Genres: new **Random** sort that shuffles the genre index; choose it again to reshuffle.
+- Genres: the genre index remembers your sort choice (including direction and shuffle order), how many rows you had revealed with **Show more**, and your scroll position, so it is exactly as you left it when you return to the page.
+
 ## [0.51.5] - 2026-11-01
 
 ### Fixed

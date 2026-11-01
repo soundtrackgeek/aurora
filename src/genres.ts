@@ -63,7 +63,7 @@ export interface GenreDetail {
   highlights: Track[];
 }
 
-export type GenreSort = "size" | "rating" | "loved" | "recent" | "unexplored" | "alphabetical";
+export type GenreSort = "size" | "rating" | "loved" | "recent" | "unexplored" | "alphabetical" | "random";
 export type GenreQueueMode = "radio" | "shuffle" | "loved" | "highestRated" | "rediscover" | "unrated";
 
 export interface GenreQueueRequest {
@@ -80,6 +80,7 @@ export interface GenreRadioSession {
 }
 
 const GENRE_RADIO_STORAGE_KEY = "aurora.genre-radio.v1";
+const GENRE_INDEX_VIEW_STORAGE_KEY = "aurora.genre-index-view.v1";
 
 function genreTracks(name: string): Track[] {
   return browserPreview.tracks.filter((track) => track.genre === name);
@@ -276,12 +277,76 @@ export function saveGenreRadioSession(session: GenreRadioSession | null): void {
   }
 }
 
+export interface GenreIndexView {
+  sort: GenreSort;
+  reversed: boolean;
+  seed: number;
+  /** How many rows were revealed with "Show more". */
+  limit: number;
+  scrollTop: number;
+}
+
+const GENRE_SORTS: readonly GenreSort[] = ["size", "rating", "loved", "recent", "unexplored", "alphabetical", "random"];
+export const DEFAULT_GENRE_INDEX_VIEW: GenreIndexView = { sort: "size", reversed: false, seed: 1, limit: 0, scrollTop: 0 };
+
+export function loadGenreIndexView(): GenreIndexView {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(GENRE_INDEX_VIEW_STORAGE_KEY) ?? "null") as Partial<GenreIndexView> | null;
+    if (!parsed || !GENRE_SORTS.includes(parsed.sort as GenreSort)) return DEFAULT_GENRE_INDEX_VIEW;
+    const whole = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback);
+    return {
+      sort: parsed.sort as GenreSort,
+      reversed: parsed.reversed === true,
+      seed: whole(parsed.seed, 1) || 1,
+      limit: whole(parsed.limit, 0),
+      scrollTop: whole(parsed.scrollTop, 0),
+    };
+  } catch {
+    return DEFAULT_GENRE_INDEX_VIEW;
+  }
+}
+
+export function saveGenreIndexView(view: GenreIndexView): void {
+  try {
+    window.localStorage.setItem(GENRE_INDEX_VIEW_STORAGE_KEY, JSON.stringify(view));
+  } catch {
+    // The index still works when the webview blocks device-local preferences.
+  }
+}
+
 function isGenreQueueMode(value: unknown): value is GenreQueueMode {
   return value === "radio" || value === "shuffle" || value === "loved"
     || value === "highestRated" || value === "rediscover" || value === "unrated";
 }
 
-export function sortGenres(genres: readonly GenreSummary[], sort: GenreSort): GenreSummary[] {
+/** Sorts that can be flipped by choosing the active option again. */
+export const REVERSIBLE_GENRE_SORTS: ReadonlySet<GenreSort> = new Set<GenreSort>(["size", "rating", "loved", "alphabetical"]);
+
+/** Deterministic shuffle so a "random" order stays put across re-renders until the seed changes. */
+function seededShuffle<T>(items: readonly T[], seed: number): T[] {
+  const result = [...items];
+  let state = (seed >>> 0) || 1;
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(next() * (index + 1));
+    [result[index], result[swap]] = [result[swap], result[index]];
+  }
+  return result;
+}
+
+export function sortGenres(genres: readonly GenreSummary[], sort: GenreSort, reversed = false, seed = 1): GenreSummary[] {
+  if (sort === "random") return seededShuffle(genres, seed);
+  const ordered = sortGenresForward(genres, sort);
+  return reversed && REVERSIBLE_GENRE_SORTS.has(sort) ? ordered.reverse() : ordered;
+}
+
+function sortGenresForward(genres: readonly GenreSummary[], sort: GenreSort): GenreSummary[] {
   return [...genres].sort((left, right) => {
     switch (sort) {
       case "rating":

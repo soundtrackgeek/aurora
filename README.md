@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.52.0** makes the Genres index sort reversible and adds a shuffle: pick the active **Largest worlds**, **Highest rated**, **Most Loved** or **A–Z** again to flip it (Smallest worlds, Lowest rated, Least Loved, Z–A), and choose **Random** to shuffle the genre list. The index also remembers your sort and scroll position when you leave and come back.
+
 Aurora **0.51.5** stops a hung audio engine from freezing tag saves: saving tags no longer waits on the playback engine, and Aurora now logs when a playback call is stuck behind another one for over 5 seconds.
 
 Aurora **0.51.4** fixes the Album Auto-Tagger **Apply & rename** failing with "The destination album folder already exists" when the target folder was only an empty leftover; empty folders are now reused.
