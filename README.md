@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.52.1** is a build fix: the 0.52.0 Genres sort changes (reversible, Random, remembered) now ship, after a lint error blocked the 0.52.0 release builds.
+Aurora **0.52.2** re-triggers the release build that 0.52.1 missed, so the Genres sort changes below finally ship. Aurora **0.52.1** was a build fix: the 0.52.0 Genres sort changes (reversible, Random, remembered) now ship, after a lint error blocked the 0.52.0 release builds.
 
 Aurora **0.52.0** makes the Genres index sort reversible and adds a shuffle: pick the active **Largest worlds**, **Highest rated**, **Most Loved** or **A–Z** again to flip it (Smallest worlds, Lowest rated, Least Loved, Z–A), and choose **Random** to shuffle the genre list. The index also remembers your sort and scroll position when you leave and come back.
 

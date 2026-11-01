@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.52.2] - 2026-11-01
+
+### Fixed
+- Release build: 0.52.1 never produced installers (the release run was cancelled and the follow-up push did not change the version). This release re-triggers the build and ships the 0.52.0 Genres changes (reversible, Random and remembered sort).
+
 ## [0.52.1] - 2026-11-01
 
 ### Fixed
