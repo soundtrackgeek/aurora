@@ -2,7 +2,8 @@
 //! artist page's chart overview.
 
 use super::track_peaks::{
-    credit_prefix, is_recording_variant, published_identity_keys, table_exists, table_has_column,
+    credit_prefix, is_recording_variant, published_chart_countries, published_country,
+    published_identity_keys, table_exists, table_has_column,
 };
 use super::*;
 use crate::chart_identity::{artist_group_key, main_performers, text_key as catalog_chart_key};
@@ -216,7 +217,7 @@ fn table_rows(
         .collect())
 }
 
-/// Published US weekly books (Hot 100, rock and airplay charts), one peak per chart.
+/// Published weekly books (US Hot 100, rock and airplay charts, UK music-paper charts), one peak per chart.
 fn published_rows(connection: &Connection, artist: &str) -> Result<Vec<(String, Row)>, String> {
     if !table_exists(connection, "published_chart_books")?
         || !table_exists(connection, "published_chart_entries")?
@@ -350,11 +351,13 @@ fn query(connection: &Connection, artist: &str) -> Result<ArtistChartHistory, St
             }
         }
         if kind == ChartKind::Singles {
+            let countries = published_chart_countries(connection)?;
             for (chart, row) in published_rows(connection, artist)? {
+                let country = published_country(&countries, &chart);
                 groups
                     .entry(group_key(row.printed.as_deref(), &row.title_key))
                     .or_default()
-                    .add(usize::MAX, &chart, "US", false, row);
+                    .add(usize::MAX, &chart, country, false, row);
             }
         }
         let items = finish(groups, kind);

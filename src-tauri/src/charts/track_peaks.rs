@@ -34,6 +34,45 @@ pub(super) fn published_identity_keys(connection: &Connection) -> Result<bool, S
         .map_err(|e| e.to_string())
 }
 
+/// Country of each published chart, from the yearly book it is printed in
+/// (`1985_uk_singles`, `1985_us_singles`). Chart names are unique across countries.
+/// Catalogs from before the UK books, or without a `book` column, read as US.
+pub(super) fn published_chart_countries(
+    connection: &Connection,
+) -> Result<std::collections::HashMap<String, &'static str>, String> {
+    if !table_has_column(connection, "published_chart_books", "book")? {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut statement = connection
+        .prepare("SELECT chart, MAX(book) FROM published_chart_books GROUP BY chart")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(chart, book)| {
+            (
+                chart,
+                if book.ends_with("_uk_singles") {
+                    "UK"
+                } else {
+                    "US"
+                },
+            )
+        })
+        .collect())
+}
+
+pub(super) fn published_country(
+    countries: &std::collections::HashMap<String, &'static str>,
+    chart: &str,
+) -> &'static str {
+    countries.get(chart).copied().unwrap_or("US")
+}
+
 /// Keys that start with "<performer> ": a range seek, since "!" follows " ".
 pub(super) fn credit_prefix(performer: &str) -> (String, String) {
     (format!("{performer} "), format!("{performer}!"))
@@ -415,6 +454,10 @@ fn query(
             }
             peaks[book_start..].sort_by_key(|peak| peak.label.to_lowercase());
         }
+        let countries = published_chart_countries(connection)?;
+        for peak in &mut peaks[book_start..] {
+            peak.country = published_country(&countries, &peak.label);
+        }
     }
     Ok(peaks)
 }
@@ -452,6 +495,40 @@ mod tests {
             ]
         );
         assert!(query(&connection, "Artist", "Missing").unwrap().is_empty());
+    }
+
+    #[test]
+    fn published_uk_books_are_tagged_uk_and_match_through_printed_version_tags() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE published_chart_books (id INTEGER, chart TEXT, book TEXT);
+            INSERT INTO published_chart_books VALUES (1,'Mainstream Rock Tracks','1990_us_singles'),(2,'NME Singles Chart','1985_uk_singles'),(3,'Melody Maker Singles Chart','1985_uk_singles');
+            CREATE TABLE published_chart_entries (book_id INTEGER, artist TEXT, title TEXT, position INTEGER, peak_position TEXT);
+            INSERT INTO published_chart_entries VALUES
+              (1,'Artist','Song',30,''),
+              (2,'Artist','Song (Radio Edit)',12,'9'),
+              (3,'Artist','Song',4,'');").unwrap();
+        let peaks = query(&connection, "Artist", "Song").unwrap();
+        assert_eq!(
+            peaks
+                .iter()
+                .map(|p| (p.label.as_str(), p.peak, p.country))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Mainstream Rock Tracks", 30, "US"),
+                ("Melody Maker Singles Chart", 4, "UK"),
+            ]
+        );
+        // The subtitled print is found through the unkeyed exact lookup only when it matches;
+        // a catalog without the yearly book column keeps every published chart US.
+        connection
+            .execute_batch("ALTER TABLE published_chart_books RENAME COLUMN book TO printed_book;")
+            .unwrap();
+        assert!(
+            query(&connection, "Artist", "Song")
+                .unwrap()
+                .iter()
+                .all(|p| p.country == "US")
+        );
     }
 
     #[test]

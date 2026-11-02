@@ -24,7 +24,7 @@ fn require_archive(conn: &Connection) -> Result<(), String> {
 
 pub(super) fn series(conn: &Connection) -> Result<Vec<PublishedSeries>, String> {
     require_archive(conn)?;
-    let mut statement = conn.prepare("SELECT chart, CAST(substr(book, 1, 4) AS INTEGER) FROM published_chart_books WHERE row_count > 0 ORDER BY chart COLLATE NOCASE, book").map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare("SELECT chart, CAST(substr(book, 1, 4) AS INTEGER) FROM published_chart_books WHERE row_count > 0 AND substr(book, 5) = '_us_singles' ORDER BY chart COLLATE NOCASE, book").map_err(|e| e.to_string())?;
     let mut grouped = BTreeMap::<String, Vec<i32>>::new();
     for row in statement
         .query_map([], |row| {
@@ -573,6 +573,24 @@ mod tests {
             (3,'Song (Live)','Artist','Artist','artist-album',80,'',''),
             (4,'Song','Other Artist','Other Artist','remix',80,'','');").unwrap();
         conn
+    }
+
+    #[test]
+    fn weekly_browser_series_list_only_us_books_until_uk_weeks_are_supported() {
+        let conn = fixture();
+        conn.execute_batch(
+            "INSERT INTO published_chart_books VALUES (3,'NME Singles Chart','1985_uk_singles',9);",
+        )
+        .unwrap();
+        let charts = series(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.chart)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            charts,
+            vec!["Country Singles Chart", "Mainstream Rock Tracks"]
+        );
     }
 
     #[test]

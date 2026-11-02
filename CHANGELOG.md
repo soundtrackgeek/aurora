@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.54.1] - 2026-11-02
+
+### Fixed
+- Music Library 0.212.0 adds British charts (NME and Melody Maker singles charts, Disc, Record Mirror and others) to the shared chart archive. Aurora now tags those charts as **UK**, not US, in an artist's chart history and in a track's chart peaks, so a song added from Inbox shows its British chart runs as soon as Music Library has prepared them. The US weekly browser in Charts keeps listing only the US charts, because it cannot open UK weeks yet.
+
 ## [0.54.0] - 2026-11-02
 
 ### Added

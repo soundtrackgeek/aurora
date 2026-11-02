@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.54.0** adds a `single:` search field for official singles. `single:1` finds albums with at least one single (and, in Songs, lists the singles themselves), `single:3..` albums with three or more, `single:2..5` two through five, and `single:..3` at most three. It uses the data Music Library **0.210.0 or newer** collects under **Settings → Providers → Album singles**. See the [search guide](docs/search.md).
+Aurora **0.54.1** labels the British charts that Music Library 0.212.0 adds to the shared chart archive as UK in artist chart history and track chart peaks, and still shows only US charts in the weekly browser. Aurora **0.54.0** adds a `single:` search field for official singles. `single:1` finds albums with at least one single (and, in Songs, lists the singles themselves), `single:3..` albums with three or more, `single:2..5` two through five, and `single:..3` at most three. It uses the data Music Library **0.210.0 or newer** collects under **Settings → Providers → Album singles**. See the [search guide](docs/search.md).
 
 Aurora **0.53.1** is a build fix: the 0.53.0 release stopped at the Rust formatting check, so the 💿 singles badge below now ships.
 
