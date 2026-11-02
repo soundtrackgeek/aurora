@@ -464,6 +464,30 @@ describe("DeepExplorer", () => {
     expect(albumTracks.getByRole("row", { name: /Third/ })).not.toHaveTextContent("🔥");
   });
 
+  it("marks tracks that were officially released as singles with a disc and the single's details", () => {
+    const singleTracks = [
+      { ...tracks[0], id: "track-1", trackKey: "file:track-1", title: "First", officialSingle: { title: "First (Radio Edit)", year: 1991 } },
+      { ...tracks[0], id: "track-2", trackKey: "file:track-2", title: "Second", officialSingle: { title: "Second", year: null } },
+      { ...tracks[0], id: "track-3", trackKey: "file:track-3", title: "Third", officialSingle: null },
+    ];
+    render(
+      <DeepExplorer
+        {...explorerProps({
+          view: "albums",
+          selectedAlbumId: albums[0].id,
+          albumTracks: singleTracks,
+          pageInfo: { loaded: 1, hasMore: false, isLoadingMore: false },
+        })}
+      />,
+    );
+
+    const albumTracks = within(screen.getByRole("grid", { name: "Album tracks" }));
+    expect(albumTracks.getAllByRole("img", { name: /Official single/ })).toHaveLength(2);
+    expect(albumTracks.getByRole("img", { name: "Official single: First (Radio Edit) (1991)" })).toHaveTextContent("💿");
+    expect(albumTracks.getByRole("img", { name: "Official single: Second" })).toBeInTheDocument();
+    expect(albumTracks.getByRole("row", { name: /Third/ })).not.toHaveTextContent("💿");
+  });
+
   it("shows two-decimal Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer

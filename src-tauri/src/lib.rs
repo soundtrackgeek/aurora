@@ -46,6 +46,7 @@ mod saved_views;
 mod shortcuts;
 mod single_instance;
 mod snapshot_io;
+mod singles;
 mod sonic;
 mod sonic_album_sides;
 mod sonic_albums;

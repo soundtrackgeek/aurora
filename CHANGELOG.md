@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.53.0] - 2026-11-02
+
+### Added
+- Album pages now mark tracks that were officially released as singles with a 💿 after the title (next to any chart position and 🔥). Hover it to see the single's title and year. The data comes from Music Library 0.210.0 or newer (**Settings → Providers → Album singles**), which finds singles on MusicBrainz and saves them in the shared catalog; Aurora only reads them and shows confirmed ones. With an older Music Library, or before you run that step, no 💿 appears. Live opens and Last.fm refreshes keep the badges.
+
 ## [0.52.3] - 2026-11-01
 
 ### Fixed

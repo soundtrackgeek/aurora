@@ -56,6 +56,13 @@ export interface Track {
   discNumber?: number | null;
   discTotal?: number | null;
   lastFmAlbumRank?: number | null;
+  /** Confirmed official single this track was released as (from Music Library's MusicBrainz data). */
+  officialSingle?: OfficialSingle | null;
+}
+
+export interface OfficialSingle {
+  title: string;
+  year: number | null;
 }
 
 export function displayTrackArtist(track: Track): string {
@@ -371,6 +378,8 @@ export interface AlbumDetail {
 
 export interface AlbumPopularity {
   tracks: Array<{ trackKey: string; rank: number }>;
+  /** Confirmed singles from the shared catalog; absent from older payloads. */
+  singles?: Array<{ trackKey: string; title: string; year: number | null }>;
 }
 
 export interface TrackPopularity {
@@ -380,9 +389,22 @@ export interface TrackPopularity {
   playCount: number | null;
 }
 
+/** Tooltip and accessible name for the 💿 badge. */
+export function officialSingleLabel(single: OfficialSingle): string {
+  return `Official single: ${single.title}${single.year ? ` (${single.year})` : ""}`;
+}
+
 export function applyAlbumPopularity(tracks: readonly Track[], popularity: AlbumPopularity): Track[] {
   const ranks = new Map(popularity.tracks.map((track) => [track.trackKey, track.rank]));
-  return tracks.map((track) => ({ ...track, lastFmAlbumRank: ranks.get(track.trackKey) ?? null }));
+  const singles = new Map((popularity.singles ?? []).map((single) => [single.trackKey, single]));
+  return tracks.map((track) => {
+    const single = singles.get(track.trackKey);
+    return {
+      ...track,
+      lastFmAlbumRank: ranks.get(track.trackKey) ?? null,
+      officialSingle: single ? { title: single.title, year: single.year } : null,
+    };
+  });
 }
 
 export interface TrackDeletionResult {

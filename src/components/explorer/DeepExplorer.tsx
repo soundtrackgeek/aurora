@@ -35,7 +35,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { displayTrackArtist, formatCount, formatDuration, type Artist, type Track, type YearBasis } from "../../library";
+import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -808,6 +808,16 @@ function TrackTable({
                       title={`#${track.lastFmAlbumRank} on Last.fm`}
                     >
                       🔥
+                    </span>
+                  ) : null}
+                  {compact && track.officialSingle ? (
+                    <span
+                      className="deep-explorer-track-single"
+                      role="img"
+                      aria-label={officialSingleLabel(track.officialSingle)}
+                      title={officialSingleLabel(track.officialSingle)}
+                    >
+                      💿
                     </span>
                   ) : null}
                   {compact ? <small className="deep-explorer-track-artist">[{displayTrackArtist(track)}]</small> : null}

@@ -40,6 +40,8 @@ const UNAVAILABLE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AlbumPopularity {
     pub(crate) tracks: Vec<AlbumPopularTrack>,
+    /// Official singles from Music Library's shared catalog (confirmed only).
+    pub(crate) singles: Vec<crate::singles::AlbumSingle>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -232,6 +234,7 @@ fn rank_album(
             .then_with(|| left.3.cmp(&right.3))
     });
     AlbumPopularity {
+        singles: Vec::new(),
         tracks: ranked
             .into_iter()
             .take(3)
@@ -249,7 +252,18 @@ pub(crate) fn cached_album_popularity(
     tracks: &[crate::catalog::TrackSummary],
     store: &crate::state_store::StateStore,
 ) -> AlbumPopularity {
-    rank_album(tracks, &combined_records(artist, store))
+    with_singles(artist, tracks, rank_album(tracks, &combined_records(artist, store)))
+}
+
+/// Singles come from the catalog, not Last.fm, but ride on the same album
+/// payload so every refresh path (cached and live) keeps them.
+fn with_singles(
+    artist: &str,
+    tracks: &[crate::catalog::TrackSummary],
+    mut popularity: AlbumPopularity,
+) -> AlbumPopularity {
+    popularity.singles = crate::singles::album_singles(artist, tracks);
+    popularity
 }
 
 fn json_count(value: &serde_json::Value, key: &str) -> Option<i64> {
@@ -410,7 +424,7 @@ pub(crate) fn refresh_album_popularity(
         }
         std::thread::sleep(Duration::from_millis(210));
     }
-    rank_album(tracks, &combined_records(artist, store))
+    with_singles(artist, tracks, rank_album(tracks, &combined_records(artist, store)))
 }
 
 #[derive(Clone, Debug, Deserialize)]
