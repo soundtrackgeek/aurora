@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.53.1** is a build fix: the 0.53.0 release stopped at the Rust formatting check, so the 💿 singles badge below now ships.
+
 Aurora **0.53.0** marks album tracks that were officially released as singles with a 💿 next to the title; hover it for the single's title and year. Aurora reads the result from the shared catalog, so update Music Library to **0.210.0 or newer** and run **Settings → Providers → Album singles** there. Only singles MusicBrainz confirms are shown; coverage is incomplete, so a missing 💿 does not prove a track was never a single.
 
 Aurora **0.52.3** fixes the Genres index sort button, whose label (for example "Largest worlds") overflowed the button.

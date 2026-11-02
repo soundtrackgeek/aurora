@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.53.1] - 2026-11-02
+
+### Fixed
+- Release build: the 0.53.0 build stopped at the Rust formatting check because the new singles code was not formatted. 0.53.1 formats it, so the 💿 singles badge from 0.53.0 now ships.
+
 ## [0.53.0] - 2026-11-02
 
 ### Added

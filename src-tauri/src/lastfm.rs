@@ -252,7 +252,11 @@ pub(crate) fn cached_album_popularity(
     tracks: &[crate::catalog::TrackSummary],
     store: &crate::state_store::StateStore,
 ) -> AlbumPopularity {
-    with_singles(artist, tracks, rank_album(tracks, &combined_records(artist, store)))
+    with_singles(
+        artist,
+        tracks,
+        rank_album(tracks, &combined_records(artist, store)),
+    )
 }
 
 /// Singles come from the catalog, not Last.fm, but ride on the same album
@@ -424,7 +428,11 @@ pub(crate) fn refresh_album_popularity(
         }
         std::thread::sleep(Duration::from_millis(210));
     }
-    with_singles(artist, tracks, rank_album(tracks, &combined_records(artist, store)))
+    with_singles(
+        artist,
+        tracks,
+        rank_album(tracks, &combined_records(artist, store)),
+    )
 }
 
 #[derive(Clone, Debug, Deserialize)]

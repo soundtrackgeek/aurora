@@ -136,18 +136,28 @@ mod tests {
         ];
         assert_eq!(
             singles_from_connection(&catalog(), " Bob Seger ", &tracks),
-            vec![AlbumSingle { track_key: "a".into(), title: "Take a Chance".into(), year: Some(1991) }]
+            vec![AlbumSingle {
+                track_key: "a".into(),
+                title: "Take a Chance".into(),
+                year: Some(1991)
+            }]
         );
     }
 
     #[test]
     fn an_older_catalog_without_the_table_means_no_singles() {
         let connection = Connection::open_in_memory().expect("memory database");
-        assert!(singles_from_connection(&connection, "Bob Seger", &[track("a", "Take A Chance")]).is_empty());
+        assert!(
+            singles_from_connection(&connection, "Bob Seger", &[track("a", "Take A Chance")])
+                .is_empty()
+        );
     }
 
     #[test]
     fn another_artists_single_never_matches() {
-        assert!(singles_from_connection(&catalog(), "Someone Else", &[track("a", "Take A Chance")]).is_empty());
+        assert!(
+            singles_from_connection(&catalog(), "Someone Else", &[track("a", "Take A Chance")])
+                .is_empty()
+        );
     }
 }
