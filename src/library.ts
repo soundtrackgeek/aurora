@@ -569,7 +569,7 @@ function matchesArtistName(name: string, artist: string): boolean {
 }
 
 function usesAdvancedLibrarySearch(search?: string): boolean {
-  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love|sonic)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
+  return /(?:^|,)\s*-|(?:^|,)\s*(?:artist|aartist|album|genre|year|ryear|publisher|country|title|cr|love|single|singles|sonic)\s*[:=]|(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|"/u.test(search ?? "");
 }
 
 function compareText(left: string, right: string, descending = false): number {
@@ -781,7 +781,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "sonic";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "sonic";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -801,7 +801,7 @@ interface LibrarySearchGroup {
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
 const librarySearchFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "sonic",
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "sonic",
 ]);
 
 const scoreGenreGroup = new Set([
@@ -906,7 +906,7 @@ function parseLibrarySearchYearRange(
 
 function parseLibrarySearchNumberRange(
   value: string,
-  field: "cr" | "love",
+  field: "cr" | "love" | "single",
 ): { numberFrom: number | null; numberTo: number | null } {
   const parts = value.trim().split("..");
   if (parts.length > 2) {
@@ -914,7 +914,7 @@ function parseLibrarySearchNumberRange(
   }
   const invalid = field === "cr"
     ? "cr bounds must be whole percentages from 0 through 100."
-    : "love bounds must be non-negative whole track counts.";
+    : `${field} bounds must be non-negative whole track counts.`;
   const parseBound = (bound: string): number | null => {
     const trimmed = bound.trim();
     if (!trimmed) return null;
@@ -931,7 +931,7 @@ function parseLibrarySearchNumberRange(
     if (field === "cr") return { numberFrom: 0, numberTo: number };
     if (number === 0) return { numberFrom: 0, numberTo: 0 };
     if (number === 1) return { numberFrom: 1, numberTo: null };
-    throw new Error("love must be 0, 1, or an inclusive range such as love:1..3.");
+    throw new Error(`${field} must be 0, 1, or an inclusive range such as ${field}:1..3.`);
   }
   const numberFrom = parseBound(parts[0]);
   const numberTo = parseBound(parts[1]);
@@ -974,7 +974,7 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
           ? colonSeparator
           : Math.min(colonSeparator, equalsSeparator);
       const candidateField = separator >= 0
-        ? raw.slice(0, separator).trim().toLocaleLowerCase()
+        ? raw.slice(0, separator).trim().toLocaleLowerCase().replace(/^singles$/u, "single")
         : "";
       const explicitField = librarySearchFields.has(candidateField as LibrarySearchField);
       const field: LibrarySearchField = explicitField
@@ -990,7 +990,7 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       let numberTo: number | null = null;
       if (field === "year" || field === "ryear") {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
-      } else if (field === "cr" || field === "love") {
+      } else if (field === "cr" || field === "love" || field === "single") {
         ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
       } else if (field === "sonic") {
         if (!["yes", "no"].includes((exact ?? value).toLowerCase())) throw new Error("Use sonic:yes or sonic:no to filter audio analysis coverage.");
@@ -1048,6 +1048,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "title": return [track.title];
     case "cr":
     case "sonic":
+    case "single":
     case "love": return [];
     case "year":
     case "ryear": return [];
@@ -1099,6 +1100,12 @@ function matchesLibrarySearchAlternative(
     const completeness = album.ratedTracks / album.totalTracks * 100;
     return (alternative.numberFrom === null || completeness >= alternative.numberFrom)
       && (alternative.numberTo === null || completeness <= alternative.numberTo);
+  }
+  if (alternative.field === "single") {
+    // Like the desktop Songs search: a track is a single (1) or it is not (0).
+    const singles = track.officialSingle ? 1 : 0;
+    return (alternative.numberFrom === null || singles >= alternative.numberFrom)
+      && (alternative.numberTo === null || singles <= alternative.numberTo);
   }
   if (alternative.field === "love") {
     const album = track.albumId ? albumStats.get(track.albumId) : undefined;

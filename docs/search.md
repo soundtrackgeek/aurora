@@ -30,7 +30,7 @@ On the local 1.1-million-track / 72,600-album catalog, the October 6 benchmark f
 
 ## Catalog search: Songs, Albums, and Artists
 
-An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through `country:`. Album rating completeness and album Love status are available through `cr:` and `love:`.
+An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through `country:`. Album rating completeness and album Love status are available through `cr:` and `love:`, and official singles through `single:`.
 
 Every named catalog field accepts either `:` or `=` as its separator. This guide uses `:` as Aurora's conventional form, but `artist:cher` and `artist=cher`, or `cr:80` and `cr=80`, are equivalent.
 
@@ -60,6 +60,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `title:` | Track title | `title:"Running Up That Hill"` |
 | `cr:` | Album rating-completeness percentage or range | `cr:50..80` |
 | `love:` | Loved-track count or range for the album | `love:1..3` |
+| `single:` | Official-single count or range: per album in Albums and Artists, per track in Songs (`singles:` is an alias) | `single:2..5` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
@@ -71,6 +72,8 @@ Artist links open a fresh Albums search such as `aartist:"Bunny X"`, replacing t
 `cr:80` includes albums from 0% through 80% rating completeness, preserving the original maximum shorthand. `cr:50..80` includes albums from 50% through 80%, inclusive. Aurora calculates rated tracks divided by total tracks from the Music Library catalog plus Aurora's verified pending rating changes and queued missing-track deletions, so search results do not wait for Music Library synchronization. Bounds must be whole percentages from 0 through 100.
 
 `love:1` includes an album when at least one of its tracks is marked Love, preserving the original shorthand. `love:0` includes albums with no loved tracks. Use a range to filter the album's loved-track count: `love:1..3` means one through three loved tracks, inclusive. These are album-wide filters even though they use the same conventional separator as text fields.
+
+`single:` filters by official singles, using the singles Music Library finds from MusicBrainz (**Settings → Providers → Album singles** in Music Library 0.210.0 or newer). In **Albums** and **Artists** it counts the singles on each album: `single:1` means at least one single, `single:0` means none, `single:3..` means three or more, `single:2..5` means two through five, and `single:..3` means at most three. In **Songs** it checks each track, so `single:1` lists the singles themselves and `single:0` every other song; combine it with other fields, for example `aartist:"Bob Seger" AND single:1`. `singles:` is accepted as an alias and `=` may replace `:`. Only singles MusicBrainz confirms are counted, and MusicBrainz coverage is incomplete, so a missing single is not proof that a song was never released as one. A catalog without Music Library's singles data matches nothing for `single:1` and everything for `single:0`.
 
 There are no `rating:` or `unrated:` search fields. Those remain Aurora collection filters and handoffs rather than query-language keywords.
 
@@ -215,20 +218,23 @@ Year alternatives inherit the field:
 year:1985..1987 OR 1990..1992
 ```
 
-### Completeness and Love ranges
+### Completeness, Love and single ranges
 
-`cr:` and `love:` use the same inclusive `..` notation as years:
+`cr:`, `love:` and `single:` use the same inclusive `..` notation as years:
 
 ```text
 cr:50..80
 cr:80..
 love:1..3
 love:2..
+single:3..
+single:2..5
+single:..3
 ```
 
 Either range boundary can be omitted. `cr:..80` means at most 80% complete, while `cr:80..` means at least 80%. `love:..3` means at most three loved tracks, while `love:2..` means at least two. A range must contain at least one boundary and its starting value cannot exceed its ending value.
 
-The single-value shorthands keep their established meanings: `cr:80` is equivalent to `cr:0..80`, `love:1` means one or more loved tracks, and `love:0` means no loved tracks. To require an exact positive loved-track count, repeat it as both bounds, such as `love:3..3`.
+The single-value shorthands keep their established meanings: `cr:80` is equivalent to `cr:0..80`, `love:1` means one or more loved tracks, and `love:0` means no loved tracks. To require an exact positive loved-track count, repeat it as both bounds, such as `love:3..3`. `single:` follows the same rules: `single:1` means one or more, `single:0` means none, and an exact count such as `single:3..3` repeats the bound.
 
 ### The Scores umbrella
 
@@ -264,12 +270,17 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | Albums no more than 80% rated | `cr:80` |
 | Albums from 50% through 80% rated | `cr:50..80` |
 | Incomplete albums with one to three loved tracks | `cr:99,love:1..3` |
+| Albums with at least one official single | `single:1` |
+| Albums with three or more singles | `single:3..` |
+| Albums with two to five singles | `single:2..5` |
+| Albums with at most three singles | `single:..3` |
+| Only the singles from one artist, in Songs | `aartist:"Bob Seger" AND single:1` |
 
 ### Differences between Songs, Albums, and Artists
 
-- **Songs** returns matching tracks. An album-wide `cr:` or `love:` clause returns every matching track from qualifying albums.
-- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:` and `love:` evaluate the album itself.
-- **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks, including album-wide `cr:` and `love:` clauses.
+- **Songs** returns matching tracks. An album-wide `cr:` clause returns every matching track from qualifying albums; `love:` and `single:` check each track itself.
+- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:`, `love:` and `single:` evaluate the album itself.
+- **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks, including album-wide `cr:`, `love:` and `single:` clauses.
 
 The same query can therefore produce different result counts in each view.
 
@@ -314,6 +325,7 @@ The Genre Atlas also repeats its genre-name search inside the atlas for convenie
 - If an artist result looks too broad, use `aartist:` instead of unscoped text; use `artist:` only when you mean per-track Display Artist.
 - If a year looks wrong, confirm whether you need Original Year (`year:`) or Release Year (`ryear:`).
 - If `cr` or `love` is rejected, use whole, non-negative bounds in ascending order. Completeness bounds are limited to 0–100; a single `love` value remains limited to the `0` and `1` shorthands, while positive exact counts use a repeated range such as `love:3..3`. Either `:` or `=` is accepted.
+- If `single:` is rejected, use `0`, `1`, or a range with whole, non-negative bounds in ascending order, such as `single:2..5`; an exact count repeats the bound (`single:3..3`). If it finds nothing, update Music Library to 0.210.0 or newer and run **Settings → Providers → Album singles** so the catalog has singles to search.
 - If `genre:scores` is too broad, search one exact genre such as `genre:"video game"`.
 - Catalog queries are limited to 256 characters, 32 search words, and 32 alternatives. Aurora reports malformed quotes, operators, fields without values, and invalid year ranges instead of silently changing the query.
 

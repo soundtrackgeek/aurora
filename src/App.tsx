@@ -200,7 +200,7 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   History: "history",
 };
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), love (album loved-track count), and sonic (saved audio analysis: yes/no). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, and love:1..3; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 (one or more), and love:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
+const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), love (album loved-track count), single (official singles: per album in Albums, per track in Songs), and sonic (saved audio analysis: yes/no). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, love:1..3, and single:2..5; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 and single:1 (one or more), and love:0 and single:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 function historyDateLabel(timestamp: number | null): string {
   if (timestamp === null) return "Never";
   return new Intl.DateTimeFormat(undefined, {
@@ -1377,7 +1377,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.53.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.54.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.54.0] - 2026-11-02
+
+### Added
+- Search: new `single:` field for official singles. In **Albums** (and Artists) it counts the singles on each album, so `single:1` finds albums with at least one single, `single:3..` three or more, `single:2..5` two through five, `single:..3` at most three, and `single:0` albums with none. In **Songs** it checks each track, so `single:1` lists the singles themselves and `single:0` the rest. `singles:` works as an alias, and `=` can replace `:`. As with `love:`, a lone number must be `0` or `1`; use a range such as `single:3..3` for an exact count. It needs Music Library 0.210.0 or newer with **Settings → Providers → Album singles** run; only confirmed singles count, and an older catalog simply finds nothing. The in-app search help and the [search guide](docs/search.md) describe it.
+
 ## [0.53.1] - 2026-11-02
 
 ### Fixed

@@ -169,6 +169,7 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         .map_err(|error| format!("Could not open the music catalog read-only: {error}"))?;
     register_catalog_functions(&connection)?;
     crate::sonic::prepare_search(&connection, path)?;
+    prepare_single_keys(&connection)?;
     connection
         .busy_timeout(Duration::from_secs(2))
         .map_err(|error| format!("Could not configure the read-only catalog: {error}"))?;
@@ -176,6 +177,29 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         .pragma_update(None, "query_only", true)
         .map_err(|error| format!("Could not enforce read-only catalog access: {error}"))?;
     Ok(connection)
+}
+
+/// Exposes Music Library's confirmed singles as `temp.aurora_single_keys`. An
+/// older catalog has no `track_singles` table, so the view is empty and the
+/// `single:` search finds nothing instead of failing.
+pub(crate) fn prepare_single_keys(connection: &Connection) -> Result<(), String> {
+    let present: bool = connection
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'track_singles')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Could not inspect the singles table: {error}"))?;
+    let source = if present {
+        "SELECT artist_key, track_key FROM main.track_singles WHERE confidence = 'confirmed'"
+    } else {
+        "SELECT NULL AS artist_key, NULL AS track_key WHERE 0"
+    };
+    connection
+        .execute_batch(&format!(
+            "DROP VIEW IF EXISTS temp.aurora_single_keys; CREATE TEMP VIEW aurora_single_keys AS {source};"
+        ))
+        .map_err(|error| format!("Could not prepare the singles search: {error}"))
 }
 
 pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), String> {
@@ -857,6 +881,7 @@ enum CatalogSearchField {
     Title,
     Completeness,
     Love,
+    Single,
     Sonic,
     Extended(ExtendedSearchField),
 }
@@ -870,6 +895,7 @@ impl CatalogSearchField {
             | Self::Country
             | Self::Completeness
             | Self::Love
+            | Self::Single
             | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
@@ -889,6 +915,7 @@ impl CatalogSearchField {
             | Self::Country
             | Self::Completeness
             | Self::Love
+            | Self::Single
             | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
@@ -926,6 +953,12 @@ enum CatalogSearchMatch {
         to: Option<u32>,
     },
     LovedTracksRange {
+        from: Option<u32>,
+        to: Option<u32>,
+    },
+    /// Official singles (Music Library's MusicBrainz data): per album in
+    /// Albums and Artists, per track in Songs.
+    SinglesRange {
         from: Option<u32>,
         to: Option<u32>,
     },
@@ -970,6 +1003,7 @@ impl CatalogSearch {
             | CatalogSearchMatch::YearRange { .. }
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
+            | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
             CatalogSearchMatch::Analyzed(_) => None,
         }
@@ -1097,6 +1131,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "cr" => Some(CatalogSearchField::Completeness),
         "sonic" => Some(CatalogSearchField::Sonic),
         "love" => Some(CatalogSearchField::Love),
+        "single" | "singles" => Some(CatalogSearchField::Single),
         _ => None,
     }
 }
@@ -1279,20 +1314,29 @@ fn extended_search_predicate(
     })
 }
 
+fn search_number_label(field: CatalogSearchField) -> &'static str {
+    match field {
+        CatalogSearchField::Completeness => "cr",
+        CatalogSearchField::Single => "single",
+        _ => "love",
+    }
+}
+
 fn parse_search_number(value: &str, field: CatalogSearchField) -> Result<u32, String> {
-    let invalid = if field == CatalogSearchField::Completeness {
-        "cr bounds must be whole percentages from 0 through 100."
-    } else {
-        "love bounds must be non-negative whole track counts."
+    let invalid = match field {
+        CatalogSearchField::Completeness => {
+            "cr bounds must be whole percentages from 0 through 100.".to_owned()
+        }
+        field => format!(
+            "{} bounds must be non-negative whole track counts.",
+            search_number_label(field)
+        ),
     };
-    let parsed = value
-        .trim()
-        .parse::<u32>()
-        .map_err(|_| invalid.to_owned())?;
+    let parsed = value.trim().parse::<u32>().map_err(|_| invalid.clone())?;
     if field != CatalogSearchField::Completeness || parsed <= 100 {
         Ok(parsed)
     } else {
-        Err(invalid.to_owned())
+        Err(invalid)
     }
 }
 
@@ -1301,31 +1345,26 @@ fn parse_search_number_range(
     field: CatalogSearchField,
 ) -> Result<(Option<u32>, Option<u32>), String> {
     let value = value.trim();
+    let field_name = search_number_label(field);
     let Some((raw_from, raw_to)) = value.split_once("..") else {
         let number = parse_search_number(value, field)?;
         return match field {
             CatalogSearchField::Completeness => Ok((Some(0), Some(number))),
-            CatalogSearchField::Love if number == 0 => Ok((Some(0), Some(0))),
-            CatalogSearchField::Love if number == 1 => Ok((Some(1), None)),
-            CatalogSearchField::Love => {
-                Err("love must be 0, 1, or an inclusive range such as love:1..3.".to_owned())
+            CatalogSearchField::Love | CatalogSearchField::Single if number == 0 => {
+                Ok((Some(0), Some(0)))
             }
+            CatalogSearchField::Love | CatalogSearchField::Single if number == 1 => {
+                Ok((Some(1), None))
+            }
+            CatalogSearchField::Love | CatalogSearchField::Single => Err(format!(
+                "{field_name} must be 0, 1, or an inclusive range such as {field_name}:1..3."
+            )),
             _ => unreachable!("numeric range uses an album metric field"),
         };
     };
     if raw_to.contains("..") {
         return Err(format!(
-            "{} range must use one '..', for example {}:1..3.",
-            if field == CatalogSearchField::Completeness {
-                "cr"
-            } else {
-                "love"
-            },
-            if field == CatalogSearchField::Completeness {
-                "cr"
-            } else {
-                "love"
-            }
+            "{field_name} range must use one '..', for example {field_name}:1..3."
         ));
     }
     let from = (!raw_from.trim().is_empty())
@@ -1334,11 +1373,6 @@ fn parse_search_number_range(
     let to = (!raw_to.trim().is_empty())
         .then(|| parse_search_number(raw_to, field))
         .transpose()?;
-    let field_name = if field == CatalogSearchField::Completeness {
-        "cr"
-    } else {
-        "love"
-    };
     if from.is_none() && to.is_none() {
         return Err(format!(
             "{field_name} range needs a starting or ending number."
@@ -1542,6 +1576,11 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                         let (from, to) =
                             parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
                         CatalogSearchMatch::LovedTracksRange { from, to }
+                    }
+                    CatalogSearchField::Single => {
+                        let (from, to) =
+                            parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
+                        CatalogSearchMatch::SinglesRange { from, to }
                     }
                     CatalogSearchField::Sonic => {
                         match exact
@@ -1767,6 +1806,7 @@ fn non_prefix_predicate(
         }
         CatalogSearchMatch::CompletenessRange { .. }
         | CatalogSearchMatch::LovedTracksRange { .. }
+        | CatalogSearchMatch::SinglesRange { .. }
         | CatalogSearchMatch::Extended { .. } => None,
     }
 }
@@ -1795,8 +1835,59 @@ fn album_level_predicate(
             }
             Some(format!("({})", predicates.join(" AND ")))
         }
+        CatalogSearchMatch::SinglesRange { from, to } => {
+            let singles = format!(
+                "(SELECT COUNT(*) FROM tracks AS single_track WHERE single_track.album_id = {alias}.id AND {})",
+                track_is_single_sql("single_track")
+            );
+            let mut predicates = Vec::new();
+            if let Some(from) = from {
+                params.push(Value::Integer(i64::from(*from)));
+                predicates.push(format!("{singles} >= ?"));
+            }
+            if let Some(to) = to {
+                params.push(Value::Integer(i64::from(*to)));
+                predicates.push(format!("{singles} <= ?"));
+            }
+            Some(format!("({})", predicates.join(" AND ")))
+        }
         _ => None,
     }
+}
+
+/// True for tracks Music Library confirmed as official singles. `track_singles`
+/// is keyed like the Last.fm cache (`lower(trim(album artist))`, `lower(trim(title))`);
+/// `temp.aurora_single_keys` is empty on a catalog that predates the table.
+fn track_is_single_sql(track_alias: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM temp.aurora_single_keys AS single_key \
+         WHERE single_key.artist_key = lower(trim({track_alias}.album_artist_display)) \
+         AND single_key.track_key = lower(trim({track_alias}.title)))"
+    )
+}
+
+/// In track searches, `single:` checks the track itself: a single counts as 1
+/// and any other track as 0, so `single:1` lists the singles.
+fn track_single_range_predicate(
+    track_alias: &str,
+    from: Option<u32>,
+    to: Option<u32>,
+    params: &mut Vec<Value>,
+) -> String {
+    let single = format!(
+        "(CASE WHEN {} THEN 1 ELSE 0 END)",
+        track_is_single_sql(track_alias)
+    );
+    let mut predicates = Vec::new();
+    if let Some(from) = from {
+        params.push(Value::Integer(i64::from(from)));
+        predicates.push(format!("{single} >= ?"));
+    }
+    if let Some(to) = to {
+        params.push(Value::Integer(i64::from(to)));
+        predicates.push(format!("{single} <= ?"));
+    }
+    format!("({})", predicates.join(" AND "))
 }
 
 pub(crate) fn live_album_total_tracks_sql(album_alias: &str) -> String {
@@ -1889,6 +1980,7 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::YearRange { .. }
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
+            | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
             CatalogSearchMatch::Analyzed(_) => None,
         })
@@ -1937,6 +2029,9 @@ pub(crate) fn push_track_search_predicates(
             match &alternative.matcher {
                 CatalogSearchMatch::LovedTracksRange { from, to } => {
                     Some(track_loved_range_predicate("t", *from, *to, params))
+                }
+                CatalogSearchMatch::SinglesRange { from, to } => {
+                    Some(track_single_range_predicate("t", *from, *to, params))
                 }
                 matcher => track_album_level_predicate("t", matcher, params),
             }
@@ -3643,6 +3738,38 @@ mod tests {
         assert!(parse_catalog_search("love=2").is_err());
         assert!(parse_catalog_search("cr:80..50").is_err());
         assert!(parse_catalog_search("love:..").is_err());
+    }
+
+    #[test]
+    fn catalog_search_parses_single_counts_and_ranges() {
+        let range = |query: &str| {
+            let search = parse_catalog_search(query).expect("single search");
+            assert_eq!(
+                search.groups[0].alternatives[0].field,
+                CatalogSearchField::Single
+            );
+            match &search.groups[0].alternatives[0].matcher {
+                CatalogSearchMatch::SinglesRange { from, to } => (*from, *to),
+                other => panic!("unexpected matcher {other:?}"),
+            }
+        };
+        assert_eq!(range("single:1"), (Some(1), None));
+        assert_eq!(range("single:0"), (Some(0), Some(0)));
+        assert_eq!(range("single:3.."), (Some(3), None));
+        assert_eq!(range("single:2..5"), (Some(2), Some(5)));
+        assert_eq!(range("single:..3"), (None, Some(3)));
+        assert_eq!(range("single=1"), (Some(1), None));
+        assert_eq!(range("singles:3.."), (Some(3), None));
+        assert_eq!(
+            parse_catalog_search("single:1").expect("single"),
+            parse_catalog_search("singles:1").expect("singles alias")
+        );
+        assert!(parse_catalog_search("single:2").is_err());
+        assert!(parse_catalog_search("single:5..2").is_err());
+        assert!(parse_catalog_search("single:..").is_err());
+        assert!(parse_catalog_search("single:x").is_err());
+        let message = parse_catalog_search("single:2").expect_err("shorthand is 0 or 1");
+        assert!(message.contains("single:1..3"), "{message}");
     }
 
     #[test]

@@ -2794,6 +2794,108 @@ mod tests {
         assert!(search("love:2..").is_empty());
     }
 
+    fn with_singles(connection: &Connection) {
+        connection
+            .execute_batch(
+                "CREATE TABLE track_singles (
+                    artist_key TEXT NOT NULL, track_key TEXT NOT NULL, confidence TEXT NOT NULL);
+                 INSERT INTO track_singles VALUES
+                    ('sigur rós', 'sæglópur', 'confirmed'),
+                    ('sigur rós', 'hoppípolla', 'confirmed'),
+                    ('sigur rós', 'svefn-g-englar', 'possible'),
+                    ('daft punk', 'digital love', 'confirmed');",
+            )
+            .expect("singles fixture");
+        crate::catalog::prepare_single_keys(connection).expect("single keys view");
+    }
+
+    #[test]
+    fn single_search_lists_singles_in_songs_and_counts_them_per_album() {
+        let connection = fixture();
+        with_singles(&connection);
+        let songs = |query: &str| {
+            let mut titles = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    search: Some(query.to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .expect("track single search")
+            .items
+            .into_iter()
+            .map(|track| track.title)
+            .collect::<Vec<_>>();
+            titles.sort();
+            titles
+        };
+        let albums = |query: &str| {
+            let mut ids = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(query.to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .expect("album single search")
+            .items
+            .into_iter()
+            .map(|album| album.id)
+            .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+
+        // Songs: a track is either a single (1) or not (0). A "possible" match never counts.
+        assert_eq!(
+            songs("single:1"),
+            ["Digital Love", "Hoppípolla", "Sæglópur"]
+        );
+        assert_eq!(songs("single:0"), ["Svefn-g-englar"]);
+        assert_eq!(
+            songs("aartist:sigur rós AND single:1"),
+            ["Hoppípolla", "Sæglópur"]
+        );
+        assert_eq!(songs("singles:1"), songs("single:1"));
+
+        // Albums: the number of singles on the album.
+        assert_eq!(albums("single:1"), ["a1", "a3"]);
+        assert_eq!(albums("single:0"), ["a2"]);
+        assert_eq!(albums("single:2.."), ["a1"]);
+        assert_eq!(albums("single:2..5"), ["a1"]);
+        assert_eq!(albums("single:..1"), ["a2", "a3"]);
+        assert_eq!(albums("single:3.."), Vec::<String>::new());
+        assert_eq!(albums("single=1..1"), ["a3"]);
+        assert_eq!(albums("genre:house AND single:1"), ["a3"]);
+        assert_eq!(albums("NOT single:1"), ["a2"]);
+    }
+
+    #[test]
+    fn single_search_finds_nothing_on_a_catalog_without_the_singles_table() {
+        let connection = fixture();
+        crate::catalog::prepare_single_keys(&connection).expect("empty single keys view");
+        let tracks = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("single:1".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("an older catalog must not break the search");
+        assert!(tracks.items.is_empty());
+        let albums = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                search: Some("single:..0".to_owned()),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("an older catalog must not break the album search");
+        assert_eq!(albums.items.len(), 3);
+    }
+
     #[test]
     fn track_search_fields_map_to_distinct_catalog_columns_and_combine() {
         let connection = fixture();
