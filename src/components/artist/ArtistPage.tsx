@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAlbumCoverUrl } from "../../albumArtwork";
 import { artistFacts, biographyText, findArtistTrack, listeningMonths, loadArtistArtwork, loadArtistDiscovery, loadArtistListening, openArtistLink, type ArtistArtwork, type ArtistDiscovery, type ArtistListening } from "../../artistPage";
 import { loadArtistChartHistory, loadChartEntryTrack, type ArtistChartHistory, type ArtistChartItem, type ArtistChartPeak } from "../../charts";
-import { exploreAlbums, exploreTracks, formatCount, formatDuration, loadAlbumDetail, loadArtistDetail, type AlbumSummary, type ArtistDetail, type Track, type TrackPage } from "../../library";
+import { exploreAlbums, exploreTracks, formatCount, formatDuration, loadAlbumDetail, loadAlbumPopularity, loadArtistDetail, type AlbumSummary, type ArtistDetail, type Track, type TrackPage } from "../../library";
 import { loadArtistIntelligence, type ArtistIntelligence } from "../../musicbrainz";
 import { transitionContent } from "../../contentTransition";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -86,6 +86,7 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
   const [lovedExpanded, setLovedExpanded] = useState(false);
   const [singles, setSingles] = useState<TrackPage | null>(null);
   const [singlesExpanded, setSinglesExpanded] = useState(false);
+  const [singleYears, setSingleYears] = useState<Record<string, number | null>>({});
   const [charts, setCharts] = useState<{ key: string; history: ArtistChartHistory } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refresh, setRefresh] = useState(0);
@@ -114,6 +115,20 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     settle("Official singles", () => exploreTracks({ artist, search: "single:1", pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setSingles);
     return () => { active = false; };
   }, [artist, refresh, catalogRevision]);
+
+  // A track row doesn't know when its single came out; the album's popularity payload does.
+  useEffect(() => {
+    if (!singles?.items.length) return;
+    let active = true;
+    const albumIds = [...new Set(singles.items.flatMap((track) => track.albumId ? [track.albumId] : []))];
+    void Promise.all(albumIds.map((id) => loadAlbumPopularity(id).catch(() => null))).then((results) => {
+      if (!active) return;
+      const years: Record<string, number | null> = {};
+      for (const popularity of results) for (const single of popularity?.singles ?? []) years[single.trackKey] = single.year;
+      setSingleYears(years);
+    });
+    return () => { active = false; };
+  }, [singles]);
 
   // Chart archives are keyed by printed artist names, so wait for the library name behind an artist id.
   const chartArtist = detail?.artist.name ?? (artist.startsWith("artist:") || artist.startsWith("unresolved:") ? null : artist);
@@ -194,6 +209,14 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     finally { if (alive.current) setBusy(null); }
   }
 
+  const singleYear = (track: Track) => singleYears[track.trackKey] ?? track.originalYear ?? track.releaseYear ?? null;
+  const singlesByYear = [...(singles?.items ?? [])].sort((a, b) => (singleYear(a) ?? 9999) - (singleYear(b) ?? 9999) || a.album.localeCompare(b.album) || (a.trackNumber ?? 0) - (b.trackNumber ?? 0));
+  const singleGroups: Array<{ year: number | null; tracks: Track[] }> = [];
+  for (const track of singlesExpanded ? singlesByYear : singlesByYear.slice(0, PREVIEW_ROWS)) {
+    const year = singleYear(track);
+    const group = singleGroups[singleGroups.length - 1];
+    if (group && group.year === year) group.tracks.push(track); else singleGroups.push({ year, tracks: [track] });
+  }
   const albums = detail?.albums ?? [];
   const profile = intelligence?.profile ?? null;
   const facts = artistFacts(profile);
@@ -285,10 +308,13 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
                 {loved.totalCount > loved.items.length && <small className="artist-source-note">Showing the first {formatCount(loved.items.length)}.</small>}
               </> : <p className="artist-empty">Tracks you love by this artist will appear here.</p>}
             </Panel>
-            <Panel title="Official singles" icon={<Disc />} action={singles?.items.length ? <button disabled={Boolean(busy)} onClick={() => void play(singles.items)} title={`Play ${singles.items.length} official singles`}>Play all</button> : undefined}>
+            <Panel title="Official singles" icon={<Disc />} action={singles?.items.length ? <button disabled={Boolean(busy)} onClick={() => void play(singlesByYear)} title={`Play ${singles.items.length} official singles`}>Play all</button> : undefined}>
               {!singles && !errors["Official singles"] ? <Loading>Loading official singles…</Loading> : singles?.items.length ? <>
                 <p className="artist-section-caption">{plural(singles.totalCount, "official single")} in your library</p>
-                <ol className="artist-personal artist-loved artist-singles">{(singlesExpanded ? singles.items : singles.items.slice(0, PREVIEW_ROWS)).map((track) => <li key={track.trackKey}><Disc className="artist-singles__disc" aria-hidden="true" /><button disabled={Boolean(busy)} onClick={() => void play([track, ...singles.items.filter((t) => t.trackKey !== track.trackKey)])} title={`Play ${track.title}`}><strong>{track.title}</strong><small>{track.album}</small></button><span>{formatDuration(track.durationSeconds)}</span></li>)}</ol>
+                {singleGroups.map((group) => <div key={group.year ?? "unknown"} className="artist-singles__year">
+                  <h3>{group.year ?? "Year unknown"}</h3>
+                  <ol className="artist-personal artist-loved artist-singles">{group.tracks.map((track) => <li key={track.trackKey}><Disc className="artist-singles__disc" aria-hidden="true" /><button disabled={Boolean(busy)} onClick={() => void play([track, ...singlesByYear.filter((t) => t.trackKey !== track.trackKey)])} title={`Play ${track.title}`}><strong>{track.title}</strong><small>{track.album}</small></button><span>{formatDuration(track.durationSeconds)}</span></li>)}</ol>
+                </div>)}
                 {singles.items.length > PREVIEW_ROWS && <button className="artist-panel__more" onClick={() => setSinglesExpanded((value) => !value)}>{singlesExpanded ? "Show fewer" : `Show all ${formatCount(singles.items.length)}`}</button>}
                 {singles.totalCount > singles.items.length && <small className="artist-source-note">Showing the first {formatCount(singles.items.length)}.</small>}
               </> : <p className="artist-empty">Official singles by this artist in your library will appear here.</p>}

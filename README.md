@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.55.1** splits the artist page **Official singles** box by year, oldest first, with each single's album shown under its title.
+
 Aurora **0.55.0** adds an **Official singles** box to artist pages, under **Loved tracks**: the artist's confirmed singles in your library, with Play all. It uses the same Music Library 0.210.0+ data as the 💿 badge and `single:` search.
 
 Aurora **0.54.1** labels the British charts that Music Library 0.212.0 adds to the shared chart archive as UK in artist chart history and track chart peaks, and still shows only US charts in the weekly browser. Aurora **0.54.0** adds a `single:` search field for official singles. `single:1` finds albums with at least one single (and, in Songs, lists the singles themselves), `single:3..` albums with three or more, `single:2..5` two through five, and `single:..3` at most three. It uses the data Music Library **0.210.0 or newer** collects under **Settings → Providers → Album singles**. See the [search guide](docs/search.md).

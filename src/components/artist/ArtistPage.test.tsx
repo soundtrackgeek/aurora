@@ -91,12 +91,15 @@ it("shows loved tracks and a complete chart overview for albums and tracks", asy
   const lovedTrack = { ...(await library.exploreTracks({ artist: "Coldplay", pageSize: 1 }, { localOnly: true })).items[0], loved: true, loveState: "loved" as const };
   const explore = library.exploreTracks;
   vi.spyOn(library, "exploreTracks").mockImplementation((request, options) => request.search === "love:1" ? Promise.resolve({ items: [lovedTrack], nextCursor: null, totalCount: 1 }) : explore(request, options));
-  vi.spyOn(library, "exploreTracks").mockImplementation((request, options) => request.search === "love:1" ? Promise.resolve({ items: [lovedTrack], nextCursor: null, totalCount: 1 }) : request.search === "single:1" ? Promise.resolve({ items: [{ ...lovedTrack, title: "A Real Single" }], nextCursor: null, totalCount: 1 }) : explore(request, options));
+  vi.spyOn(library, "exploreTracks").mockImplementation((request, options) => request.search === "love:1" ? Promise.resolve({ items: [lovedTrack], nextCursor: null, totalCount: 1 }) : request.search === "single:1" ? Promise.resolve({ items: [{ ...lovedTrack, trackKey: "s2", title: "A Real Single", originalYear: 1999 }, { ...lovedTrack, trackKey: "s1", title: "Earlier Single", originalYear: 1985 }], nextCursor: null, totalCount: 2 }) : explore(request, options));
   render(<ArtistPage {...props} artist="Coldplay" />);
 
   const singlesPanel = await screen.findByRole("region", { name: "Official singles" });
   expect(await within(singlesPanel).findByText("A Real Single")).toBeInTheDocument();
-  expect(within(singlesPanel).getByText("1 official single in your library")).toBeInTheDocument();
+  expect(within(singlesPanel).getByText("2 official singles in your library")).toBeInTheDocument();
+  expect(within(singlesPanel).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["1985", "1999"]);
+  expect(within(singlesPanel).getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent)).toEqual(["Earlier Single", "A Real Single"]);
+  expect(within(singlesPanel).getAllByText(lovedTrack.album)).toHaveLength(2);
 
   const lovedPanel = await screen.findByRole("region", { name: "Loved tracks" });
   expect(await within(lovedPanel).findByText(lovedTrack.title)).toBeInTheDocument();

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.55.1] - 2026-11-03
+
+### Changed
+- Artist pages: the **Official singles** box is now split by year, oldest first, with a year heading above each group. Each song still shows the album it appeared on. The year is the single's release year from Music Library; when that is missing, the album's year is used, and songs with neither come last under "Year unknown". **Play all** follows the same oldest-to-newest order.
+
 ## [0.55.0] - 2026-11-03
 
 ### Added

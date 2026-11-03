@@ -83,6 +83,8 @@
 .artist-popular li > a svg { width: 12px; height: 12px; }
 .artist-personal li > span:last-child { color: #b0c5df; font-size: 12px; }
 .artist-loved__heart { width: 12px; height: 12px; min-width: 12px; color: #e07ab8; fill: #e07ab8; }
+.artist-singles__year { margin-top: 10px; }
+.artist-singles__year h3 { margin: 0 0 4px; padding-bottom: 3px; border-bottom: 1px solid #1d2b3a; color: #ce8aec; font-size: 11px; font-weight: 600; letter-spacing: .06em; font-variant-numeric: tabular-nums; }
 .artist-singles__disc { width: 12px; height: 12px; min-width: 12px; color: #6fb7e8; }
 .artist-personal li > span:last-child { font-variant-numeric: tabular-nums; }
 .artist-loved li > span:last-child { font-size: 10px; color: #8aa2b9; }
