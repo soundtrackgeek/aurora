@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.55.0] - 2026-11-03
+
+### Added
+- Artist pages: an **Official singles** box lists the artist's tracks in your library that Music Library confirmed as official singles (the same data behind the 💿 badge and the `single:` search), with **Play all**; click a song to play it followed by the rest. It sits under **Loved tracks** and shows ten rows with **Show all** for more. It needs Music Library 0.210.0 or newer with **Settings → Providers → Album singles** run; otherwise the box stays empty.
+
 ## [0.54.1] - 2026-11-02
 
 ### Fixed

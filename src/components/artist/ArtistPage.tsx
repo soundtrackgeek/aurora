@@ -1,5 +1,5 @@
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
-import { ArrowLeft, ArrowUpRight, AudioLines, BookOpen, Disc3, Globe2, Headphones, Heart, ListMusic, LoaderCircle, Play, RefreshCw, Shuffle, Trophy, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, AudioLines, BookOpen, Disc, Disc3, Globe2, Headphones, Heart, ListMusic, LoaderCircle, Play, RefreshCw, Shuffle, Trophy, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAlbumCoverUrl } from "../../albumArtwork";
 import { artistFacts, biographyText, findArtistTrack, listeningMonths, loadArtistArtwork, loadArtistDiscovery, loadArtistListening, openArtistLink, type ArtistArtwork, type ArtistDiscovery, type ArtistListening } from "../../artistPage";
@@ -84,6 +84,8 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
   const [tracks, setTracks] = useState<TrackPage | null>(null);
   const [loved, setLoved] = useState<TrackPage | null>(null);
   const [lovedExpanded, setLovedExpanded] = useState(false);
+  const [singles, setSingles] = useState<TrackPage | null>(null);
+  const [singlesExpanded, setSinglesExpanded] = useState(false);
   const [charts, setCharts] = useState<{ key: string; history: ArtistChartHistory } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refresh, setRefresh] = useState(0);
@@ -109,6 +111,7 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
     settle("Listening history", () => loadArtistListening(artist), setListening);
     settle("Tracks", () => exploreTracks({ artist, pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setTracks);
     settle("Loved tracks", () => exploreTracks({ artist, search: "love:1", pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setLoved);
+    settle("Official singles", () => exploreTracks({ artist, search: "single:1", pageSize: 100, sort: "albumAsc" }, { localOnly: true }), setSingles);
     return () => { active = false; };
   }, [artist, refresh, catalogRevision]);
 
@@ -281,6 +284,14 @@ export function ArtistPage({ artist, catalogRevision = 0, onBack, onOpenArtist, 
                 {loved.items.length > PREVIEW_ROWS && <button className="artist-panel__more" onClick={() => setLovedExpanded((value) => !value)}>{lovedExpanded ? "Show fewer" : `Show all ${formatCount(loved.items.length)}`}</button>}
                 {loved.totalCount > loved.items.length && <small className="artist-source-note">Showing the first {formatCount(loved.items.length)}.</small>}
               </> : <p className="artist-empty">Tracks you love by this artist will appear here.</p>}
+            </Panel>
+            <Panel title="Official singles" icon={<Disc />} action={singles?.items.length ? <button disabled={Boolean(busy)} onClick={() => void play(singles.items)} title={`Play ${singles.items.length} official singles`}>Play all</button> : undefined}>
+              {!singles && !errors["Official singles"] ? <Loading>Loading official singles…</Loading> : singles?.items.length ? <>
+                <p className="artist-section-caption">{plural(singles.totalCount, "official single")} in your library</p>
+                <ol className="artist-personal artist-loved artist-singles">{(singlesExpanded ? singles.items : singles.items.slice(0, PREVIEW_ROWS)).map((track) => <li key={track.trackKey}><Disc className="artist-singles__disc" aria-hidden="true" /><button disabled={Boolean(busy)} onClick={() => void play([track, ...singles.items.filter((t) => t.trackKey !== track.trackKey)])} title={`Play ${track.title}`}><strong>{track.title}</strong><small>{track.album}</small></button><span>{formatDuration(track.durationSeconds)}</span></li>)}</ol>
+                {singles.items.length > PREVIEW_ROWS && <button className="artist-panel__more" onClick={() => setSinglesExpanded((value) => !value)}>{singlesExpanded ? "Show fewer" : `Show all ${formatCount(singles.items.length)}`}</button>}
+                {singles.totalCount > singles.items.length && <small className="artist-source-note">Showing the first {formatCount(singles.items.length)}.</small>}
+              </> : <p className="artist-empty">Official singles by this artist in your library will appear here.</p>}
             </Panel>
             <Panel title="Links & identity" icon={<Globe2 />}><div className="artist-links">{externalLink(lastfmUrl, "Last.fm")}{intelligence?.identity && externalLink(`https://musicbrainz.org/artist/${intelligence.identity.mbid}`, "MusicBrainz")}{externalLink(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(artist)}`, "Find on Wikipedia")}</div></Panel>
           </div>
