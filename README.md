@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.55.1** splits the artist page **Official singles** box by year, oldest first, with each single's album shown under its title.
+Aurora **0.55.2** fixes Track Chart info missing Billboard peaks for songs printed as "Song (Album Version)".
 
 Aurora **0.55.0** adds an **Official singles** box to artist pages, under **Loved tracks**: the artist's confirmed singles in your library, with Play all. It uses the same Music Library 0.210.0+ data as the 💿 badge and `single:` search.
 

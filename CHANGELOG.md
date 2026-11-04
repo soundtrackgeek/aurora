@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.55.2] - 2026-11-04
+
+### Fixed
+- Track Chart info: charts that print a title as "Song (Album Version)" or "Song (LP Version)" now count as the same song. Previously the word "version" made Aurora treat them as a different recording, so e.g. Kelly Clarkson's "Never Again" showed no Billboard peak even though the badge showed one.
+
 ## [0.55.1] - 2026-11-03
 
 ### Changed

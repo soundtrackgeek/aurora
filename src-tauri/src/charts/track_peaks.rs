@@ -232,9 +232,14 @@ pub(super) fn is_recording_variant(subtitle_title: &str) -> bool {
         "remastered",
         "reissue",
     ];
-    catalog_chart_key(subtitle_title)
-        .split(' ')
-        .any(|word| VARIANT_WORDS.contains(&word))
+    // "(Album Version)" and "(LP Version)" label the standard recording, not a
+    // different one, so they must not count as the "version" variant word.
+    const NEUTRAL_PHRASES: [&str; 3] = ["album version", "lp version", "original album version"];
+    let mut key = format!(" {} ", catalog_chart_key(subtitle_title));
+    for phrase in NEUTRAL_PHRASES {
+        key = key.replace(&format!(" {phrase} "), " ");
+    }
+    key.split(' ').any(|word| VARIANT_WORDS.contains(&word))
 }
 
 /// True when a printed chart title is the library title plus a parenthetical
@@ -470,6 +475,15 @@ pub(crate) fn load(artist: String, title: String) -> Result<Vec<TrackChartPeak>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn album_version_labels_are_not_recording_variants() {
+        assert!(!is_recording_variant("Never Again (Album Version)"));
+        assert!(!is_recording_variant("Song (LP Version)"));
+        assert!(is_recording_variant("Song (Live)"));
+        assert!(is_recording_variant("Song (Radio Version)"));
+        assert!(is_recording_variant("Song (Remix) (Album Version)"));
+    }
 
     #[test]
     fn combines_all_years_and_series_without_merging_other_recordings() {
