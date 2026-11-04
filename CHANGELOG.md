@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.55.3] - 2026-11-04
+
+### Fixed
+- Track Chart info and artist chart history: "(Single Version)", "(Original Version)" and "(Original Single Version)" chart titles are now treated as the same song, like "(Album Version)". Live, remix, radio and other genuinely different versions are still kept separate.
+
 ## [0.55.2] - 2026-11-04
 
 ### Fixed

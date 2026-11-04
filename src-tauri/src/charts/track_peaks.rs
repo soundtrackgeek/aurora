@@ -232,9 +232,16 @@ pub(super) fn is_recording_variant(subtitle_title: &str) -> bool {
         "remastered",
         "reissue",
     ];
-    // "(Album Version)" and "(LP Version)" label the standard recording, not a
+    // "(Album Version)", "(LP Version)" and "(Single Version)" label the standard recording, not a
     // different one, so they must not count as the "version" variant word.
-    const NEUTRAL_PHRASES: [&str; 3] = ["album version", "lp version", "original album version"];
+    const NEUTRAL_PHRASES: [&str; 6] = [
+        "original album version",
+        "album version",
+        "lp version",
+        "single version",
+        "original single version",
+        "original version",
+    ];
     let mut key = format!(" {} ", catalog_chart_key(subtitle_title));
     for phrase in NEUTRAL_PHRASES {
         key = key.replace(&format!(" {phrase} "), " ");
@@ -480,6 +487,8 @@ mod tests {
     fn album_version_labels_are_not_recording_variants() {
         assert!(!is_recording_variant("Never Again (Album Version)"));
         assert!(!is_recording_variant("Song (LP Version)"));
+        assert!(!is_recording_variant("Song (Single Version)"));
+        assert!(!is_recording_variant("Song (Original Version)"));
         assert!(is_recording_variant("Song (Live)"));
         assert!(is_recording_variant("Song (Radio Version)"));
         assert!(is_recording_variant("Song (Remix) (Album Version)"));
