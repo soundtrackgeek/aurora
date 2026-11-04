@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.55.4] - 2026-11-04
+
+### Fixed
+- Inbox **Rename from tags** now writes a colon as a space (`An American Tail: Fievel Goes West` becomes `An American Tail  Fievel Goes West`), matching the library's existing folders, instead of `_`. Other characters Windows rejects still become `_`. Albums and tracks already renamed with `_` stay ready for Add to Library. Together with Music Library 0.212.2, an album whose name differs from the library folder only by how a colon was written is offered as a replacement instead of failing with "already represented in the catalog".
+
 ## [0.55.3] - 2026-11-04
 
 ### Fixed

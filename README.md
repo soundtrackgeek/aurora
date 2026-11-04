@@ -1,6 +1,6 @@
 # Aurora
 
-Aurora **0.55.3** also treats "(Single Version)" and "(Original Version)" chart titles as the same song in Track Chart info.
+Aurora **0.55.4** writes a colon as a space when Inbox renames an album or track from its tags, like the library's existing folders, and still accepts the earlier `_` spelling as ready. Aurora **0.55.3** also treats "(Single Version)" and "(Original Version)" chart titles as the same song in Track Chart info.
 
 Aurora **0.55.0** adds an **Official singles** box to artist pages, under **Loved tracks**: the artist's confirmed singles in your library, with Play all. It uses the same Music Library 0.210.0+ data as the 💿 badge and `single:` search.
 

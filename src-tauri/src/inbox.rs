@@ -2472,12 +2472,15 @@ fn organization_issues(
     let mut issues = Vec::new();
     if let (Some(album_artist), Some(album_title), Some(year)) =
         (album_artist, album_title, year.filter(|value| *value > 0))
-        && let Ok(expected) =
-            sanitize_component(&format!("{album_artist} - {album_title} ({year})"))
+        && let name = format!("{album_artist} - {album_title} ({year})")
+        && let Ok(expected) = sanitize_component(&name)
+        && let Ok(legacy) = legacy_sanitize_component(&name)
         && album_path
             .file_name()
             .and_then(|value| value.to_str())
-            .is_none_or(|actual| !actual.eq_ignore_ascii_case(&expected))
+            .is_none_or(|actual| {
+                !actual.eq_ignore_ascii_case(&expected) && !actual.eq_ignore_ascii_case(&legacy)
+            })
     {
         issues.push("Album folder is not organized as Album Artist - Album (Year)".to_owned());
     }
@@ -2500,8 +2503,11 @@ fn organization_issues(
             Some(disc) => format!("{disc}-{track_number:0track_width$}"),
             None => format!("{track_number:0track_width$}"),
         };
-        sanitize_component(&format!("{position} - {artist} - {title}"))
-            .is_ok_and(|stem| track.file_name.eq_ignore_ascii_case(&format!("{stem}.mp3")))
+        let name = format!("{position} - {artist} - {title}");
+        [sanitize_component(&name), legacy_sanitize_component(&name)]
+            .into_iter()
+            .flatten()
+            .any(|stem| track.file_name.eq_ignore_ascii_case(&format!("{stem}.mp3")))
     });
     if !filenames_ready {
         issues.push("One or more track filenames are not organized from their tags".to_owned());
@@ -3127,15 +3133,26 @@ fn required_component(value: Option<&str>, label: &str) -> Result<String, String
         .map(str::to_owned)
         .ok_or_else(|| format!("Add a {label} tag before renaming this album."))
 }
+/// Names written for renamed albums and tracks. A colon becomes a space, as in the
+/// library's existing folders (`Tail: Fievel` is `Tail  Fievel`); other characters
+/// Windows rejects become `_`.
 fn sanitize_component(value: &str) -> Result<String, String> {
+    sanitize_component_with_colon(value, ' ')
+}
+
+/// The spelling Aurora wrote before colons became spaces. Albums renamed then stay ready.
+fn legacy_sanitize_component(value: &str) -> Result<String, String> {
+    sanitize_component_with_colon(value, '_')
+}
+
+fn sanitize_component_with_colon(value: &str, colon: char) -> Result<String, String> {
     let mut sanitized = value
         .chars()
         .map(|character| {
-            if character.is_control()
-                || matches!(
-                    character,
-                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
-                )
+            if character == ':' {
+                colon
+            } else if character.is_control()
+                || matches!(character, '<' | '>' | '"' | '/' | '\\' | '|' | '?' | '*')
             {
                 '_'
             } else {
@@ -3357,7 +3374,15 @@ mod tests {
 
     #[test]
     fn rename_components_are_windows_safe_and_track_width_is_at_least_two() {
-        assert_eq!(sanitize_component("AC/DC: Live").unwrap(), "AC_DC_ Live");
+        assert_eq!(sanitize_component("AC/DC: Live").unwrap(), "AC_DC  Live");
+        assert_eq!(
+            sanitize_component("An American Tail: Fievel Goes West").unwrap(),
+            "An American Tail  Fievel Goes West"
+        );
+        assert_eq!(
+            legacy_sanitize_component("AC/DC: Live").unwrap(),
+            "AC_DC_ Live"
+        );
         assert_eq!(sanitize_component("CON").unwrap(), "_CON");
         assert_eq!(decimal_width(9).max(2), 2);
         assert_eq!(decimal_width(101).max(2), 3);
