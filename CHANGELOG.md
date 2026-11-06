@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.56.0] - 2026-11-06
+
+### Added
+- The Inbox Album Auto-Tagger's cover tile (top left) now shows the album's embedded cover instead of staying blank. When no cover is embedded, click the tile to pick an image; **Apply** embeds it in the album's tracks together with the tags.
+
 ## [0.55.4] - 2026-11-04
 
 ### Fixed

@@ -593,11 +593,16 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
   const [discNumber, setDiscNumber] = useState("");
   const [discTotal, setDiscTotal] = useState("");
   const [busy, setBusy] = useState<"search" | "detail" | "apply" | null>(null);
+  const [pickedCoverPath, setPickedCoverPath] = useState<string | null>(null);
+  const [failedCoverSource, setFailedCoverSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
   const loadRequest = useRef(0);
   const updating = busy !== null;
+  const embeddedCoverAlbum = albums.find((candidate) => candidate.artworkPresent && candidate.artworkSourcePath) ?? null;
+  const embeddedCoverSource = embeddedCoverAlbum ? inboxCoverUrl(embeddedCoverAlbum, 128) : null;
+  const hasEmbeddedCover = albums.some((candidate) => candidate.artworkPresent);
   const reconciliation = useMemo(
     () => reconcileInboxTracks(
       tracks,
@@ -614,6 +619,14 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
       .catch((nextError: unknown) => console.warn("Aurora could not load genre suggestions", nextError));
     return () => { cancelled = true; };
   }, []);
+
+  async function chooseCover() {
+    if (updating) return;
+    try {
+      const path = await selectInboxCoverImage();
+      if (path) setPickedCoverPath(path);
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+  }
 
   const hydrateDetail = useCallback((next: ReleaseCandidateDetail) => {
     const nextReconciliation = reconcileInboxTracks(tracks, next.tracks);
@@ -773,6 +786,13 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
       // Each disc folder is written separately, in disc order; one release can span several Inbox albums.
       const ownerPath = new Map(albums.flatMap((candidate) => candidate.tracks.map((track) => [track.path, candidate.path] as const)));
       const results: Awaited<ReturnType<typeof applyInboxTags>>[] = [];
+      // A cover chosen by hand is embedded before tagging, while the disc folders still have their original paths.
+      if (pickedCoverPath) {
+        for (const target of albums.filter((candidate) => !candidate.artworkPresent)) {
+          if (target.tracks.every((track) => removeExtraPaths.has(track.path))) continue;
+          await embedInboxAlbumCover(target.path, pickedCoverPath);
+        }
+      }
       // Folders emptied by removing their extras (an expanded 2CD edition trimmed to one disc) have nothing left to rename.
       const survivingAlbums = albums.filter((candidate) => candidate.tracks.some((track) => !removeExtraPaths.has(track.path)));
       let mergedRenames = 0;
@@ -823,7 +843,12 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
         {!candidates.length && busy !== "search" ? <tr><td colSpan={9}>No release matches found. Broaden the artist or album spelling.</td></tr> : null}
       </tbody></table></section>
       <div className="inbox-tagger__editor" inert={updating}>
-        <section className="inbox-release-fields"><div className="inbox-release-art"><Disc3 /></div><div className="inbox-release-form"><datalist id="inbox-auto-tagger-genre-suggestions">{genreSuggestions.map((genre) => <option value={genre} key={genre} />)}</datalist><label className="inbox-release-form__disc-total">Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__disc-override">Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__album-artist">Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label className="inbox-release-form__album">Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label className="inbox-release-form__publisher">Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label className="inbox-release-form__year">Original year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__release-year">Release year<input inputMode="numeric" value={values.releaseYear} onChange={(event) => setValues((current) => ({ ...current, releaseYear: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__genre">Genre<input list="inbox-auto-tagger-genre-suggestions" value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label></div></section>
+        <section className="inbox-release-fields">{hasEmbeddedCover
+          ? <div className="inbox-release-art" title="Embedded album cover">{embeddedCoverSource && embeddedCoverSource !== failedCoverSource
+            ? <img src={embeddedCoverSource} alt="Embedded album cover" onError={() => setFailedCoverSource(embeddedCoverSource)} />
+            : <Disc3 />}</div>
+          : <button type="button" className={`inbox-release-art inbox-release-art--empty${pickedCoverPath ? " has-pick" : ""}`} title={pickedCoverPath ? `Cover to embed: ${leafName(pickedCoverPath)}. Click to choose another.` : "No embedded cover. Click to choose an image to embed."} aria-label="Choose album cover" onClick={() => void chooseCover()}>{pickedCoverPath ? <><Check /><small>{leafName(pickedCoverPath)}</small></> : <><ImagePlus /><small>Add cover</small></>}</button>}
+        <div className="inbox-release-form"><datalist id="inbox-auto-tagger-genre-suggestions">{genreSuggestions.map((genre) => <option value={genre} key={genre} />)}</datalist><label className="inbox-release-form__disc-total">Disc total<input inputMode="numeric" placeholder="Release" value={discTotal} onChange={(event) => setDiscTotal(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__disc-override">Disc # override<input aria-label="Disc number override" inputMode="numeric" placeholder="Release" value={discNumber} onChange={(event) => setDiscNumber(event.target.value.replace(/\D/g, "").slice(0, 3))} /></label><label className="inbox-release-form__album-artist">Album artist<input value={values.albumArtist} onChange={(event) => setValues((current) => ({ ...current, albumArtist: event.target.value }))} /></label><label className="inbox-release-form__album">Album<input value={values.album} onChange={(event) => setValues((current) => ({ ...current, album: event.target.value }))} /></label><label className="inbox-release-form__publisher">Publisher<input value={values.publisher} onChange={(event) => setValues((current) => ({ ...current, publisher: event.target.value }))} /></label><label className="inbox-release-form__year">Original year<input inputMode="numeric" value={values.year} onChange={(event) => setValues((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__release-year">Release year<input inputMode="numeric" value={values.releaseYear} onChange={(event) => setValues((current) => ({ ...current, releaseYear: event.target.value.replace(/\D/g, "").slice(0, 4) }))} /></label><label className="inbox-release-form__genre">Genre<input list="inbox-auto-tagger-genre-suggestions" value={values.genre} onChange={(event) => setValues((current) => ({ ...current, genre: event.target.value }))} /></label></div></section>
         <fieldset className="inbox-fields"><legend>Include fields</legend>{allFields.map((field) => <label key={field.id}><input type="checkbox" checked={fields.has(field.id)} onChange={() => toggleField(field.id)} />{field.label}</label>)}</fieldset>
       </div>
       <section className="inbox-track-compare" inert={updating}>
