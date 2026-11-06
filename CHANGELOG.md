@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.56.1] - 2026-11-06
+
+### Changed
+- The Inbox cover picker (Auto-Tagger **Add cover** and the album cover repair) now opens in the album's own folder.
+
 ## [0.56.0] - 2026-11-06
 
 ### Added

@@ -343,7 +343,7 @@ export function Inbox({ onOpenMetadataSettings, onCatalogChanged }: InboxProps) 
     if (!selectedAlbum || coverBusy) return;
     setCoverBusy(true);
     try {
-      const imagePath = selectedAlbum.artworkPresent ? null : await selectInboxCoverImage();
+      const imagePath = selectedAlbum.artworkPresent ? null : await selectInboxCoverImage(selectedAlbum.path);
       if (!selectedAlbum.artworkPresent && !imagePath) return;
       const result = await embedInboxAlbumCover(selectedAlbum.path, imagePath);
       notify(`Embedded the album cover in ${result.trackCount} ${result.trackCount === 1 ? "track" : "tracks"}${result.changedTracks < result.trackCount ? `; ${result.changedTracks} needed updating` : ""}.`);
@@ -623,7 +623,7 @@ function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSettings, on
   async function chooseCover() {
     if (updating) return;
     try {
-      const path = await selectInboxCoverImage();
+      const path = await selectInboxCoverImage(album.path);
       if (path) setPickedCoverPath(path);
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
   }

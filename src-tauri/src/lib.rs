@@ -414,13 +414,23 @@ async fn select_album_cover_image(
 }
 
 #[tauri::command]
-async fn select_inbox_cover_image(app: AppHandle) -> Result<Option<String>, String> {
-    let selected = app
+async fn select_inbox_cover_image(
+    app: AppHandle,
+    start_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut dialog = app
         .dialog()
         .file()
         .set_title("Choose an album cover")
-        .add_filter("Images", &["jpg", "jpeg", "png", "gif", "bmp", "webp"])
-        .blocking_pick_file();
+        .add_filter("Images", &["jpg", "jpeg", "png", "gif", "bmp", "webp"]);
+    // Open in the album's own folder, where a loose cover image usually sits.
+    if let Some(directory) = start_directory
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+    {
+        dialog = dialog.set_directory(directory);
+    }
+    let selected = dialog.blocking_pick_file();
     selected
         .map(|path| {
             path.into_path()

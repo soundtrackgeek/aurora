@@ -382,9 +382,9 @@ export async function fillInboxTrackTotals(albumPaths: string[]): Promise<InboxT
   return invoke<InboxTrackTotalsResult>("fill_inbox_track_totals", { request: { albumPaths } });
 }
 
-export async function selectInboxCoverImage(): Promise<string | null> {
+export async function selectInboxCoverImage(startDirectory?: string): Promise<string | null> {
   if (!isTauriRuntime()) return "C:\\Pictures\\album-cover.jpg";
-  return invoke<string | null>("select_inbox_cover_image");
+  return invoke<string | null>("select_inbox_cover_image", { startDirectory: startDirectory ?? null });
 }
 
 export async function embedInboxAlbumCover(
