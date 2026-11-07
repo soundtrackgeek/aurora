@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.56.2** fixes the tag editor refusing to save albums, titles or genres that are a single character (such as Peter Maffay's album "X") with "contains an unsupported control character".
+
 Aurora **0.56.1** makes the Inbox cover picker (Auto-Tagger **Add cover**) open in the album's own folder.
 
 Aurora **0.56.0** shows the album's embedded cover in the Inbox Album Auto-Tagger's top-left tile; when there is none, click the tile to choose an image, which Apply embeds in the album's MP3 files along with the tags.

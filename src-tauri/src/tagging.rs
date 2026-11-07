@@ -2072,9 +2072,13 @@ pub(crate) fn read_editable_tag_values(tag: &Tag) -> Result<EditableTagValues, S
     })
 }
 
-fn normalized_tag_text(value: Option<&str>) -> Option<String> {
+pub(crate) fn normalized_tag_text(value: Option<&str>) -> Option<String> {
+    // id3 1.17 keeps the null terminator of one-character ID3v2.4 text frames
+    // ("X\0"), so strip nulls along with whitespace.
     value
-        .map(str::trim)
+        .map(|value| {
+            value.trim_matches(|character: char| character == '\0' || character.is_whitespace())
+        })
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
 }
@@ -4324,6 +4328,28 @@ mod tests {
         );
         assert!(v24.get("TYER").is_none());
         assert_eq!(read_editable_tag_values(&v24).expect("read v2.4"), desired);
+    }
+
+    #[test]
+    fn one_character_v24_text_frames_drop_their_null_terminator() {
+        // Raw ID3v2.4 tag as written by common taggers: UTF-8 text frames that end
+        // with a null terminator. id3 1.17 keeps the terminator when the value is
+        // a single character, which made Peter Maffay's album "X" fail validation.
+        let mut frames = Vec::new();
+        for (id, value) in [(b"TALB", b'X'), (b"TIT2", b'Y'), (b"TCON", b'Z')] {
+            frames.extend_from_slice(id);
+            frames.extend_from_slice(&[0, 0, 0, 3, 0, 0, 0x03, value, 0]);
+        }
+        let mut bytes = b"ID3\x04\x00\x00\x00\x00\x00".to_vec();
+        bytes.push(u8::try_from(frames.len()).expect("small fixture"));
+        bytes.extend_from_slice(&frames);
+        let tag = Tag::read_from2(std::io::Cursor::new(bytes)).expect("decode fixture tag");
+
+        let values = read_editable_tag_values(&tag).expect("read editable values");
+        assert_eq!(values.album.as_deref(), Some("X"));
+        assert_eq!(values.title.as_deref(), Some("Y"));
+        assert_eq!(values.genre.as_deref(), Some("Z"));
+        values.validate().expect("one-character values are valid");
     }
 
     #[test]

@@ -46,9 +46,7 @@ pub(crate) fn read_genre(directory: &str, filename: &str) -> Option<Option<Strin
 }
 
 fn normalized_genre(tag: &id3::Tag) -> Option<String> {
-    tag.genre()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    crate::tagging::normalized_tag_text(tag.genre())
 }
 
 fn syncsafe(bytes: &[u8]) -> Option<u32> {

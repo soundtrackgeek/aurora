@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.56.2] - 2026-11-07
+
+### Fixed
+- The tag editor no longer refuses to save an album whose Album, Track Title, Genre or Publisher is a single character (for example Peter Maffay's album "X") with "Album contains an unsupported control character." The ID3 library Aurora uses kept the hidden end-of-text marker on one-character ID3v2.4 values; Aurora now strips it when reading tags. The same fix applies to genres shown from one-character genre tags.
+
 ## [0.56.1] - 2026-11-06
 
 ### Changed
