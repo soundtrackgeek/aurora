@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.57.3] - 2026-11-10
+
+### Fixed
+- The 0.57.2 release build failed. On macOS, the check that clears a moved album folder rejected Windows-style folder paths in its test; it now accepts Windows drive and network paths on every platform. On Windows, a long playback test hit the 5-second limit on a slow runner; it now has 20 seconds, like the other long App tests. This release ships the 0.57.2 changes.
+
 ## [0.57.2] - 2026-11-10
 
 ### Fixed

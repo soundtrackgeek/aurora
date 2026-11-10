@@ -94,7 +94,7 @@ it("keeps following playback across other album selections, delayed file refresh
   await waitFor(() => expect(player.state.status).toBe("paused"));
   fireEvent.click(album.getByRole("row", { name: /Strawberry Swing/ }));
   await expectPlaying(queue[1]);
-});
+}, 20_000);
 
 it("keeps a selected chart song from overriding the playing track and resumes chart details after clearing playback", async () => {
   const queue = library.browserPreview.tracks.slice(0, 2);

@@ -1763,7 +1763,14 @@ impl StateStore {
         let trimmed = directory.trim();
         let trimmed = trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed);
         let folder = trimmed.trim_end_matches(['\\', '/']);
-        if folder.is_empty() || !Path::new(folder).is_absolute() {
+        // Catalog folders are Windows paths even when tests run elsewhere.
+        let bytes = folder.as_bytes();
+        let windows_absolute = (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/'))
+            || folder.starts_with(r"\\");
+        if folder.is_empty() || !(windows_absolute || Path::new(folder).is_absolute()) {
             return Err("Aurora refused an invalid moved album folder.".to_owned());
         }
         let nested = format!("{folder}\\");
