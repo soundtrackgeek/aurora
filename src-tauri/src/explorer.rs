@@ -8,7 +8,7 @@ use crate::{
     state_store::StateStore,
     tag_model::LoveState,
 };
-use rusqlite::{Connection, Row, params_from_iter, types::Value};
+use rusqlite::{Connection, OptionalExtension, Row, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_PAGE_SIZE: u16 = 50;
@@ -1383,6 +1383,48 @@ pub(crate) fn load_album_detail(
     album_detail_with_file_refresh(&connection, &album_id, Some(store), false)
 }
 
+/// Finds the catalog album stored in a folder. Each candidate spelling of the path
+/// uses the case-sensitive `file_path` index, so the lookup never scans the catalog.
+pub(crate) fn album_for_directory(
+    connection: &Connection,
+    directory: &str,
+) -> Result<Option<(String, String)>, String> {
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT t.album_id, a.album FROM tracks AS t JOIN albums AS a ON a.id = t.album_id
+             WHERE t.file_path = ?1 AND t.album_id IS NOT NULL LIMIT 1",
+        )
+        .map_err(|error| format!("Could not prepare the folder album lookup: {error}"))?;
+    for candidate in directory_spellings(directory) {
+        let found = statement
+            .query_row([&candidate], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()
+            .map_err(|error| format!("Could not look up the folder's album: {error}"))?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
+
+fn directory_spellings(directory: &str) -> Vec<String> {
+    let trimmed = directory.trim().trim_end_matches(['\\', '/']);
+    let plain = trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed).to_owned();
+    let mut spellings = vec![plain.clone()];
+    let mut drive_upper = plain.clone();
+    if drive_upper.get(1..2) == Some(":") {
+        drive_upper.replace_range(0..1, &plain[0..1].to_ascii_uppercase());
+    }
+    spellings.push(drive_upper);
+    if let Ok(real) = std::path::Path::new(&plain).canonicalize() {
+        let real = real.to_string_lossy();
+        spellings.push(real.strip_prefix(r"\\?\").unwrap_or(&real).to_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    spellings.retain(|spelling| seen.insert(spelling.clone()));
+    spellings
+}
+
 pub(crate) fn load_local_album_detail(
     album_id: String,
     store: &StateStore,
@@ -1605,6 +1647,34 @@ mod tests {
         refresh_live_album_rating_projection(&connection)
             .expect("initial live album rating projection");
         connection
+    }
+
+    #[test]
+    fn folder_album_lookup_tries_exact_then_uppercase_drive_spellings() {
+        assert_eq!(
+            directory_spellings(r"d:\MUSIC\Missing album (2009)\"),
+            vec![
+                r"d:\MUSIC\Missing album (2009)".to_owned(),
+                r"D:\MUSIC\Missing album (2009)".to_owned()
+            ]
+        );
+        assert_eq!(
+            directory_spellings(r"\\?\Q:\Scores\Missing album"),
+            vec![r"Q:\Scores\Missing album".to_owned()]
+        );
+    }
+
+    #[test]
+    fn folder_album_lookup_finds_the_album_even_with_a_lowercase_drive() {
+        let connection = fixture();
+        assert_eq!(
+            album_for_directory(&connection, r"h:\Music\Daft Punk\").unwrap(),
+            Some(("a3".to_owned(), "Discovery".to_owned()))
+        );
+        assert_eq!(
+            album_for_directory(&connection, r"H:\Music\Nobody").unwrap(),
+            None
+        );
     }
 
     #[test]

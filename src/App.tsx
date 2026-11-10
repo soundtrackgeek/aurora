@@ -924,9 +924,13 @@ function App() {
 
   function openTrackAlbum(track: Track) {
     if (!track.albumId) return;
+    openAlbum(track.albumId, track.album);
+  }
+
+  function openAlbum(albumId: string, albumTitle: string) {
     transitionContent(() => {
-      pendingExplorerAlbumIdRef.current = track.albumId;
-      setSelectedAlbumId(track.albumId);
+      pendingExplorerAlbumIdRef.current = albumId;
+      setSelectedAlbumId(albumId);
       setInspectorView("album");
       setTagSelectionKind("album");
       setActiveNav("Albums");
@@ -934,7 +938,7 @@ function App() {
       setExplorerView("albums");
       setExplorerFilters({
         ...defaultExplorerFilters,
-        query: chartAlbumSearchQuery({ title: track.album, matchedAlbumTitle: null }),
+        query: chartAlbumSearchQuery({ title: albumTitle, matchedAlbumTitle: null }),
         sort: "yearDesc",
       });
     }, "page");
@@ -1345,7 +1349,8 @@ function App() {
       {contextTags && <ContextTagDialog onClose={() => setContextTags(null)}><TagEditor
         target={contextTags.albumIds?.length ? { kind: "albums", albumIds: [...contextTags.albumIds], label: contextTags.label } : { kind: "tracks", tracks: (contextTags.tracks ?? []).map(track => ({ trackId: track.id, trackKey: track.trackKey })), label: contextTags.label }}
         onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} /></ContextTagDialog>}
-      {librarySyncOpen && <LibrarySyncDialog onClose={() => setLibrarySyncOpen(false)} onCatalogSync={(sync) => void handleCatalogSync(sync)} />}
+      {librarySyncOpen && <LibrarySyncDialog onClose={() => setLibrarySyncOpen(false)} onCatalogSync={(sync) => void handleCatalogSync(sync)}
+        onOpenAlbum={(albumId, albumTitle) => { setLibrarySyncOpen(false); openAlbum(albumId, albumTitle); }} />}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
@@ -1380,7 +1385,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.57.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.57.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

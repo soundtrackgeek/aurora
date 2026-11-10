@@ -485,6 +485,9 @@ export interface LibrarySyncFolder {
   lastAttemptAtMs: number;
   nextRetryAtMs: number;
   pendingEditCount: number;
+  /** The catalog album in this folder, when Music Library has one. */
+  albumId?: string | null;
+  albumTitle?: string | null;
 }
 
 export interface LibrarySyncFolderRetry {

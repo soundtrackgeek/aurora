@@ -29,8 +29,8 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-function renderDialog(onCatalogSync = vi.fn()) {
-  render(<LibrarySyncDialog onClose={vi.fn()} onCatalogSync={onCatalogSync} now={() => NOW} />);
+function renderDialog(onCatalogSync = vi.fn(), onOpenAlbum = vi.fn()) {
+  render(<LibrarySyncDialog onClose={vi.fn()} onCatalogSync={onCatalogSync} onOpenAlbum={onOpenAlbum} now={() => NOW} />);
   return onCatalogSync;
 }
 
@@ -101,6 +101,21 @@ describe("LibrarySyncDialog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open folder Andrew Powell - Ladyhawke (1985)" }));
 
     expect(reveal).toHaveBeenCalledWith(waiting.directory);
+  });
+
+  it("opens the folder's album in Aurora when the catalog has it", async () => {
+    vi.spyOn(tags, "loadLibrarySyncFolders").mockResolvedValue([
+      { ...blocked, albumId: "mb:42", albumTitle: "Playing It Cool" },
+      waiting,
+    ]);
+    const onOpenAlbum = vi.fn();
+    renderDialog(vi.fn(), onOpenAlbum);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show album Jake Monaco - Playing It Cool (2014)" }));
+
+    expect(onOpenAlbum).toHaveBeenCalledWith("mb:42", "Playing It Cool");
+    // A folder without a catalog album offers no album link.
+    expect(screen.queryByRole("button", { name: "Show album Andrew Powell - Ladyhawke (1985)" })).not.toBeInTheDocument();
   });
 
   it("says so when nothing is waiting", async () => {

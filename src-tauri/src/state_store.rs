@@ -100,6 +100,11 @@ pub(crate) struct LibrarySyncFolder {
     /// When the background worker will try again on its own.
     pub(crate) next_retry_at_ms: i64,
     pub(crate) pending_edit_count: i64,
+    /// The catalog album for this folder, so the user can open it in Aurora.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) album_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) album_title: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1672,6 +1677,8 @@ impl StateStore {
                         last_attempt_at_ms: row.get(4)?,
                         next_retry_at_ms: row.get(5)?,
                         pending_edit_count: row.get(6)?,
+                        album_id: None,
+                        album_title: None,
                     })
                 },
             )

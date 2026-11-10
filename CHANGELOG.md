@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.57.1] - 2026-11-10
+
+### Added
+- **Show album** in the list of folders waiting for Music Library opens that folder's album in Aurora's album view, so you can check and fix its tags (for example an Album Artist that differs between tracks) without searching for it. The button appears whenever Music Library's catalog has an album for the folder.
+
 ## [0.57.0] - 2026-11-10
 
 ### Added

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, FolderOpen, RefreshCw, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, Disc3, FolderOpen, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { formatCount } from "../library";
 import {
   loadLibrarySyncFolders,
@@ -15,6 +15,8 @@ export interface LibrarySyncDialogProps {
   onClose: () => void;
   /** Receives the sync status after a retry so the topbar notice stays current. */
   onCatalogSync: (sync: CatalogSync) => void;
+  /** Opens the folder's album in Aurora's album view, for example to fix its tags. */
+  onOpenAlbum: (albumId: string, albumTitle: string) => void;
   /** Injected in tests so retry times read the same on every run. */
   now?: () => number;
 }
@@ -29,7 +31,7 @@ function folderName(directory: string): string {
   return directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory;
 }
 
-export function LibrarySyncDialog({ onClose, onCatalogSync, now = Date.now }: LibrarySyncDialogProps) {
+export function LibrarySyncDialog({ onClose, onCatalogSync, onOpenAlbum, now = Date.now }: LibrarySyncDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const mountedRef = useRef(true);
   const [folders, setFolders] = useState<LibrarySyncFolder[] | null>(null);
@@ -108,6 +110,12 @@ export function LibrarySyncDialog({ onClose, onCatalogSync, now = Date.now }: Li
         <p className="library-sync-folder__next">{describeNextRetry(folder.nextRetryAtMs, nowMs)}</p>
         {row?.status === "error" && <p className="library-sync-folder__error" role="alert">{row.message}</p>}
         <div className="library-sync-folder__actions">
+          {folder.albumId && (
+            <button type="button" onClick={() => onOpenAlbum(folder.albumId!, folder.albumTitle ?? folderName(folder.directory))}
+              aria-label={`Show album ${folderName(folder.directory)}`} title="Show this album in Aurora, for example to check its tags">
+              <Disc3 aria-hidden="true" /> Show album
+            </button>
+          )}
           <button type="button" onClick={() => void reveal(folder.directory)} aria-label={`Open folder ${folderName(folder.directory)}`}>
             <FolderOpen aria-hidden="true" /> Open folder
           </button>

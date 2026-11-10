@@ -1812,9 +1812,25 @@ async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, Strin
 
 #[tauri::command]
 async fn library_sync_folders(app: AppHandle) -> Result<Vec<LibrarySyncFolder>, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<StateStore>().library_sync_folders())
-        .await
-        .map_err(|error| format!("The Music Library folder reader stopped: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut folders = app.state::<StateStore>().library_sync_folders()?;
+        // The album link is a convenience: without a readable catalog the list still shows.
+        if let Ok(connection) =
+            catalog::default_catalog_path().and_then(|path| catalog::open_catalog_for_lookup(&path))
+        {
+            for folder in &mut folders {
+                if let Ok(Some((album_id, album_title))) =
+                    explorer::album_for_directory(&connection, &folder.directory)
+                {
+                    folder.album_id = Some(album_id);
+                    folder.album_title = Some(album_title);
+                }
+            }
+        }
+        Ok(folders)
+    })
+    .await
+    .map_err(|error| format!("The Music Library folder reader stopped: {error}"))?
 }
 
 #[derive(serde::Serialize)]
