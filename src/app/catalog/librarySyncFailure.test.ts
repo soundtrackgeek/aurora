@@ -44,6 +44,20 @@ describe("describeLibrarySyncFailure", () => {
     expect(failure.file).toBeUndefined();
   });
 
+  it("names tracks missing from the folder instead of guessing at Album Artist", () => {
+    const error = "Music Library could not complete syncExistingFolders: Could not sync D:\\Music\\Voices Carry: Aurora background sync requires reviewed reconciliation (importFailed)";
+    const one = describeLibrarySyncFailure(error, "D:\\Music\\Voices Carry", ["Are You Serious?"]);
+    expect(one.reason).toBe(`"Are You Serious?" is missing from this folder, but Music Library still lists it.`);
+    expect(one.fix).toMatch(/Move to Inbox/);
+    expect(one.fix).not.toMatch(/Album Artist/);
+
+    const many = describeLibrarySyncFailure(error, "D:\\Music\\A", ["One", "Two", "Three", "Four"]);
+    expect(many.reason).toBe(`"One", "Two", "Three" and 1 more are missing from this folder, but Music Library still lists them.`);
+    expect(describeLibrarySyncFailure(error, "D:\\Music\\A", ["One", "Two"]).reason).toMatch(/^"One" and "Two" are missing/);
+    // Before the first attempt there is nothing to explain yet.
+    expect(describeLibrarySyncFailure(null, "D:\\Music\\A", ["One"]).reason).toMatch(/first sync/);
+  });
+
   it("tells the user an interrupted sync needs nothing from them", () => {
     const failure = describeLibrarySyncFailure(
       "Music Library could not complete syncExistingFolders: Could not sync D:\\Music\\A: Aurora background sync was interrupted: the album's MP3s changed (importFailed)",

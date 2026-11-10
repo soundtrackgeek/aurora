@@ -28,10 +28,32 @@ export function cleanLibrarySyncError(error: string): string {
   return error.trim().replace(BRIDGE_PREFIX, "").replace(SYNC_PREFIX, "").replace(ERROR_CODE, "").trim();
 }
 
-/** Turns a stored Music Library sync error into a reason and a suggested fix. */
-export function describeLibrarySyncFailure(error: string | null | undefined, directory: string): LibrarySyncFailure {
+function quotedList(titles: string[]): string {
+  const quoted = titles.slice(0, 3).map((title) => `"${title}"`);
+  const more = titles.length - quoted.length;
+  if (more > 0) return `${quoted.join(", ")} and ${more} more`;
+  return quoted.length > 1 ? `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}` : quoted[0];
+}
+
+/**
+ * Turns a stored Music Library sync error into a reason and a suggested fix.
+ * `missingTracks` are catalog tracks whose MP3 is gone from the folder; they explain
+ * any failure better than the error text, which only says the album no longer matches.
+ */
+export function describeLibrarySyncFailure(
+  error: string | null | undefined,
+  directory: string,
+  missingTracks: readonly string[] = [],
+): LibrarySyncFailure {
   if (!error?.trim()) {
     return { reason: "Waiting for its first sync.", fix: "Nothing to do; Aurora syncs it shortly." };
+  }
+  if (missingTracks.length > 0) {
+    const one = missingTracks.length === 1;
+    return {
+      reason: `${quotedList([...missingTracks])} ${one ? "is" : "are"} missing from this folder, but Music Library still lists ${one ? "it" : "them"}.`,
+      fix: `Put the ${one ? "file" : "files"} back, or use Move to Inbox on the album: Music Library drops the missing ${one ? "track" : "tracks"}, and you can add the album again from the Inbox.`,
+    };
   }
   const message = cleanLibrarySyncError(error);
 

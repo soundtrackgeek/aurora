@@ -488,6 +488,8 @@ export interface LibrarySyncFolder {
   /** The catalog album in this folder, when Music Library has one. */
   albumId?: string | null;
   albumTitle?: string | null;
+  /** Catalog tracks of that album whose MP3 is no longer in the folder. */
+  missingTracks?: string[];
 }
 
 export interface LibrarySyncFolderRetry {

@@ -727,6 +727,8 @@ pub async fn apply_library_intake_batch(
             let mut after = crate::timing::Span::new("applyBatch.after_bridge", &request.plan_id);
             after.stage("validate_receipt");
             validate_apply_result(&result, &request)?;
+            after.stage("forget_moved_folders");
+            forget_moved_album_folders(&app, &mut result);
             after.stage("record_additions");
             let recorded = record_album_additions(&app, &result);
             after.finish(recorded.is_ok());
@@ -741,6 +743,25 @@ pub async fn apply_library_intake_batch(
     })
     .await
     .map_err(|error| format!("The album import worker stopped unexpectedly: {error}"))?
+}
+
+/// A folder moved back to the Inbox or removed is no longer in the library, so Aurora
+/// stops waiting to sync its edits there; the moved files keep them.
+fn forget_moved_album_folders(app: &AppHandle, result: &mut LibraryIntakeApplyResult) {
+    let store = app.state::<StateStore>();
+    for album in &result.albums {
+        if album.action != LibraryIntakeAction::Remove
+            || album.cleanup_status != LibraryIntakeCleanupStatus::Removed
+        {
+            continue;
+        }
+        if let Err(error) = store.forget_moved_library_folder(&album.source_path) {
+            result.status = LibraryIntakeApplyStatus::CompletedWithWarnings;
+            result.cleanup_warnings.push(format!(
+                "The album moved, but Aurora could not clear its waiting Music Library edits: {error}"
+            ));
+        }
+    }
 }
 
 fn foreground_album_work<T>(

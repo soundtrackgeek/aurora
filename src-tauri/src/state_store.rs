@@ -105,6 +105,9 @@ pub(crate) struct LibrarySyncFolder {
     pub(crate) album_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) album_title: Option<String>,
+    /// Catalog tracks of the folder's album whose MP3 is no longer on disk.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) missing_tracks: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1679,6 +1682,7 @@ impl StateStore {
                         pending_edit_count: row.get(6)?,
                         album_id: None,
                         album_title: None,
+                        missing_tracks: Vec::new(),
                     })
                 },
             )
@@ -1745,6 +1749,55 @@ impl StateStore {
             )
             .map(|changed| changed == 1)
             .map_err(|error| format!("Could not complete Aurora's library-folder sync: {error}"))
+    }
+
+    /// Forgets the queued Music Library sync and the catalog overlays of an album folder
+    /// that a reviewed move took out of the library. The moved MP3s already carry every
+    /// edit, so nothing is lost; without this the old folder would wait for a sync that can
+    /// never succeed. Overlays with an unfinished file write stay so recovery can finish it.
+    /// Returns the number of queue rows and overlays removed.
+    pub(crate) fn forget_moved_library_folder(
+        &self,
+        directory: &str,
+    ) -> Result<(usize, usize), String> {
+        let trimmed = directory.trim();
+        let trimmed = trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed);
+        let folder = trimmed.trim_end_matches(['\\', '/']);
+        if folder.is_empty() || !Path::new(folder).is_absolute() {
+            return Err("Aurora refused an invalid moved album folder.".to_owned());
+        }
+        let nested = format!("{folder}\\");
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not prepare Aurora's moved-folder cleanup: {error}"))?;
+        // NOCASE matches Windows paths; the prefix test covers disc subfolders.
+        let queued = transaction
+            .execute(
+                "DELETE FROM pending_library_folder_sync
+                 WHERE directory = ?1 COLLATE NOCASE
+                    OR substr(directory, 1, length(?2)) = ?2 COLLATE NOCASE",
+                params![folder, &nested],
+            )
+            .map_err(|error| {
+                format!("Could not forget the moved folder's library sync: {error}")
+            })?;
+        let overlays = transaction
+            .execute(
+                "DELETE FROM tag_overlays
+                 WHERE (directory = ?1 COLLATE NOCASE
+                        OR substr(directory, 1, length(?2)) = ?2 COLLATE NOCASE)
+                   AND NOT EXISTS (
+                     SELECT 1 FROM tag_edit_operations AS operation
+                     WHERE operation.track_key = tag_overlays.track_key
+                       AND operation.status IN ('prepared', 'replaced', 'undoing'))",
+                params![folder, &nested],
+            )
+            .map_err(|error| format!("Could not forget the moved folder's tag edits: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not commit Aurora's moved-folder cleanup: {error}"))?;
+        Ok((queued, overlays))
     }
 
     pub(crate) fn defer_library_folder_sync(
@@ -3077,6 +3130,64 @@ mod tests {
         assert_eq!(folders[1].last_error, None);
         assert_eq!(folders[1].next_retry_at_ms, 0);
         assert_eq!(folders[1].pending_edit_count, 0);
+        drop(connection);
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn moved_album_folder_forgets_its_queue_and_finished_overlays_only() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).unwrap();
+        let moved = r"D:\MUSIC\'Til Tuesday - Voices Carry (1985)";
+        let sibling = r"D:\MUSIC\'Til Tuesday - Voices Carry (1985) Deluxe";
+        store
+            .queue_library_file_syncs(&[
+                (moved.to_owned(), "09.mp3".to_owned()),
+                (format!(r"{moved}\CD2"), "01.mp3".to_owned()),
+                (sibling.to_owned(), "01.mp3".to_owned()),
+            ])
+            .unwrap();
+        let connection = store.open().unwrap();
+        for (key, directory) in [
+            ("finished", r"d:\music\'til tuesday - voices carry (1985)"),
+            ("writing", moved),
+            ("sibling", sibling),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO tag_overlays(track_key, directory, filename, love_state, catalog_love_state, catalog_import_run_id, updated_at_ms)
+                     VALUES (?1, ?2, '09.mp3', 'neutral', 'neutral', 1, 1)",
+                    params![key, directory],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO tag_edit_operations(track_key, target_path, before_love_state, after_love_state, source_fingerprint, status, created_at_ms, updated_at_ms)
+                 VALUES ('writing', 'x', 'neutral', 'neutral', 'f', 'replaced', 1, 1)",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .forget_moved_library_folder(&format!(r"\\?\{moved}\"))
+                .unwrap(),
+            (2, 1)
+        );
+        let folders = store.library_sync_folders().unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].directory, sibling);
+        let left: Vec<String> = connection
+            .prepare("SELECT track_key FROM tag_overlays ORDER BY track_key")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["sibling", "writing"]);
+        assert!(store.forget_moved_library_folder("relative").is_err());
         drop(connection);
         drop(store);
         let _ = fs::remove_file(path);

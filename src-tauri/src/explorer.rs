@@ -1407,6 +1407,48 @@ pub(crate) fn album_for_directory(
     Ok(None)
 }
 
+/// Titles of the album's catalog tracks whose MP3 is gone from a still-readable folder.
+/// A catalog that lists more tracks than the folder holds blocks Music Library's fast
+/// sync, so the waiting list names them instead of guessing at a tagging problem.
+pub(crate) fn missing_album_tracks(
+    connection: &Connection,
+    album_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT COALESCE(title, ''), COALESCE(file_path, ''), COALESCE(filename, '')
+             FROM tracks WHERE album_id = ?1
+             ORDER BY disc_number, track_number, filename",
+        )
+        .map_err(|error| format!("Could not prepare the missing-track lookup: {error}"))?;
+    let rows = statement
+        .query_map([album_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .and_then(Iterator::collect::<rusqlite::Result<Vec<_>>>)
+        .map_err(|error| format!("Could not look up the album's tracks: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, directory, filename)| {
+            !directory.is_empty()
+                && !filename.is_empty()
+                && std::fs::read_dir(directory).is_ok()
+                && !std::path::Path::new(directory).join(filename).exists()
+        })
+        .map(|(title, _, filename)| {
+            if title.trim().is_empty() {
+                filename
+            } else {
+                title
+            }
+        })
+        .collect())
+}
+
 fn directory_spellings(directory: &str) -> Vec<String> {
     let trimmed = directory.trim().trim_end_matches(['\\', '/']);
     let plain = trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed).to_owned();
@@ -1675,6 +1717,36 @@ mod tests {
             album_for_directory(&connection, r"H:\Music\Nobody").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn missing_album_tracks_names_files_gone_from_a_readable_folder() {
+        let connection = fixture();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("01.mp3"), b"present").unwrap();
+        let directory = folder.path().to_string_lossy().into_owned();
+        connection
+            .execute(
+                "UPDATE tracks SET file_path = ?1 WHERE album_id = 'a3'",
+                [&directory],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tracks (id, import_run_id, album_id, title, file_path, filename, disc_number, track_number)
+                 VALUES (11, 1, 'a3', 'Are You Serious?', ?1, '09.mp3', 1, 9),
+                        (12, 1, 'a3', '', ?1, '10.mp3', 1, 10),
+                        (13, 1, 'a3', 'Elsewhere', 'Z:\\No Such Folder', '01.mp3', 1, 1)",
+                [&directory],
+            )
+            .unwrap();
+
+        // An unreadable folder is no proof that its track was deleted.
+        assert_eq!(
+            missing_album_tracks(&connection, "a3").unwrap(),
+            ["Are You Serious?", "10.mp3"]
+        );
+        assert!(missing_album_tracks(&connection, "a1").unwrap().is_empty());
     }
 
     #[test]

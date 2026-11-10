@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.57.2** names tracks that are missing from an album's folder in the list of folders waiting for Music Library, and suggests putting them back or using **Move to Inbox**. With Music Library 0.215.1 or later, Move to Inbox works for such albums, and Aurora then clears the old folder's waiting edits.
+
 Aurora **0.57.1** adds **Show album** to the list of folders waiting for Music Library: it opens the folder's album in Aurora so you can fix its tags straight away.
 
 Aurora **0.57.0** shows which folders still have edits waiting for Music Library. Click the Music Library notice in the top bar to see each folder, why Music Library refused it, what to change, and when Aurora tries again; **Retry** syncs a folder right away once you have fixed it, and **Open folder** shows it in Explorer.

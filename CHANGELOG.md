@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.2] - 2026-11-10
+
+### Fixed
+- The **Edits waiting for Music Library** list now names tracks that are missing from an album's folder (for example "Are You Serious?" is missing from this folder, but Music Library still lists it), instead of suggesting an Album Artist problem. It suggests putting the file back or using **Move to Inbox**.
+- After **Move to Inbox** or **Remove album**, Aurora stops waiting to sync the old folder: its queued Music Library sync and its finished tag edits are cleared, since the moved MP3s already carry every edit. Edits with an unfinished file write are kept.
+- With Music Library 0.215.1 or later, **Move to Inbox** works for albums whose catalog still lists a track that was deleted from disk.
+
 ## [0.57.1] - 2026-11-10
 
 ### Added

@@ -91,7 +91,7 @@ export function LibrarySyncDialog({ onClose, onCatalogSync, onOpenAlbum, now = D
   const nowMs = now();
 
   const renderFolder = (folder: LibrarySyncFolder) => {
-    const failure = describeLibrarySyncFailure(folder.lastError, folder.directory);
+    const failure = describeLibrarySyncFailure(folder.lastError, folder.directory, folder.missingTracks);
     const row = rows[folder.directory];
     return (
       <li key={folder.directory} className="library-sync-folder" data-blocked={folder.blocked ? "true" : undefined}>

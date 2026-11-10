@@ -118,6 +118,17 @@ describe("LibrarySyncDialog", () => {
     expect(screen.queryByRole("button", { name: "Show album Andrew Powell - Ladyhawke (1985)" })).not.toBeInTheDocument();
   });
 
+  it("names a track missing from the folder as the reason", async () => {
+    vi.spyOn(tags, "loadLibrarySyncFolders").mockResolvedValue([
+      { ...blocked, albumId: "mb:42", albumTitle: "Playing It Cool", missingTracks: ["Are You Serious?"] },
+    ]);
+    renderDialog();
+
+    expect(await screen.findByText(/"Are You Serious\?" is missing from this folder/)).toBeInTheDocument();
+    expect(screen.getByText(/use Move to Inbox on the album/)).toBeInTheDocument();
+    expect(screen.queryByText(/Album Artist/)).not.toBeInTheDocument();
+  });
+
   it("says so when nothing is waiting", async () => {
     vi.spyOn(tags, "loadLibrarySyncFolders").mockResolvedValue([]);
     renderDialog();

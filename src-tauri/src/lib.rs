@@ -1822,6 +1822,8 @@ async fn library_sync_folders(app: AppHandle) -> Result<Vec<LibrarySyncFolder>, 
                 if let Ok(Some((album_id, album_title))) =
                     explorer::album_for_directory(&connection, &folder.directory)
                 {
+                    folder.missing_tracks =
+                        explorer::missing_album_tracks(&connection, &album_id).unwrap_or_default();
                     folder.album_id = Some(album_id);
                     folder.album_title = Some(album_title);
                 }
