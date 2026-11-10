@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.56.4** stops tag edits from waiting forever for Music Library: a sync interrupted by a change during the sync is retried after 30 seconds, and folders Music Library refuses are retried once a day and again after every Music Library update.
+
 Aurora **0.56.3** uses much less CPU while you rate tracks: it no longer reloads the whole library after each of its own tag edits reaches Music Library, re-checks pending tag edits only when the catalog or the edit queue changes (plus a sweep every 10 minutes), and stops logging the fast four-times-a-second playback check.
 
 Aurora **0.56.2** fixes the tag editor refusing to save albums, titles or genres that are a single character (such as Peter Maffay's album "X") with "contains an unsupported control character".

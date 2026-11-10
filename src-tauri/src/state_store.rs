@@ -15,6 +15,10 @@ pub(crate) const SCHEMA_VERSION: i64 = 17;
 
 const MAX_PENDING_LIBRARY_FOLDER_SYNCS: usize = 32;
 pub(crate) const MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS: i64 = 3;
+/// A blocked folder still gets one attempt a day, so a cause fixed elsewhere
+/// (a tidied folder, a Music Library update) cannot strand its edits.
+pub(crate) const BLOCKED_LIBRARY_SYNC_RETRY_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
+const MUSIC_LIBRARY_BUILD_KEY: &str = "music_library_build";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StoredQueueEntry {
@@ -519,6 +523,12 @@ impl StateStore {
                 .map_err(|error| format!("Could not reopen verified deletion sync: {error}"))?;
         }
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS saved_views(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,view TEXT NOT NULL,filters_json TEXT NOT NULL);").map_err(|e| e.to_string())?;
+        // Local bookkeeping for library sync; deliberately not a synchronized table.
+        transaction
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS library_sync_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )
+            .map_err(|error| format!("Could not ensure Aurora's library-sync metadata: {error}"))?;
         let synchronized_tables = [
             "saved_views",
             "playback_queue",
@@ -1413,7 +1423,8 @@ impl StateStore {
                 r#"
                 SELECT directory, filename, updated_at_ms
                 FROM pending_library_folder_sync
-                WHERE attempt_count < ?2 AND next_attempt_at_ms <= ?3
+                WHERE next_attempt_at_ms <= ?3
+                  AND (attempt_count < ?2 OR updated_at_ms <= ?3 - ?4)
                 ORDER BY updated_at_ms, directory COLLATE NOCASE
                 LIMIT ?1
                 "#,
@@ -1423,7 +1434,12 @@ impl StateStore {
             })?;
         statement
             .query_map(
-                params![limit as i64, MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS, now_ms()],
+                params![
+                    limit as i64,
+                    MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS,
+                    now_ms(),
+                    BLOCKED_LIBRARY_SYNC_RETRY_INTERVAL_MS
+                ],
                 |row| {
                     Ok(PendingLibraryFolderSync {
                         directory: row.get(0)?,
@@ -1602,6 +1618,49 @@ impl StateStore {
             .map_err(|error| {
                 format!("Could not count Aurora's pending library-folder sync: {error}")
             })
+    }
+
+    /// Gives every blocked folder a fresh attempt the first time Aurora sees a
+    /// Music Library build. Returns how many folders were reopened.
+    pub(crate) fn reopen_blocked_library_syncs_for_build(
+        &self,
+        build: &str,
+    ) -> Result<usize, String> {
+        if build.trim().is_empty() {
+            return Err("Aurora refused an empty Music Library build identity.".to_owned());
+        }
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not prepare Aurora's library-sync reopen: {error}"))?;
+        let seen: Option<String> = transaction
+            .query_row(
+                "SELECT value FROM library_sync_meta WHERE key = ?1",
+                [MUSIC_LIBRARY_BUILD_KEY],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("Could not read Aurora's Music Library build: {error}"))?;
+        if seen.as_deref() == Some(build) {
+            return Ok(0);
+        }
+        let reopened = transaction
+            .execute(
+                "UPDATE pending_library_folder_sync SET attempt_count = 0, next_attempt_at_ms = 0 WHERE attempt_count >= ?1",
+                [MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS],
+            )
+            .map_err(|error| format!("Could not reopen Aurora's blocked library sync: {error}"))?;
+        transaction
+            .execute(
+                "INSERT INTO library_sync_meta(key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![MUSIC_LIBRARY_BUILD_KEY, build],
+            )
+            .map_err(|error| format!("Could not record Aurora's Music Library build: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not commit Aurora's library-sync reopen: {error}"))?;
+        Ok(reopened)
     }
 
     pub(crate) fn complete_library_folder_sync(
@@ -2260,7 +2319,8 @@ mod tests {
         let path = temp.path().join("state.sqlite3");
         let store = StateStore::new(path.clone()).unwrap();
         let conn = store.open().unwrap();
-        conn.execute("INSERT INTO pending_library_folder_sync(directory,updated_at_ms,attempt_count,last_error) VALUES ('deleted',1,3,'does not have the exact MP3 identity set'),('other',1,3,'unsupported metadata')", []).unwrap();
+        // Recent blocks, so the once-a-day retry of blocked folders is not due yet.
+        conn.execute("INSERT INTO pending_library_folder_sync(directory,updated_at_ms,attempt_count,last_error) VALUES ('deleted',?1,3,'does not have the exact MP3 identity set'),('other',?1,3,'unsupported metadata')", [now_ms()]).unwrap();
         conn.pragma_update(None, "user_version", 14).unwrap();
         drop(conn);
         drop(store);
@@ -2890,6 +2950,71 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn blocked_folder_reopens_once_per_music_library_build_and_once_a_day() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).unwrap();
+        let directory = r"D:\Music\Blocked until fixed";
+        store
+            .queue_library_file_syncs(&[(directory.to_owned(), "Track.mp3".to_owned())])
+            .unwrap();
+        let item = store.pending_library_folder_sync(1).unwrap().pop().unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&item, "unsupported")
+                .unwrap()
+        );
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+
+        // The first build Aurora sees, and every later one, reopens blocked work once.
+        assert_eq!(
+            store.reopen_blocked_library_syncs_for_build("1:1").unwrap(),
+            1
+        );
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
+        let item = store.pending_library_folder_sync(1).unwrap().pop().unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&item, "still unsupported")
+                .unwrap()
+        );
+        assert_eq!(
+            store.reopen_blocked_library_syncs_for_build("1:1").unwrap(),
+            0
+        );
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
+        assert_eq!(
+            store.reopen_blocked_library_syncs_for_build("2:2").unwrap(),
+            1
+        );
+        let item = store.pending_library_folder_sync(1).unwrap().pop().unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&item, "still unsupported")
+                .unwrap()
+        );
+
+        // A day after its last failure a blocked folder is offered again, still counted as blocked.
+        store
+            .open()
+            .unwrap()
+            .execute(
+                "UPDATE pending_library_folder_sync SET updated_at_ms = ?1",
+                [now_ms() - BLOCKED_LIBRARY_SYNC_RETRY_INTERVAL_MS - 1],
+            )
+            .unwrap();
+        assert_eq!(store.library_folder_sync_counts().unwrap(), (0, 1));
+        let due = store.pending_library_folder_sync(1).unwrap().pop().unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&due, "still unsupported")
+                .unwrap()
+        );
+        assert!(store.pending_library_folder_sync(1).unwrap().is_empty());
         drop(store);
         let _ = fs::remove_file(path);
     }

@@ -1664,6 +1664,24 @@ fn update_music_library_message(detail: String) -> String {
     )
 }
 
+/// Identifies the installed Music Library build by its executable's size and
+/// modification time; every update replaces the file. `None` when it is missing.
+pub(crate) fn music_library_build_stamp() -> Option<String> {
+    let executable = discover_music_library_executable().ok()?;
+    build_stamp_for(&executable)
+}
+
+fn build_stamp_for(executable: &Path) -> Option<String> {
+    let metadata = fs::metadata(executable).ok()?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{}:{modified}", metadata.len()))
+}
+
 fn discover_music_library_executable() -> Result<PathBuf, String> {
     #[cfg(target_os = "macos")]
     {
@@ -2230,6 +2248,21 @@ mod tests {
         )
         .expect("override");
         assert_eq!(discovered, override_path.canonicalize().expect("canonical"));
+    }
+
+    #[test]
+    fn build_stamp_changes_when_music_library_is_replaced() {
+        let directory = TempDir::new().expect("temp directory");
+        let executable = directory.path().join("music-library.exe");
+        fs::write(&executable, b"build one").expect("first build");
+        let first = build_stamp_for(&executable).expect("first stamp");
+        assert_eq!(
+            build_stamp_for(&executable).as_deref(),
+            Some(first.as_str())
+        );
+        fs::write(&executable, b"the second build").expect("updated build");
+        assert_ne!(build_stamp_for(&executable).expect("second stamp"), first);
+        assert_eq!(build_stamp_for(&directory.path().join("missing.exe")), None);
     }
 
     #[test]

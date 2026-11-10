@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.56.4] - 2026-11-10
+
+### Fixed
+- Tag edits could wait forever for Music Library: 277 rating and tag edits across 108 album folders stayed pending, some since September. When Music Library refused a folder sync once, Aurora stopped retrying that folder until its MP3s changed again, even when the refusal only meant the album or the catalog had changed during the sync (for example while you rated the next track). Aurora now retries those interrupted syncs after 30 seconds.
+- Folders that Music Library refuses for a lasting reason (stray non-MP3 files, inconsistent Album Artist tags, unsupported rating values) are no longer stranded: Aurora retries each one once a day, and every blocked folder gets a fresh attempt as soon as Aurora sees a new Music Library build, so a fix in Music Library or in the folder reaches the waiting edits without another tag change.
+
 ## [0.56.3] - 2026-11-10
 
 ### Fixed

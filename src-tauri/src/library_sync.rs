@@ -1,5 +1,5 @@
 use crate::{
-    library_bridge::sync_existing_library_folders,
+    library_bridge::{music_library_build_stamp, sync_existing_library_folders},
     state_store::{PendingLibraryFolderSync, StateStore},
 };
 use serde::Serialize;
@@ -61,7 +61,7 @@ impl CatalogSync {
         }
         if blocked_folder_count > 0 {
             message.push_str(&format!(
-                " {blocked_folder_count} other folder{} will not retry until its MP3s change again.",
+                " {blocked_folder_count} other folder{} needs attention; Aurora retries it once a day and after Music Library updates.",
                 if blocked_folder_count == 1 { "" } else { "s" }
             ));
         }
@@ -76,7 +76,7 @@ impl CatalogSync {
 
     fn blocked(blocked_folder_count: usize, detail: Option<String>) -> Self {
         let mut message = format!(
-            "Music Library update needs attention for {blocked_folder_count} folder{}; automatic retries are paused until those MP3s change again.",
+            "Music Library update needs attention for {blocked_folder_count} folder{}; automatic retries are paused, apart from one try a day and one after Music Library updates.",
             if blocked_folder_count == 1 { "" } else { "s" }
         );
         if let Some(detail) = detail.filter(|detail| !detail.trim().is_empty()) {
@@ -115,6 +115,8 @@ pub(crate) struct LibrarySyncCoordinator {
     background_gate: Mutex<()>,
     foreground_waiters: AtomicUsize,
     next_projection_token: AtomicU64,
+    /// The Music Library build seen last, so its file is only compared in memory.
+    seen_music_library_build: Mutex<Option<String>>,
 }
 
 impl Default for LibrarySyncCoordinator {
@@ -125,6 +127,7 @@ impl Default for LibrarySyncCoordinator {
             background_gate: Mutex::new(()),
             foreground_waiters: AtomicUsize::new(0),
             next_projection_token: AtomicU64::new(1),
+            seen_music_library_build: Mutex::new(None),
         }
     }
 }
@@ -270,8 +273,27 @@ impl LibrarySyncCoordinator {
         operation()
     }
 
+    /// A new Music Library build may fix what blocked a folder, so blocked folders get
+    /// one fresh attempt per build instead of waiting for their MP3s to change.
+    fn reopen_blocked_after_music_library_update(&self, store: &StateStore) {
+        let Some(build) = music_library_build_stamp() else {
+            return;
+        };
+        let mut seen = self
+            .seen_music_library_build
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if seen.as_deref() == Some(build.as_str()) {
+            return;
+        }
+        if store.reopen_blocked_library_syncs_for_build(&build).is_ok() {
+            *seen = Some(build);
+        }
+    }
+
     fn run_locked(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
         let store = app.state::<StateStore>();
+        self.reopen_blocked_after_music_library_update(&store);
         let priorities = unique_directories(priority_directories);
         let targets = if priorities.is_empty() {
             match store.pending_library_folder_sync(BACKGROUND_RETRY_FOLDERS) {
@@ -381,6 +403,8 @@ fn transient_library_sync_error(error: &str) -> bool {
         "database is locked",
         "background sync yielded to a foreground operation",
         "music library must be updated (or installed if missing)",
+        // Music Library's guards saw the album or catalog change mid-sync.
+        "background sync was interrupted",
     ]
     .iter()
     .any(|fragment| error.contains(fragment))
@@ -563,6 +587,16 @@ mod tests {
         assert!(!transient_library_sync_error(
             "The selected folder contains more than one album"
         ));
+    }
+
+    #[test]
+    fn album_changed_mid_sync_is_retried_while_unsupported_edits_still_block() {
+        let interrupted = "Music Library could not complete syncExistingFolders: Could not sync \\\\?\\D:\\MUSIC\\Album: Aurora background sync was interrupted: the album's MP3s or the Music Library catalog changed while it synchronized. The file edits are retained; retry the catalog sync (importFailed)";
+        assert!(transient_library_sync_error(interrupted));
+        assert!(!structural_library_sync_error(interrupted));
+        let unsupported = "Aurora background sync requires reviewed reconciliation: the selected album could not be safely updated with an album-sized metadata sync.";
+        assert!(!transient_library_sync_error(unsupported));
+        assert!(structural_library_sync_error(unsupported));
     }
 
     #[test]
