@@ -828,6 +828,29 @@ pub(crate) fn sync_existing_library_folders(
         SYNC_TIMEOUT,
     )?;
     validate_sync_result(&result, &folder_paths)?;
+    let own_edited_files = if changed_file_paths.is_empty() {
+        // A folder-level sync after several edits in one album: count Aurora's
+        // pending edits there. If that lookup fails, treat the import as foreign.
+        let store = app.state::<StateStore>();
+        folder_paths
+            .iter()
+            .map(|folder| {
+                store
+                    .pending_overlay_filenames_for_directory(folder, 100)
+                    .map(|files| files.len())
+            })
+            .sum::<Result<usize, String>>()
+            .unwrap_or(0)
+    } else {
+        changed_file_paths.len()
+    };
+    if crate::own_catalog_imports::sync_only_carries_own_edits(
+        result.changed_tracks,
+        deleted_file_paths.len(),
+        own_edited_files,
+    ) {
+        crate::own_catalog_imports::record(&result.import_run_ids);
+    }
     Ok(result)
 }
 

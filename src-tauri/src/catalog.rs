@@ -439,9 +439,95 @@ fn completed_import_revision_for_connection(connection: &Connection) -> Result<S
 }
 
 pub(crate) fn completed_import_revision() -> Result<String, String> {
-    let path = default_catalog_path()?;
-    let connection = open_catalog(&path)?;
+    let connection = open_catalog_for_lookup(&default_catalog_path()?)?;
     completed_import_revision_for_connection(&connection)
+}
+
+/// The catalog's current revision, plus whether every import completed since
+/// `previous` was one of Aurora's own tag syncs. The UI already shows those
+/// edits, so it can adopt the new revision without reloading the library.
+pub(crate) fn completed_import_revision_since(
+    previous: Option<&str>,
+) -> Result<(String, bool), String> {
+    let connection = open_catalog_for_lookup(&default_catalog_path()?)?;
+    let current = completed_import_revision_for_connection(&connection)?;
+    let own_only = match previous {
+        Some(previous) if previous != current => {
+            revision_change_is_own_tag_sync(&connection, previous, &current)?
+        }
+        _ => false,
+    };
+    Ok((current, own_only))
+}
+
+struct ParsedRevision<'a> {
+    completed_count: i64,
+    maximum_id: i64,
+    artists: Option<&'a str>,
+}
+
+/// Revisions look like `count:max_id:latest_completion[:artists:revision]`;
+/// the completion timestamp itself contains colons.
+fn parse_revision(revision: &str) -> Option<ParsedRevision<'_>> {
+    let mut parts = revision.splitn(3, ':');
+    let completed_count = parts.next()?.parse().ok()?;
+    let maximum_id = parts.next()?.parse().ok()?;
+    let rest = parts.next()?;
+    let artists = rest.rsplit_once(":artists:").map(|(_, artists)| artists);
+    Some(ParsedRevision {
+        completed_count,
+        maximum_id,
+        artists,
+    })
+}
+
+fn revision_change_is_own_tag_sync(
+    connection: &Connection,
+    previous: &str,
+    current: &str,
+) -> Result<bool, String> {
+    let (Some(before), Some(after)) = (parse_revision(previous), parse_revision(current)) else {
+        return Ok(false);
+    };
+    let added = after.completed_count - before.completed_count;
+    if before.artists != after.artists || added <= 0 || after.maximum_id <= before.maximum_id {
+        return Ok(false);
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT id FROM import_runs WHERE status = 'completed' AND id > ?1 AND id <= ?2 ORDER BY id",
+        )
+        .map_err(|error| format!("Could not inspect recent library imports: {error}"))?;
+    let new_runs = statement
+        .query_map(params![before.maximum_id, after.maximum_id], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|error| format!("Could not inspect recent library imports: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Could not inspect recent library imports: {error}"))?;
+    // A late-completing older run would raise the count without a new id.
+    Ok(new_runs.len() as i64 == added && crate::own_catalog_imports::contains_all(&new_runs))
+}
+
+/// A plain read-only connection for small lookups. Unlike `open_catalog`, it
+/// skips the search setup (attached analysis database, temporary views), which
+/// costs several milliseconds per connection on a large catalog.
+pub(crate) fn open_catalog_for_lookup(path: &Path) -> Result<Connection, String> {
+    if !path.is_file() {
+        return Err(format!("Music catalog was not found at {}", path.display()));
+    }
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_URI
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)
+        .map_err(|error| format!("Could not open the music catalog read-only: {error}"))?;
+    connection
+        .busy_timeout(Duration::from_secs(2))
+        .map_err(|error| format!("Could not configure the read-only catalog: {error}"))?;
+    connection
+        .pragma_update(None, "query_only", true)
+        .map_err(|error| format!("Could not enforce read-only catalog access: {error}"))?;
+    Ok(connection)
 }
 
 pub(crate) fn map_track_row(row: &Row<'_>) -> rusqlite::Result<TrackSummary> {
@@ -2709,8 +2795,16 @@ pub(crate) fn catalog_tag_values_by_path(
     directory: &str,
     filename: &str,
 ) -> Result<Option<(TagValues, i64)>, String> {
-    let path = default_catalog_path()?;
-    let connection = open_catalog(&path)?;
+    let connection = open_catalog_for_lookup(&default_catalog_path()?)?;
+    catalog_tag_values_by_path_with(&connection, directory, filename)
+}
+
+/// Reuses one catalog connection when checking many tracks in a row.
+pub(crate) fn catalog_tag_values_by_path_with(
+    connection: &Connection,
+    directory: &str,
+    filename: &str,
+) -> Result<Option<(TagValues, i64)>, String> {
     connection
         .query_row(
             r#"
@@ -2853,6 +2947,36 @@ fn cover_archive_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_revisions_advanced_by_aurora_tag_syncs_skip_the_reload() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE import_runs (id INTEGER PRIMARY KEY, status TEXT, started_at TEXT, completed_at TEXT);
+                 INSERT INTO import_runs VALUES (800010, 'completed', '2026-11-10T10:00:00Z', '2026-11-10T10:00:01Z');",
+            )
+            .unwrap();
+        let before = completed_import_revision_for_connection(&connection).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO import_runs VALUES (800011, 'completed', '2026-11-10T10:01:00Z', '2026-11-10T10:01:01Z');
+                 INSERT INTO import_runs VALUES (800012, 'completed', '2026-11-10T10:02:00Z', '2026-11-10T10:02:01Z');",
+            )
+            .unwrap();
+        let after = completed_import_revision_for_connection(&connection).unwrap();
+        assert!(parse_revision(&after).is_some_and(|parsed| parsed.maximum_id == 800012));
+
+        crate::own_catalog_imports::record(&[800011]);
+        assert!(!revision_change_is_own_tag_sync(&connection, &before, &after).unwrap());
+        crate::own_catalog_imports::record(&[800012]);
+        assert!(revision_change_is_own_tag_sync(&connection, &before, &after).unwrap());
+
+        // A changed artist identity or an unparseable revision always reloads.
+        let artists_changed = format!("{after}:artists:2");
+        assert!(!revision_change_is_own_tag_sync(&connection, &before, &artists_changed).unwrap());
+        assert!(!revision_change_is_own_tag_sync(&connection, "legacy", &after).unwrap());
+    }
 
     #[test]
     fn embedded_cover_candidates_stay_within_the_selected_album() {

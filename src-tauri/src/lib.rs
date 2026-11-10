@@ -31,6 +31,7 @@ mod live_genres;
 mod media_controls;
 mod musicbrainz;
 mod native_events;
+mod own_catalog_imports;
 mod pcm_buffer;
 mod peak_limiter;
 mod playback;

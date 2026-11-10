@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.3] - 2026-11-10
+
+### Fixed
+- Aurora used 10% or more CPU while you rated tracks. Each rating that reached Music Library started a new catalog import, and Aurora answered every import by reloading the whole library (over a million tracks) even though it already showed the edit. Imports that only carry Aurora's own tag edits now just advance the known catalog revision; imports from anywhere else still reload the library.
+- Pending tag edits waiting for Music Library to catch up were re-checked every 5 seconds, opening the full catalog (with its search setup) once per track. Aurora now reuses one lightweight catalog connection per pass, sweeps the queue once after a catalog import or a tag edit, and otherwise only re-checks every 10 minutes to catch edits made outside Aurora.
+- The playback check that runs four times a second no longer writes about 50 timing-log lines per second; it is logged only when it is slow (50 ms or more) or fails.
+
 ## [0.56.2] - 2026-11-07
 
 ### Fixed

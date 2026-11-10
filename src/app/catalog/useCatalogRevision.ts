@@ -112,15 +112,23 @@ export function useCatalogRevision({
         console.warn("Aurora could not check the Music Library catalog revision", error);
       });
     };
+    // Aurora's own tag syncs are already projected locally, so their imports only
+    // move the known revision forward. A running refresh settles on its own.
+    const adoptOwnRevision = (revision: string) => {
+      if (cancelled || catalogRevisionRef.current === null || catalogRefreshPromiseRef.current) return;
+      catalogRevisionRef.current = revision;
+    };
     let initialRefresh: number | undefined;
     const stop = subscribeNativeEvent<string>("catalog://revision", refreshQuietly, () => {
       initialRefresh = window.setTimeout(refreshQuietly, 0);
     });
+    const stopOwn = subscribeNativeEvent<string>("catalog://own-revision", adoptOwnRevision);
     window.addEventListener("focus", refreshQuietly);
     return () => {
       cancelled = true;
       window.clearTimeout(initialRefresh);
       stop();
+      stopOwn();
       window.removeEventListener("focus", refreshQuietly);
     };
   }, [libraryReady, refreshCatalogIfChanged]);

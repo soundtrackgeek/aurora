@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, SyncSender},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -99,6 +99,9 @@ pub(crate) struct Span {
     stage_start: Instant,
     stage: &'static str,
     outcome: &'static str,
+    /// For frequent operations: events wait here and are written only when the
+    /// span ends slow or unsuccessful.
+    held: Option<(Duration, Vec<Event>)>,
 }
 
 impl Span {
@@ -106,13 +109,21 @@ impl Span {
         Self::with_sender(operation, context, SENDER.get().cloned())
     }
 
-    fn with_sender(
+    /// Like `new`, but for operations that run several times a second: the trace
+    /// is written only if the span takes at least `threshold` or does not succeed.
+    pub(crate) fn when_slow(operation: &'static str, context: &str, threshold: Duration) -> Self {
+        Self::held_with_sender(operation, context, SENDER.get().cloned(), threshold)
+    }
+
+    fn held_with_sender(
         operation: &'static str,
         context: &str,
         sender: Option<SyncSender<Event>>,
+        threshold: Duration,
     ) -> Self {
         let now = Instant::now();
-        let span = Self {
+        let mut span = Self {
+            held: sender.as_ref().map(|_| (threshold, Vec::new())),
             sender,
             id: SEQUENCE.fetch_add(1, Ordering::Relaxed),
             operation,
@@ -121,6 +132,27 @@ impl Span {
             stage_start: now,
             stage: "start",
             outcome: "returned_without_success",
+        };
+        span.emit("begin");
+        span
+    }
+
+    fn with_sender(
+        operation: &'static str,
+        context: &str,
+        sender: Option<SyncSender<Event>>,
+    ) -> Self {
+        let now = Instant::now();
+        let mut span = Self {
+            sender,
+            id: SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            operation,
+            context: context.chars().take(512).collect(),
+            start: now,
+            stage_start: now,
+            stage: "start",
+            outcome: "returned_without_success",
+            held: None,
         };
         span.emit("begin");
         span
@@ -139,45 +171,53 @@ impl Span {
 
     /// Records a point-in-time observation (a progress message, an I/O sample)
     /// inside the current stage without ending it.
-    pub(crate) fn note(&self, detail: &str) {
+    pub(crate) fn note(&mut self, detail: &str) {
         self.emit_with("note", detail.chars().take(512).collect());
     }
 
-    fn emit(&self, event: &'static str) {
+    fn emit(&mut self, event: &'static str) {
         self.emit_with(event, self.context.clone());
     }
 
-    fn emit_with(&self, event: &'static str, context: String) {
+    fn emit_with(&mut self, event: &'static str, context: String) {
         if let Some(sender) = &self.sender {
-            enqueue(
-                sender,
-                Event {
-                    timestamp_ms: crate::state_sync::now_ms(),
-                    process_id: std::process::id(),
-                    thread_id: format!("{:?}", std::thread::current().id()),
-                    version: env!("CARGO_PKG_VERSION"),
-                    span_id: self.id,
-                    operation: self.operation,
-                    context,
-                    stage: self.stage,
-                    event,
-                    elapsed_ms: self.start.elapsed().as_millis() as u64,
-                    stage_ms: self.stage_start.elapsed().as_millis() as u64,
-                    dropped_events: 0,
-                },
-                &DROPPED,
-            );
+            let event = Event {
+                timestamp_ms: crate::state_sync::now_ms(),
+                process_id: std::process::id(),
+                thread_id: format!("{:?}", std::thread::current().id()),
+                version: env!("CARGO_PKG_VERSION"),
+                span_id: self.id,
+                operation: self.operation,
+                context,
+                stage: self.stage,
+                event,
+                elapsed_ms: self.start.elapsed().as_millis() as u64,
+                stage_ms: self.stage_start.elapsed().as_millis() as u64,
+                dropped_events: 0,
+            };
+            match &mut self.held {
+                Some((_, events)) => events.push(event),
+                None => enqueue(sender, event, &DROPPED),
+            }
         }
     }
 }
 
 impl Drop for Span {
     fn drop(&mut self) {
-        self.emit(if std::thread::panicking() {
+        let outcome = if std::thread::panicking() {
             "panic"
         } else {
             self.outcome
-        });
+        };
+        self.emit(outcome);
+        if let (Some(sender), Some((threshold, events))) = (&self.sender, self.held.take())
+            && (outcome != "success" || self.start.elapsed() >= threshold)
+        {
+            for event in events {
+                enqueue(sender, event, &DROPPED);
+            }
+        }
     }
 }
 
@@ -200,6 +240,47 @@ mod tests {
             stage_ms: 0,
             dropped_events: 0,
         }
+    }
+
+    #[test]
+    fn held_spans_write_only_slow_or_unsuccessful_traces() {
+        let threshold = Duration::from_millis(50);
+        let (sender, receiver) = mpsc::sync_channel(64);
+        {
+            let mut fast =
+                Span::held_with_sender("playback.snapshot", "", Some(sender.clone()), threshold);
+            fast.stage("build_snapshot");
+            fast.finish(true);
+        }
+        assert!(receiver.try_recv().is_err());
+
+        let slow_id;
+        {
+            let mut slow =
+                Span::held_with_sender("playback.snapshot", "", Some(sender.clone()), threshold);
+            slow_id = slow.id;
+            slow.stage("persist_state");
+            slow.start -= Duration::from_secs(1);
+            slow.finish(true);
+        }
+        let failed_id;
+        {
+            let mut failed =
+                Span::held_with_sender("playback.snapshot", "", Some(sender), threshold);
+            failed_id = failed.id;
+            failed.stage("synchronize_audio_runtime");
+        }
+        let events = receiver.iter().collect::<Vec<_>>();
+        assert_eq!(events.first().map(|event| event.event), Some("begin"));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.span_id == slow_id && event.event == "success")
+        );
+        assert!(events.iter().any(|event| {
+            event.span_id == failed_id && event.event == "returned_without_success"
+        }));
+        assert_eq!(events.len(), 8);
     }
 
     #[test]

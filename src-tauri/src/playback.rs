@@ -1148,7 +1148,12 @@ impl PlaybackRuntime {
         {
             self.priority_next_end = None;
         }
-        let mut timing = crate::timing::Span::new("playback.snapshot", "");
+        // Runs four times a second; only slow or failed ticks are worth a trace.
+        let mut timing = crate::timing::Span::when_slow(
+            "playback.snapshot",
+            "",
+            std::time::Duration::from_millis(50),
+        );
         timing.stage("synchronize_audio_runtime");
         if !self.closing {
             self.synchronize_audio_runtime();

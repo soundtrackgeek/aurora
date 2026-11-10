@@ -21,12 +21,13 @@ it("acknowledges catalog events only after recovery from a failed refresh", asyn
   const input = { ...await options(), libraryReady: true };
   vi.spyOn(library, "isTauriRuntime").mockReturnValue(true);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  let receive!: (payload: unknown) => void;
-  vi.spyOn(events, "subscribeNativeEvent").mockImplementation((_name, callback, ready) => {
-    receive = callback;
+  const receivers = new Map<string, (payload: unknown) => void>();
+  vi.spyOn(events, "subscribeNativeEvent").mockImplementation((name, callback, ready) => {
+    receivers.set(name, callback);
     ready?.();
     return vi.fn();
   });
+  const receive = (payload: unknown) => receivers.get("catalog://revision")?.(payload);
   vi.spyOn(library, "loadCatalogRevision").mockRejectedValueOnce(new Error("catalog busy")).mockResolvedValue("next");
   vi.spyOn(library, "loadLibrarySnapshot").mockResolvedValue({ ...library.browserPreview, catalogRevision: "next" });
   const { result } = renderHook(() => useCatalogRevision(input));
@@ -36,6 +37,28 @@ it("acknowledges catalog events only after recovery from a failed refresh", asyn
   await act(async () => { receive("next"); });
   expect(input.onCatalogRefresh).toHaveBeenCalledOnce();
   expect(invoke).toHaveBeenCalledWith("acknowledge_catalog_revision", { revision: "next" });
+});
+
+it("adopts revisions from Aurora's own tag syncs without reloading the library", async () => {
+  vi.useFakeTimers();
+  const input = { ...await options(), libraryReady: true };
+  vi.spyOn(library, "isTauriRuntime").mockReturnValue(true);
+  const receivers = new Map<string, (payload: unknown) => void>();
+  vi.spyOn(events, "subscribeNativeEvent").mockImplementation((name, callback, ready) => {
+    receivers.set(name, callback);
+    ready?.();
+    return vi.fn();
+  });
+  vi.spyOn(library, "loadCatalogRevision").mockResolvedValue("previous");
+  const loadSnapshot = vi.spyOn(library, "loadLibrarySnapshot");
+  const { result } = renderHook(() => useCatalogRevision(input));
+  result.current.catalogRevisionRef.current = "previous";
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { receivers.get("catalog://own-revision")?.("own"); });
+  expect(result.current.catalogRevisionRef.current).toBe("own");
+  expect(input.rebindPlaybackCatalog).not.toHaveBeenCalled();
+  expect(loadSnapshot).not.toHaveBeenCalled();
+  expect(input.onCatalogRefresh).not.toHaveBeenCalled();
 });
 
 async function options() {

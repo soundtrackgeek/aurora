@@ -871,6 +871,18 @@ impl StateStore {
             .map_err(|error| format!("Could not decode Aurora's tag reconciliation: {error}"))
     }
 
+    /// Count and newest update of the pending tag edits; changes whenever an edit
+    /// is added, re-saved or cleared.
+    pub(crate) fn tag_overlay_signature(&self) -> Result<(i64, i64), String> {
+        self.open()?
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(updated_at_ms), 0) FROM tag_overlays",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("Could not read Aurora's pending-tag summary: {error}"))
+    }
+
     pub(crate) fn pending_overlays(&self, limit: usize) -> Result<Vec<TagOverlay>, String> {
         if limit == 0 || limit > 201 {
             return Err("Aurora's pending-tag reconciliation batch is invalid.".to_owned());

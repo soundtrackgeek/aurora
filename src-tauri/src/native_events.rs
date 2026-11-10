@@ -2,14 +2,58 @@
 //! thread so an unavailable share/bridge cannot delay playback or catalog checks.
 use crate::{
     HistoryStore, LaptopState, LibrarySyncCoordinator, PlaybackState, TagReconciliationProjection,
-    TagState, catalog, connections, playback::PlaybackSnapshot,
+    TagState, catalog, connections, playback::PlaybackSnapshot, state_store::StateStore,
 };
 use serde::Serialize;
 use std::{
     sync::{Arc, Condvar, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Pending tag edits are re-checked against their files and the catalog. Without
+/// a new import or a changed queue, the outcome cannot change except through an
+/// edit made outside Aurora, which this slow sweep still catches.
+const TAG_SAFETY_SWEEP: Duration = Duration::from_secs(600);
+
+/// Runs one full sweep of the pending tag queue after each change, then idles.
+#[derive(Default)]
+struct ReconciliationPacer {
+    seen: Option<(Option<String>, (i64, i64))>,
+    remaining: i64,
+    last_sweep: Option<Instant>,
+}
+
+impl ReconciliationPacer {
+    fn should_run(
+        &mut self,
+        revision: &Option<String>,
+        signature: (i64, i64),
+        now: Instant,
+    ) -> bool {
+        let unchanged = self
+            .seen
+            .as_ref()
+            .is_some_and(|(seen_revision, seen_signature)| {
+                seen_revision == revision && *seen_signature == signature
+            });
+        let sweep_due = self
+            .last_sweep
+            .is_none_or(|last| now.duration_since(last) >= TAG_SAFETY_SWEEP);
+        if !unchanged || (self.remaining <= 0 && sweep_due) {
+            // Always run once after a change, even with an empty queue, so the
+            // UI receives a report that settles earlier notices.
+            self.remaining = signature.0.max(1);
+            self.last_sweep = Some(now);
+        }
+        self.remaining > 0
+    }
+
+    fn after_pass(&mut self, revision: Option<String>, signature: (i64, i64), processed: usize) {
+        self.remaining = self.remaining.saturating_sub((processed as i64).max(1));
+        self.seen = Some((revision, signature));
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct NativeBackgroundTasks {
@@ -76,13 +120,29 @@ impl NativeBackgroundTasks {
         let catalog_app = app.clone();
         let acknowledged = Arc::clone(&self.catalog_acknowledged);
         self.schedule("aurora-catalog", Duration::from_secs(5), move || {
-            let revision = catalog::completed_import_revision()?;
-            if acknowledged
+            let previous = acknowledged
                 .lock()
                 .map_err(|_| "Catalog acknowledgement stopped")?
-                .as_ref()
-                != Some(&revision)
-            {
+                .clone();
+            let (revision, own_only) =
+                catalog::completed_import_revision_since(previous.as_deref())?;
+            if previous.as_ref() == Some(&revision) {
+                return Ok(());
+            }
+            if own_only {
+                // Only Aurora's own tag syncs landed: the UI already shows them,
+                // so it adopts the revision instead of reloading the library.
+                let mut current = acknowledged
+                    .lock()
+                    .map_err(|_| "Catalog acknowledgement stopped")?;
+                if *current == previous {
+                    *current = Some(revision.clone());
+                }
+                drop(current);
+                catalog_app
+                    .emit("catalog://own-revision", revision)
+                    .map_err(|error| error.to_string())?;
+            } else {
                 catalog_app
                     .emit("catalog://revision", revision)
                     .map_err(|error| error.to_string())?;
@@ -92,10 +152,16 @@ impl NativeBackgroundTasks {
 
         let tags_app = app.clone();
         let mut tag_previous = None;
+        let mut pacer = ReconciliationPacer::default();
         self.schedule(
             "aurora-tag-reconciliation",
             Duration::from_secs(5),
             move || {
+                let store = tags_app.state::<StateStore>();
+                let revision = catalog::completed_import_revision().ok();
+                if !pacer.should_run(&revision, store.tag_overlay_signature()?, Instant::now()) {
+                    return Ok(());
+                }
                 let coordinator = tags_app.state::<LibrarySyncCoordinator>();
                 let projection_token = coordinator.reserve_background_projection_token();
                 let service = tags_app
@@ -104,6 +170,8 @@ impl NativeBackgroundTasks {
                     .map_err(|_| "Tag reader stopped")?
                     .clone();
                 let report = service.reconcile_pending_overlays(100)?;
+                // Reconciliation re-saves rows it checks, so record the queue as it is now.
+                pacer.after_pass(revision, store.tag_overlay_signature()?, report.processed);
                 // Empty reports settle initial notices too; omit duplicate reports.
                 if changed_payload(&report, &mut tag_previous)? {
                     tags_app
@@ -271,6 +339,43 @@ mod tests {
         state_sync::StartupSyncOutcome,
     };
     use std::sync::mpsc;
+
+    #[test]
+    fn tag_pacer_sweeps_once_per_change_then_idles_until_the_safety_sweep() {
+        let mut pacer = ReconciliationPacer::default();
+        let start = Instant::now();
+        let revision = Some("1:10:t".to_owned());
+
+        // 259 pending edits take three passes of 100; each pass re-saves rows.
+        assert!(pacer.should_run(&revision, (259, 1), start));
+        pacer.after_pass(revision.clone(), (259, 2), 100);
+        assert!(pacer.should_run(&revision, (259, 2), start));
+        pacer.after_pass(revision.clone(), (259, 3), 100);
+        assert!(pacer.should_run(&revision, (259, 3), start));
+        pacer.after_pass(revision.clone(), (259, 4), 59);
+        assert!(!pacer.should_run(&revision, (259, 4), start + Duration::from_secs(5)));
+
+        // A new import, or a new edit, starts another sweep.
+        let imported = Some("2:11:t".to_owned());
+        assert!(pacer.should_run(&imported, (259, 4), start + Duration::from_secs(10)));
+        pacer.after_pass(imported.clone(), (259, 5), 259);
+        assert!(!pacer.should_run(&imported, (259, 5), start + Duration::from_secs(15)));
+        assert!(pacer.should_run(&imported, (260, 9), start + Duration::from_secs(20)));
+        pacer.after_pass(imported.clone(), (260, 10), 260);
+
+        // Otherwise only the slow safety sweep runs.
+        assert!(!pacer.should_run(&imported, (260, 10), start + Duration::from_secs(300)));
+        assert!(pacer.should_run(&imported, (260, 10), start + Duration::from_secs(621)));
+    }
+
+    #[test]
+    fn tag_pacer_reports_once_for_an_empty_queue() {
+        let mut pacer = ReconciliationPacer::default();
+        let now = Instant::now();
+        assert!(pacer.should_run(&None, (0, 0), now));
+        pacer.after_pass(None, (0, 0), 0);
+        assert!(!pacer.should_run(&None, (0, 0), now + Duration::from_secs(5)));
+    }
 
     #[test]
     fn catalog_acknowledgement_only_settles_the_delivered_revision() {

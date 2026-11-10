@@ -1092,6 +1092,15 @@ impl TagService {
         let has_more = overlays.len() > limit;
         overlays.truncate(limit);
         let mut report = TagReconciliationReport::new(has_more);
+        // One connection for the whole pass; opening one per track dominated the cost.
+        let catalog_connection = if overlays.is_empty() {
+            None
+        } else {
+            Some(
+                catalog::default_catalog_path()
+                    .and_then(|path| catalog::open_catalog_for_lookup(&path)),
+            )
+        };
 
         for overlay in overlays {
             report.processed += 1;
@@ -1110,10 +1119,16 @@ impl TagService {
                 )?;
                 continue;
             }
-            let catalog_values = match catalog::catalog_tag_values_by_path(
-                &overlay.directory,
-                &overlay.filename,
-            ) {
+            let lookup = match &catalog_connection {
+                Some(Ok(connection)) => catalog::catalog_tag_values_by_path_with(
+                    connection,
+                    &overlay.directory,
+                    &overlay.filename,
+                ),
+                Some(Err(error)) => Err(error.clone()),
+                None => unreachable!("the catalog is opened whenever overlays are pending"),
+            };
+            let catalog_values = match lookup {
                 Ok(Some(values)) => values,
                 Ok(None) => {
                     self.record_pending_failure(
