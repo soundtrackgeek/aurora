@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.57.0** shows which folders still have edits waiting for Music Library. Click the Music Library notice in the top bar to see each folder, why Music Library refused it, what to change, and when Aurora tries again; **Retry** syncs a folder right away once you have fixed it, and **Open folder** shows it in Explorer.
+
 Aurora **0.56.4** stops tag edits from waiting forever for Music Library: a sync interrupted by a change during the sync is retried after 30 seconds, and folders Music Library refuses are retried once a day and again after every Music Library update.
 
 Aurora **0.56.3** uses much less CPU while you rate tracks: it no longer reloads the whole library after each of its own tag edits reaches Music Library, re-checks pending tag edits only when the catalog or the edit queue changes (plus a sweep every 10 minutes), and stops logging the fast four-times-a-second playback check.

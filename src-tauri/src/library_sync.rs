@@ -234,6 +234,16 @@ impl LibrarySyncCoordinator {
         self.run(app, directories)
     }
 
+    /// A retry the user asked for: it waits for a running background pass instead of
+    /// skipping, and for the bridge instead of yielding, so the click always tries the folder.
+    pub(crate) fn retry_folder_now(&self, app: &AppHandle, directory: &str) -> LibrarySyncReport {
+        let _worker = self
+            .background_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.run_locked(app, &[directory.to_owned()], true)
+    }
+
     fn run(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
         // A second polling worker must not repeat a target already being processed.
         let Ok(_worker) = self.background_gate.try_lock() else {
@@ -242,7 +252,7 @@ impl LibrarySyncCoordinator {
                 completed_directories: HashSet::new(),
             };
         };
-        self.run_locked(app, priority_directories)
+        self.run_locked(app, priority_directories, false)
     }
 
     pub(crate) fn serialize_bridge_work<T>(&self, operation: impl FnOnce() -> T) -> T {
@@ -291,7 +301,12 @@ impl LibrarySyncCoordinator {
         }
     }
 
-    fn run_locked(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
+    fn run_locked(
+        &self,
+        app: &AppHandle,
+        priority_directories: &[String],
+        requested_by_user: bool,
+    ) -> LibrarySyncReport {
         let store = app.state::<StateStore>();
         self.reopen_blocked_after_music_library_update(&store);
         let priorities = unique_directories(priority_directories);
@@ -338,14 +353,19 @@ impl LibrarySyncCoordinator {
                     Vec::new()
                 };
                 sync_target_with_overlay_fallback(target, &overlay_filenames, |changed_files| {
-                    self.background_bridge_work(|| {
+                    let synchronize = || {
                         sync_existing_library_folders(
                             app,
                             vec![target.directory.clone()],
                             changed_files,
                         )
                         .map(|_| ())
-                    })
+                    };
+                    if requested_by_user {
+                        self.serialize_bridge_work(synchronize)
+                    } else {
+                        self.background_bridge_work(synchronize)
+                    }
                 })
             },
             |target| store.complete_library_folder_sync(target),

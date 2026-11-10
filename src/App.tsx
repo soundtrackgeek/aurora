@@ -43,6 +43,7 @@ import { PlaylistAuthoringDialog } from "./components/playlists/PlaylistAuthorin
 import { PlaylistAuthoringContext, type PlaylistSelection } from "./components/playlists/playlistAuthoringContext";
 import { MediaContextMenuProvider } from "./components/context/MediaContextMenu";
 import { ContextTagDialog } from "./components/context/ContextTagDialog";
+import { LibrarySyncDialog } from "./components/LibrarySyncDialog";
 import { AppStoreProvider } from "./app/AppStoreProvider";
 import { useArtistNavigation } from "./app/artist/useArtistNavigation";
 import { EmptyInspector } from "./app/components/EmptyInspector";
@@ -622,6 +623,7 @@ function App() {
   }, [setAlbumTracks, setExplorerTracks, setGenreDetail, setPublisherAlbumTracks, setRatingAlbumTracks, setSelectedTrack, setYearAlbumTracks]);
 
   const onChartsChanged = useCallback(() => setChartReloadToken(value => value + 1), [setChartReloadToken]);
+  const [librarySyncOpen, setLibrarySyncOpen] = useState(false);
   const { catalogSyncNotice, handleCatalogSync } = usePendingLibrarySync({
     libraryReady,
     reloadToken,
@@ -1343,6 +1345,7 @@ function App() {
       {contextTags && <ContextTagDialog onClose={() => setContextTags(null)}><TagEditor
         target={contextTags.albumIds?.length ? { kind: "albums", albumIds: [...contextTags.albumIds], label: contextTags.label } : { kind: "tracks", tracks: (contextTags.tracks ?? []).map(track => ({ trackId: track.id, trackKey: track.trackKey })), label: contextTags.label }}
         onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} /></ContextTagDialog>}
+      {librarySyncOpen && <LibrarySyncDialog onClose={() => setLibrarySyncOpen(false)} onCatalogSync={(sync) => void handleCatalogSync(sync)} />}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
       {layoutPreferences.leftSidebar !== "collapsed" && <aside className="sidebar">
         <div className="brand">
@@ -1377,7 +1380,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.56.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.57.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1444,12 +1447,22 @@ function App() {
             )}
             {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
             {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && catalogNoticeMessage && (
-              <span
-                className="tag-sync-message"
-                data-sync-status={catalogSyncNotice?.status}
-                role="status"
-                title={catalogNoticeMessage}
-              >{catalogNoticeMessage}</span>
+              catalogSyncNotice?.status === "pending" || catalogSyncNotice?.status === "blocked" ? (
+                <button
+                  type="button"
+                  className="tag-sync-message"
+                  data-sync-status={catalogSyncNotice.status}
+                  title={`${catalogNoticeMessage} Click to see the waiting folders.`}
+                  onClick={() => setLibrarySyncOpen(true)}
+                >{catalogNoticeMessage}</button>
+              ) : (
+                <span
+                  className="tag-sync-message"
+                  data-sync-status={catalogSyncNotice?.status}
+                  role="status"
+                  title={catalogNoticeMessage}
+                >{catalogNoticeMessage}</span>
+              )
             )}
           </div>
         </div>

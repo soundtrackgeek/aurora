@@ -1,0 +1,93 @@
+.library-sync-dialog {
+  width: min(860px, calc(100vw - 36px));
+  max-height: min(820px, calc(100vh - 36px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(174, 108, 218, .3);
+  border-radius: 14px;
+  color: var(--text, #e5ebf1);
+  background:
+    radial-gradient(circle at 18% -14%, rgba(128, 51, 170, .18), transparent 31%),
+    linear-gradient(145deg, #101923, #080e16 70%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .72);
+}
+.library-sync-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.library-sync-dialog::backdrop { background: rgba(1, 4, 8, .76); backdrop-filter: blur(6px); }
+
+.library-sync-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(150, 176, 199, .12);
+}
+.library-sync-dialog .eyebrow { margin: 0 0 3px; color: #c661e7; font-size: max(var(--aurora-font-min), calc(7px + var(--aurora-font-offset))); text-transform: uppercase; }
+.library-sync-dialog h2 { margin: 0; font-size: max(var(--aurora-font-min), calc(17px + var(--aurora-font-offset))); font-weight: 560; }
+.library-sync-dialog header p:last-child { margin: 4px 0 0; color: #82909d; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); line-height: 1.4; }
+.library-sync-dialog header > button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 7px; color: #8996a6; background: transparent; cursor: pointer; }
+.library-sync-dialog header > button:hover { color: #e5eaf0; background: rgba(255, 255, 255, .05); }
+.library-sync-dialog header > button svg { width: 16px; height: 16px; }
+
+.library-sync-dialog__body {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 20px 20px;
+  overflow-y: auto;
+  scrollbar-color: #34404c transparent;
+  scrollbar-width: thin;
+}
+.library-sync-dialog section h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; color: #aeb9c4; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); font-weight: 560; }
+.library-sync-dialog section h3 svg { width: 13px; height: 13px; color: #c661e7; }
+.library-sync-dialog ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.library-sync-dialog__synced { display: flex; align-items: center; gap: 7px; margin: 0; color: #9fe1bc; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.library-sync-dialog__synced svg { width: 14px; height: 14px; }
+
+.library-sync-folder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 14px;
+  padding: 11px 13px;
+  border: 1px solid rgba(132, 157, 178, .13);
+  border-radius: 9px;
+  background: rgba(5, 11, 17, .55);
+  font-size: max(var(--aurora-font-min), calc(8.5px + var(--aurora-font-offset)));
+}
+.library-sync-folder[data-blocked] { border-color: rgba(230, 170, 90, .22); }
+.library-sync-folder > p { grid-column: 1 / -1; margin: 0; line-height: 1.45; }
+.library-sync-folder__title { display: grid; min-width: 0; }
+.library-sync-folder__title strong { overflow: hidden; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.library-sync-folder__title small { overflow: hidden; color: #66737f; text-overflow: ellipsis; white-space: nowrap; }
+.library-sync-folder__edits { align-self: start; color: #8fdde8; white-space: nowrap; }
+.library-sync-folder__reason { color: #dfe6ec; }
+.library-sync-folder__file { overflow: hidden; color: #e6b877; font-family: ui-monospace, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.library-sync-folder__fix { color: #aab6c1; }
+.library-sync-folder__next { color: #66737f; }
+.library-sync-folder__error { color: #ffb7b7; margin: 0; }
+.library-sync-folder__actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; gap: 8px; margin-top: 5px; }
+.library-sync-folder__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1px solid rgba(132, 157, 178, .2);
+  border-radius: 6px;
+  color: #cfd8e0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.library-sync-folder__actions button:hover:not(:disabled) { border-color: rgba(189, 100, 241, .45); color: #fff; }
+.library-sync-folder__actions button:disabled { opacity: .45; cursor: default; }
+.library-sync-folder__actions svg { width: 13px; height: 13px; }
+.library-sync-folder__retry { border-color: rgba(189, 100, 241, .4) !important; background: rgba(142, 56, 197, .17) !important; }
+.library-sync-folder .is-spinning { animation: library-sync-spin 1s linear infinite; }
+@keyframes library-sync-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .library-sync-folder .is-spinning { animation: none; } }
+
+/* The topbar notice opens this dialog when folders are waiting. */
+button.tag-sync-message { padding: 0; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted rgba(143, 221, 232, .45); text-underline-offset: 3px; }
+button.tag-sync-message:hover { color: #c3f1f7; }

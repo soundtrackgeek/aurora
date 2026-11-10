@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.57.0] - 2026-11-10
+
+### Added
+- A list of the folders whose edits still wait for Music Library. When the top bar says a Music Library update is pending or needs attention, click that notice. The dialog groups folders into **Needs your attention** and **Retrying automatically**. For each folder it shows how many edits are waiting, the reason in plain words (for example a rating Music Library cannot read, a stray non-MP3 file, an album missing from the catalog, or a change that needs a reviewed import), the file involved, what to change, and when Aurora tries again.
+- **Retry** on each folder syncs it with Music Library straight away instead of waiting for the daily retry, and **Open folder** shows the folder in Explorer.
+
 ## [0.56.4] - 2026-11-10
 
 ### Fixed

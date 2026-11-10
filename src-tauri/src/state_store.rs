@@ -88,6 +88,20 @@ pub(crate) struct PendingLibraryFolderSync {
     pub(crate) token: i64,
 }
 
+/// One folder whose MP3 edits still wait for Music Library, as shown to the user.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LibrarySyncFolder {
+    pub(crate) directory: String,
+    pub(crate) blocked: bool,
+    pub(crate) attempt_count: i64,
+    pub(crate) last_error: Option<String>,
+    pub(crate) last_attempt_at_ms: i64,
+    /// When the background worker will try again on its own.
+    pub(crate) next_retry_at_ms: i64,
+    pub(crate) pending_edit_count: i64,
+}
+
 #[derive(Clone)]
 pub(crate) struct StateStore {
     path: PathBuf,
@@ -1620,6 +1634,52 @@ impl StateStore {
             })
     }
 
+    /// Lists every folder still waiting for Music Library, blocked folders first.
+    pub(crate) fn library_sync_folders(&self) -> Result<Vec<LibrarySyncFolder>, String> {
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT
+                  queue.directory,
+                  queue.attempt_count >= ?1,
+                  queue.attempt_count,
+                  queue.last_error,
+                  queue.updated_at_ms,
+                  CASE WHEN queue.attempt_count >= ?1
+                    THEN queue.updated_at_ms + ?2
+                    ELSE queue.next_attempt_at_ms END,
+                  (SELECT COUNT(*) FROM tag_overlays
+                   WHERE tag_overlays.directory = queue.directory COLLATE NOCASE)
+                FROM pending_library_folder_sync AS queue
+                ORDER BY queue.attempt_count >= ?1 DESC, queue.directory COLLATE NOCASE
+                LIMIT 512
+                "#,
+            )
+            .map_err(|error| format!("Could not prepare Aurora's library-sync folders: {error}"))?;
+        statement
+            .query_map(
+                params![
+                    MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS,
+                    BLOCKED_LIBRARY_SYNC_RETRY_INTERVAL_MS
+                ],
+                |row| {
+                    Ok(LibrarySyncFolder {
+                        directory: row.get(0)?,
+                        blocked: row.get(1)?,
+                        attempt_count: row.get(2)?,
+                        last_error: row.get(3)?,
+                        last_attempt_at_ms: row.get(4)?,
+                        next_retry_at_ms: row.get(5)?,
+                        pending_edit_count: row.get(6)?,
+                    })
+                },
+            )
+            .map_err(|error| format!("Could not read Aurora's library-sync folders: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not decode Aurora's library-sync folders: {error}"))
+    }
+
     /// Gives every blocked folder a fresh attempt the first time Aurora sees a
     /// Music Library build. Returns how many folders were reopened.
     pub(crate) fn reopen_blocked_library_syncs_for_build(
@@ -2950,6 +3010,67 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(store.library_folder_sync_counts().unwrap(), (1, 0));
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn library_sync_folders_list_blocked_first_with_reason_retry_time_and_edits() {
+        let path = temporary_state_path();
+        let store = StateStore::new(path.clone()).unwrap();
+        let blocked = r"D:\Music\Blocked";
+        let waiting = r"D:\Music\Waiting";
+        store
+            .queue_library_file_syncs(&[
+                (waiting.to_owned(), "A.mp3".to_owned()),
+                (blocked.to_owned(), "B.mp3".to_owned()),
+            ])
+            .unwrap();
+        let target = store
+            .pending_library_folder_sync_for_paths(&[blocked.to_owned()])
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(
+            store
+                .block_library_folder_sync(&target, "needs a reviewed import")
+                .unwrap()
+        );
+        // Overlay directories may differ in case from the queued folder.
+        let connection = store.open().unwrap();
+        for (key, filename) in [("one", "B.mp3"), ("two", "C.mp3")] {
+            connection
+                .execute(
+                    "INSERT INTO tag_overlays(track_key, directory, filename, love_state, catalog_love_state, catalog_import_run_id, updated_at_ms)
+                     VALUES (?1, ?2, ?3, 'neutral', 'neutral', 1, 1)",
+                    params![key, r"d:\music\blocked", filename],
+                )
+                .unwrap();
+        }
+
+        let folders = store.library_sync_folders().unwrap();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].directory, blocked);
+        assert!(folders[0].blocked);
+        assert_eq!(
+            folders[0].attempt_count,
+            MAX_AUTOMATIC_LIBRARY_SYNC_ATTEMPTS
+        );
+        assert_eq!(
+            folders[0].last_error.as_deref(),
+            Some("needs a reviewed import")
+        );
+        assert_eq!(folders[0].pending_edit_count, 2);
+        assert_eq!(
+            folders[0].next_retry_at_ms,
+            folders[0].last_attempt_at_ms + BLOCKED_LIBRARY_SYNC_RETRY_INTERVAL_MS
+        );
+        assert_eq!(folders[1].directory, waiting);
+        assert!(!folders[1].blocked);
+        assert_eq!(folders[1].last_error, None);
+        assert_eq!(folders[1].next_retry_at_ms, 0);
+        assert_eq!(folders[1].pending_edit_count, 0);
+        drop(connection);
         drop(store);
         let _ = fs::remove_file(path);
     }

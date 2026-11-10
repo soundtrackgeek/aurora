@@ -106,7 +106,7 @@ use ratings::{
     CompletionKind, RatingAlbumPage, RatingAlbumQueueRequest, RatingCollectionRequest,
     RatingsOverview,
 };
-use state_store::StateStore;
+use state_store::{LibrarySyncFolder, StateStore};
 use std::sync::Mutex;
 use tag_model::{TagEditRequest, TagEditorTarget, TagEditorUpdateRequest, TagEditorUpdateResult};
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
@@ -1811,6 +1811,49 @@ async fn retry_pending_library_sync(app: AppHandle) -> Result<CatalogSync, Strin
 }
 
 #[tauri::command]
+async fn library_sync_folders(app: AppHandle) -> Result<Vec<LibrarySyncFolder>, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<StateStore>().library_sync_folders())
+        .await
+        .map_err(|error| format!("The Music Library folder reader stopped: {error}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibrarySyncFolderRetry {
+    completed: bool,
+    catalog_sync: CatalogSync,
+}
+
+#[tauri::command]
+async fn retry_library_sync_folder(
+    app: AppHandle,
+    directory: String,
+) -> Result<LibrarySyncFolderRetry, String> {
+    connections::require_music_writes()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let queued = app
+            .state::<StateStore>()
+            .library_sync_folders()?
+            .into_iter()
+            .any(|folder| folder.directory == directory);
+        if !queued {
+            return Err("This folder is no longer waiting for Music Library.".to_owned());
+        }
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let projection_token = coordinator.reserve_background_projection_token();
+        let report = coordinator.retry_folder_now(&app, &directory);
+        let mut catalog_sync = report.catalog_sync.clone();
+        catalog_sync.projection_token = Some(projection_token);
+        Ok(LibrarySyncFolderRetry {
+            completed: report.completed(&directory),
+            catalog_sync,
+        })
+    })
+    .await
+    .map_err(|error| format!("The Music Library retry worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn laptop_mode_status(app: AppHandle) -> Result<LaptopModeStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<LaptopState>();
@@ -2300,6 +2343,9 @@ pub fn run() {
             refresh_external_tag_changes,
             retry_pending_library_sync,
             library_sync_status,
+            library_sync_folders,
+            retry_library_sync_folder,
+            desktop_reveal::reveal_library_sync_folder,
             laptop_mode_status,
             set_laptop_mode,
             listening_history_page,

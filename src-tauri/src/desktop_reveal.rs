@@ -31,6 +31,27 @@ pub(crate) async fn reveal_catalog_item(
     .map_err(|error| format!("Could not open the file browser: {error}"))?
 }
 
+/// Opens a folder from the Music Library sync list. Only queued folders are accepted.
+#[tauri::command]
+pub(crate) async fn reveal_library_sync_folder(
+    app: AppHandle,
+    directory: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let queued = app
+            .state::<StateStore>()
+            .library_sync_folders()?
+            .into_iter()
+            .any(|folder| folder.directory == directory);
+        if !queued {
+            return Err("This folder is no longer waiting for Music Library.".into());
+        }
+        reveal_path(&existing_path(Path::new(&directory), false)?, false)
+    })
+    .await
+    .map_err(|error| format!("Could not open the file browser: {error}"))?
+}
+
 fn existing_path(path: &Path, file: bool) -> Result<PathBuf, String> {
     let resolved = path
         .canonicalize()

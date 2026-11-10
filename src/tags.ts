@@ -475,3 +475,36 @@ export async function loadLibrarySyncStatus(): Promise<CatalogSync> {
   if (!isTauriRuntime()) return { status: "synced", pendingFolderCount: 0 };
   return invoke<CatalogSync>("library_sync_status");
 }
+
+/** A folder whose MP3 edits still wait for Music Library. */
+export interface LibrarySyncFolder {
+  directory: string;
+  blocked: boolean;
+  attemptCount: number;
+  lastError?: string | null;
+  lastAttemptAtMs: number;
+  nextRetryAtMs: number;
+  pendingEditCount: number;
+}
+
+export interface LibrarySyncFolderRetry {
+  completed: boolean;
+  catalogSync: CatalogSync;
+}
+
+export async function loadLibrarySyncFolders(): Promise<LibrarySyncFolder[]> {
+  if (!isTauriRuntime()) return [];
+  return invoke<LibrarySyncFolder[]>("library_sync_folders");
+}
+
+export async function retryLibrarySyncFolder(directory: string): Promise<LibrarySyncFolderRetry> {
+  if (!isTauriRuntime()) {
+    return { completed: true, catalogSync: { status: "synced", message: "Music Library updated.", pendingFolderCount: 0 } };
+  }
+  return invoke<LibrarySyncFolderRetry>("retry_library_sync_folder", { directory });
+}
+
+export async function revealLibrarySyncFolder(directory: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("reveal_library_sync_folder", { directory });
+}
