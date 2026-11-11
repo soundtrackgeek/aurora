@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.57.4** reads ratings that another tagger saved on the 5-step Windows scale (153 = 3 stars, 204 = 4 stars) in both the MusicBee and the Default rating frame, so those tracks open in the tag editor and can be re-rated. Saving a rating writes a standard MusicBee rating. Music Library 0.215.7 reads them the same way.
+
 Aurora **0.57.3** (and 0.57.2, whose release build failed) names tracks that are missing from an album's folder in the list of folders waiting for Music Library, and suggests putting them back or using **Move to Inbox**. With Music Library 0.215.1 or later, Move to Inbox works for such albums, and Aurora then clears the old folder's waiting edits.
 
 Aurora **0.57.1** adds **Show album** to the list of folders waiting for Music Library: it opens the folder's album in Aurora so you can fix its tags straight away.

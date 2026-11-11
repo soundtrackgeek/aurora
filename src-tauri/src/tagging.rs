@@ -2583,7 +2583,13 @@ fn effective_musicbee_rating(tag: &Tag) -> Result<Option<f64>, String> {
     }
 
     if let Some(byte) = musicbee.first().copied() {
-        return (byte != 0).then(|| rating_from_byte(byte)).transpose();
+        // Some taggers write the 5-step Windows scale (153 = 3 stars) into both
+        // frames. A matching Default frame says which scale the byte uses.
+        let five_step = legacy_default.first() == Some(&byte)
+            && !MUSICBEE_RATINGS.iter().any(|(_, value)| *value == byte);
+        if !five_step {
+            return (byte != 0).then(|| rating_from_byte(byte)).transpose();
+        }
     }
     let Some(byte) = legacy_default.first().copied() else {
         return Ok(None);
@@ -4642,6 +4648,44 @@ mod tests {
         assert!(verify_editor_expected(&expected, &fingerprint, &expected.values).is_err());
         assert_eq!(fs::read(&path).expect("fixture bytes after"), bytes_before);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn five_step_byte_written_into_both_rating_frames_reads_on_that_scale() {
+        let both = |rating| {
+            let mut tag = Tag::with_version(Version::Id3v23);
+            for user in [MUSICBEE_POPM_OWNER, LEGACY_DEFAULT_POPM_OWNER] {
+                tag.add_frame(Popularimeter {
+                    user: user.to_owned(),
+                    rating,
+                    counter: 0,
+                });
+            }
+            tag
+        };
+        assert_eq!(effective_musicbee_rating(&both(153)), Ok(Some(3.0)));
+        assert_eq!(effective_musicbee_rating(&both(204)), Ok(Some(4.0)));
+        assert_eq!(effective_musicbee_rating(&both(255)), Ok(Some(5.0)));
+
+        // Saving a new rating drops both five-step frames.
+        let mut tag = both(153);
+        set_musicbee_rating(&mut tag, Version::Id3v23, Some(3.5)).unwrap();
+        assert_eq!(
+            tag.frames()
+                .filter_map(|frame| frame.content().popularimeter())
+                .count(),
+            0
+        );
+        assert_eq!(tag.frames().filter(|frame| frame.id() == "POPM").count(), 1);
+
+        // Without a matching Default frame the MusicBee byte stays unsupported.
+        let mut alone = Tag::with_version(Version::Id3v23);
+        alone.add_frame(Popularimeter {
+            user: MUSICBEE_POPM_OWNER.to_owned(),
+            rating: 153,
+            counter: 0,
+        });
+        assert!(effective_musicbee_rating(&alone).is_err());
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.57.4] - 2026-11-11
+
+### Fixed
+- Tracks whose MusicBee rating frame holds a 5-step Windows-scale byte (51, 102, 153 or 204) and whose Default rating frame holds the same byte are no longer rejected with "unsupported MusicBee rating byte". Aurora reads the rating on the 5-step scale, and saving a new rating replaces both frames with one MusicBee frame. A MusicBee byte without a matching Default frame is still rejected.
+
 ## [0.57.3] - 2026-11-10
 
 ### Fixed
