@@ -663,20 +663,38 @@ function App() {
   const refreshAfterAlbumRename = useCallback(async () => {
     await refreshCatalogIfChanged();
   }, [refreshCatalogIfChanged]);
-  // The Albums view's naming icon offers this rename; the page reloads so the icon clears.
-  const renameAlbumToMatchTags = useCallback(async (album: ExplorerAlbum) => {
-    setRenamingAlbumId(album.id);
+  // The Albums view's naming icon and Ctrl+R offer this rename; the page reloads once so the icons clear.
+  const renameAlbumsToMatchTags = useCallback(async (albums: readonly ExplorerAlbum[]) => {
+    const first = albums[0];
+    if (!first) return;
+    setRenamingAlbumId(first.id);
+    const renamed: string[] = [];
+    const failures: string[] = [];
     try {
-      const result = await renameLibraryAlbum(album.id);
-      setSyncMessage(renameSummary(result) ?? `${album.title} is already named after its tags.`);
-      await refreshAfterAlbumRename();
-      setExplorerReloadToken((value) => value + 1);
-    } catch (error) {
-      setSyncMessage(`${album.title} was not renamed: ${error instanceof Error ? error.message : String(error)}`);
+      for (const album of albums) {
+        setRenamingAlbumId(album.id);
+        try {
+          const result = await renameLibraryAlbum(album.id);
+          renamed.push(renameSummary(result) ?? `${album.title} is already named after its tags.`);
+        } catch (error) {
+          failures.push(`${album.title} was not renamed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (albums.length === 1) {
+        setSyncMessage(renamed[0] ?? failures[0]);
+      } else {
+        const summary = `Renamed ${formatCount(renamed.length)} of ${formatCount(albums.length)} albums to match their tags.`;
+        setSyncMessage(failures.length ? `${summary} ${failures[0]}` : summary);
+      }
+      if (renamed.length) {
+        await refreshAfterAlbumRename();
+        setExplorerReloadToken((value) => value + 1);
+      }
     } finally {
       setRenamingAlbumId(null);
     }
   }, [refreshAfterAlbumRename, setExplorerReloadToken, setSyncMessage]);
+  const renameAlbumToMatchTags = useCallback((album: ExplorerAlbum) => renameAlbumsToMatchTags([album]), [renameAlbumsToMatchTags]);
 
   useEffect(() => {
     appMountedRef.current = true;
@@ -760,6 +778,32 @@ function App() {
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
+
+  // Albums view shortcuts: Ctrl+Shift+T auto-tags the open album, Ctrl+R renames the misnamed
+  // albums in the selection (or the open album). Ctrl+R never reloads the window; the top bar has a refresh button.
+  useEffect(() => {
+    function handleAlbumShortcut(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLocaleLowerCase();
+      if (key !== "r" && key !== "t") return;
+      if (key === "r") event.preventDefault();
+      if (artistPageName || activeNav !== "Albums") return;
+      if (autoTagAlbum || albumMoveRequest || renamingAlbumId) return;
+      const openAlbum = explorerAlbums.find((album) => album.id === selectedAlbumId) ?? null;
+      const selected = explorerSelection?.kind === "albums" && explorerSelection.albums.length ? explorerSelection.albums : null;
+      if (key === "t" && event.shiftKey) {
+        const target = openAlbum ?? (selected?.length === 1 ? selected[0] : null);
+        if (!target) return;
+        event.preventDefault();
+        setAutoTagAlbum(target);
+      } else if (key === "r" && !event.shiftKey) {
+        const misnamed = (selected ?? (openAlbum ? [openAlbum] : [])).filter((album) => album.naming?.status === "misnamed");
+        if (misnamed.length) void renameAlbumsToMatchTags(misnamed);
+      }
+    }
+    window.addEventListener("keydown", handleAlbumShortcut);
+    return () => window.removeEventListener("keydown", handleAlbumShortcut);
+  }, [activeNav, albumMoveRequest, artistPageName, autoTagAlbum, explorerAlbums, explorerSelection, renameAlbumsToMatchTags, renamingAlbumId, selectedAlbumId]);
 
   const startBackgroundIntake = useCallback((
     request: LibraryIntakeApplyRequest,
@@ -1412,7 +1456,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.59.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.60.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

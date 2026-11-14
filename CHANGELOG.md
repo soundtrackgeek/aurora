@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.60.0] - 2026-11-14
+
+### Added
+- **Ctrl+Shift+T** in the Albums view opens the Album Auto-Tagger on the open album, or on the selected album when exactly one is selected, the same as its **Auto-tag** button.
+- **Ctrl+R** in the Albums view renames the selected albums that the naming check flags as misnamed (the amber folder icon), or the open album when none are selected. Albums that are already organized or cannot be checked are skipped. Several albums are renamed one after another and the view reloads once at the end; the status line reports how many were renamed and the first failure, if any.
+
+### Changed
+- Ctrl+R no longer reloads Aurora's window anywhere in the app. Use the refresh button instead. Ctrl+R in the Inbox still renames the selected albums.
+
 ## [0.59.0] - 2026-11-14
 
 ### Added
