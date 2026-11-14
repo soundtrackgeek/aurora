@@ -688,12 +688,20 @@ function App() {
       }
       if (renamed.length) {
         await refreshAfterAlbumRename();
+        // Reload every loaded page in place, keeping the scroll position and the open album,
+        // so a rename far down the list does not jump back to the first album.
+        const currentScroll = mainScrollRef.current?.scrollTop;
+        if (typeof currentScroll === "number" && currentScroll > 0) {
+          scrollPositionByDestinationRef.current[activeNavRef.current] = currentScroll;
+        }
+        restoringScrollRef.current = true;
+        preserveExplorerOnReloadRef.current = true;
         setExplorerReloadToken((value) => value + 1);
       }
     } finally {
       setRenamingAlbumId(null);
     }
-  }, [refreshAfterAlbumRename, setExplorerReloadToken, setSyncMessage]);
+  }, [mainScrollRef, preserveExplorerOnReloadRef, refreshAfterAlbumRename, restoringScrollRef, scrollPositionByDestinationRef, setExplorerReloadToken, setSyncMessage]);
   const renameAlbumToMatchTags = useCallback((album: ExplorerAlbum) => renameAlbumsToMatchTags([album]), [renameAlbumsToMatchTags]);
 
   useEffect(() => {
@@ -1456,7 +1464,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.60.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.60.1</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

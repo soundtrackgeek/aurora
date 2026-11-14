@@ -1649,7 +1649,7 @@ fn merge_album_group(
                     track.file_name
                 )
             })?;
-            let disc_number = track.disc_number.ok_or_else(|| {
+            let disc_number = track.disc_number.filter(|disc| *disc > 0).ok_or_else(|| {
                 format!(
                     "Add a Disc Number tag to {} before merging this multi-disc release.",
                     track.file_name

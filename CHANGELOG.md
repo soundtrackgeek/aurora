@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.60.1] - 2026-11-14
+
+### Fixed
+- Albums whose disc tag is `0/0` were renamed to `0-01 - Artist - Title.mp3` and stayed flagged by the naming check, which expected `01 - Artist - Title`. Disc 0 now counts as no disc number everywhere names are built, so these albums are named `01`, `02` and so on. Click **Rename to match tags** again on an album renamed with `0-` to fix it. A multi-disc merge in the Inbox asks for a real Disc Number instead of accepting 0.
+- Renaming an album from the Albums view (**Rename to match tags** or Ctrl+R) no longer jumps back to the first album. The view refreshes the albums already loaded in place, so it keeps its scroll position and the open album.
+
 ## [0.60.0] - 2026-11-14
 
 ### Added

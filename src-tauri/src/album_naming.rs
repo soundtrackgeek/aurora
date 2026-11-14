@@ -28,9 +28,10 @@ pub(crate) fn track_number_width(numbers: impl Iterator<Item = Option<u32>>) -> 
     numbers.flatten().max().map_or(2, decimal_width).max(2)
 }
 
-/// `1-01` with a disc number, `01` without.
+/// `1-01` with a disc number, `01` without. Disc 0 (an empty `0/0` disc tag) counts as no
+/// disc number, as Music Library's catalog stores it.
 pub(crate) fn track_position(disc_number: Option<u32>, track_number: u32, width: usize) -> String {
-    match disc_number {
+    match disc_number.filter(|disc| *disc > 0) {
         Some(disc) => format!("{disc}-{track_number:0width$}"),
         None => format!("{track_number:0width$}"),
     }
@@ -175,6 +176,33 @@ pub(crate) fn misnamed_tracks<'a>(tracks: &[NamingTrack<'a>]) -> Vec<(&'a str, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disc_zero_counts_as_no_disc_number() {
+        assert_eq!(track_position(Some(0), 1, 2), "01");
+        assert_eq!(track_position(None, 1, 2), "01");
+        assert_eq!(track_position(Some(1), 1, 2), "1-01");
+        let zero_disc = NamingTrack {
+            file_name: "0-01 - Gloria Gaynor - Ain't No Bigger Fool.mp3",
+            artist: Some("Gloria Gaynor"),
+            title: Some("Ain't No Bigger Fool"),
+            track_number: Some(1),
+            track_total: Some(8),
+            disc_number: Some(0),
+        };
+        assert_eq!(
+            misnamed_tracks(&[zero_disc]),
+            vec![(
+                zero_disc.file_name,
+                "01 - Gloria Gaynor - Ain't No Bigger Fool".to_owned()
+            )]
+        );
+        let renamed = NamingTrack {
+            file_name: "01 - Gloria Gaynor - Ain't No Bigger Fool.mp3",
+            ..zero_disc
+        };
+        assert!(misnamed_tracks(&[renamed]).is_empty());
+    }
 
     #[test]
     fn folder_and_track_names_follow_the_inbox_pattern() {

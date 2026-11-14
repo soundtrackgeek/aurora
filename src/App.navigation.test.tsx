@@ -4,6 +4,7 @@ import App from "./App";
 import * as charts from "./charts";
 import * as library from "./library";
 import * as ingest from "./ingest";
+import * as libraryAutoTag from "./libraryAutoTag";
 import { defaultExplorerFilters, saveViewPreferences } from "./viewPreferences";
 
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
@@ -151,6 +152,42 @@ it.each([
   expect(returnedTable.getByRole("row", { name: /Obsession/ })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => expect(scroll.scrollTop).toBe(640));
   expect(load).toHaveBeenCalledTimes(requests);
+});
+
+it("keeps the scroll position and open album after renaming it to match its tags", async () => {
+  const exploreAlbums = library.exploreAlbums;
+  vi.spyOn(library, "exploreAlbums").mockImplementation(async (...args) => {
+    const page = await exploreAlbums(...args);
+    return { ...page, items: page.items.map((album) => album.id === "preview-viva"
+      ? { ...album, naming: { status: "misnamed" as const, issues: ["Folder should be “Coldplay - Viva la Vida (2008)”"] } }
+      : album) };
+  });
+  const loadAlbumDetail = library.loadAlbumDetail;
+  vi.spyOn(library, "loadAlbumDetail").mockImplementation(async (...args) => {
+    const detail = await loadAlbumDetail(...args);
+    return { ...detail, album: { ...detail.album, naming: { status: "misnamed" as const, issues: ["Folder should be “Coldplay - Viva la Vida (2008)”"] } } };
+  });
+  const rename = vi.spyOn(libraryAutoTag, "renameLibraryAlbum").mockResolvedValue({
+    albumId: "preview-viva", sourcePath: "D:/Music/viva", destinationPath: "D:/Music/Coldplay - Viva la Vida (2008)",
+    folderRenamed: true, renamedFiles: 0, warnings: [],
+  });
+  const { container } = render(<App />);
+  await navigate("Albums");
+  const main = within(screen.getByRole("main"));
+  fireEvent.click(within(await main.findByRole("tablist", { name: "Explorer views" })).getByRole("tab", { name: "Albums" }));
+  fireEvent.click(await main.findByRole("button", { name: /^Viva la Vida cover/ }));
+  const details = await main.findByRole("complementary", { name: "Viva la Vida album details" });
+  const scroll = container.querySelector<HTMLElement>(".main-scroll")!;
+  fireEvent.wheel(scroll, { deltaY: 640 });
+  scroll.scrollTop = 640;
+  fireEvent.scroll(scroll);
+  const loads = vi.mocked(library.exploreAlbums).mock.calls.length;
+  fireEvent.click(within(details).getByRole("button", { name: "Rename to match tags" }));
+  await waitFor(() => expect(rename).toHaveBeenCalledWith("preview-viva"));
+  // The reload refreshes the loaded pages in place instead of starting over at the first album.
+  await waitFor(() => expect(vi.mocked(library.exploreAlbums).mock.calls.length).toBeGreaterThan(loads));
+  await waitFor(() => expect(scroll.scrollTop).toBe(640));
+  expect(main.getByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
 
 it("keeps Albums filters and expanded detail separate from a Songs search", async () => {
