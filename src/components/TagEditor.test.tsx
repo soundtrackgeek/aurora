@@ -9,6 +9,13 @@ const tagMocks = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 
+const renameMocks = vi.hoisted(() => ({ rename: vi.fn() }));
+
+vi.mock("../libraryAutoTag", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../libraryAutoTag")>();
+  return { ...actual, renameLibraryAlbum: renameMocks.rename };
+});
+
 vi.mock("../tags", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../tags")>();
   return {
@@ -74,6 +81,10 @@ function updatedTracks(): Track[] {
 beforeEach(() => {
   tagMocks.read.mockReset().mockResolvedValue(snapshot());
   tagMocks.update.mockReset().mockResolvedValue({ state: snapshot(), tracks: updatedTracks() });
+  renameMocks.rename.mockReset().mockResolvedValue({
+    albumId: "album-1", sourcePath: "", destinationPath: "", folderRenamed: false, renamedFiles: 0, warnings: [],
+  });
+  try { window.localStorage.clear(); } catch { /* storage may be unavailable */ }
 });
 
 afterEach(cleanup);
@@ -321,5 +332,73 @@ describe("TagEditor", () => {
     fireEvent.change(album, { target: { value: "Unsaved album name" } });
     fireEvent.focus(window);
     expect(tagMocks.read).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TagEditor auto rename folder", () => {
+  const renamed = {
+    albumId: "album-1",
+    sourcePath: "D:\\Music\\Five for Fighting - America Town (2000)",
+    destinationPath: "D:\\Music\\Five for Fighting - America Town (1999)",
+    folderRenamed: true,
+    renamedFiles: 2,
+    warnings: [],
+  };
+
+  it("renames the album folder after a year change, then rereads the moved files", async () => {
+    renameMocks.rename.mockResolvedValue(renamed);
+    const onAlbumRenamed = vi.fn().mockResolvedValue(undefined);
+    render(<TagEditor target={target} onTracksChange={vi.fn()} onAlbumRenamed={onAlbumRenamed} />);
+
+    expect(await screen.findByRole("checkbox", { name: /Auto rename folder/ })).toBeChecked();
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: "1999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByText(/Renamed the folder to Five for Fighting - America Town \(1999\) and 2 tracks\./)).toBeInTheDocument();
+    expect(renameMocks.rename).toHaveBeenCalledWith("album-1");
+    expect(onAlbumRenamed).toHaveBeenCalledWith(renamed);
+    expect(tagMocks.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the folder alone for fields that are not in its name", async () => {
+    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+
+    fireEvent.change(await screen.findByLabelText("Release year"), { target: { value: "2001" } });
+    fireEvent.change(screen.getByLabelText("Genre"), { target: { value: "Pop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 2 fields to 2 MP3s" }));
+
+    await waitFor(() => expect(tagMocks.update).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Saved 2 fields/)).toBeInTheDocument();
+    expect(renameMocks.rename).not.toHaveBeenCalled();
+  });
+
+  it("remembers when the user turns it off", async () => {
+    const first = render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Auto rename folder/ }));
+    fireEvent.change(screen.getByLabelText("Album"), { target: { value: "America Town (Remastered)" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+    await waitFor(() => expect(tagMocks.update).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Saved 1 field/)).toBeInTheDocument();
+    expect(renameMocks.rename).not.toHaveBeenCalled();
+    first.unmount();
+
+    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+    expect(await screen.findByRole("checkbox", { name: /Auto rename folder/ })).not.toBeChecked();
+  });
+
+  it("keeps the saved tags and explains a rename Music Library refused", async () => {
+    renameMocks.rename.mockRejectedValue(new Error("Music Library 0.217.0 or later is required."));
+    render(<TagEditor target={target} onTracksChange={vi.fn()} />);
+
+    fireEvent.change(await screen.findByLabelText("Album artist"), { target: { value: "John Ondrasik" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 field to 2 MP3s" }));
+
+    expect(await screen.findByText(/The folder was not renamed: Music Library 0\.217\.0 or later is required\./)).toBeInTheDocument();
+  });
+
+  it("is only offered for one album", async () => {
+    render(<TagEditor target={{ kind: "track", trackId: "track-1", trackKey: "c:/music/01.mp3", label: "Superman" }} onTracksChange={vi.fn()} />);
+    await screen.findByLabelText("Genre");
+    expect(screen.queryByRole("checkbox", { name: /Auto rename folder/ })).not.toBeInTheDocument();
   });
 });

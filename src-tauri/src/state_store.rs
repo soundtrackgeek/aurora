@@ -548,7 +548,11 @@ impl StateStore {
         // Local bookkeeping for library sync; deliberately not a synchronized table.
         transaction
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS library_sync_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+                "CREATE TABLE IF NOT EXISTS library_sync_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 CREATE TABLE IF NOT EXISTS reviewed_album_syncs(
+                   directory TEXT PRIMARY KEY COLLATE NOCASE,
+                   marked_at_ms INTEGER NOT NULL
+                 );",
             )
             .map_err(|error| format!("Could not ensure Aurora's library-sync metadata: {error}"))?;
         let synchronized_tables = [
@@ -1742,13 +1746,101 @@ impl StateStore {
             return Err("Aurora refused an empty pending library-folder path.".to_owned());
         }
         let connection = self.open()?;
-        connection
+        let completed = connection
             .execute(
                 "DELETE FROM pending_library_folder_sync WHERE directory = ?1 AND updated_at_ms = ?2",
                 params![&item.directory, item.token],
             )
             .map(|changed| changed == 1)
-            .map_err(|error| format!("Could not complete Aurora's library-folder sync: {error}"))
+            .map_err(|error| format!("Could not complete Aurora's library-folder sync: {error}"))?;
+        if completed {
+            connection
+                .execute(
+                    "DELETE FROM reviewed_album_syncs WHERE directory = ?1",
+                    [&item.directory],
+                )
+                .map_err(|error| {
+                    format!("Could not complete Aurora's reviewed album sync: {error}")
+                })?;
+        }
+        Ok(completed)
+    }
+
+    /// The folder's waiting edits were reviewed in the library auto-tagger, so every retry
+    /// asks Music Library for a reviewed album sync. Cleared when the sync completes.
+    pub(crate) fn mark_reviewed_album_sync(&self, directory: &str) -> Result<(), String> {
+        self.open()?
+            .execute(
+                "INSERT INTO reviewed_album_syncs(directory, marked_at_ms) VALUES (?1, ?2)
+                 ON CONFLICT(directory) DO UPDATE SET marked_at_ms = excluded.marked_at_ms",
+                params![directory, now_ms()],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("Could not mark Aurora's reviewed album sync: {error}"))
+    }
+
+    pub(crate) fn is_reviewed_album_sync(&self, directory: &str) -> Result<bool, String> {
+        self.open()?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM reviewed_album_syncs WHERE directory = ?1)",
+                [directory],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Could not read Aurora's reviewed album sync: {error}"))
+    }
+
+    /// Follows a library album renamed in place: tag edit records, the saved queue and the
+    /// album's added date move to the new paths in one transaction.
+    pub(crate) fn relocate_library_tracks(
+        &self,
+        source_folder: &str,
+        destination_folder: &str,
+        moves: &[crate::library_rename::TrackRelocation],
+    ) -> Result<(), String> {
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not prepare Aurora's renamed-album update: {error}"))?;
+        for item in moves {
+            let target_path = item.new_audio_path().to_string_lossy().into_owned();
+            transaction
+                .execute(
+                    "UPDATE OR REPLACE tag_overlays SET track_key = ?2, directory = ?3, filename = ?4
+                     WHERE track_key = ?1",
+                    params![item.old_key, item.new_key, item.new_directory, item.new_filename],
+                )
+                .map_err(|error| format!("Could not move a tag overlay: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE tag_edit_operations SET track_key = ?2, target_path = ?3 WHERE track_key = ?1",
+                    params![item.old_key, item.new_key, target_path],
+                )
+                .map_err(|error| format!("Could not move a tag edit record: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE playback_queue SET track_key = ?2, directory = ?3, filename = ?4
+                     WHERE track_key = ?1",
+                    params![
+                        item.old_key,
+                        item.new_key,
+                        item.new_directory,
+                        item.new_filename
+                    ],
+                )
+                .map_err(|error| format!("Could not move a queued track: {error}"))?;
+        }
+        if source_folder != destination_folder {
+            transaction
+                .execute(
+                    "UPDATE album_additions SET destination_path = ?2
+                     WHERE destination_path = ?1 COLLATE NOCASE",
+                    params![source_folder, destination_folder],
+                )
+                .map_err(|error| format!("Could not move the album's added date: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not save Aurora's renamed-album update: {error}"))
     }
 
     /// Forgets the queued Music Library sync and the catalog overlays of an album folder

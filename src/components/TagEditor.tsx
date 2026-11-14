@@ -17,11 +17,21 @@ import {
   type TagEditorSnapshot,
   type TagEditorTarget,
 } from "../tags";
+import {
+  changesFolderNameTags,
+  readAutoRenamePreference,
+  renameLibraryAlbum,
+  renameSummary,
+  writeAutoRenamePreference,
+  type LibraryAlbumRenameResult,
+} from "../libraryAutoTag";
 
 interface TagEditorProps {
   target: TagEditorTarget;
   onTracksChange: (tracks: Track[], catalogSync?: CatalogSync) => void | boolean;
   onCatalogSync?: (sync: CatalogSync) => void | Promise<void>;
+  /** Called after "Auto rename folder" moved the album, whose tracks then have new keys. */
+  onAlbumRenamed?: (result: LibraryAlbumRenameResult) => void | Promise<void>;
 }
 
 export interface ManualTagEditorSaveResult {
@@ -45,8 +55,11 @@ interface ManualTagEditorProps {
     fields: EditableTagField[],
     values: EditableTagValues,
     artworkToken: string | null,
+    options?: { renameFolder: boolean },
   ) => Promise<ManualTagEditorSaveResult>;
   artwork?: AlbumArtworkEditor;
+  /** Shows "Auto rename folder", for one library album. */
+  folderRename?: boolean;
 }
 
 type EditorPhase = "loading" | "ready" | "saving" | "saved" | "error";
@@ -251,8 +264,9 @@ function ArtworkField({
   );
 }
 
-export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, saveSnapshot, artwork }: ManualTagEditorProps) {
+export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, saveSnapshot, artwork, folderRename = false }: ManualTagEditorProps) {
   const [snapshot, setSnapshot] = useState<TagEditorSnapshot | null>(null);
+  const [autoRename, setAutoRename] = useState(readAutoRenamePreference);
   const [draft, setDraft] = useState<DraftText>(emptyDraft);
   const [selectedFields, setSelectedFields] = useState<Set<EditableTagField>>(() => new Set());
   const [phase, setPhase] = useState<EditorPhase>("loading");
@@ -401,6 +415,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, s
         selectedInOrder,
         valuesForDraft(draft),
         savingArtwork?.token ?? null,
+        { renameFolder: folderRename && autoRename },
       );
       acceptSnapshot(result.state, "saved");
       if (savingArtwork) {
@@ -501,6 +516,21 @@ export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, s
         </div>
       </div>
 
+      {folderRename ? (
+        <label className="tag-editor__rename-option">
+          <input
+            type="checkbox"
+            checked={autoRename}
+            disabled={isWorking}
+            onChange={(event) => { setAutoRename(event.target.checked); writeAutoRenamePreference(event.target.checked); }}
+          />
+          <span>
+            <strong>Auto rename folder</strong>
+            <small>When Album artist, Album or Year changes · Album Artist - Album (Year)</small>
+          </span>
+        </label>
+      ) : null}
+
       {validationMessage ? <p className="tag-message tag-message--error" role="alert">{validationMessage}</p> : null}
       {message ? <p className={`tag-message tag-message--${phase}`} role={phase === "error" ? "alert" : "status"}>{message}</p> : null}
 
@@ -526,7 +556,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, s
   );
 }
 
-export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorProps) {
+export function TagEditor({ target, onTracksChange, onCatalogSync, onAlbumRenamed }: TagEditorProps) {
   const targetKind = target.kind;
   const targetAlbumId = target.kind === "album" ? target.albumId : null;
   const targetTrackId = target.kind === "track" ? target.trackId : null;
@@ -565,7 +595,7 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     currentUrl: currentArtworkUrl,
     choose: () => selectAlbumCoverImage({ source: "library", target: requestTarget }),
   } : undefined, [requestTarget, currentArtworkUrl, targetKind]);
-  const saveSnapshot = useCallback(async (
+  const saveTags = useCallback(async (
     expected: TagEditorSnapshot,
     fields: EditableTagField[],
     values: EditableTagValues,
@@ -608,6 +638,37 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     }
     return { state: result.state, message };
   }, [onCatalogSync, onTracksChange, requestTarget]);
+  const saveSnapshot = useCallback(async (
+    expected: TagEditorSnapshot,
+    fields: EditableTagField[],
+    values: EditableTagValues,
+    artworkToken: string | null,
+    options?: { renameFolder: boolean },
+  ): Promise<ManualTagEditorSaveResult> => {
+    const saved = await saveTags(expected, fields, values, artworkToken);
+    if (
+      !options?.renameFolder
+      || requestTarget.kind !== "album"
+      || !changesFolderNameTags(expected.tracks.map((track) => track.values), fields, values)
+    ) return saved;
+    // The tags are already saved, so a rename that fails is reported, never thrown.
+    let renamed: LibraryAlbumRenameResult;
+    try {
+      renamed = await renameLibraryAlbum(requestTarget.albumId);
+    } catch (error) {
+      return { ...saved, message: `${saved.message} The folder was not renamed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    const summary = renameSummary(renamed);
+    if (!summary) return saved;
+    try {
+      await onAlbumRenamed?.(renamed);
+    } catch (error) {
+      console.warn("The album was renamed, but Aurora could not refresh its catalog views yet", error);
+    }
+    // The files moved, so the editor rereads them; the saved state still names the old paths.
+    const state = await readTagEditorState(requestTarget).catch(() => saved.state);
+    return { state, message: `${saved.message} ${summary}` };
+  }, [onAlbumRenamed, requestTarget, saveTags]);
 
   return <ManualTagEditor
     key={JSON.stringify(requestTarget)}
@@ -617,5 +678,6 @@ export function TagEditor({ target, onTracksChange, onCatalogSync }: TagEditorPr
     onSnapshotLoaded={onSnapshotLoaded}
     saveSnapshot={saveSnapshot}
     artwork={artwork}
+    folderRename={target.kind === "album"}
   />;
 }

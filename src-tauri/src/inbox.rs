@@ -1,4 +1,8 @@
 use crate::{
+    album_naming::{
+        album_folder_name, decimal_width, legacy_sanitize_component, required_component,
+        sanitize_component,
+    },
     artwork::{
         CanonicalCover, canonical_cover_from_image, canonical_cover_from_picture,
         canonical_front_cover_fingerprint, cover_digest, front_cover_matches, validate_cover_bytes,
@@ -309,6 +313,40 @@ pub(crate) struct InboxTagApplyResult {
     removed_tracks: usize,
     recovery_path: Option<String>,
     album_path: String,
+}
+
+impl InboxTagApplyRequest {
+    pub(crate) fn album_path(&self) -> &str {
+        &self.album_path
+    }
+
+    pub(crate) fn track_paths(&self) -> impl Iterator<Item = &str> {
+        self.tracks.iter().map(|track| track.path.as_str())
+    }
+
+    pub(crate) fn removed_track_paths(&self) -> &[String] {
+        &self.remove_track_paths
+    }
+
+    /// A library album is renamed by Music Library, which keeps its catalog paths in step.
+    pub(crate) fn without_folder_rename(mut self) -> Self {
+        self.rename_after_apply = false;
+        self
+    }
+}
+
+impl InboxTagApplyResult {
+    pub(crate) fn changed_tracks(&self) -> usize {
+        self.changed_tracks
+    }
+
+    pub(crate) fn removed_tracks(&self) -> usize {
+        self.removed_tracks
+    }
+
+    pub(crate) fn recovery_path(&self) -> Option<&str> {
+        self.recovery_path.as_deref()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1469,13 +1507,11 @@ pub(crate) fn rename_albums(
 fn album_rename_candidate(requested_path: String) -> Result<AlbumRenameCandidate, String> {
     let path = canonical_directory(&requested_path)?;
     let scanned = scan_album(&path)?;
-    let album_artist = required_component(scanned.artist.as_deref(), "Album Artist")?;
-    let album_title = required_component(scanned.album.as_deref(), "Album")?;
-    let year = scanned
-        .year
-        .filter(|value| *value > 0)
-        .ok_or_else(|| "Add a Year tag before renaming this album.".to_owned())?;
-    let folder_name = sanitize_component(&format!("{album_artist} - {album_title} ({year})"))?;
+    let folder_name = album_folder_name(
+        scanned.artist.as_deref(),
+        scanned.album.as_deref(),
+        scanned.year,
+    )?;
     Ok(AlbumRenameCandidate {
         requested_path,
         path,
@@ -1798,14 +1834,12 @@ fn rename_album_path(
     monitored_roots: &[PathBuf],
 ) -> Result<InboxRenameResult, String> {
     let scanned = scan_album(album)?;
-    let album_artist = required_component(scanned.artist.as_deref(), "Album Artist")?;
-    let album_title = required_component(scanned.album.as_deref(), "Album")?;
-    let year = scanned
-        .year
-        .filter(|value| *value > 0)
-        .ok_or_else(|| "Add a Year tag before renaming this album.".to_owned())?;
     let parent = rename_parent(album, monitored_roots)?;
-    let folder_name = sanitize_component(&format!("{album_artist} - {album_title} ({year})"))?;
+    let folder_name = album_folder_name(
+        scanned.artist.as_deref(),
+        scanned.album.as_deref(),
+        scanned.year,
+    )?;
     let destination_folder = parent.join(folder_name);
     let folder_renamed = !path_eq(album, &destination_folder);
     if folder_renamed && destination_folder.exists() {
@@ -2147,6 +2181,18 @@ fn collect_album_directories(
 
 fn scan_album(directory: &Path) -> Result<InboxAlbum, String> {
     scan_album_cached(directory, &mut HashMap::new(), &mut HashSet::new())
+}
+
+/// Scans a library album folder in the shape the auto-tagger reviews, keeping only the files
+/// `keep` accepts (the album's catalog tracks), so stray files are never tagged or removed.
+pub(crate) fn scan_library_album(
+    directory: &Path,
+    keep: impl Fn(&Path) -> bool,
+) -> Result<InboxAlbum, String> {
+    let mut album = scan_album(directory)?;
+    album.tracks.retain(|track| keep(Path::new(&track.path)));
+    album.track_count = album.tracks.len();
+    Ok(album)
 }
 
 fn scan_album_cached(
@@ -3126,56 +3172,6 @@ fn paths_equal(left: &str, right: &str) -> bool {
     } else {
         left == right
     }
-}
-fn required_component(value: Option<&str>, label: &str) -> Result<String, String> {
-    let value = value.map(str::trim).filter(|value| !value.is_empty());
-    value
-        .map(str::to_owned)
-        .ok_or_else(|| format!("Add a {label} tag before renaming this album."))
-}
-/// Names written for renamed albums and tracks. A colon becomes a space, as in the
-/// library's existing folders (`Tail: Fievel` is `Tail  Fievel`); other characters
-/// Windows rejects become `_`.
-fn sanitize_component(value: &str) -> Result<String, String> {
-    sanitize_component_with_colon(value, ' ')
-}
-
-/// The spelling Aurora wrote before colons became spaces. Albums renamed then stay ready.
-fn legacy_sanitize_component(value: &str) -> Result<String, String> {
-    sanitize_component_with_colon(value, '_')
-}
-
-fn sanitize_component_with_colon(value: &str, colon: char) -> Result<String, String> {
-    let mut sanitized = value
-        .chars()
-        .map(|character| {
-            if character == ':' {
-                colon
-            } else if character.is_control()
-                || matches!(character, '<' | '>' | '"' | '/' | '\\' | '|' | '?' | '*')
-            {
-                '_'
-            } else {
-                character
-            }
-        })
-        .collect::<String>();
-    sanitized = sanitized.trim().trim_end_matches(['.', ' ']).to_owned();
-    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
-        return Err("The tags do not produce a valid Windows file name.".to_owned());
-    }
-    let stem = sanitized.split('.').next().unwrap_or_default();
-    let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if reserved.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
-        sanitized.insert(0, '_');
-    }
-    Ok(sanitized)
-}
-fn decimal_width(value: u32) -> usize {
-    value.max(1).ilog10() as usize + 1
 }
 fn is_mp3(path: &Path) -> bool {
     !path

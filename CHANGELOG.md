@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.58.0] - 2026-11-14
+
+### Added
+- **Auto-tag** in the album view of the Albums page opens the Album Auto-Tagger on a library album, read straight from its MP3s. It has the same MusicBrainz and Discogs search, original-edition preference, track matching, manual matches and **Select all extras** as the Inbox tagger. Extra tracks are copied and verified in Aurora's `library-recovery` folder before they are deleted. Music Library takes the new tags, renumbered tracks and removed tracks as one reviewed album update, so there is no longer any need to move an album to the Inbox, tag it and import it again. Requires Music Library 0.218.0.
+- **Rename folder after tagging** in the library auto-tagger renames the album folder and its MP3s after the new tags, with the Inbox pattern: `Album Artist - Album (Year)` for the folder and `01 - Artist - Title.mp3` (or `1-01 - …` for multi-disc albums) for the tracks.
+- **Auto rename folder** at the end of the sidebar tag editor, on by default and remembered, renames a single album's folder and tracks the same way after a save that changes Album artist, Album or Year. Release year, Genre and the other fields never rename the folder, and a field saved with its old value is not a change. If Music Library has not taken the tag edit yet, the tags stay saved and the editor explains why the folder kept its name. Requires Music Library 0.217.0.
+
+### Changed
+- Album renames happen in place through Music Library, which moves the files and rewrites its catalog paths. Aurora then moves its own records to the new paths: play history, the playback queue and the track playing now, tag-edit records, pending syncs, file observations and the waveform cache, so nothing is lost or re-analyzed.
+- Aurora remembers when a folder needs a reviewed Music Library sync, so an automatic retry after a restart uses the same reviewed update.
+
 ## [0.57.4] - 2026-11-11
 
 ### Fixed

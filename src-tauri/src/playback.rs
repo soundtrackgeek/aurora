@@ -1864,6 +1864,34 @@ impl PlaybackRuntime {
         }
     }
 
+    /// A library album was renamed in place. Playback keeps going: the playing track is
+    /// already decoded from memory, and every queued track, the open history session and the
+    /// next-track preparation now point at the new files.
+    pub(crate) fn relocate_tracks(&mut self, moves: &[crate::library_rename::TrackRelocation]) {
+        let mut changed = false;
+        for item in moves {
+            for track in &mut self.queue {
+                if track.track_key == item.old_key {
+                    item.apply(track);
+                    changed = true;
+                }
+            }
+            if let Some(session) = self.history_session.as_mut() {
+                session.relocate(item);
+            }
+            if let Some(pending) = self.pending_next.as_mut()
+                && pending.next_track_key == item.old_key
+            {
+                pending.next_track_key.clone_from(&item.new_key);
+            }
+        }
+        if changed {
+            // Cached bytes are keyed by the old paths.
+            self.media_cache.entries.clear();
+            let _ = self.persist();
+        }
+    }
+
     pub(crate) fn refresh_track_metadata(&mut self, updated: &TrackSummary) {
         for track in &mut self.queue {
             if track.track_key == updated.track_key {

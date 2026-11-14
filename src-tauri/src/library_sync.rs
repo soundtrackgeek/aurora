@@ -1,5 +1,7 @@
 use crate::{
-    library_bridge::{music_library_build_stamp, sync_existing_library_folders},
+    library_bridge::{
+        music_library_build_stamp, sync_existing_library_folders, sync_reviewed_library_album,
+    },
     state_store::{PendingLibraryFolderSync, StateStore},
 };
 use serde::Serialize;
@@ -241,7 +243,21 @@ impl LibrarySyncCoordinator {
             .background_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.run_locked(app, &[directory.to_owned()], true)
+        self.run_locked(app, &[directory.to_owned()], true, false)
+    }
+
+    /// Syncs one album the user reviewed in the library auto-tagger: Music Library may take
+    /// renumbered and removed tracks together with album tag changes in one update.
+    pub(crate) fn sync_reviewed_album(
+        &self,
+        app: &AppHandle,
+        directory: &str,
+    ) -> LibrarySyncReport {
+        let _worker = self
+            .background_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.run_locked(app, &[directory.to_owned()], true, true)
     }
 
     fn run(&self, app: &AppHandle, priority_directories: &[String]) -> LibrarySyncReport {
@@ -252,7 +268,7 @@ impl LibrarySyncCoordinator {
                 completed_directories: HashSet::new(),
             };
         };
-        self.run_locked(app, priority_directories, false)
+        self.run_locked(app, priority_directories, false, false)
     }
 
     pub(crate) fn serialize_bridge_work<T>(&self, operation: impl FnOnce() -> T) -> T {
@@ -306,6 +322,7 @@ impl LibrarySyncCoordinator {
         app: &AppHandle,
         priority_directories: &[String],
         requested_by_user: bool,
+        reviewed_album: bool,
     ) -> LibrarySyncReport {
         let store = app.state::<StateStore>();
         self.reopen_blocked_after_music_library_update(&store);
@@ -353,12 +370,20 @@ impl LibrarySyncCoordinator {
                     Vec::new()
                 };
                 sync_target_with_overlay_fallback(target, &overlay_filenames, |changed_files| {
+                    let reviewed = reviewed_album
+                        || store
+                            .is_reviewed_album_sync(&target.directory)
+                            .unwrap_or(false);
                     let synchronize = || {
-                        sync_existing_library_folders(
-                            app,
-                            vec![target.directory.clone()],
-                            changed_files,
-                        )
+                        if reviewed {
+                            sync_reviewed_library_album(app, &target.directory)
+                        } else {
+                            sync_existing_library_folders(
+                                app,
+                                vec![target.directory.clone()],
+                                changed_files,
+                            )
+                        }
                         .map(|_| ())
                     };
                     if requested_by_user {

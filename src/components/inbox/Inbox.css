@@ -215,3 +215,4 @@
 .inbox-release-art--empty:hover, .inbox-release-art--empty:focus-visible { border-color: rgba(188,123,243,.7); background: radial-gradient(circle, rgba(168,85,247,.3), #0a111a); }
 .inbox-release-art--empty small { max-width: 100%; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); color: #d9e0e9; }
 .inbox-release-art--empty.has-pick { border-style: solid; }
+.inbox-tagger.inbox-tagger--loading { height: auto; min-height: 0; }.inbox-tagger--loading > .inbox-tagger__status, .inbox-tagger--loading > .inbox-tagger__error { margin: 16px 18px 20px; }

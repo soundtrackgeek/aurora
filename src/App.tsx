@@ -94,6 +94,7 @@ import { ContentTransition } from "./components/ContentTransition";
 import type { AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
 import { AlbumMoveOperation, SettingsDialog, TagEditor } from "./app/components/LazyPanels";
 import {
+  type ExplorerAlbum,
   type ExplorerFilters,
   type ExplorerView
 } from "./components/explorer/DeepExplorer";
@@ -184,6 +185,11 @@ const Inbox = lazy(async () => {
   return { default: module.Inbox };
 });
 
+const LibraryAutoTagDialog = lazy(async () => {
+  const module = await import("./components/inbox/LibraryAutoTagDialog");
+  return { default: module.LibraryAutoTagDialog };
+});
+
 const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   Universe: "universe",
   Inbox: "inbox",
@@ -225,6 +231,7 @@ function App() {
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
   useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
   const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
+  const [autoTagAlbum, setAutoTagAlbum] = useState<ExplorerAlbum | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
   const explorerWorkspace = useExplorerWorkspace(initialViewPreferences);
   const {
@@ -650,6 +657,10 @@ function App() {
     handleCatalogSync,
     playback,
   });
+  // A renamed folder moves every track key, so the catalog views reload from Music Library.
+  const refreshAfterAlbumRename = useCallback(async () => {
+    await refreshCatalogIfChanged();
+  }, [refreshCatalogIfChanged]);
 
   useEffect(() => {
     appMountedRef.current = true;
@@ -1348,7 +1359,7 @@ function App() {
       {playlistSelection && <PlaylistAuthoringDialog selection={playlistSelection} onClose={()=>setPlaylistSelection(null)} onSaved={()=>{setPlaylistSelection(null);setPlaylistsReloadToken(v=>v+1);setPlaylistSaveMessage("Playlist saved in Music Library and Aurora.");}} />}
       {contextTags && <ContextTagDialog onClose={() => setContextTags(null)}><TagEditor
         target={contextTags.albumIds?.length ? { kind: "albums", albumIds: [...contextTags.albumIds], label: contextTags.label } : { kind: "tracks", tracks: (contextTags.tracks ?? []).map(track => ({ trackId: track.id, trackKey: track.trackKey })), label: contextTags.label }}
-        onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} /></ContextTagDialog>}
+        onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} onAlbumRenamed={refreshAfterAlbumRename} /></ContextTagDialog>}
       {librarySyncOpen && <LibrarySyncDialog onClose={() => setLibrarySyncOpen(false)} onCatalogSync={(sync) => void handleCatalogSync(sync)}
         onOpenAlbum={(albumId, albumTitle) => { setLibrarySyncOpen(false); openAlbum(albumId, albumTitle); }} />}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
@@ -1385,7 +1396,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.57.4</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.58.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1798,6 +1809,7 @@ function App() {
                       onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
                       onDeleteTracks={deleteExplorerAlbumTracks}
                       onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
+                      onRequestAutoTag={setAutoTagAlbum}
                       onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
                       albumMoveBusy={albumMoveRequest !== null}
                       onSelectionChange={(selection) => {
@@ -1858,7 +1870,7 @@ function App() {
               key={tagEditorKey}
               target={tagEditorTarget}
               onTracksChange={applyTrackChanges}
-              onCatalogSync={refreshTagEditorCatalogViews}
+              onCatalogSync={refreshTagEditorCatalogViews} onAlbumRenamed={refreshAfterAlbumRename}
             />
           </div>
         ) : activeNav === "Charts" && chartSelection && ((chartSelection.kind === "singles" && inspectorView === "track" && !playback.state.currentTrack) || (chartSelection.kind === "albums" && inspectorView === "album")) ? (
@@ -1949,6 +1961,27 @@ function App() {
         ) : <EmptyInspector />}
       </aside>}
 
+      {autoTagAlbum ? (
+        <Suspense fallback={<div className="modal-backdrop"><div className="settings-loading" role="status">Opening the auto-tagger…</div></div>}>
+          <LibraryAutoTagDialog
+            albumId={autoTagAlbum.id}
+            albumTitle={autoTagAlbum.title}
+            onOpenSettings={() => openSettings("metadata")}
+            onClose={() => setAutoTagAlbum(null)}
+            onApplied={async (message, result) => {
+              setAutoTagAlbum(null);
+              setSyncMessage(message);
+              try {
+                await handleCatalogSync(result.catalogSync);
+                // A renamed folder moves every track key, so the catalog views reload from it.
+                if (result.rename) await refreshCatalogIfChanged();
+              } catch (error) {
+                setSyncMessage(`${message} Catalog refresh needs a retry: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }}
+          />
+        </Suspense>
+      ) : null}
       {albumMoveRequest ? <AlbumMoveOperation request={albumMoveRequest} onDismiss={() => setAlbumMoveRequest(null)} onRemoved={handleAlbumRemoved} /> : null}
 
       {queueOpen && (

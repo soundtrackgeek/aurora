@@ -351,6 +351,13 @@ pub(crate) struct ActiveHistorySession {
 }
 
 impl ActiveHistorySession {
+    /// The session's track moved to a new path (a library album renamed in place).
+    pub(crate) fn relocate(&mut self, item: &crate::library_rename::TrackRelocation) {
+        if self.track.track_key == item.old_key {
+            item.apply(&mut self.track);
+        }
+    }
+
     pub(crate) fn checkpoint(&self) -> HistoryCheckpoint {
         HistoryCheckpoint {
             session_id: self.session_id.clone(),
@@ -685,6 +692,46 @@ impl HistoryStore {
         transaction
             .commit()
             .map_err(|error| format!("Could not commit history recovery: {error}"))
+    }
+
+    /// Follows tracks renamed in place, so their plays stay theirs.
+    pub(crate) fn relocate_tracks(
+        &self,
+        moves: &[crate::library_rename::TrackRelocation],
+    ) -> Result<(), String> {
+        if moves.is_empty() {
+            return Ok(());
+        }
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("Could not start the history update: {error}"))?;
+        let mut updated = 0;
+        for item in moves {
+            updated += transaction
+                .execute(
+                    "UPDATE listening_sessions SET track_key = ?2, directory = ?3, filename = ?4
+                     WHERE track_key = ?1",
+                    params![
+                        item.old_key,
+                        item.new_key,
+                        item.new_directory,
+                        item.new_filename
+                    ],
+                )
+                .map_err(|error| format!("Could not move listening history: {error}"))?;
+        }
+        if updated > 0 {
+            transaction
+                .execute(
+                    "UPDATE history_meta SET content_revision = content_revision + 1 WHERE singleton = 1",
+                    [],
+                )
+                .map_err(|error| format!("Could not checkpoint moved history: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not commit the history update: {error}"))
     }
 
     pub(crate) fn play_threshold_seconds(&self) -> Result<u32, String> {
@@ -2726,6 +2773,39 @@ mod tests {
             registered_at_ms: Some(started_at_ms + 30_000),
             outcome: "completed".to_owned(),
         }
+    }
+
+    #[test]
+    fn plays_follow_a_track_renamed_in_place() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new_with_tonehavn_directory(
+            directory.path().join("history.sqlite3"),
+            directory.path().join("remote"),
+            "device-test-rename".to_owned(),
+            "Test".to_owned(),
+            None,
+        )
+        .unwrap();
+        let mut active = store.capture_session(&track(240), 0.0, 30);
+        active.registered_play = true;
+        store
+            .persist_checkpoint(&active.finish("completed").unwrap())
+            .unwrap();
+        let moved = crate::library_rename::TrackRelocation::from_paths(
+            r"D:\MUSIC\Artist\track.mp3",
+            r"D:\MUSIC\Artist - Album (1976)\01 - Artist - Track.mp3",
+        )
+        .unwrap();
+        assert_eq!(moved.old_key, track(240).track_key);
+        store.relocate_tracks(std::slice::from_ref(&moved)).unwrap();
+        let plays = store.registered_plays_by_track().unwrap();
+        assert_eq!(plays.get(&moved.new_key), Some(&1));
+        assert!(!plays.contains_key(&moved.old_key));
+
+        let mut session = store.capture_session(&track(240), 0.0, 30);
+        session.relocate(&moved);
+        assert_eq!(session.track.track_key, moved.new_key);
+        assert_eq!(session.track.filename, "01 - Artist - Track.mp3");
     }
 
     #[test]

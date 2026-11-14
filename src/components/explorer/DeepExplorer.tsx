@@ -16,6 +16,7 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Star,
+  Tags,
   Trash2,
   UsersRound,
   X,
@@ -172,6 +173,7 @@ export interface DeepExplorerProps {
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
+  onRequestAutoTag?: (album: ExplorerAlbum) => void;
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
@@ -1171,6 +1173,7 @@ function AlbumDetail({
   onLoveChange,
   onDeleteTracks,
   onRequestMoveToInbox,
+  onRequestAutoTag,
   onRequestRemoveAlbum,
   albumMoveBusy,
   onSelectionChange,
@@ -1194,6 +1197,7 @@ function AlbumDetail({
   onLoveChange?: (track: Track, loveState: Track["loveState"]) => void;
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
+  onRequestAutoTag?: (album: ExplorerAlbum) => void;
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
@@ -1283,7 +1287,8 @@ function AlbumDetail({
             <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}</span>
           </span>
         </div>
-        {onRequestRemoveAlbum || onRequestMoveToInbox ? <div className="deep-explorer-album-actions">
+        {onRequestRemoveAlbum || onRequestMoveToInbox || onRequestAutoTag ? <div className="deep-explorer-album-actions">
+          {onRequestAutoTag ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestAutoTag(album)}><Tags aria-hidden="true" />Auto-tag</button> : null}
           {onRequestRemoveAlbum ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestRemoveAlbum(album)}><FolderOutput aria-hidden="true" />Remove Album</button> : null}
           {onRequestMoveToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestMoveToInbox(album)}><FolderOutput aria-hidden="true" />Move to Inbox</button> : null}
         </div> : null}
@@ -1459,6 +1464,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onLoveChange,
     onDeleteTracks,
     onRequestMoveToInbox,
+    onRequestAutoTag,
     onRequestRemoveAlbum,
     albumMoveBusy,
     onSelectionChange,
@@ -1689,6 +1695,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                   onDeleteTracks={onDeleteTracks}
                   onRequestRemoveAlbum={onRequestRemoveAlbum}
                   onRequestMoveToInbox={onRequestMoveToInbox}
+                  onRequestAutoTag={onRequestAutoTag}
                   albumMoveBusy={albumMoveBusy}
                   onSelectionChange={onSelectionChange}
                   trackChartRanks={trackChartRanks}

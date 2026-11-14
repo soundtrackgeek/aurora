@@ -137,6 +137,29 @@ pub(crate) fn record_deleted(
     Ok(())
 }
 
+/// Checks recorded for files that were renamed describe the old paths; drop them.
+pub(crate) fn forget_relocated(
+    store: &StateStore,
+    moves: &[crate::library_rename::TrackRelocation],
+) -> Result<(), String> {
+    if moves.is_empty() {
+        return Ok(());
+    }
+    let connection = open(store)?;
+    let mut statement = connection
+        .prepare(
+            r"DELETE FROM observations
+             WHERE lower(rtrim(replace(directory, '/', '\'), '\') || '\' || trim(filename)) = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    for item in moves {
+        statement
+            .execute([&item.old_key])
+            .map_err(|e| format!("Could not clear a renamed file's check: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Only send saved, still-missing identities; unavailable directories remain unknown.
 pub(crate) fn pending_deletion_paths(
     catalog: &Connection,

@@ -103,6 +103,10 @@ pub struct LibraryBridgeSupports {
     pub bounded_existing_folder_sync: bool,
     #[serde(default)]
     pub verified_track_deletion_sync: bool,
+    #[serde(default)]
+    pub relocate_album_folders: bool,
+    #[serde(default)]
+    pub reviewed_album_sync: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,6 +317,8 @@ struct SyncExistingFoldersPayload<'a> {
     changed_file_paths: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deleted_file_paths: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    reviewed_album: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -745,6 +751,64 @@ pub async fn apply_library_intake_batch(
     .map_err(|error| format!("The album import worker stopped unexpectedly: {error}"))?
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RelocateAlbumPayload {
+    pub(crate) album_id: String,
+    pub(crate) folder_name: String,
+    pub(crate) files: Vec<RelocateAlbumFile>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RelocateAlbumFile {
+    pub(crate) from_path: String,
+    pub(crate) to_filename: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RelocatedAlbum {
+    pub(crate) source_path: String,
+    pub(crate) destination_path: String,
+    pub(crate) folder_renamed: bool,
+    pub(crate) renamed_files: usize,
+    #[serde(default)]
+    pub(crate) files: Vec<RelocatedAlbumFile>,
+    #[serde(default)]
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RelocatedAlbumFile {
+    pub(crate) from_path: String,
+    pub(crate) to_path: String,
+}
+
+/// Renames a library album folder and its MP3s in place. Music Library rewrites every path it
+/// stores, so the album keeps its ids, ratings, play history and sound analysis.
+pub(crate) fn relocate_album(
+    app: &AppHandle,
+    payload: &RelocateAlbumPayload,
+) -> Result<RelocatedAlbum, String> {
+    foreground_album_work(app, "relocateAlbum", Some(&payload.album_id), None, || {
+        let capabilities = invoke_bridge::<_, LibraryBridgeCapabilities>(
+            app,
+            "capabilities",
+            EmptyPayload {},
+            CAPABILITIES_TIMEOUT,
+        )?;
+        if !capabilities.supports.relocate_album_folders {
+            return Err(
+                "Renaming a library album folder requires Music Library 0.217.0 or newer. Update Music Library, then try again."
+                    .to_owned(),
+            );
+        }
+        invoke_bridge(app, "relocateAlbum", payload, SYNC_TIMEOUT)
+    })
+}
+
 /// A folder moved back to the Inbox or removed is no longer in the library, so Aurora
 /// stops waiting to sync its edits there; the moved files keep them.
 fn forget_moved_album_folders(app: &AppHandle, result: &mut LibraryIntakeApplyResult) {
@@ -803,6 +867,8 @@ fn foreground_album_work<T>(
                 "starting",
                 if operation == "previewRemoveAlbum" {
                     "Checking the selected album and preparing its move."
+                } else if operation == "relocateAlbum" {
+                    "Renaming the album folder and its tracks."
                 } else {
                     "Starting the reviewed album move."
                 },
@@ -817,6 +883,44 @@ pub(crate) fn sync_existing_library_folders(
     app: &AppHandle,
     folder_paths: Vec<String>,
     changed_file_paths: Vec<String>,
+) -> Result<LibraryExistingFoldersSyncResult, String> {
+    sync_library_folders(app, folder_paths, changed_file_paths, false)
+}
+
+/// One album whose renumbered or removed tracks the user reviewed in the auto-tagger.
+pub(crate) fn sync_reviewed_library_album(
+    app: &AppHandle,
+    folder_path: &str,
+) -> Result<LibraryExistingFoldersSyncResult, String> {
+    sync_library_folders(app, vec![folder_path.to_owned()], Vec::new(), true)
+}
+
+pub(crate) const REVIEWED_ALBUM_SYNC_MESSAGE: &str = "Auto-tagging a library album requires Music Library 0.218.0 or newer. Update Music Library, then try again.";
+
+/// Checked before Aurora writes any file, so an old Music Library never leaves edits waiting.
+pub(crate) fn require_reviewed_album_sync(app: &AppHandle) -> Result<(), String> {
+    let capabilities = app
+        .state::<LibrarySyncCoordinator>()
+        .serialize_bridge_work(|| {
+            invoke_bridge::<_, LibraryBridgeCapabilities>(
+                app,
+                "capabilities",
+                EmptyPayload {},
+                CAPABILITIES_TIMEOUT,
+            )
+        })?;
+    if capabilities.supports.reviewed_album_sync {
+        Ok(())
+    } else {
+        Err(REVIEWED_ALBUM_SYNC_MESSAGE.to_owned())
+    }
+}
+
+fn sync_library_folders(
+    app: &AppHandle,
+    folder_paths: Vec<String>,
+    changed_file_paths: Vec<String>,
+    reviewed_album: bool,
 ) -> Result<LibraryExistingFoldersSyncResult, String> {
     let folder_paths = validate_sync_folder_paths(folder_paths)?;
     let changed_file_paths = validate_sync_file_paths(changed_file_paths)?;
@@ -833,6 +937,9 @@ pub(crate) fn sync_existing_library_folders(
     )?;
     validate_capabilities(&capabilities)?;
     validate_tag_sync_capabilities(&capabilities)?;
+    if reviewed_album && !capabilities.supports.reviewed_album_sync {
+        return Err(REVIEWED_ALBUM_SYNC_MESSAGE.to_owned());
+    }
     if !deleted_file_paths.is_empty() && !capabilities.supports.verified_track_deletion_sync {
         return Err("Music Library must be updated (or installed if missing) to synchronize verified track deletions.".to_owned());
     }
@@ -845,6 +952,7 @@ pub(crate) fn sync_existing_library_folders(
                 .then_some(deleted_file_paths.as_slice()),
             changed_file_paths: (!changed_file_paths.is_empty())
                 .then_some(changed_file_paths.as_slice()),
+            reviewed_album,
         },
         SYNC_TIMEOUT,
     )?;
@@ -2021,6 +2129,8 @@ mod tests {
                 default_popm_rating_fallback: true,
                 bounded_existing_folder_sync: true,
                 verified_track_deletion_sync: true,
+                relocate_album_folders: false,
+                reviewed_album_sync: false,
             },
         };
 
@@ -2046,6 +2156,7 @@ mod tests {
                 deleted_file_paths: None,
                 folder_paths: &folder_paths,
                 changed_file_paths: Some(&changed_file_paths),
+                reviewed_album: false,
             },
         };
         let value = serde_json::to_value(request).expect("request");
@@ -2072,6 +2183,7 @@ mod tests {
                 deleted_file_paths: None,
                 folder_paths: &folder_paths,
                 changed_file_paths: None,
+                reviewed_album: false,
             },
         };
 

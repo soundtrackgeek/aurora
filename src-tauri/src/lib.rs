@@ -1,3 +1,4 @@
+mod album_naming;
 mod artist_discovery;
 mod artist_identity;
 mod artwork;
@@ -26,6 +27,7 @@ mod laptop_mode;
 mod lastfm;
 mod library_bridge;
 mod library_plays;
+mod library_rename;
 mod library_sync;
 mod live_genres;
 mod media_controls;
@@ -1717,6 +1719,60 @@ async fn update_tag_editor(
     .map_err(|error| format!("The tag writer stopped unexpectedly: {error}"))?
 }
 
+/// Renames a library album folder and its MP3s after their tags (`Album Artist - Album (Year)`).
+#[tauri::command]
+async fn rename_library_album(
+    app: AppHandle,
+    album_id: String,
+) -> Result<library_rename::LibraryAlbumRenameResult, String> {
+    connections::require_music_writes()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, _) =
+            coordinator.serialize_tag_edit(|| library_rename::rename_album_locked(&app, &album_id));
+        result
+    })
+    .await
+    .map_err(|error| format!("The album rename worker stopped unexpectedly: {error}"))?
+}
+
+/// Reads a library album's files for the auto-tagger.
+#[tauri::command]
+async fn library_auto_tag_album(
+    app: AppHandle,
+    album_id: String,
+) -> Result<inbox::InboxAlbum, String> {
+    tauri::async_runtime::spawn_blocking(move || library_rename::auto_tag_album(&app, &album_id))
+        .await
+        .map_err(|error| format!("The album reader stopped unexpectedly: {error}"))?
+}
+
+/// Applies a release reviewed in the auto-tagger to a library album.
+#[tauri::command]
+async fn apply_library_auto_tags(
+    app: AppHandle,
+    request: library_rename::LibraryAutoTagRequest,
+) -> Result<library_rename::LibraryAutoTagResult, String> {
+    connections::require_music_writes()?;
+    let cover = artwork::selected_cover(&app, request.tags.artwork_token.as_deref())?;
+    let recovery_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Aurora could not locate its recovery folder: {error}"))?
+        .join("library-recovery");
+    tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<LibrarySyncCoordinator>();
+        let (result, projection_token) = coordinator.serialize_tag_edit(|| {
+            library_rename::apply_auto_tags_locked(&app, request, cover.as_ref(), &recovery_root)
+        });
+        let mut result = result?;
+        result.catalog_sync.projection_token = Some(projection_token);
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("The auto-tag worker stopped unexpectedly: {error}"))?
+}
+
 #[tauri::command]
 async fn undo_track_tag_edit(
     app: AppHandle,
@@ -2357,6 +2413,9 @@ pub fn run() {
             update_track_tags,
             tag_editor_state,
             update_tag_editor,
+            rename_library_album,
+            library_auto_tag_album,
+            apply_library_auto_tags,
             undo_track_tag_edit,
             refresh_external_tag_changes,
             retry_pending_library_sync,

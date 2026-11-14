@@ -207,6 +207,26 @@ impl WaveformStore {
         Ok(())
     }
 
+    /// Keeps cached peaks for tracks renamed in place; a rename keeps size and modified time.
+    pub(crate) fn relocate_tracks(
+        &self,
+        moves: &[crate::library_rename::TrackRelocation],
+    ) -> Result<(), String> {
+        if moves.is_empty() {
+            return Ok(());
+        }
+        let connection = self.open()?;
+        for item in moves {
+            connection
+                .execute(
+                    "UPDATE OR REPLACE waveform_cache SET track_key = ?2 WHERE track_key = ?1",
+                    params![item.old_key, item.new_key],
+                )
+                .map_err(|error| format!("Could not move a cached waveform: {error}"))?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn load(
         &self,
         track_key: &str,
