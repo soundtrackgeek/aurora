@@ -27,6 +27,7 @@ On the local 1.1-million-track / 72,600-album catalog, the October 6 benchmark f
 - Initial catalog results use local SQLite metadata and saved corrections without waiting for MP3 or folder inspection. Pending file changes reconcile in the background. Album and artist track filters collect matching album IDs once, including combined queries such as `genre:soundtrack AND year:1997`.
 - Use **Reset** in Songs, Albums, or Artists to clear both the query and filters inherited from another Aurora view.
 - Aurora restores the last catalog query and filters after a restart.
+- Add `sort:` to order results, or `group:` to show them under headings by genre, artist, country, year, decade, Love, album rating and more. See [Sort and group in the search](#sort-and-group-in-the-search-sort-and-group).
 
 ## Catalog search: Songs, Albums, and Artists
 
@@ -83,6 +84,65 @@ analysis and combine with other fields/boolean operators. Albums and Artists
 qualify through matching tracks, so partly analyzed albums can match either
 value. `sonic=` is accepted too. Searches report saved coverage; similarity
 validates shortlisted files before using them. See [sonic analysis](sonic-analysis.md).
+
+### Sort and group in the search: `sort:` and `group:`
+
+`sort:` orders results and `group:` puts them together under headings. Neither filters anything. Each can appear once, anywhere in a Songs, Albums, or Artists query, either alone or next to a search. Separate it with a space, a comma, or `AND`, and use `=` in place of `:` if you prefer:
+
+```text
+sort:random
+genre:scores sort:..year
+year:1980..1989, group:country
+aartist:"Kate Bush" AND group:year sort:..rating
+group:genre za sort:az
+```
+
+A `sort:` in the search replaces the **Sort** menu's choice while it is in the query. Remove it to go back to the menu's sort. Aurora NG has the same clauses for its cover wall.
+
+#### `sort:`
+
+| Sort | Order | Songs | Albums | Artists |
+| --- | --- | --- | --- | --- |
+| `sort:random` | Shuffled; pick **Random** in the Sort menu again for a new draw | ✓ | ✓ | — |
+| `sort:year..` / `sort:..year` | Original Year, oldest / newest first | ✓ | ✓ | — |
+| `sort:ryear..` / `sort:..ryear` | Release Year, oldest / newest first | ✓ | ✓ | — |
+| `sort:added..` / `sort:..added` | Order added to the library, oldest / newest first | ✓ | ✓ | — |
+| `sort:rating..` / `sort:..rating` | Rating, lowest / highest first (track rating in Songs, album rating in Albums) | ✓ | ✓ | — |
+| `sort:minutes..` / `sort:..minutes` | Track duration, shortest / longest first | ✓ | — | — |
+| `sort:plays..` / `sort:..plays` | Plays, fewest / most first | ✓ | — | — |
+| `sort:love..` / `sort:..love` | Love state | ✓ | — | — |
+| `sort:az` / `sort:za` | Title A–Z / Z–A: the song title in Songs, the album title in Albums, the artist name in Artists | ✓ | ✓ | ✓ |
+| `sort:title az` / `sort:title za` | Same as `sort:az` / `sort:za` | ✓ | ✓ | ✓ |
+| `sort:album az` / `sort:album za` | Album title (`sort:albums` works too) | ✓ | ✓ | — |
+| `sort:aartist az` / `sort:aartist za` | Album artist, then title | ✓ | ✓ | ✓ |
+| `sort:genre az` / `sort:genre za` | Genre | ✓ | — | — |
+| `sort:publisher az` / `sort:publisher za` | Publisher | ✓ | — | — |
+
+Numeric sorts use the same `..` notation as ranges. `year..` reads as "from the earliest year onward", so oldest first, and `..year` is newest first. Text sorts take `az` or `za` after a space, and without either they sort A–Z. Items without a year or rating come last. A sort that a view does not offer, such as `sort:genre` in Albums, is reported as an error instead of being ignored.
+
+#### `group:`
+
+With `group:`, results are ordered by the group first. Each group starts under a heading, and inside a group the `sort:` order applies, or the Sort menu's when the query has no `sort:`. In Albums, each group starts on a new row of covers. In Songs, a heading row appears where the group changes. Headings stay correct across pages: if a group continues on the next page of 50, it does not get a second heading.
+
+| Group | Groups by | Default order | Songs | Albums |
+| --- | --- | --- | --- | --- |
+| `group:genre` | Genre, including pending genre edits | A–Z | ✓ | ✓ |
+| `group:aartist` | Album Artist | A–Z | ✓ | ✓ |
+| `group:artist` | Display Artist in Songs; Album Artist in Albums | A–Z | ✓ | ✓ |
+| `group:album` | Album title | A–Z | ✓ | ✓ |
+| `group:publisher` | Publisher or label | A–Z | ✓ | ✓ |
+| `group:country` | Album Artist origin country, as imported from MusicBrainz (the same data as `country:` and the flags) | A–Z | ✓ | ✓ |
+| `group:year` | Original Year | Oldest first | ✓ | ✓ |
+| `group:ryear` | Release Year | Oldest first | ✓ | ✓ |
+| `group:decade` | Decade of the Original Year, such as "1980s" | Oldest first | ✓ | ✓ |
+| `group:love` | Albums: loved-track count, such as "3 loved tracks". Songs: "Loved" or "Not loved" | Most first | ✓ | ✓ |
+| `group:ar` | Album rating in half stars, such as "4.5 stars"; in Songs the containing album's rating | Highest first | ✓ | ✓ |
+
+Text groups take `za` (or `az`) after a space to reverse them: `group:genre za`, `group:country za`. Numeric groups use `..`: `group:year..` / `group:..year` for oldest / newest first, and `group:love..` or `group:ar..` for lowest first. Items without a value come last in either direction, under headings such as "No genre", "No country", "No year" and "Not rated". Grouping is not available in Artists. Group names are compared without regard to case, so "Synthpop" and "synthpop" share a heading.
+
+Album ratings are grouped to the nearest half star of the catalog's album rating (effective, then calculated, then stored). An album rated 4.34 stars is grouped under "4.5 stars"; use `ar:` ranges for exact bounds.
+
+Grouping by country or rating in Songs looks up the album artist or album for every matching song. On a very large unfiltered library, the first page can take longer to load than an ungrouped one. Adding a filter keeps it fast.
 
 ### Artist lifespans
 
@@ -275,6 +335,10 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | Albums with two to five singles | `single:2..5` |
 | Albums with at most three singles | `single:..3` |
 | Only the singles from one artist, in Songs | `aartist:"Bob Seger" AND single:1` |
+| 1980s albums by country, newest first in each | `year:1980..1989 group:country sort:..year` |
+| Score albums by decade, best rated first | `genre:scores group:decade sort:..rating` |
+| A random draw of loved songs | `love:1 sort:random` |
+| One artist's songs by album rating | `aartist:"Kate Bush" group:ar` |
 
 ### Differences between Songs, Albums, and Artists
 
@@ -327,6 +391,7 @@ The Genre Atlas also repeats its genre-name search inside the atlas for convenie
 - If `cr` or `love` is rejected, use whole, non-negative bounds in ascending order. Completeness bounds are limited to 0–100; a single `love` value remains limited to the `0` and `1` shorthands, while positive exact counts use a repeated range such as `love:3..3`. Either `:` or `=` is accepted.
 - If `single:` is rejected, use `0`, `1`, or a range with whole, non-negative bounds in ascending order, such as `single:2..5`; an exact count repeats the bound (`single:3..3`). If it finds nothing, update Music Library to 0.210.0 or newer and run **Settings → Providers → Album singles** so the catalog has singles to search.
 - If `genre:scores` is too broad, search one exact genre such as `genre:"video game"`.
+- If `sort:` or `group:` is rejected, check that the view offers it: `sort:genre`, `sort:publisher`, `sort:minutes`, `sort:plays` and `sort:love` are Songs only, and `group:` is not available in Artists. Use one of each per query, `az`/`za` after text fields, and `..` before or after numeric ones. A `sort:` or `group:` inside quotes, such as `title:"sort:az"`, is ordinary search text.
 - Catalog queries are limited to 256 characters, 32 search words, and 32 alternatives. Aurora reports malformed quotes, operators, fields without values, and invalid year ranges instead of silently changing the query.
 
 Album Love filters (`love:1`, `love:0`, and ranges; `=` remains compatible) use verified surviving tracks and pending Love edits while Music Library sync is pending. Deleting an album's only loved track immediately excludes it from `love=1 AND cr=99 NOT genre:scores OR soundtrack`, including filtered counts and pagination. Unavailable folders are not treated as deleted tracks.

@@ -1,5 +1,5 @@
 import type { ExplorerFilters, ExplorerView } from "../../components/explorer/DeepExplorer";
-import { exploreTracks, exploreAlbums, exploreArtists, type Track, type AlbumSummary, type Artist, type ExplorerCursor, type TrackSort, type AlbumSort } from "../../library";
+import { exploreTracks, exploreAlbums, exploreArtists, type Track, type AlbumSummary, type Artist, type ExplorerCursor, type TrackSort, type AlbumSort, type CatalogItemGroup } from "../../library";
 import { explorerSorts } from "../../viewPreferences";
 
 export type ExplorerResult = {
@@ -9,6 +9,16 @@ export type ExplorerResult = {
   nextCursor: ExplorerCursor | null;
   totalCount: number;
 };
+
+/** Puts each item under the `group:` heading the page gave it. */
+export function withCatalogGroups<T extends { id: string }>(items: T[], groups: readonly CatalogItemGroup[] | undefined): T[] {
+  if (!groups?.length) return items;
+  const byId = new Map(groups.map((group) => [group.id, { key: group.key, label: group.label }]));
+  return items.map((item) => {
+    const catalogGroup = byId.get(item.id);
+    return catalogGroup ? { ...item, catalogGroup } : item;
+  });
+}
 
 export async function loadExplorerPage(
   view: ExplorerView,
@@ -25,7 +35,7 @@ export async function loadExplorerPage(
   if (view === "tracks") {
     const page = await exploreTracks({
       ...shared,
-      randomSeed: filters.sort === "random" ? filters.randomSeed ?? 0 : undefined,
+      randomSeed: filters.randomSeed ?? 0,
       rating: typeof filters.rating === "number" ? filters.rating : undefined,
       unrated: filters.rating === "unrated" || undefined,
       loveState: filters.love === "all" ? undefined : filters.love,
@@ -38,12 +48,12 @@ export async function loadExplorerPage(
         ? filters.sort as TrackSort
         : "newest",
     }, { localOnly });
-    return { tracks: page.items, albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
+    return { tracks: withCatalogGroups(page.items, page.groups), albums: [], artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   if (view === "albums") {
     const page = await exploreAlbums({
       ...shared,
-      randomSeed: filters.sort === "random" ? filters.randomSeed ?? 0 : undefined,
+      randomSeed: filters.randomSeed ?? 0,
       rating: typeof filters.rating === "number" ? filters.rating : undefined,
       unrated: filters.rating === "unrated" || undefined,
       yearFrom: filters.yearFrom ?? undefined,
@@ -55,7 +65,7 @@ export async function loadExplorerPage(
         ? filters.sort as AlbumSort
         : "yearDesc",
     }, { localOnly });
-    return { tracks: [], albums: page.items, artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
+    return { tracks: [], albums: withCatalogGroups(page.items, page.groups), artists: [], nextCursor: page.nextCursor, totalCount: page.totalCount };
   }
   const page = await exploreArtists({
     ...shared,

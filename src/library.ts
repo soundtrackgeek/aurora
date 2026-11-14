@@ -24,9 +24,22 @@ export interface Artist {
   lastPlayedAtMs: number | null;
 }
 
+/** A `group:` heading: items with the same key share one heading. */
+export interface CatalogGroupHeading {
+  key: string;
+  label: string;
+}
+
+/** Which `group:` heading each item of a page is under. */
+export interface CatalogItemGroup extends CatalogGroupHeading {
+  id: string;
+}
+
 export interface Track {
   /** Browser demonstration coverage; native searches evaluate the saved store. */
   sonicAnalyzed?: boolean;
+  /** The `group:` heading this item belongs under, when the search groups results. */
+  catalogGroup?: CatalogGroupHeading;
   id: string;
   trackKey: string;
   albumId: string | null;
@@ -202,9 +215,13 @@ export interface TrackPage {
   items: Track[];
   nextCursor: ExplorerCursor | null;
   totalCount: number;
+  /** Present when the search has a `group:`. */
+  groups?: CatalogItemGroup[];
 }
 
 export interface AlbumSummary {
+  /** The `group:` heading this item belongs under, when the search groups results. */
+  catalogGroup?: CatalogGroupHeading;
   id: string;
   title: string;
   artist: string;
@@ -356,6 +373,8 @@ export interface AlbumPage {
   items: AlbumSummary[];
   nextCursor: ExplorerCursor | null;
   totalCount: number;
+  /** Present when the search has a `group:`. */
+  groups?: CatalogItemGroup[];
 }
 
 export type YearBasis = "original" | "release";

@@ -1,3 +1,4 @@
+use crate::catalog_view::{CatalogView, GroupSql, GroupTarget, split_catalog_view};
 use crate::{
     catalog::{
         ArtistSummary, TrackSummary, apply_overlays, attach_aurora_state, default_catalog_path,
@@ -102,6 +103,19 @@ pub(crate) struct TrackPage {
     pub(crate) items: Vec<TrackSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
     pub(crate) total_count: u64,
+    /// The `group:` of each item, in item order; empty without one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) groups: Vec<ItemGroup>,
+}
+
+/// Which `group:` group an item of a page is in.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ItemGroup {
+    pub(crate) id: String,
+    /// Equal for every item of one group.
+    pub(crate) key: String,
+    pub(crate) label: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
@@ -176,6 +190,9 @@ pub(crate) struct AlbumPage {
     pub(crate) items: Vec<AlbumSummary>,
     pub(crate) next_cursor: Option<ExploreCursor>,
     pub(crate) total_count: u64,
+    /// The `group:` of each item, in item order; empty without one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) groups: Vec<ItemGroup>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default, PartialEq)]
@@ -487,6 +504,129 @@ fn push_order_by(sql: &mut String, sort: SortDefinition<'_>, id_expression: &str
     sql.push_str(direction);
 }
 
+/// Takes `sort:` and `group:` out of the search text; `None` when nothing
+/// else is left to search for.
+fn split_view_search(search: Option<String>) -> Result<(Option<String>, CatalogView), String> {
+    let Some(search) = search else {
+        return Ok((None, CatalogView::default()));
+    };
+    let (rest, view) = split_catalog_view(&search)?;
+    Ok(((!rest.trim().is_empty()).then_some(rest), view))
+}
+
+/// The page cursor's tag: the sort's, plus the grouping's.
+fn page_cursor_tag(sort: &SortDefinition<'_>, group: Option<&GroupSql>) -> String {
+    match group {
+        Some(group) => format!("{}-{}", sort.cursor_tag, group.cursor_tag),
+        None => sort.cursor_tag.to_owned(),
+    }
+}
+
+/// The value saved in a page cursor: the group key, then the sort value.
+fn page_cursor_value(
+    sort: &SortDefinition<'_>,
+    group: Option<&GroupSql>,
+    group_key: Option<&str>,
+    value: &str,
+) -> String {
+    match group {
+        Some(_) => format!(
+            "{}:{}\u{1f}{value}",
+            page_cursor_tag(sort, group),
+            group_key.unwrap_or_default()
+        ),
+        None => format!("{}:{value}", sort.cursor_tag),
+    }
+}
+
+/// `push_keyset` behind a `group:`: rows after the cursor's group, or in its
+/// group and after it by the sort.
+fn push_grouped_keyset(
+    sql: &mut String,
+    params: &mut Vec<Value>,
+    cursor: Option<&ExploreCursor>,
+    sort: SortDefinition<'_>,
+    group: Option<&GroupSql>,
+    id_expression: &str,
+    numeric_id: bool,
+) -> Result<(), String> {
+    let Some(group) = group else {
+        return push_keyset(sql, params, cursor, sort, id_expression, numeric_id);
+    };
+    let Some(cursor) = cursor else {
+        return Ok(());
+    };
+    validate_cursor(cursor)?;
+    let prefix = format!("{}:", page_cursor_tag(&sort, Some(group)));
+    let (group_key, value) = cursor
+        .value
+        .strip_prefix(&prefix)
+        .and_then(|rest| rest.split_once('\u{1f}'))
+        .ok_or_else(|| "Page cursor does not match the current sort.".to_owned())?;
+    let inner = ExploreCursor {
+        value: format!("{}:{value}", sort.cursor_tag),
+        id: cursor.id.clone(),
+    };
+    let mut inner_sql = String::new();
+    let mut inner_params = Vec::new();
+    push_keyset(
+        &mut inner_sql,
+        &mut inner_params,
+        Some(&inner),
+        sort,
+        id_expression,
+        numeric_id,
+    )?;
+    let operator = if group.descending { "<" } else { ">" };
+    sql.push_str(&format!(
+        " AND (({key}) {operator} ? OR (({key}) = ?{inner_sql}))",
+        key = group.key
+    ));
+    params.push(Value::Text(group_key.to_owned()));
+    params.push(Value::Text(group_key.to_owned()));
+    params.extend(inner_params);
+    Ok(())
+}
+
+/// `push_order_by` behind a `group:`, which orders first.
+fn push_grouped_order_by(
+    sql: &mut String,
+    sort: SortDefinition<'_>,
+    group: Option<&GroupSql>,
+    id_expression: &str,
+) {
+    let mut order = String::new();
+    push_order_by(&mut order, sort, id_expression);
+    match group {
+        Some(group) => {
+            let direction = if group.descending { "DESC" } else { "ASC" };
+            let rest = order.strip_prefix(" ORDER BY ").unwrap_or(&order);
+            sql.push_str(&format!(" ORDER BY ({}) {direction}, {rest}", group.key));
+        }
+        None => sql.push_str(&order),
+    }
+}
+
+/// The SELECT columns that carry each row's group.
+fn group_columns(group: Option<&GroupSql>) -> String {
+    group.map_or_else(String::new, |group| {
+        format!(
+            ", ({}) AS group_key, ({}) AS group_label",
+            group.key, group.label
+        )
+    })
+}
+
+fn read_group(
+    row: &Row<'_>,
+    group: Option<&GroupSql>,
+) -> rusqlite::Result<Option<(String, String)>> {
+    if group.is_none() {
+        return Ok(None);
+    }
+    Ok(Some((row.get("group_key")?, row.get("group_label")?)))
+}
+
 fn track_sort(sort: TrackSort) -> SortDefinition<'static> {
     match sort {
         TrackSort::Random => SortDefinition {
@@ -758,6 +898,7 @@ fn track_page_from_connection(
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
     let artist = bounded_optional_text(&request.artist, "Artist filter", MAX_FILTER_CHARS)?;
     let search = bounded_optional_text(&request.search, "Search text", MAX_SEARCH_CHARS)?;
+    let (search, view) = split_view_search(search)?;
     let parsed_search = search.as_deref().map(parse_catalog_search).transpose()?;
     if parsed_search
         .as_ref()
@@ -767,11 +908,21 @@ fn track_page_from_connection(
             items: Vec::new(),
             next_cursor: None,
             total_count: 0,
+            groups: Vec::new(),
         });
     }
-    let mut sort = track_sort(request.sort.unwrap_or_default());
+    let sort_choice = view
+        .sort
+        .map(crate::catalog_view::track_sort)
+        .or(request.sort);
+    let group = view.group.map(|group| {
+        crate::catalog_view::group_sql(group, GroupTarget::Tracks, |column| {
+            crate::artist_identity::key_sql(connection, column)
+        })
+    });
+    let mut sort = track_sort(sort_choice.unwrap_or_default());
     let random_tag = format!("track-random-{}", request.random_seed.unwrap_or(0));
-    if request.sort == Some(TrackSort::Random) {
+    if sort_choice == Some(TrackSort::Random) {
         register_random_order(connection, request.random_seed.unwrap_or(0))?;
         sort.cursor_tag = &random_tag;
     }
@@ -828,18 +979,20 @@ fn track_page_from_connection(
     )?;
     prepare_registered_track_plays(connection)?;
     let mut sql = format!(
-        "SELECT {TRACK_COLUMNS}, COALESCE(rp.plays, 0) AS registered_plays, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) LEFT JOIN temp.aurora_registered_track_plays AS rp ON rp.track_key = aurora_track_key(t.file_path, t.filename){predicates}",
-        sort.expression
+        "SELECT {TRACK_COLUMNS}, COALESCE(rp.plays, 0) AS registered_plays, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value{} FROM tracks AS t LEFT JOIN lastfm_track_popularity AS l ON l.artist_key = lower(trim(t.album_artist_display)) AND l.track_key = lower(trim(t.title)) LEFT JOIN temp.aurora_registered_track_plays AS rp ON rp.track_key = aurora_track_key(t.file_path, t.filename){predicates}",
+        sort.expression,
+        group_columns(group.as_ref())
     );
-    push_keyset(
+    push_grouped_keyset(
         &mut sql,
         &mut params,
         request.cursor.as_ref(),
         sort,
+        group.as_ref(),
         "t.id",
         true,
     )?;
-    push_order_by(&mut sql, sort, "t.id");
+    push_grouped_order_by(&mut sql, sort, group.as_ref(), "t.id");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
 
@@ -849,7 +1002,8 @@ fn track_page_from_connection(
     let mut rows = statement
         .query(params_from_iter(params.iter()))
         .map_err(|error| format!("Could not read the track explorer: {error}"))?;
-    let mut mapped = Vec::<(TrackSummary, String)>::with_capacity(page_size + 1);
+    let mut mapped =
+        Vec::<(TrackSummary, String, Option<(String, String)>)>::with_capacity(page_size + 1);
     while let Some(row) = rows
         .next()
         .map_err(|error| format!("Could not read the track explorer: {error}"))?
@@ -859,27 +1013,43 @@ fn track_page_from_connection(
                 .map_err(|error| format!("Could not decode the track explorer: {error}"))?,
             row.get("cursor_value")
                 .map_err(|error| format!("Could not decode the track cursor: {error}"))?,
+            read_group(row, group.as_ref())
+                .map_err(|error| format!("Could not decode the track group: {error}"))?,
         ));
     }
     let has_more = mapped.len() > page_size;
     mapped.truncate(page_size);
     let next_cursor = has_more.then(|| {
-        let (track, value) = mapped.last().expect("a page with more rows has an item");
+        let (track, value, row_group) = mapped.last().expect("a page with more rows has an item");
         ExploreCursor {
-            value: format!("{}:{value}", sort.cursor_tag),
+            value: page_cursor_value(
+                &sort,
+                group.as_ref(),
+                row_group.as_ref().map(|(key, _)| key.as_str()),
+                value,
+            ),
             id: track.id.clone(),
         }
     });
-    let mut items = mapped
-        .into_iter()
-        .map(|(track, _)| track)
-        .collect::<Vec<_>>();
+    let mut groups = Vec::new();
+    let mut items = Vec::with_capacity(mapped.len());
+    for (track, _, row_group) in mapped {
+        if let Some((key, label)) = row_group {
+            groups.push(ItemGroup {
+                id: track.id.clone(),
+                key,
+                label,
+            });
+        }
+        items.push(track);
+    }
     apply_overlays(&mut items, store)?;
     crate::artist_identity::attach_tracks(connection, &mut items)?;
     Ok(TrackPage {
         items,
         next_cursor,
         total_count,
+        groups,
     })
 }
 
@@ -1033,6 +1203,7 @@ fn album_page_from_connection(
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
     let artist = bounded_optional_text(&request.artist, "Artist filter", MAX_FILTER_CHARS)?;
     let search = bounded_optional_text(&request.search, "Search text", MAX_SEARCH_CHARS)?;
+    let (search, view) = split_view_search(search)?;
     let parsed_search = search.as_deref().map(parse_catalog_search).transpose()?;
     if parsed_search
         .as_ref()
@@ -1042,14 +1213,25 @@ fn album_page_from_connection(
             items: Vec::new(),
             next_cursor: None,
             total_count: 0,
+            groups: Vec::new(),
         });
     }
     let plain_match_query = parsed_search
         .as_ref()
         .and_then(|search| search.plain_fts_query().map(str::to_owned));
-    let mut sort = album_sort(request.sort.unwrap_or_default());
+    let sort_choice = view
+        .sort
+        .map(crate::catalog_view::album_sort)
+        .transpose()?
+        .or(request.sort);
+    let group = view.group.map(|group| {
+        crate::catalog_view::group_sql(group, GroupTarget::Albums, |column| {
+            crate::artist_identity::key_sql(connection, column)
+        })
+    });
+    let mut sort = album_sort(sort_choice.unwrap_or_default());
     let random_tag = format!("album-random-{}", request.random_seed.unwrap_or(0));
-    if request.sort == Some(AlbumSort::Random) {
+    if sort_choice == Some(AlbumSort::Random) {
         register_random_order(connection, request.random_seed.unwrap_or(0))?;
         sort.cursor_tag = &random_tag;
     }
@@ -1061,8 +1243,9 @@ fn album_page_from_connection(
     let live_total_tracks = live_album_total_tracks_sql("a");
     let live_rated_tracks = live_album_rated_tracks_sql("a");
     let display_sql = format!(
-        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, {artist_reference} AS artist_identity_id, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
-        sort.expression
+        "SELECT a.id, a.album, a.album_artist_display, a.release_year, {live_genre}, {live_total_tracks}, {live_rated_tracks}, CASE WHEN live.album_id IS NOT NULL THEN live.loved_tracks ELSE a.loved_tracks END, CASE WHEN live.album_id IS NOT NULL THEN live.total_seconds ELSE a.total_seconds END, CASE WHEN live.album_id IS NOT NULL THEN live.album_score ELSE a.album_score END, CASE WHEN live.album_id IS NOT NULL THEN live.rating ELSE a.effective_album_rating END, a.year, a.publisher AS publisher, origin.country_code AS origin_country_code, origin.country_name AS origin_country_name, quality.formats AS formats, quality.avg_bitrate_kbps AS avg_bitrate_kbps, {artist_reference} AS artist_identity_id, COALESCE(CAST(({}) AS TEXT), 'unrated') AS cursor_value{} FROM albums AS a LEFT JOIN temp.aurora_live_album_metrics live ON live.album_id = a.id LEFT JOIN musicbrainz_artist_origin_countries AS origin ON origin.local_artist_key = {origin_key} LEFT JOIN music_doctor_album_quality AS quality ON quality.album_id = a.id",
+        sort.expression,
+        group_columns(group.as_ref())
     );
     let mut sql = String::from(" WHERE 1 = 1");
     if let Some(match_query) = plain_match_query {
@@ -1112,15 +1295,16 @@ fn album_page_from_connection(
     params.clear();
     sql = display_sql;
     sql.push_str(" WHERE a.id IN (SELECT album_id FROM temp.aurora_album_page_matches)");
-    push_keyset(
+    push_grouped_keyset(
         &mut sql,
         &mut params,
         request.cursor.as_ref(),
         sort,
+        group.as_ref(),
         "a.id",
         false,
     )?;
-    push_order_by(&mut sql, sort, "a.id");
+    push_grouped_order_by(&mut sql, sort, group.as_ref(), "a.id");
     sql.push_str(" LIMIT ?");
     params.push(Value::Integer((page_size + 1) as i64));
 
@@ -1130,7 +1314,8 @@ fn album_page_from_connection(
     let mut rows = statement
         .query(params_from_iter(params.iter()))
         .map_err(|error| format!("Could not read the album explorer: {error}"))?;
-    let mut mapped = Vec::<(AlbumSummary, String)>::with_capacity(page_size + 1);
+    let mut mapped =
+        Vec::<(AlbumSummary, String, Option<(String, String)>)>::with_capacity(page_size + 1);
     while let Some(row) = rows
         .next()
         .map_err(|error| format!("Could not read the album explorer: {error}"))?
@@ -1140,21 +1325,36 @@ fn album_page_from_connection(
                 .map_err(|error| format!("Could not decode the album explorer: {error}"))?,
             row.get("cursor_value")
                 .map_err(|error| format!("Could not decode the album cursor: {error}"))?,
+            read_group(row, group.as_ref())
+                .map_err(|error| format!("Could not decode the album group: {error}"))?,
         ));
     }
     let has_more = mapped.len() > page_size;
     mapped.truncate(page_size);
     let next_cursor = has_more.then(|| {
-        let (album, value) = mapped.last().expect("a page with more rows has an item");
+        let (album, value, row_group) = mapped.last().expect("a page with more rows has an item");
         ExploreCursor {
-            value: format!("{}:{value}", sort.cursor_tag),
+            value: page_cursor_value(
+                &sort,
+                group.as_ref(),
+                row_group.as_ref().map(|(key, _)| key.as_str()),
+                value,
+            ),
             id: album.id.clone(),
         }
     });
-    let mut items = mapped
-        .into_iter()
-        .map(|(album, _)| album)
-        .collect::<Vec<_>>();
+    let mut groups = Vec::new();
+    let mut items = Vec::with_capacity(mapped.len());
+    for (album, _, row_group) in mapped {
+        if let Some((key, label)) = row_group {
+            groups.push(ItemGroup {
+                id: album.id.clone(),
+                key,
+                label,
+            });
+        }
+        items.push(album);
+    }
     let ids = items
         .iter()
         .map(|album| album.id.as_str())
@@ -1167,6 +1367,7 @@ fn album_page_from_connection(
         items,
         next_cursor,
         total_count,
+        groups,
     })
 }
 
@@ -1205,8 +1406,17 @@ fn artist_page_from_connection(
 ) -> Result<ArtistPage, String> {
     let page_size = page_size(request.page_size)?;
     let search = bounded_optional_text(&request.search, "Search text", MAX_SEARCH_CHARS)?;
+    let (search, view) = split_view_search(search)?;
+    if view.group.is_some() {
+        return Err("group: works in Songs and Albums.".to_owned());
+    }
     let genre = bounded_optional_text(&request.genre, "Genre filter", MAX_FILTER_CHARS)?;
-    let sort = request.sort.unwrap_or_default();
+    let sort = view
+        .sort
+        .map(crate::catalog_view::artist_sort)
+        .transpose()?
+        .or(request.sort)
+        .unwrap_or_default();
     let definition = match sort {
         ArtistSort::NameAsc => SortDefinition {
             cursor_tag: "artist-name-asc",
@@ -2610,6 +2820,146 @@ mod tests {
                 .into_iter()
                 .filter(|id| id != "a3")
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// Every page of a search, one item at a time: (id, group label).
+    fn all_album_groups(connection: &Connection, search: &str) -> Vec<(String, String)> {
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = album_page_from_connection(
+                connection,
+                AlbumPageRequest {
+                    page_size: Some(1),
+                    cursor,
+                    search: Some(search.to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .expect(search);
+            for (album, group) in page.items.iter().zip(&page.groups) {
+                assert_eq!(album.id, group.id);
+                seen.push((album.id.clone(), group.label.clone()));
+            }
+            assert_eq!(page.total_count, 3);
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => return seen,
+            }
+        }
+    }
+
+    fn all_track_groups(connection: &Connection, search: &str) -> Vec<(String, String)> {
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = track_page_from_connection(
+                connection,
+                TrackPageRequest {
+                    page_size: Some(1),
+                    cursor,
+                    search: Some(search.to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .expect(search);
+            for (track, group) in page.items.iter().zip(&page.groups) {
+                assert_eq!(track.id, group.id);
+                seen.push((track.title.clone(), group.label.clone()));
+            }
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => return seen,
+            }
+        }
+    }
+
+    #[test]
+    fn group_and_sort_in_the_search_page_through_every_result_once() {
+        let connection = fixture();
+        let pairs = |items: &[(&str, &str)]| {
+            items
+                .iter()
+                .map(|(id, label)| ((*id).to_owned(), (*label).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        // Countries A–Z; inside a country the default newest-first year
+        // sort, whose ties (both 1999) go by id, newest first.
+        assert_eq!(
+            all_album_groups(&connection, "group:country"),
+            pairs(&[("a3", "France"), ("a2", "Iceland"), ("a1", "Iceland")])
+        );
+        assert_eq!(
+            all_album_groups(&connection, "group:country za sort:album za"),
+            pairs(&[("a2", "Iceland"), ("a1", "Iceland"), ("a3", "France")])
+        );
+        // Half stars, highest first; unrated albums last.
+        assert_eq!(
+            all_album_groups(&connection, "group:ar"),
+            pairs(&[("a1", "4.5 stars"), ("a3", "4 stars"), ("a2", "Not rated")])
+        );
+        assert_eq!(
+            all_album_groups(&connection, "group:decade.. AND sort:az"),
+            pairs(&[("a1", "1990s"), ("a2", "1990s"), ("a3", "2000s")])
+        );
+
+        assert_eq!(
+            all_track_groups(&connection, "group:genre sort:title"),
+            pairs(&[
+                ("Digital Love", "House"),
+                ("Hoppípolla", "Post-rock"),
+                ("Svefn-g-englar", "Post-rock"),
+                ("Sæglópur", "Post-rock"),
+            ])
+        );
+        assert_eq!(
+            all_track_groups(&connection, "aartist:\"Sigur Rós\" group:love sort:title"),
+            pairs(&[
+                ("Sæglópur", "Loved"),
+                ("Hoppípolla", "Not loved"),
+                ("Svefn-g-englar", "Not loved"),
+            ])
+        );
+        // `sort:` alone sorts every song.
+        let titles = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("sort:..minutes".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|track| track.title)
+        .collect::<Vec<_>>();
+        assert_eq!(
+            titles,
+            ["Sæglópur", "Svefn-g-englar", "Digital Love", "Hoppípolla"]
+        );
+
+        assert!(
+            album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some("sort:genre".to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            artist_page_from_connection(
+                &connection,
+                ArtistPageRequest {
+                    search: Some("group:genre".to_owned()),
+                    ..ArtistPageRequest::default()
+                },
+            )
+            .is_err()
         );
     }
 

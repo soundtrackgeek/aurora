@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.0] - 2026-11-14
+
+### Added
+- `sort:` in the search box orders Songs, Albums and Artists results without filtering them: `sort:random`, `sort:year..` / `sort:..year`, `sort:ryear..`, `sort:added..`, `sort:rating..`, `sort:az` / `sort:za`, `sort:title`, `sort:album`, `sort:aartist` (with `az`/`za`), and in Songs also `sort:genre`, `sort:publisher`, `sort:minutes..`, `sort:plays..` and `sort:love..`. While it is in the query, it replaces the Sort menu's choice. A sort the view does not offer is reported as an error.
+- `group:` in the search box shows Songs and Albums results under headings: `group:genre`, `group:aartist`, `group:artist`, `group:album`, `group:publisher`, `group:country`, `group:year`, `group:ryear`, `group:decade`, `group:love` and `group:ar` (album rating in half stars). Text groups take `az`/`za`, and numeric groups take `..` like `group:..year`. Items without a value come last under headings such as "No genre". The group orders first and the sort applies inside it. Groups and their keyset cursors page together, so a group that continues on the next page keeps its single heading. Album groups start on a new row of covers.
+- [docs/search.md](docs/search.md) documents both clauses, with recipes. Aurora NG 0.19.0 has the same `sort:` and `group:` for its cover wall.
+
 ## [0.60.3] - 2026-11-14
 
 ### Fixed

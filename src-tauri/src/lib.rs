@@ -4,6 +4,7 @@ mod artist_identity;
 mod artwork;
 mod audio_settings;
 mod catalog;
+mod catalog_view;
 mod chart_identity;
 mod chart_song_match;
 mod charts;

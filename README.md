@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.61.0** adds `sort:` and `group:` to the search box in Songs and Albums. `sort:` orders the results, for example `sort:random`, `sort:..year` (newest first), `sort:az` or `sort:aartist za`, and `sort:az`/`sort:za` also work in Artists. `group:` shows results under headings: `group:genre`, `group:aartist`, `group:artist`, `group:album`, `group:publisher`, `group:country`, `group:year`, `group:ryear`, `group:decade`, `group:love` and `group:ar` (album rating in half stars). Each group of albums starts on a new row, songs get a heading row, and the sort applies inside each group, as in `year:1980..1989 group:country sort:..year`. Neither clause filters anything, and both combine with any search. Aurora NG 0.19.0 has the same clauses for its cover wall. See [Sort and group in the search](docs/search.md#sort-and-group-in-the-search-sort-and-group).
+
 Aurora **0.60.3** stops the Albums view from flagging an album named `1-01 - Artist - Title` when Music Library's catalog lists its tracks without a disc number, which happens after a disc tag is changed from `0/0` to `1/1`.
 
 Aurora **0.60.2** lets you read a status message in the top bar that is too long to fit: hover it to see the whole text, such as the reason Music Library refused to rename an album (for example, a `.rar` or other unsupported file in the album folder).

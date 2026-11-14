@@ -1559,7 +1559,9 @@ fn exact_search_value(value: &str) -> Result<Option<String>, String> {
 }
 
 pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String> {
-    let tokens = tokenize_catalog_search(input)?;
+    // `sort:` and `group:` arrange results and filter nothing.
+    let (input, _) = crate::catalog_view::split_catalog_view(input)?;
+    let tokens = tokenize_catalog_search(&input)?;
     let mut groups = Vec::new();
     let mut current: Option<CatalogSearchGroup> = None;
     let mut inherited_field = None;

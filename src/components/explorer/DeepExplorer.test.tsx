@@ -269,6 +269,32 @@ describe("DeepExplorer", () => {
     expect(onClearFilters).toHaveBeenCalledOnce();
   });
 
+  it("heads each group: of songs once, where the group changes", () => {
+    const grouped = [
+      { ...tracks[0], catalogGroup: { key: "0synthwave", label: "Synthwave" } },
+      { ...tracks[1], catalogGroup: { key: "0synthwave", label: "Synthwave" } },
+      { ...tracks[0], id: "track-3", trackKey: "file:track-3", title: "Third", catalogGroup: { key: "1", label: "No genre" } },
+    ];
+    render(<DeepExplorer {...explorerProps({ tracks: grouped })} />);
+
+    expect(screen.getAllByRole("row", { name: "Synthwave" })).toHaveLength(1);
+    expect(screen.getAllByRole("row", { name: "No genre" })).toHaveLength(1);
+    const rows = screen.getAllByRole("row").map((row) => row.textContent ?? "");
+    expect(rows.findIndex((row) => row === "No genre")).toBeGreaterThan(rows.findIndex((row) => row.includes("Second Light")));
+  });
+
+  it("starts each album group: on a new row under its heading", () => {
+    const grouped: ExplorerAlbum[] = [
+      { ...albums[0], catalogGroup: { key: "0norway", label: "Norway" } },
+      { ...albums[0], id: "album-2", title: "Second", catalogGroup: { key: "0sweden", label: "Sweden" } },
+    ];
+    const { container } = render(<DeepExplorer {...explorerProps({ view: "albums", albums: grouped })} />);
+
+    expect(screen.getByRole("heading", { name: "Norway" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sweden" })).toBeInTheDocument();
+    expect(container.querySelectorAll(".deep-explorer-album-row")).toHaveLength(2);
+  });
+
   it("renders Year without substituting Release Year", () => {
     render(<DeepExplorer {...explorerProps()} />);
 

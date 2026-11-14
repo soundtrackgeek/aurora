@@ -29,6 +29,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -38,7 +39,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type AlbumNamingCheck, type Artist, type Track, type YearBasis } from "../../library";
+import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type AlbumNamingCheck, type Artist, type CatalogGroupHeading, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -114,6 +115,8 @@ export interface ExplorerFilters {
 }
 
 export interface ExplorerAlbum {
+  /** The `group:` heading the album is under. */
+  catalogGroup?: CatalogGroupHeading;
   id: string;
   title: string;
   artist: string;
@@ -985,7 +988,16 @@ function TrackTable({
               : track.id === selectedTrackId;
             const current = track.trackKey === currentTrackKey;
             const busy = busyTrackKeys.has(track.trackKey);
+            const heading = track.catalogGroup && track.catalogGroup.key !== tracks[index - 1]?.catalogGroup?.key
+              ? track.catalogGroup.label
+              : null;
             return (
+              <Fragment key={track.trackKey}>
+              {heading !== null ? (
+                <tr className="deep-explorer-group-row">
+                  <td colSpan={columns.length + 2 + (showSpacer ? 1 : 0) + (onDeleteTrack ? 1 : 0)}>{heading}</td>
+                </tr>
+              ) : null}
               <PlaylistRow key={track.trackKey} selection={{ tracks: multiSelectedTrackKeys?.has(track.trackKey) ? tracks.filter(item => multiSelectedTrackKeys.has(item.trackKey)) : [track], label: multiSelectedTrackKeys?.has(track.trackKey) && multiSelectedTrackKeys.size > 1 ? `${multiSelectedTrackKeys.size} selected songs` : track.title }}><tr
                 key={track.trackKey}
                 ref={(node) => {
@@ -1023,6 +1035,7 @@ function TrackTable({
                   </td>
                 ) : null}
               </tr></PlaylistRow>
+              </Fragment>
             );
           })}
         </tbody>
@@ -1117,20 +1130,34 @@ function AlbumGrid({
   }, [updateColumnCount]);
 
   const rows = useMemo(() => {
-    const next: ExplorerAlbum[][] = [];
-    for (let index = 0; index < albums.length; index += columnCount) {
-      next.push(albums.slice(index, index + columnCount));
+    const next: Array<{ albums: ExplorerAlbum[]; heading: string | null }> = [];
+    // With `group:`, each group starts on a new row under its heading.
+    let start = 0;
+    while (start < albums.length) {
+      const key = albums[start].catalogGroup?.key;
+      let end = start + 1;
+      while (end < albums.length && albums[end].catalogGroup?.key === key) end += 1;
+      const heading = albums[start].catalogGroup?.label ?? null;
+      const previousKey = start > 0 ? albums[start - 1].catalogGroup?.key : undefined;
+      for (let index = start; index < end; index += columnCount) {
+        next.push({
+          albums: albums.slice(index, Math.min(index + columnCount, end)),
+          heading: index === start && heading !== null && previousKey !== key ? heading : null,
+        });
+      }
+      start = end;
     }
     return next;
   }, [albums, columnCount]);
 
   return (
     <div className="deep-explorer-albums" aria-label="Albums" ref={rootRef}>
-      {rows.map((row) => (
+      {rows.map(({ albums: row, heading }) => (
+        <Fragment key={row[0].id}>
+        {heading !== null ? <h3 className="deep-explorer-group-heading">{heading}</h3> : null}
         <div
           className="deep-explorer-album-row"
           style={{ "--album-columns": columnCount } as CSSProperties}
-          key={row[0].id}
         >
           {row.map((album) => {
             const index = albums.indexOf(album);
@@ -1180,6 +1207,7 @@ function AlbumGrid({
           })}
           {row.some((album) => album.id === detailAlbumId) ? detail : null}
         </div>
+        </Fragment>
       ))}
     </div>
   );
