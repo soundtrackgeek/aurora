@@ -1464,7 +1464,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.60.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.60.2</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1529,7 +1529,7 @@ function App() {
                 title={backgroundIntakeNotice.message}
               >{backgroundIntakeNotice.message}</span>
             )}
-            {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && syncMessage && <span className="tag-sync-message" role="status">{syncMessage}</span>}
+            {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && syncMessage && <span className="tag-sync-message" role="status" title={syncMessage}>{syncMessage}</span>}
             {!backgroundIntakeNotice && Object.keys(tagSaveErrors).length === 0 && catalogNoticeMessage && (
               catalogSyncNotice?.status === "pending" || catalogSyncNotice?.status === "blocked" ? (
                 <button

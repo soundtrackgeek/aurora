@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.60.2] - 2026-11-14
+
+### Fixed
+- A long status message in the top bar, such as the reason Music Library refused to rename an album, was cut off with no way to read the rest. Hover the message to see all of it.
+
 ## [0.60.1] - 2026-11-14
 
 ### Fixed

@@ -190,6 +190,24 @@ it("keeps the scroll position and open album after renaming it to match its tags
   expect(main.getByRole("complementary", { name: "Viva la Vida album details" })).toBeVisible();
 });
 
+it("shows the whole rename error when the topbar cuts it short", async () => {
+  const loadAlbumDetail = library.loadAlbumDetail;
+  vi.spyOn(library, "loadAlbumDetail").mockImplementation(async (...args) => {
+    const detail = await loadAlbumDetail(...args);
+    return { ...detail, album: { ...detail.album, naming: { status: "misnamed" as const, issues: ["Folder should be “Coldplay - Viva la Vida (2008)”"] } } };
+  });
+  const reason = "The selected folder contains an unsupported non-MP3 file: D:\\Music\\viva\\scans.rar";
+  vi.spyOn(libraryAutoTag, "renameLibraryAlbum").mockRejectedValue(new Error(reason));
+  render(<App />);
+  await navigate("Albums");
+  fireEvent.click(await screen.findByRole("button", { name: /^Viva la Vida cover/ }));
+  const details = await screen.findByRole("complementary", { name: "Viva la Vida album details" });
+  fireEvent.click(within(details).getByRole("button", { name: "Rename to match tags" }));
+  const message = `Viva la Vida was not renamed: ${reason}`;
+  const status = await screen.findByText(message);
+  expect(status).toHaveAttribute("title", message);
+});
+
 it("keeps Albums filters and expanded detail separate from a Songs search", async () => {
   const load = vi.spyOn(library, "exploreAlbums");
   render(<App />);

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.60.2** lets you read a status message in the top bar that is too long to fit: hover it to see the whole text, such as the reason Music Library refused to rename an album (for example, a `.rar` or other unsupported file in the album folder).
+
 Aurora **0.60.1** treats an empty `0/0` disc tag as no disc number when renaming, so such albums get `01 - Artist - Title.mp3` instead of `0-01 - …` and the Albums view stops flagging them after **Rename to match tags**. Renaming an album also keeps your place in the Albums view instead of jumping back to the first album.
 
 Aurora **0.60.0** adds keyboard shortcuts to the Albums view: **Ctrl+Shift+T** opens the Album Auto-Tagger on the open album, and **Ctrl+R** renames the selected albums that the naming check flags as misnamed (or the open album when none are selected). Ctrl+R no longer reloads the window; use the refresh button instead.
