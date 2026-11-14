@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.60.3** stops the Albums view from flagging an album named `1-01 - Artist - Title` when Music Library's catalog lists its tracks without a disc number, which happens after a disc tag is changed from `0/0` to `1/1`.
+
 Aurora **0.60.2** lets you read a status message in the top bar that is too long to fit: hover it to see the whole text, such as the reason Music Library refused to rename an album (for example, a `.rar` or other unsupported file in the album folder).
 
 Aurora **0.60.1** treats an empty `0/0` disc tag as no disc number when renaming, so such albums get `01 - Artist - Title.mp3` instead of `0-01 - …` and the Albums view stops flagging them after **Rename to match tags**. Renaming an album also keeps your place in the Albums view instead of jumping back to the first album.

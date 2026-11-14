@@ -112,7 +112,24 @@ pub(crate) fn check_album(tracks: &[CatalogNamingTrack]) -> AlbumNamingCheck {
             disc_number: track.disc_number,
         })
         .collect::<Vec<_>>();
-    let misnamed = misnamed_tracks(&naming);
+    // Music Library's tag sync treats no disc, disc 0 and disc 1 as the same disc and keeps
+    // the catalog's old value, so a track tagged `1/1` can be cataloged without a disc number.
+    // Without one, the disc-1 spelling `1-01 - …` passes as well as `01 - …`.
+    let as_disc_one = naming
+        .iter()
+        .map(|track| NamingTrack {
+            disc_number: track.disc_number.filter(|disc| *disc > 0).or(Some(1)),
+            ..*track
+        })
+        .collect::<Vec<_>>();
+    let misnamed_as_disc_one = misnamed_tracks(&as_disc_one)
+        .into_iter()
+        .map(|(file_name, _)| file_name)
+        .collect::<HashSet<_>>();
+    let misnamed = misnamed_tracks(&naming)
+        .into_iter()
+        .filter(|(file_name, _)| misnamed_as_disc_one.contains(file_name))
+        .collect::<Vec<_>>();
     if let Some((first, expected)) = misnamed.first() {
         issues.push(format!(
             "{} of {} not named Disc-Track - Artist - Title",
@@ -256,9 +273,32 @@ mod tests {
         let mut plain = track(FOLDER, "01 - Pink Floyd - Dogs.mp3", 1, "Dogs");
         plain.disc_number = None;
         assert_eq!(check_album(&[plain.clone()]), AlbumNamingCheck::Organized);
-        plain.filename = "1-01 - Pink Floyd - Dogs.mp3".to_owned();
-        assert!(matches!(
+        plain.filename = "Dogs.mp3".to_owned();
+        assert_eq!(
             check_album(&[plain]),
+            AlbumNamingCheck::Misnamed {
+                issues: vec![
+                    "1 track file of 1 not named Disc-Track - Artist - Title".to_owned(),
+                    "“Dogs.mp3” should be “01 - Pink Floyd - Dogs”".to_owned(),
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn tracks_without_a_disc_number_may_use_the_disc_one_position() {
+        // A `1/1` disc tag that Music Library's sync left out of the catalog.
+        let mut tracks = [
+            track(FOLDER, "1-01 - Pink Floyd - Dogs.mp3", 1, "Dogs"),
+            track(FOLDER, "1-02 - Pink Floyd - Sheep.mp3", 2, "Sheep"),
+        ];
+        for track in &mut tracks {
+            track.disc_number = None;
+        }
+        assert_eq!(check_album(&tracks), AlbumNamingCheck::Organized);
+        tracks[1].filename = "2-02 - Pink Floyd - Sheep.mp3".to_owned();
+        assert!(matches!(
+            check_album(&tracks),
             AlbumNamingCheck::Misnamed { .. }
         ));
     }

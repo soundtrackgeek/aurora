@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.60.3] - 2026-11-14
+
+### Fixed
+- An album whose disc tag was changed from `0/0` to `1/1` stayed flagged as misnamed in the Albums view, asking for `01 - Artist - Title` although **Rename to match tags** names its tracks `1-01 - Artist - Title`. Music Library's tag sync keeps the catalog's old empty disc number when a disc changes between none, 0 and 1, so the check now accepts both `01` and `1-01` for a track the catalog lists without a disc number.
+
 ## [0.60.2] - 2026-11-14
 
 ### Fixed
