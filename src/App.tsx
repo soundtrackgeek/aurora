@@ -171,6 +171,7 @@ import {
   type LibraryIntakePreview,
 } from "./ingest";
 import type { PlaybackSnapshot } from "./playback";
+import { renameLibraryAlbum, renameSummary } from "./libraryAutoTag";
 import {
   type YearSelection
 } from "./years";
@@ -232,6 +233,7 @@ function App() {
   useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
   const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
   const [autoTagAlbum, setAutoTagAlbum] = useState<ExplorerAlbum | null>(null);
+  const [renamingAlbumId, setRenamingAlbumId] = useState<string | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
   const explorerWorkspace = useExplorerWorkspace(initialViewPreferences);
   const {
@@ -661,6 +663,20 @@ function App() {
   const refreshAfterAlbumRename = useCallback(async () => {
     await refreshCatalogIfChanged();
   }, [refreshCatalogIfChanged]);
+  // The Albums view's naming icon offers this rename; the page reloads so the icon clears.
+  const renameAlbumToMatchTags = useCallback(async (album: ExplorerAlbum) => {
+    setRenamingAlbumId(album.id);
+    try {
+      const result = await renameLibraryAlbum(album.id);
+      setSyncMessage(renameSummary(result) ?? `${album.title} is already named after its tags.`);
+      await refreshAfterAlbumRename();
+      setExplorerReloadToken((value) => value + 1);
+    } catch (error) {
+      setSyncMessage(`${album.title} was not renamed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRenamingAlbumId(null);
+    }
+  }, [refreshAfterAlbumRename, setExplorerReloadToken, setSyncMessage]);
 
   useEffect(() => {
     appMountedRef.current = true;
@@ -1396,7 +1412,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.58.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.59.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1810,8 +1826,9 @@ function App() {
                       onDeleteTracks={deleteExplorerAlbumTracks}
                       onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
                       onRequestAutoTag={setAutoTagAlbum}
+                      onRequestRename={(album) => void renameAlbumToMatchTags(album)}
                       onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
-                      albumMoveBusy={albumMoveRequest !== null}
+                      albumMoveBusy={albumMoveRequest !== null || renamingAlbumId !== null}
                       onSelectionChange={(selection) => {
                         setExplorerSelection(selection);
                         setTagSelectionKind(selection.kind === "albums" ? "album" : "track");

@@ -165,6 +165,9 @@ pub(crate) struct AlbumSummary {
     pub(crate) album_score: Option<f64>,
     pub(crate) formats: Vec<String>,
     pub(crate) avg_bitrate_kbps: Option<f64>,
+    /// Whether the folder and track files follow the tags; set on Albums view pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) naming: Option<crate::library_naming::AlbumNamingCheck>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -933,6 +936,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
             Ok(index) => row.get(index)?,
             Err(_) => None,
         },
+        naming: None,
     })
 }
 
@@ -1147,8 +1151,20 @@ fn album_page_from_connection(
             id: album.id.clone(),
         }
     });
+    let mut items = mapped
+        .into_iter()
+        .map(|(album, _)| album)
+        .collect::<Vec<_>>();
+    let ids = items
+        .iter()
+        .map(|album| album.id.as_str())
+        .collect::<Vec<_>>();
+    let mut naming = crate::library_naming::check_albums(connection, &ids);
+    for album in &mut items {
+        album.naming = naming.remove(&album.id);
+    }
     Ok(AlbumPage {
-        items: mapped.into_iter().map(|(album, _)| album).collect(),
+        items,
         next_cursor,
         total_count,
     })
@@ -1542,6 +1558,7 @@ fn album_detail_with_file_refresh(
         album.rating = live.effective_rating;
         album.album_score = live.album_score;
     }
+    album.naming = crate::library_naming::check_albums(connection, &[album_id]).remove(album_id);
     Ok(AlbumDetail {
         album,
         tracks,

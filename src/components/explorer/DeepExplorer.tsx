@@ -6,10 +6,12 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CircleHelp,
   Columns3Cog,
   Disc3,
   Gauge,
   FolderOutput,
+  FolderPen,
   Heart,
   LoaderCircle,
   Music2,
@@ -36,7 +38,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type Artist, type Track, type YearBasis } from "../../library";
+import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type AlbumNamingCheck, type Artist, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -127,6 +129,7 @@ export interface ExplorerAlbum {
   lovedTracks: number;
   ratedTracks: number;
   albumScore: number | null;
+  naming?: AlbumNamingCheck;
 }
 
 export interface ExplorerPageInfo {
@@ -174,6 +177,7 @@ export interface DeepExplorerProps {
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
   onRequestAutoTag?: (album: ExplorerAlbum) => void;
+  onRequestRename?: (album: ExplorerAlbum) => void;
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
@@ -396,6 +400,30 @@ function StaticRating({ rating }: { rating: number | null }) {
     <span className="deep-explorer-rating" aria-label={rating === null ? "Unrated" : `${rating} stars`}>
       <Star aria-hidden="true" className={rating !== null ? "is-rated" : undefined} />
       <span>{rating === null ? "—" : rating.toFixed(1)}</span>
+    </span>
+  );
+}
+
+/** The tooltip for an album whose names do not follow its tags, or `null` when there is nothing to show. */
+function albumNamingTooltip(naming: AlbumNamingCheck | undefined): string | null {
+  if (!naming || naming.status === "organized") return null;
+  if (naming.status === "unchecked") return `Naming not checked: ${naming.reason}`;
+  return ["Not named after its tags:", ...naming.issues].join("\n");
+}
+
+/** A small mark on the cover: amber when a rename would change names, grey when tags are missing. */
+function AlbumNamingBadge({ naming }: { naming: AlbumNamingCheck | undefined }) {
+  const tooltip = albumNamingTooltip(naming);
+  if (!naming || !tooltip) return null;
+  const misnamed = naming.status === "misnamed";
+  return (
+    <span
+      className={`deep-explorer-album-naming${misnamed ? " is-misnamed" : " is-unchecked"}`}
+      role="img"
+      aria-label={tooltip}
+      title={tooltip}
+    >
+      {misnamed ? <FolderPen aria-hidden="true" /> : <CircleHelp aria-hidden="true" />}
     </span>
   );
 }
@@ -1123,6 +1151,7 @@ function AlbumGrid({
                 }}
               >
                 <AlbumArtwork album={album} />
+                <AlbumNamingBadge naming={album.naming} />
                 <span className="deep-explorer-album__copy">
                   <strong>{album.title}</strong>
                   <span className="deep-explorer-album__artist">
@@ -1174,6 +1203,7 @@ function AlbumDetail({
   onDeleteTracks,
   onRequestMoveToInbox,
   onRequestAutoTag,
+  onRequestRename,
   onRequestRemoveAlbum,
   albumMoveBusy,
   onSelectionChange,
@@ -1198,6 +1228,7 @@ function AlbumDetail({
   onDeleteTracks?: (tracks: readonly Track[]) => Promise<void>;
   onRequestMoveToInbox?: (album: ExplorerAlbum) => void;
   onRequestAutoTag?: (album: ExplorerAlbum) => void;
+  onRequestRename?: (album: ExplorerAlbum) => void;
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
@@ -1213,6 +1244,8 @@ function AlbumDetail({
   ));
   const [deleteTargets, setDeleteTargets] = useState<readonly Track[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const renameTooltip = album.naming?.status === "misnamed" ? albumNamingTooltip(album.naming) : null;
+  const renameOffer = onRequestRename && renameTooltip ? { onRename: onRequestRename, tooltip: renameTooltip } : null;
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const visibleSelectedTrackKeys = useMemo(() => {
@@ -1287,8 +1320,9 @@ function AlbumDetail({
             <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}</span>
           </span>
         </div>
-        {onRequestRemoveAlbum || onRequestMoveToInbox || onRequestAutoTag ? <div className="deep-explorer-album-actions">
+        {onRequestRemoveAlbum || onRequestMoveToInbox || onRequestAutoTag || renameOffer ? <div className="deep-explorer-album-actions">
           {onRequestAutoTag ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestAutoTag(album)}><Tags aria-hidden="true" />Auto-tag</button> : null}
+          {renameOffer ? <button type="button" className="deep-explorer-move-inbox deep-explorer-rename" disabled={albumMoveBusy} title={renameOffer.tooltip} onClick={() => renameOffer.onRename(album)}><FolderPen aria-hidden="true" />Rename to match tags</button> : null}
           {onRequestRemoveAlbum ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestRemoveAlbum(album)}><FolderOutput aria-hidden="true" />Remove Album</button> : null}
           {onRequestMoveToInbox ? <button type="button" className="deep-explorer-move-inbox" disabled={albumMoveBusy} onClick={() => onRequestMoveToInbox(album)}><FolderOutput aria-hidden="true" />Move to Inbox</button> : null}
         </div> : null}
@@ -1465,6 +1499,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onDeleteTracks,
     onRequestMoveToInbox,
     onRequestAutoTag,
+    onRequestRename,
     onRequestRemoveAlbum,
     albumMoveBusy,
     onSelectionChange,
@@ -1696,6 +1731,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
                   onRequestRemoveAlbum={onRequestRemoveAlbum}
                   onRequestMoveToInbox={onRequestMoveToInbox}
                   onRequestAutoTag={onRequestAutoTag}
+                  onRequestRename={onRequestRename}
                   albumMoveBusy={albumMoveBusy}
                   onSelectionChange={onSelectionChange}
                   trackChartRanks={trackChartRanks}

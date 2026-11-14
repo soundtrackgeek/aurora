@@ -26,6 +26,7 @@ mod jev;
 mod laptop_mode;
 mod lastfm;
 mod library_bridge;
+mod library_naming;
 mod library_plays;
 mod library_rename;
 mod library_sync;

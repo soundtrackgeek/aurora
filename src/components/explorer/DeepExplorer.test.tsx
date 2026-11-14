@@ -154,6 +154,36 @@ describe("DeepExplorer", () => {
     expect(screen.getAllByRole("complementary", { name: "Night Geometry album details" })).toHaveLength(1);
   });
 
+  it("marks misnamed albums on the cover and offers the rename in their details", () => {
+    const misnamed: ExplorerAlbum = {
+      ...albums[0],
+      naming: { status: "misnamed", issues: ["Folder should be “Aurora Lines - Night Geometry (1985)”"] },
+    };
+    const unchecked: ExplorerAlbum = {
+      ...albums[0], id: "album-2", title: "Untagged", naming: { status: "unchecked", reason: "Add Year tags to check the album's naming." },
+    };
+    const organized: ExplorerAlbum = { ...albums[0], id: "album-3", title: "Tidy", naming: { status: "organized" } };
+    const onRequestRename = vi.fn();
+    render(<DeepExplorer {...explorerProps({
+      view: "albums", albums: [misnamed, unchecked, organized], selectedAlbumId: "album-1", albumTracks: tracks, onRequestRename,
+    })} />);
+    const marks = screen.getAllByRole("img", { name: /^(Not named|Naming not checked)/ });
+    expect(marks).toHaveLength(2);
+    expect(marks[0]).toHaveAttribute("title", "Not named after its tags:\nFolder should be “Aurora Lines - Night Geometry (1985)”");
+    expect(marks[1]).toHaveAttribute("title", "Naming not checked: Add Year tags to check the album's naming.");
+    fireEvent.click(screen.getByRole("button", { name: "Rename to match tags" }));
+    expect(onRequestRename).toHaveBeenCalledWith(misnamed);
+  });
+
+  it("offers no rename for an album already named after its tags", () => {
+    const organized: ExplorerAlbum = { ...albums[0], naming: { status: "organized" } };
+    render(<DeepExplorer {...explorerProps({
+      view: "albums", albums: [organized], selectedAlbumId: "album-1", albumTracks: tracks, onRequestRename: vi.fn(),
+    })} />);
+    expect(screen.queryByRole("button", { name: "Rename to match tags" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Not named/ })).not.toBeInTheDocument();
+  });
+
   it("shows the listener's registered plays in the Songs Plays column, not Last.fm scrobbles", () => {
     const played = { ...tracks[0], playCount: 987_654, registeredPlays: 7 };
     const unplayed = { ...tracks[0], id: "track-9", trackKey: "file:track-9", title: "Never Played", playCount: 123_456, registeredPlays: 0 };

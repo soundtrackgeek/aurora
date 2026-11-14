@@ -223,7 +223,14 @@ export interface AlbumSummary {
   albumScore: number | null;
   formats?: string[];
   avgBitrateKbps?: number | null;
+  naming?: AlbumNamingCheck;
 }
+
+/** Whether an album's folder and track files follow its tags (`Album Artist - Album (Year)`, `1-01 - Artist - Title`). */
+export type AlbumNamingCheck =
+  | { status: "organized" }
+  | { status: "misnamed"; issues: string[] }
+  | { status: "unchecked"; reason: string };
 
 type ConsistentAlbumValue<T> = { consistent: true; value: T } | { consistent: false };
 

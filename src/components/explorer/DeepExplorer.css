@@ -184,6 +184,10 @@
 .deep-explorer-album-artwork > svg { position: absolute; z-index: 1; right: 10px; bottom: 10px; width: 22px; height: 22px; opacity: .66; }
 .deep-explorer-album > svg { position: absolute; right: 11px; bottom: 11px; width: 13px; height: 13px; color: #697789; }
 .deep-explorer-album__copy { min-width: 0; padding-right: 16px; }
+.deep-explorer-album-naming { position: absolute; z-index: 3; top: 14px; right: 14px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: rgba(8, 12, 20, .78); box-shadow: 0 1px 6px rgba(0, 0, 0, .45); cursor: help; }
+.deep-explorer-album-naming svg { width: 13px; height: 13px; }
+.deep-explorer-album-naming.is-misnamed { color: #f5b454; }
+.deep-explorer-album-naming.is-unchecked { color: #8896a5; }
 .deep-explorer-album__copy strong,
 .deep-explorer-album__copy > span,
 .deep-explorer-album__copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

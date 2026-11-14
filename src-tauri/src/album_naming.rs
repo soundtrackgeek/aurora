@@ -93,6 +93,85 @@ pub(crate) fn decimal_width(value: u32) -> usize {
     value.max(1).ilog10() as usize + 1
 }
 
+/// `Album Artist - Album (Year)` before sanitizing, or `None` when a part is missing.
+pub(crate) fn folder_label(
+    album_artist: Option<&str>,
+    album: Option<&str>,
+    year: Option<i32>,
+) -> Option<String> {
+    let album_artist = album_artist
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let album = album.map(str::trim).filter(|value| !value.is_empty())?;
+    let year = year.filter(|value| *value > 0)?;
+    Some(format!("{album_artist} - {album} ({year})"))
+}
+
+/// Whether `actual` is `label` as Aurora writes it, in today's spelling or the legacy one
+/// where a colon became `_`. Case is ignored, as Windows ignores it.
+pub(crate) fn name_matches(actual: &str, label: &str) -> bool {
+    [sanitize_component(label), legacy_sanitize_component(label)]
+        .into_iter()
+        .flatten()
+        .any(|expected| actual.eq_ignore_ascii_case(&expected))
+}
+
+/// A file name without its extension.
+pub(crate) fn file_stem(file_name: &str) -> &str {
+    file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem)
+}
+
+/// The tags a track file is named from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NamingTrack<'a> {
+    pub(crate) file_name: &'a str,
+    pub(crate) artist: Option<&'a str>,
+    pub(crate) title: Option<&'a str>,
+    pub(crate) track_number: Option<u32>,
+    pub(crate) track_total: Option<u32>,
+    pub(crate) disc_number: Option<u32>,
+}
+
+impl NamingTrack<'_> {
+    /// `1-01 - Artist - Title` before sanitizing, or `None` when a tag is missing.
+    fn label(&self, width: usize) -> Option<String> {
+        let number = self.track_number?;
+        let artist = self
+            .artist
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        let title = self
+            .title
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        let position = track_position(self.disc_number, number, width);
+        Some(format!("{position} - {artist} - {title}"))
+    }
+}
+
+/// The tracks whose file is not named `1-01 - Artist - Title` (or `01 - …` without a disc
+/// number), with the name each should have. Tracks missing a number, artist or title are
+/// left out: their name cannot be judged. Any extension is accepted.
+pub(crate) fn misnamed_tracks<'a>(tracks: &[NamingTrack<'a>]) -> Vec<(&'a str, String)> {
+    let width = track_number_width(
+        tracks
+            .iter()
+            .map(|track| track.track_number.or(track.track_total)),
+    );
+    tracks
+        .iter()
+        .filter_map(|track| {
+            let label = track.label(width)?;
+            (!name_matches(file_stem(track.file_name), &label)).then(|| {
+                let expected = sanitize_component(&label).unwrap_or(label);
+                (track.file_name, expected)
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

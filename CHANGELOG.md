@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.59.0] - 2026-11-14
+
+### Added
+- **Naming check in the Albums view.** An amber folder icon on an album cover means its folder or track files do not follow its tags: `Album Artist - Album (Year)` for the folder and `1-01 - Artist - Title` for tracks (`01 - Artist - Title` when a track has no Disc Number tag; three digits for albums with 100 tracks or more). Hover the icon for what differs, for example the folder name it should have, how many track files are misnamed and the first one's expected name. A grey question mark means the album cannot be checked because Album Artist, Album, Year, Track Number, Artist or Title is missing or differs between tracks. Albums that are already named after their tags show no icon.
+- **Rename to match tags** in a misnamed album's details renames its folder and track files with the same in-place rename as **Auto rename folder**, then reloads the Albums view so the icon clears.
+
+### Changed
+- The Inbox readiness check, the Inbox rename and the new library check share one set of naming rules, so they always agree on what an organized album looks like. The check ignores letter case and still accepts the older spelling where a colon became `_`, and it accepts any audio file extension.
+
 ## [0.58.0] - 2026-11-14
 
 ### Added

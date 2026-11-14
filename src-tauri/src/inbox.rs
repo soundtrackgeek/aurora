@@ -1,7 +1,7 @@
 use crate::{
     album_naming::{
-        album_folder_name, decimal_width, legacy_sanitize_component, required_component,
-        sanitize_component,
+        NamingTrack, album_folder_name, folder_label, misnamed_tracks, name_matches,
+        track_file_stem, track_number_width, track_position,
     },
     artwork::{
         CanonicalCover, canonical_cover_from_image, canonical_cover_from_picture,
@@ -1630,13 +1630,12 @@ fn merge_album_group(
         }
     }
 
-    let track_width = group
-        .iter()
-        .flat_map(|candidate| candidate.scanned.tracks.iter())
-        .filter_map(|track| track.track_number.or(track.track_total))
-        .max()
-        .map_or(2, decimal_width)
-        .max(2);
+    let track_width = track_number_width(
+        group
+            .iter()
+            .flat_map(|candidate| candidate.scanned.tracks.iter())
+            .map(|track| track.track_number.or(track.track_total)),
+    );
     let sequence = now_ms();
     let mut next_index = 0usize;
     let mut destinations = HashSet::new();
@@ -1656,10 +1655,9 @@ fn merge_album_group(
                     track.file_name
                 )
             })?;
-            let artist = required_component(track.artist.as_deref(), "Artist")?;
-            let title = required_component(track.title.as_deref(), "Title")?;
-            let position = format!("{disc_number}-{track_number:0track_width$}");
-            let file_name = sanitize_component(&format!("{position} - {artist} - {title}"))?;
+            let position = track_position(Some(disc_number), track_number, track_width);
+            let file_name =
+                track_file_stem(&position, track.artist.as_deref(), track.title.as_deref())?;
             let source = PathBuf::from(&track.path);
             let destination = destination_root.join(format!("{file_name}.mp3"));
             if prepare_merged_file_rename(
@@ -1858,13 +1856,12 @@ fn rename_album_path(
     }
 
     let sequence = now_ms();
-    let track_width = scanned
-        .tracks
-        .iter()
-        .filter_map(|track| track.track_number.or(track.track_total))
-        .max()
-        .map_or(2, decimal_width)
-        .max(2);
+    let track_width = track_number_width(
+        scanned
+            .tracks
+            .iter()
+            .map(|track| track.track_number.or(track.track_total)),
+    );
     let mut destinations = HashSet::new();
     let sources = scanned
         .tracks
@@ -1879,13 +1876,9 @@ fn rename_album_path(
                 track.file_name
             )
         })?;
-        let artist = required_component(track.artist.as_deref(), "Artist")?;
-        let title = required_component(track.title.as_deref(), "Title")?;
-        let position = match track.disc_number {
-            Some(disc) => format!("{disc}-{track_number:0track_width$}"),
-            None => format!("{track_number:0track_width$}"),
-        };
-        let file_name = sanitize_component(&format!("{position} - {artist} - {title}"))?;
+        let position = track_position(track.disc_number, track_number, track_width);
+        let file_name =
+            track_file_stem(&position, track.artist.as_deref(), track.title.as_deref())?;
         let source = PathBuf::from(&track.path);
         let destination = album.join(format!("{file_name}.mp3"));
         if !destinations.insert(path_key(&destination)) {
@@ -2516,46 +2509,27 @@ fn organization_issues(
     tracks: &[InboxTrack],
 ) -> Vec<String> {
     let mut issues = Vec::new();
-    if let (Some(album_artist), Some(album_title), Some(year)) =
-        (album_artist, album_title, year.filter(|value| *value > 0))
-        && let name = format!("{album_artist} - {album_title} ({year})")
-        && let Ok(expected) = sanitize_component(&name)
-        && let Ok(legacy) = legacy_sanitize_component(&name)
+    if let Some(label) = folder_label(album_artist, album_title, year)
         && album_path
             .file_name()
             .and_then(|value| value.to_str())
-            .is_none_or(|actual| {
-                !actual.eq_ignore_ascii_case(&expected) && !actual.eq_ignore_ascii_case(&legacy)
-            })
+            .is_none_or(|actual| !name_matches(actual, &label))
     {
         issues.push("Album folder is not organized as Album Artist - Album (Year)".to_owned());
     }
 
-    let track_width = tracks
+    let naming = tracks
         .iter()
-        .filter_map(|track| track.track_number.or(track.track_total))
-        .max()
-        .map_or(2, decimal_width)
-        .max(2);
-    let filenames_ready = tracks.iter().all(|track| {
-        let (Some(track_number), Some(artist), Some(title)) = (
-            track.track_number,
-            track.artist.as_deref(),
-            track.title.as_deref(),
-        ) else {
-            return true;
-        };
-        let position = match track.disc_number {
-            Some(disc) => format!("{disc}-{track_number:0track_width$}"),
-            None => format!("{track_number:0track_width$}"),
-        };
-        let name = format!("{position} - {artist} - {title}");
-        [sanitize_component(&name), legacy_sanitize_component(&name)]
-            .into_iter()
-            .flatten()
-            .any(|stem| track.file_name.eq_ignore_ascii_case(&format!("{stem}.mp3")))
-    });
-    if !filenames_ready {
+        .map(|track| NamingTrack {
+            file_name: &track.file_name,
+            artist: track.artist.as_deref(),
+            title: track.title.as_deref(),
+            track_number: track.track_number,
+            track_total: track.track_total,
+            disc_number: track.disc_number,
+        })
+        .collect::<Vec<_>>();
+    if !misnamed_tracks(&naming).is_empty() {
         issues.push("One or more track filenames are not organized from their tags".to_owned());
     }
     issues
@@ -3323,6 +3297,7 @@ fn parse_duration_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::album_naming::{decimal_width, legacy_sanitize_component, sanitize_component};
     use id3::frame::{Picture, PictureType};
 
     #[test]
