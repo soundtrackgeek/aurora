@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { ExplorerAlbum, ExplorerLoadState } from "../../components/explorer/DeepExplorer";
 import { transitionContent } from "../../contentTransition";
+import { replaceExplorerAlbum } from "../explorer/explorerQueries";
 import {
   applyAlbumPopularity, applyAlbumTrackMetricsProjection, loadAlbumDetail, loadAlbumPopularity,
   type AlbumSummary, type Track,
@@ -65,7 +66,7 @@ export function useInspectorSelection({
     void loadAlbumDetail(albumId).then((detail) => {
       if (requestId !== albumRequestRef.current) return;
       const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-      portsRef.current.setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
+      portsRef.current.setExplorerAlbums((current) => replaceExplorerAlbum(current, projectedAlbum));
       setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
       setAlbumTracksTruncated(detail.tracksTruncated);
       portsRef.current.setSelectedTrack((current) => detail.tracks.find((track) => track.trackKey === current?.trackKey) ?? detail.tracks[0] ?? null);
@@ -113,7 +114,7 @@ export function useInspectorSelection({
           transitionContent(() => {
             if (requestId !== albumRequestRef.current) return;
             const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-            portsRef.current.setExplorerAlbums((current) => current.map((candidate) => candidate.id === detail.album.id ? projectedAlbum : candidate));
+            portsRef.current.setExplorerAlbums((current) => replaceExplorerAlbum(current, projectedAlbum));
             setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
             setAlbumTracksTruncated(detail.tracksTruncated);
             portsRef.current.setSelectedTrack(detail.tracks[0] ?? null);

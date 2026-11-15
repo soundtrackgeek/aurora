@@ -16,6 +16,7 @@ import type { usePublishersDomain } from "../domains/usePublishersDomain";
 import type { useRatingsDomain } from "../domains/useRatingsDomain";
 import type { useYearsDomain } from "../domains/useYearsDomain";
 import type { ExplorerWorkspace } from "../explorer/useExplorerWorkspace";
+import { replaceExplorerAlbum } from "../explorer/explorerQueries";
 import type { InspectorSelection } from "../inspector/useInspectorSelection";
 import type { WorkspaceRestoration } from "../navigation/useWorkspaceRestoration";
 
@@ -202,7 +203,7 @@ export function useTagMutations({
       const detail = await loadAlbumDetail(albumId);
       if (requestId !== albumRequestRef.current || selectedAlbumIdRef.current !== albumId) return;
       const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-      setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
+      setExplorerAlbums((current) => replaceExplorerAlbum(current, projectedAlbum));
       setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
       setAlbumTracksTruncated(detail.tracksTruncated);
       setSelectedTrack((current) => {
@@ -339,7 +340,7 @@ export function useTagMutations({
           const detail = await loadAlbumDetail(albumId);
           if (requestId === albumRequestRef.current && selectedAlbumIdRef.current === albumId) {
             const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
-            setExplorerAlbums((current) => current.map((album) => album.id === albumId ? projectedAlbum : album));
+            setExplorerAlbums((current) => replaceExplorerAlbum(current, projectedAlbum));
             setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
             setAlbumTracksTruncated(detail.tracksTruncated);
             setSelectedTrack((current) => {

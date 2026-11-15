@@ -1,5 +1,5 @@
 import type { ExplorerFilters, ExplorerView } from "../../components/explorer/DeepExplorer";
-import { exploreTracks, exploreAlbums, exploreArtists, type Track, type AlbumSummary, type Artist, type ExplorerCursor, type TrackSort, type AlbumSort, type CatalogItemGroup } from "../../library";
+import { exploreTracks, exploreAlbums, exploreArtists, type Track, type AlbumSummary, type Artist, type ExplorerCursor, type TrackSort, type AlbumSort, type CatalogItemGroup, type CatalogGroupHeading } from "../../library";
 import { explorerSorts } from "../../viewPreferences";
 
 export type ExplorerResult = {
@@ -18,6 +18,16 @@ export function withCatalogGroups<T extends { id: string }>(items: T[], groups: 
     const catalogGroup = byId.get(item.id);
     return catalogGroup ? { ...item, catalogGroup } : item;
   });
+}
+
+/**
+ * Replaces one album with a freshly loaded copy. Album details do not know
+ * about the search's `group:`, so the copy keeps the heading of the album it replaces.
+ */
+export function replaceExplorerAlbum<T extends { id: string; catalogGroup?: CatalogGroupHeading }>(albums: T[], replacement: T): T[] {
+  return albums.map((album) => album.id === replacement.id
+    ? (album.catalogGroup && !replacement.catalogGroup ? { ...replacement, catalogGroup: album.catalogGroup } : replacement)
+    : album);
 }
 
 export async function loadExplorerPage(

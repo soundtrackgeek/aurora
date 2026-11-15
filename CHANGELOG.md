@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.61.1] - 2026-11-15
+
+### Fixed
+- Clicking an album in a `group:` search no longer drops its heading. Loading the album's details replaced the album with a copy that had no group, so it joined the previous group's row; the copy now keeps the heading.
+
 ## [0.61.0] - 2026-11-14
 
 ### Added

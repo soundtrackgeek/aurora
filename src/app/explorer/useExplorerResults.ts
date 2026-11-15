@@ -12,7 +12,7 @@ import {
 } from "../../explorerRefresh";
 import { explorerViewForDestination } from "../../viewPreferences";
 import { loadWorkspacePages, restoreWorkspaceScroll } from "../../workspaceRestoration";
-import { explorerCountKey, explorerRequestKey, loadExplorerPage, type ExplorerResult } from "./explorerQueries";
+import { explorerCountKey, explorerRequestKey, loadExplorerPage, replaceExplorerAlbum, type ExplorerResult } from "./explorerQueries";
 import type { ExplorerWorkspace } from "./useExplorerWorkspace";
 import type { WorkspaceRestoration } from "../navigation/useWorkspaceRestoration";
 
@@ -215,7 +215,7 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
                       || selectedAlbumIdRef.current !== restoredAlbumId) return;
                     const projectedAlbum = applyAlbumTrackMetricsProjection(detail.album, detail.tracks);
                     setExplorerAlbums((current) => current.some((album) => album.id === detail.album.id)
-                      ? current.map((album) => album.id === detail.album.id ? projectedAlbum : album)
+                      ? replaceExplorerAlbum(current, projectedAlbum)
                       : [projectedAlbum, ...current]);
                     setAlbumTracks(applyAlbumPopularity(detail.tracks, detail.popularity));
                     setAlbumTracksTruncated(detail.tracksTruncated);
