@@ -433,7 +433,9 @@ the baseline. A separate release-profile benchmark covers 1.1 million vectors.
 These measurements do not represent a completed analysis of all real MP3s;
 measurement scope and reproduction are recorded in the linked scale proof.
 
-### 7. Natural-language search
+### 7. Natural-language search - PARTLY DONE
+
+**Aurora 0.62.0:** the Assistant answers questions with tools and suggests search queries that run with one click. A dedicated Ask mode that only writes a query is still open.
 
 **What.** An **Ask** mode turns a sentence such as "melancholic 80s synth ballads by Norwegian artists I've loved" into Aurora's query language, for example `genre:synthpop AND year:1980..1989 AND country:NO AND love:1..`. Aurora shows the generated query so the user can edit it before running it.
 
@@ -536,7 +538,9 @@ setlist.fm's terms require an attribution link.
 
 **What.** Timestamped free-text notes and personal tags on albums and artists, such as "first heard at…" or "the 1999 remaster is brighter". Notes are stored in Aurora state, so they sync through snapshots and never touch MP3s or the catalog. They are searchable through a `note:` field and shown in the Album inspector. Optionally, finishing an album prompts for a note and an album rating.
 
-### 20. Local read-only MCP server
+### 20. Local read-only MCP server - DONE
+
+**Completed 2026-11-15 in Aurora 0.62.0** as `aurora.exe --mcp` over stdio, with 14 read-only tools; see [ai-assistant.md](ai-assistant.md).
 
 **What.** Expose library tools to Claude Desktop and Claude Code through the official Rust MCP SDK ([`rmcp`](https://github.com/modelcontextprotocol/rust-sdk)), over stdio or localhost Streamable HTTP. Possible tools: `search_catalog` (using the query language), `album_detail`, `listening_report`, `ratings_overview`, and optionally `queue_tracks`.
 

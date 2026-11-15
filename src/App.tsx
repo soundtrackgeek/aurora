@@ -18,6 +18,7 @@ import {
   CircleUserRound,
   Disc3,
   Download,
+  BotMessageSquare,
   FlaskConical,
   FolderPlus,
   Gauge,
@@ -176,6 +177,7 @@ import {
   type YearSelection
 } from "./years";
 
+const LazyAssistantPanel = lazy(async () => ({ default: (await import("./components/AssistantPanel")).AssistantPanel }));
 const AddFolderDialog = lazy(async () => {
   const module = await import("./components/AddFolderDialog");
   return { default: module.AddFolderDialog };
@@ -299,6 +301,7 @@ function App() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [addFolderOpen, setAddFolderOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [backgroundIntakeNotice, setBackgroundIntakeNotice] = useState<{
     status: "running" | "completed" | "failed";
     message: string;
@@ -1464,7 +1467,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.61.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.62.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1559,6 +1562,7 @@ function App() {
             onToggle={() => void toggleLaptopMode()}
           />
           <button type="button" aria-label="Audio settings" title="Audio settings" onClick={() => openSettings("audio")}><AudioLines aria-hidden="true" /></button>
+          <button type="button" aria-label="Assistant" title="Assistant: ask about your library" aria-pressed={assistantOpen} className={assistantOpen ? "is-active" : undefined} onClick={() => setAssistantOpen((open) => !open)}><BotMessageSquare aria-hidden="true" /></button>
           <button type="button" aria-label="Labs" disabled><FlaskConical aria-hidden="true" /></button>
           {!updater.state.version && <button type="button" aria-label="Check for updates" title="Check for updates" onClick={() => void updater.checkForUpdate(true)}><Download aria-hidden="true" /></button>}
           {updater.state.version && <button type="button" className="update-badge" onClick={updater.showPrompt}><Download aria-hidden="true" /> Update {updater.state.version}</button>}
@@ -2106,6 +2110,19 @@ function App() {
             onClose={() => setAddFolderOpen(false)}
             onCatalogChanged={refreshCatalogIfChanged}
             onApplyInBackground={startBackgroundIntake}
+          />
+        </Suspense>
+      )}
+      {assistantOpen && (
+        <Suspense fallback={null}>
+          <LazyAssistantPanel
+            context={`View: ${activeNav}${artistPageName ? ` (artist page: ${artistPageName})` : ""}. Search box: ${topbarSearchValue ? `"${topbarSearchValue}"` : "empty"}.`}
+            onClose={() => setAssistantOpen(false)}
+            onOpenSettings={() => openSettings("connections")}
+            onUseQuery={(query) => {
+              const view = activeNav === "Songs" ? "tracks" : activeNav === "Artists" ? "artists" : "albums";
+              openSavedExplorerView(view, { ...defaultExplorerFilters, sort: defaultExplorerSort[view], query });
+            }}
           />
         </Suspense>
       )}

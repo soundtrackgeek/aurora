@@ -2,6 +2,7 @@ mod album_naming;
 mod artist_discovery;
 mod artist_identity;
 mod artwork;
+mod assistant;
 mod audio_settings;
 mod catalog;
 mod catalog_view;
@@ -32,6 +33,7 @@ mod library_plays;
 mod library_rename;
 mod library_sync;
 mod live_genres;
+mod mcp;
 mod media_controls;
 mod musicbrainz;
 mod native_events;
@@ -1136,6 +1138,58 @@ async fn ratings_overview(app: AppHandle) -> Result<RatingsOverview, String> {
     .map_err(|error| format!("The Ratings overview worker stopped unexpectedly: {error}"))?
 }
 
+fn assistant_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|error| format!("Aurora's settings folder is unavailable: {error}"))
+}
+
+#[tauri::command]
+async fn assistant_status(app: AppHandle) -> Result<assistant::AssistantStatus, String> {
+    let directory = assistant_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || assistant::status(&directory))
+        .await
+        .map_err(|_| "The assistant settings worker stopped.".to_owned())
+}
+
+#[tauri::command]
+async fn update_assistant_settings(
+    app: AppHandle,
+    settings: assistant::AssistantSettings,
+) -> Result<assistant::AssistantStatus, String> {
+    let directory = assistant_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || assistant::update_settings(&directory, settings))
+        .await
+        .map_err(|_| "The assistant settings worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+async fn test_assistant_backend(
+    app: AppHandle,
+    backend: assistant::Backend,
+) -> Result<String, String> {
+    let directory = assistant_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || assistant::test_backend(&directory, backend))
+        .await
+        .map_err(|_| "The assistant test worker stopped.".to_owned())?
+}
+
+#[tauri::command]
+fn assistant_send(app: AppHandle, request: assistant::SendRequest) -> Result<String, String> {
+    let directory = assistant_directory(&app)?;
+    let runs = app
+        .state::<std::sync::Arc<assistant::AssistantRuns>>()
+        .inner()
+        .clone();
+    assistant::send(app, runs, &directory, request)
+}
+
+#[tauri::command]
+fn assistant_cancel(app: AppHandle, run_id: String) {
+    app.state::<std::sync::Arc<assistant::AssistantRuns>>()
+        .cancel(&run_id);
+}
+
 #[tauri::command]
 async fn jev_settings() -> Result<jev::Status, String> {
     tauri::async_runtime::spawn_blocking(jev::status)
@@ -2157,6 +2211,12 @@ async fn tonehavn_logout(app: AppHandle) -> Result<tonehavn::Status, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Serves Aurora's read-only MCP server over stdio (`aurora --mcp`) instead of
+/// opening the window. Returns the process exit code.
+pub fn run_mcp_server() -> i32 {
+    mcp::run_stdio()
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Reject duplicate launches before plugins or setup acquire shared resources.
@@ -2265,6 +2325,7 @@ pub fn run() {
             app.manage(Mutex::new(artwork::ArtworkSelectionRegistry::default()));
             app.manage(WaveformWorkCoordinator::default());
             app.manage(LibrarySyncCoordinator::default());
+            app.manage(std::sync::Arc::new(assistant::AssistantRuns::default()));
             app.manage(shortcuts::ShortcutTagQueue::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
                 state_directory.join("aurora-shortcuts.json"),
@@ -2371,6 +2432,11 @@ pub fn run() {
             chart_queue_tracks,
             ratings_overview,
             jev_settings,
+            assistant_status,
+            update_assistant_settings,
+            test_assistant_backend,
+            assistant_send,
+            assistant_cancel,
             update_jev_credentials,
             test_jev_connection,
             tonight_suggestions,

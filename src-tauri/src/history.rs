@@ -484,6 +484,39 @@ impl HistoryStore {
         open_valid_history_source(path).map(|source| source.map(|(metadata, _)| metadata.device_id))
     }
 
+    /// Opens this device's history for reading from another process, such as
+    /// the MCP server. Unlike [`Self::new`], it never migrates, never marks the
+    /// running Aurora's active session as interrupted, never restores or
+    /// mirrors snapshots, and never publishes.
+    pub(crate) fn open_reader(path: PathBuf, remote_directory: PathBuf) -> Result<Self, String> {
+        if !path.is_file() {
+            return Err(
+                "Aurora's listening history was not found. Open Aurora once, then try again."
+                    .to_owned(),
+            );
+        }
+        let metadata = open_valid_history_source(&path)?
+            .map(|(metadata, _)| metadata)
+            .ok_or_else(|| {
+                "Aurora's listening history uses a different schema than this Aurora build. Update Aurora so both match.".to_owned()
+            })?;
+        let remote_path =
+            remote_directory.join(format!("aurora-history-{}.sqlite3", metadata.device_id));
+        Ok(Self {
+            path,
+            remote_directory,
+            remote_path,
+            tonehavn_directory: None,
+            device_id: metadata.device_id,
+            device_name: metadata.device_name,
+            shared: Arc::new(Mutex::new(SharedHistoryState {
+                last_publish_attempt_ms: None,
+                last_error: None,
+                remote_write_blocked: true,
+            })),
+        })
+    }
+
     pub(crate) fn new(
         path: PathBuf,
         remote_directory: PathBuf,

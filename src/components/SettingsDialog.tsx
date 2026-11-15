@@ -41,6 +41,7 @@ import { loadInboxSettings, MAX_MUSICBRAINZ_RETRIES, updateDiscogsCredentials, u
 
 import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
 import { JevSettingsPanel } from "./JevSettingsPanel";
+import { AssistantSettingsPanel } from "./AssistantSettingsPanel";
 import { FanartSettingsPanel } from "./FanartSettingsPanel";
 
 export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata" | "connections";
@@ -221,7 +222,7 @@ export function SettingsDialog({
         </nav>
 
         <div className="settings-dialog__body">
-          {tab === "connections" ? <><JevSettingsPanel /><ConnectionSettingsPanel /></> : tab === "display" ? (
+          {tab === "connections" ? <><AssistantSettingsPanel /><JevSettingsPanel /><ConnectionSettingsPanel /></> : tab === "display" ? (
             <DisplaySettingsPanel
               preferences={displayDraft}
               selectedView={selectedDisplayView}

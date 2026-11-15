@@ -143,6 +143,31 @@ impl StateStore {
         })
     }
 
+    /// Opens the state database of a running or closed Aurora from another
+    /// process, such as the MCP server, without migrating it. The database
+    /// must already exist at the schema this build understands.
+    pub(crate) fn open_existing(path: PathBuf) -> Result<Self, String> {
+        if !path.is_file() {
+            return Err(
+                "Aurora's state database was not found. Open Aurora once, then try again."
+                    .to_owned(),
+            );
+        }
+        let anchor = Self::open_connection(&path)?;
+        let current: i64 = anchor
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|error| format!("Could not read Aurora's state schema: {error}"))?;
+        if current != SCHEMA_VERSION {
+            return Err(format!(
+                "Aurora's state database uses schema version {current}, but this Aurora build expects {SCHEMA_VERSION}. Open the installed Aurora once, or update it, so both match."
+            ));
+        }
+        Ok(Self {
+            path,
+            _wal_anchor: Arc::new(Mutex::new(anchor)),
+        })
+    }
+
     pub(crate) fn open(&self) -> Result<Connection, String> {
         Self::open_connection(&self.path)
     }

@@ -237,6 +237,16 @@ pub(crate) fn laptop_mode_enabled() -> bool {
     LAPTOP_MODE.load(Ordering::SeqCst)
 }
 
+/// Applies this device's saved Laptop Mode for a helper process, such as the
+/// MCP server, without creating or saving a device identity.
+pub(crate) fn apply_saved_laptop_mode(path: &Path) {
+    let laptop_mode = fs::read_to_string(path)
+        .ok()
+        .and_then(|json| serde_json::from_str::<DeviceSettingsFile>(&json).ok())
+        .is_some_and(|settings| settings.laptop_mode);
+    set_laptop_mode_runtime(laptop_mode);
+}
+
 fn set_laptop_mode_runtime(enabled: bool) {
     LAPTOP_MODE.store(enabled, Ordering::SeqCst);
 }

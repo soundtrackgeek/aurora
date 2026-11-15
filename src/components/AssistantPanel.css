@@ -1,0 +1,84 @@
+.assistant-panel {
+  position: absolute; z-index: 40; top: 76px; right: 12px; bottom: 128px;
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(460px, calc(100% - 24px));
+  border: 1px solid rgba(177, 105, 229, .26); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(13, 22, 33, .98), rgba(7, 13, 20, .98));
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .55); overflow: hidden;
+  font-size: max(var(--aurora-font-min), calc(11px + var(--aurora-font-offset)));
+}
+.assistant-panel__header { display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--border); }
+.assistant-panel__header > svg { width: 18px; height: 18px; color: var(--violet-bright); flex: 0 0 auto; }
+.assistant-panel__header > div { min-width: 0; flex: 1; }
+.assistant-panel__header strong, .assistant-panel__header small { display: block; }
+.assistant-panel__header strong { color: #e8ebf0; font-weight: 570; }
+.assistant-panel__header small { color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
+.assistant-panel__header select { height: 28px; padding: 0 6px; border: 1px solid var(--border-bright); border-radius: 6px; background: #0e1823; color: #d6dde5; font: inherit; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.assistant-panel__header button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #aeb9c6; cursor: pointer; }
+.assistant-panel__header button:hover:not(:disabled) { background: rgba(255, 255, 255, .06); color: #fff; }
+.assistant-panel__header button:disabled { opacity: .35; cursor: default; }
+.assistant-panel__header button svg { width: 15px; height: 15px; }
+
+.assistant-panel__scroll { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow-y: auto; scrollbar-width: thin; }
+.assistant-panel__notice { display: flex; align-items: center; gap: 9px; margin: 0; padding: 9px 10px; border: 1px solid rgba(245, 158, 11, .3); border-radius: 8px; background: rgba(245, 158, 11, .07); color: #f0dcb8; }
+.assistant-panel__notice > svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--amber); }
+.assistant-panel__notice > span { flex: 1; }
+.assistant-panel__notice .button { min-height: 28px; padding: 0 10px; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.assistant-panel__empty p { margin: 2px 0 10px; color: var(--muted); line-height: 1.45; }
+.assistant-panel__empty ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.assistant-panel__empty button { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, .02); color: #cdd5de; font: inherit; text-align: left; cursor: pointer; }
+.assistant-panel__empty button:hover:not(:disabled) { border-color: rgba(188, 101, 245, .45); color: #fff; }
+.assistant-panel__empty button:disabled { opacity: .45; cursor: default; }
+
+.assistant-turn { display: grid; gap: 6px; max-width: 100%; }
+.assistant-turn--user { justify-self: end; max-width: 85%; padding: 8px 11px; border-radius: 10px 10px 2px 10px; background: rgba(126, 48, 174, .3); color: #f3e8fb; }
+.assistant-turn--user p { margin: 0; white-space: pre-wrap; }
+.assistant-turn--assistant { color: #dfe5ec; }
+.assistant-turn__error { margin: 0; padding: 7px 9px; border-radius: 7px; background: rgba(236, 72, 153, .1); color: #f6c4dc; }
+.assistant-tool { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.assistant-tool svg { width: 12px; height: 12px; }
+.assistant-tool--running svg { animation: assistant-spin 1s linear infinite; color: var(--violet-bright); }
+.assistant-tool--done svg { color: #6fd3a0; }
+.assistant-tool--failed svg { color: var(--amber); }
+@keyframes assistant-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .assistant-tool--running svg { animation: none; } }
+
+.assistant-md { line-height: 1.5; overflow-wrap: anywhere; }
+.assistant-md p, .assistant-md ul, .assistant-md ol, .assistant-md pre { margin: 0 0 7px; }
+.assistant-md > :last-child { margin-bottom: 0; }
+.assistant-md ul, .assistant-md ol { padding-left: 19px; }
+.assistant-md li + li { margin-top: 2px; }
+.assistant-md strong { color: #fff; font-weight: 600; }
+.assistant-md__heading { color: #fff; font-weight: 600; }
+.assistant-md code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, .07); color: #e9d5ff; font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+.assistant-md pre { padding: 8px 10px; border-radius: 7px; background: rgba(0, 0, 0, .3); overflow-x: auto; }
+.assistant-md pre code { padding: 0; background: none; }
+.assistant-md__query { display: inline; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+.assistant-md__query code { border: 1px dashed rgba(194, 116, 255, .4); }
+.assistant-md__query:hover code { border-style: solid; background: rgba(168, 85, 247, .18); }
+.assistant-md__table { margin: 0 0 7px; overflow-x: auto; }
+.assistant-md table { width: 100%; border-collapse: collapse; font-size: .95em; }
+.assistant-md th, .assistant-md td { padding: 4px 7px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.assistant-md th { color: var(--muted); font-weight: 560; }
+
+.assistant-panel__composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: rgba(4, 10, 16, .4); }
+.assistant-panel__composer textarea { flex: 1; min-height: 38px; max-height: 140px; padding: 8px 10px; border: 1px solid var(--border-bright); border-radius: 8px; background: #0b141e; color: #e8ebf0; font: inherit; resize: vertical; }
+.assistant-panel__composer textarea:focus { outline: none; border-color: rgba(188, 101, 245, .6); }
+.assistant-panel__composer button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid rgba(188, 101, 245, .48); border-radius: 8px; background: linear-gradient(135deg, #7130ae, #9b42d3); color: #fff; cursor: pointer; }
+.assistant-panel__composer button:disabled { opacity: .4; cursor: default; }
+.assistant-panel__composer button svg { width: 16px; height: 16px; }
+
+.assistant-settings__backends { display: grid; gap: 7px; margin: 12px 0 10px; padding: 0; border: 0; }
+.assistant-settings__backends legend { margin-bottom: 6px; color: #c9d1da; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
+.assistant-settings__backend { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.assistant-settings__backend strong, .assistant-settings__backend small { display: block; }
+.assistant-settings__backend strong { color: #e3e8ed; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); font-weight: 560; }
+.assistant-settings__backend small { overflow: hidden; color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); text-overflow: ellipsis; white-space: nowrap; }
+.assistant-settings__backend .button { min-height: 28px; padding: 0 10px; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
+.assistant-settings__paths { display: grid; gap: 8px; }
+.assistant-settings__terminal { display: grid; gap: 6px; margin-top: 12px; }
+.assistant-settings__terminal strong { color: #e3e8ed; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); font-weight: 560; }
+.assistant-settings__terminal small { color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); line-height: 1.35; }
+.assistant-settings__command { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 9px; border-radius: 7px; background: rgba(0, 0, 0, .3); }
+.assistant-settings__command code { flex: 1; min-width: 0; overflow-x: auto; color: #e9d5ff; font-family: "Cascadia Code", Consolas, monospace; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); white-space: nowrap; scrollbar-width: thin; }
+.assistant-settings__command button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: rgba(255, 255, 255, .05); color: #c7cfd8; cursor: pointer; }
+.assistant-settings__command button svg { width: 13px; height: 13px; }

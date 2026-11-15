@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.62.0] - 2026-11-15
+
+### Added
+- A local, read-only MCP server: `aurora.exe --mcp` speaks the Model Context Protocol over stdio without opening a window. It offers 14 tools over the catalog, genres, genre tag spellings, albums with mixed genres, ratings, years and listening history. It reads Aurora's databases without migrating, recovering or publishing them, so it is safe to use while Aurora is running.
+- An **Assistant** panel in the top bar runs Claude Code or OpenAI Codex in the background with the user's own sign-in. It streams answers, shows each tool as it runs, continues the CLI session for follow-ups, and turns suggested queries into one-click searches. It has a Stop button and a 10-minute limit.
+- Settings → Connections → **AI assistant** has the library-access switch (off by default), the backend choice, detected or chosen CLI paths with a Test button, and copyable `claude mcp add` / `codex mcp add` commands.
+- [docs/ai-assistant.md](docs/ai-assistant.md) documents the tools, the privacy rules and how the CLIs are locked down.
+
+### Security
+- Tool results never include file paths, path-derived track keys or Last.fm's global play counts. In Aurora, the CLIs run with only Aurora's tools, no shell, no web search and no user configuration.
+
 ## [0.61.1] - 2026-11-15
 
 ### Fixed
