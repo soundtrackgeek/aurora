@@ -48,7 +48,11 @@ impl Backend {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+/// Fast, inexpensive models suit library questions: the tools do the work.
+pub(crate) const DEFAULT_CLAUDE_MODEL: &str = "claude-haiku-5-5";
+pub(crate) const DEFAULT_CODEX_MODEL: &str = "gpt-6-luna";
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct AssistantSettings {
     /// Lets MCP clients and the Assistant read the library. Off by default.
@@ -57,6 +61,22 @@ pub(crate) struct AssistantSettings {
     /// A user-chosen CLI executable; empty means detect it.
     pub(crate) claude_path: String,
     pub(crate) codex_path: String,
+    /// The model each CLI runs in Aurora; empty means the CLI's own default.
+    pub(crate) claude_model: String,
+    pub(crate) codex_model: String,
+}
+
+impl Default for AssistantSettings {
+    fn default() -> Self {
+        Self {
+            library_access: false,
+            backend: Backend::default(),
+            claude_path: String::new(),
+            codex_path: String::new(),
+            claude_model: DEFAULT_CLAUDE_MODEL.to_owned(),
+            codex_model: DEFAULT_CODEX_MODEL.to_owned(),
+        }
+    }
 }
 
 pub(crate) fn read_settings(directory: &Path) -> AssistantSettings {
@@ -151,6 +171,23 @@ pub(crate) fn update_settings(
 ) -> Result<AssistantStatus, String> {
     settings.claude_path = settings.claude_path.trim().to_owned();
     settings.codex_path = settings.codex_path.trim().to_owned();
+    settings.claude_model = settings.claude_model.trim().to_owned();
+    settings.codex_model = settings.codex_model.trim().to_owned();
+    for (label, model) in [
+        ("Claude Code", &settings.claude_model),
+        ("Codex", &settings.codex_model),
+    ] {
+        if !model.is_empty() && !valid_model_id(model) {
+            return Err(format!(
+                "{label} model: use a model id such as {}.",
+                if label == "Codex" {
+                    DEFAULT_CODEX_MODEL
+                } else {
+                    DEFAULT_CLAUDE_MODEL
+                }
+            ));
+        }
+    }
     for (label, path) in [
         ("Claude Code", &settings.claude_path),
         ("Codex", &settings.codex_path),
@@ -521,7 +558,7 @@ pub(crate) fn send(
             fs::write(&config, json.to_string())
                 .map_err(|error| format!("Could not write the MCP configuration: {error}"))?;
             (
-                claude_command(&executable, &config, &request),
+                claude_command(&executable, &config, &settings.claude_model, &request),
                 message.to_owned(),
             )
         }
@@ -534,7 +571,16 @@ pub(crate) fn send(
                     system_prompt(&request)
                 )
             };
-            (codex_command(&executable, &workspace, &mcp, &request), text)
+            (
+                codex_command(
+                    &executable,
+                    &workspace,
+                    &mcp,
+                    &settings.codex_model,
+                    &request,
+                ),
+                text,
+            )
         }
     };
     command
@@ -592,6 +638,15 @@ pub(crate) fn send(
     Ok(run_id)
 }
 
+/// Model ids are passed as CLI arguments, so they must not look like flags.
+fn valid_model_id(value: &str) -> bool {
+    value.len() <= 100
+        && value.starts_with(|character: char| character.is_ascii_alphanumeric())
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '.' | '_' | '[' | ']')
+        })
+}
+
 /// Session ids are passed as CLI arguments, so they must not look like flags.
 fn valid_session_id(value: &str) -> bool {
     value.len() <= 128
@@ -601,7 +656,7 @@ fn valid_session_id(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
-fn claude_command(executable: &Path, config: &Path, request: &SendRequest) -> Command {
+fn claude_command(executable: &Path, config: &Path, model: &str, request: &SendRequest) -> Command {
     let mut command = Command::new(executable);
     command.args([
         "-p",
@@ -628,6 +683,9 @@ fn claude_command(executable: &Path, config: &Path, request: &SendRequest) -> Co
         "--system-prompt",
     ]);
     command.arg(system_prompt(request));
+    if !model.is_empty() {
+        command.args(["--model", model]);
+    }
     if let Some(session) = &request.session_id {
         command.args(["--resume", session]);
     }
@@ -638,6 +696,7 @@ fn codex_command(
     executable: &Path,
     workspace: &Path,
     mcp: &[String],
+    model: &str,
     request: &SendRequest,
 ) -> Command {
     let mut command = Command::new(executable);
@@ -667,6 +726,9 @@ fn codex_command(
         "features.view_image=false",
     ] {
         command.args(["-c", override_value]);
+    }
+    if !model.is_empty() {
+        command.args(["-m", model]);
     }
     if let Some(session) = &request.session_id {
         command.args(["resume", session]);
@@ -1156,6 +1218,29 @@ mod tests {
         settings.library_access = true;
         write_settings(directory.path(), &settings).unwrap();
         assert!(library_access_enabled(directory.path()));
+    }
+
+    #[test]
+    fn models_default_to_haiku_and_luna_and_must_not_look_like_flags() {
+        let directory = tempfile::tempdir().unwrap();
+        // A settings file from 0.62.0 has no model fields.
+        fs::write(
+            directory.path().join(SETTINGS_FILE),
+            r#"{"libraryAccess":true}"#,
+        )
+        .unwrap();
+        let settings = read_settings(directory.path());
+        assert_eq!(settings.claude_model, DEFAULT_CLAUDE_MODEL);
+        assert_eq!(settings.codex_model, DEFAULT_CODEX_MODEL);
+        assert!(valid_model_id("claude-sonnet-5-5[1m]"));
+        assert!(valid_model_id("gpt-6.1-sol"));
+        assert!(!valid_model_id("--dangerously-skip-permissions"));
+        assert!(!valid_model_id("haiku; rm"));
+        let rejected = AssistantSettings {
+            codex_model: "-c x".to_owned(),
+            ..AssistantSettings::default()
+        };
+        assert!(update_settings(directory.path(), rejected).is_err());
     }
 
     #[test]

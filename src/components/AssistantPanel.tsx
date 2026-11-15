@@ -145,7 +145,7 @@ export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery }:
   return <aside className="assistant-panel" aria-label="Assistant">
     <header className="assistant-panel__header">
       <BotMessageSquare aria-hidden="true" />
-      <div><strong>Assistant</strong><small>Read-only · answers from your library</small></div>
+      <div><strong>Assistant</strong><small>Read-only · {(backend === "claudeCode" ? status?.settings.claudeModel : status?.settings.codexModel) || "CLI default model"}</small></div>
       <select aria-label="Assistant backend" value={backend} disabled={busy} onChange={(event) => void chooseBackend(event.target.value as AssistantBackend)}>
         {(["claudeCode", "codex"] as const).map((value) => <option key={value} value={value}>{backendLabels[value]}</option>)}
       </select>

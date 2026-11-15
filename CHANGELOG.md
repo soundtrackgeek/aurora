@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.62.1] - 2026-11-15
+
+### Changed
+- The Assistant chooses its model instead of using each CLI's default: Claude Haiku 5.5 (`claude-haiku-5-5`) for Claude Code and GPT-6-Luna (`gpt-6-luna`) for Codex. Settings → Connections → AI assistant has a model field for each; an empty field uses the CLI's default. The panel header shows the model in use. Model IDs that could be read as command-line flags are refused.
+
 ## [0.62.0] - 2026-11-15
 
 ### Added

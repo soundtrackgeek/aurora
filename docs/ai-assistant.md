@@ -1,6 +1,6 @@
 # AI assistant and MCP server
 
-*Aurora 0.62.0*
+*Aurora 0.62.1*
 
 Aurora exposes its library to AI assistants through a read-only [Model Context Protocol](https://modelcontextprotocol.io) server, and its **Assistant** panel runs Claude Code or OpenAI Codex against that server. The design and later phases are in [ai-assistant-proposal.md](ai-assistant-proposal.md).
 
@@ -39,10 +39,10 @@ The server cleans every result before it leaves:
 
 For each message, Aurora runs the chosen CLI with the prompt on stdin. It parses the CLI's streamed JSON into text, tool-status and done events, which it sends to the panel on `assistant://event`.
 
-- **Claude Code:** `-p --output-format stream-json --verbose --include-partial-messages --mcp-config <generated> --strict-mcp-config --tools "" --allowedTools mcp__aurora --permission-mode dontAsk --setting-sources ""`, with Aurora's system prompt, and `--resume` for follow-ups.
-- **Codex:** `exec --json --ignore-user-config --sandbox read-only`, with Aurora's MCP server added through `-c`, `approval_policy="never"`, web search off, and the shell, plugin, app and multi-agent features off. `resume <id>` continues a conversation.
+- **Claude Code:** `-p --output-format stream-json --verbose --include-partial-messages --mcp-config <generated> --strict-mcp-config --tools "" --allowedTools mcp__aurora --permission-mode dontAsk --setting-sources ""`, with Aurora's system prompt, `--model` (default `claude-haiku-5-5`), and `--resume` for follow-ups.
+- **Codex:** `exec --json --ignore-user-config --sandbox read-only`, with Aurora's MCP server added through `-c`, `approval_policy="never"`, web search off, and the shell, plugin, app and multi-agent features off. `-m` picks the model (default `gpt-6-luna`), and `resume <id>` continues a conversation.
 
-Aurora validates session IDs before passing them to the CLI. A run times out after 10 minutes, and **Stop** kills the process.
+The models are `claudeModel` and `codexModel` in `aurora-assistant.json`; an empty value leaves out the flag, so the CLI uses its own default. Aurora validates model and session IDs before passing them to the CLI, so neither can be read as a flag. A run times out after 10 minutes, and **Stop** kills the process.
 
 ## Not yet
 

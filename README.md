@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.62.1** runs the Assistant on fast, inexpensive models: Claude Haiku 5.5 (`claude-haiku-5-5`) for Claude Code and GPT-6-Luna (`gpt-6-luna`) for Codex. Change either model, or leave it empty to use the CLI's own default, in Settings → Connections → AI assistant.
+
 Aurora **0.62.0** adds an AI assistant that answers questions about your library, such as which genre tags are spelled several ways, what you played most last month, or which albums mix genres. Turn on **Settings → Connections → AI assistant → Let AI assistants read my library**, then open **Assistant** in the top bar. It runs Claude Code or OpenAI Codex in the background with your own sign-in. The same read-only tools work from your terminal: `aurora.exe --mcp` is a local MCP server, and the settings show the `claude mcp add` and `codex mcp add` commands that register it. See [AI assistant and MCP server](#ai-assistant-and-mcp-server-0620).
 
 Aurora **0.61.1** keeps an album under its `group:` heading after you click it; before, opening an album's details dropped its heading and moved it into the previous group's row.
@@ -129,7 +131,7 @@ can originate inside Aurora even when Music Library is closed.
 Aurora answers questions about the library through a local, read-only [MCP](https://modelcontextprotocol.io) server. Music Library's catalog is included, because Aurora reads it directly; Music Library itself needs no changes.
 
 - **Turn it on.** Settings → Connections → AI assistant → **Let AI assistants read my library**. It is off by default, and while it is off every tool call is refused, including calls from your terminal. Aurora rereads the setting on every call.
-- **In Aurora.** The **Assistant** button in the top bar opens a chat panel. Choose Claude Code or OpenAI Codex. Aurora runs the CLI in the background with its own sign-in, so it counts against your Claude or ChatGPT plan, and Aurora stores no AI keys. Follow-up questions continue the same CLI session. Click a query in an answer (shown in code style) to run it in Aurora's search. **Stop** ends a run, and runs are stopped after 10 minutes.
+- **In Aurora.** The **Assistant** button in the top bar opens a chat panel. Choose Claude Code or OpenAI Codex. It uses Claude Haiku 5.5 or GPT-6-Luna unless you choose another model in the settings. Aurora runs the CLI in the background with its own sign-in, so it counts against your Claude or ChatGPT plan, and Aurora stores no AI keys. Follow-up questions continue the same CLI session. Click a query in an answer (shown in code style) to run it in Aurora's search. **Stop** ends a run, and runs are stopped after 10 minutes.
 - **In your terminal.** Register the server once, then ask from any folder:
   - `claude mcp add --scope user aurora -- "C:\Users\<you>\AppData\Local\Aurora\aurora.exe" --mcp`
   - `codex mcp add aurora -- "C:\Users\<you>\AppData\Local\Aurora\aurora.exe" --mcp`

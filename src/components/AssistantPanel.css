@@ -75,6 +75,7 @@
 .assistant-settings__backend small { overflow: hidden; color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); text-overflow: ellipsis; white-space: nowrap; }
 .assistant-settings__backend .button { min-height: 28px; padding: 0 10px; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
 .assistant-settings__paths { display: grid; gap: 8px; }
+.assistant-settings__hint { color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); line-height: 1.35; }
 .assistant-settings__terminal { display: grid; gap: 6px; margin-top: 12px; }
 .assistant-settings__terminal strong { color: #e3e8ed; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); font-weight: 560; }
 .assistant-settings__terminal small { color: var(--muted); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); line-height: 1.35; }

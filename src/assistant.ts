@@ -9,6 +9,9 @@ export interface AssistantSettings {
   backend: AssistantBackend;
   claudePath: string;
   codexPath: string;
+  /** Model ids passed to each CLI; empty uses the CLI's own default. */
+  claudeModel: string;
+  codexModel: string;
 }
 
 export interface AssistantCliStatus { path: string | null; source: "settings" | "detected" | null }
@@ -57,7 +60,7 @@ export const emptyConversation: AssistantConversation = { sessions: {}, turns: [
 export const backendLabels: Record<AssistantBackend, string> = { claudeCode: "Claude Code", codex: "OpenAI Codex" };
 
 const previewStatus: AssistantStatus = {
-  settings: { libraryAccess: false, backend: "claudeCode", claudePath: "", codexPath: "" },
+  settings: { libraryAccess: false, backend: "claudeCode", claudePath: "", codexPath: "", claudeModel: "claude-haiku-5-5", codexModel: "gpt-6-luna" },
   claude: { path: null, source: null },
   codex: { path: null, source: null },
   mcpCommand: ["aurora.exe", "--mcp"],

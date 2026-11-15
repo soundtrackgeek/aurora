@@ -14,9 +14,13 @@ import {
 import { isTauriRuntime } from "../library";
 import "./AssistantPanel.css";
 
+function editableFields(settings: AssistantSettings) {
+  return { claudePath: settings.claudePath, codexPath: settings.codexPath, claudeModel: settings.claudeModel, codexModel: settings.codexModel };
+}
+
 export function AssistantSettingsPanel() {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
-  const [paths, setPaths] = useState({ claudePath: "", codexPath: "" });
+  const [paths, setPaths] = useState({ claudePath: "", codexPath: "", claudeModel: "", codexModel: "" });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -26,7 +30,7 @@ export function AssistantSettingsPanel() {
       .then((value) => {
         if (!active) return;
         setStatus(value);
-        setPaths({ claudePath: value.settings.claudePath, codexPath: value.settings.codexPath });
+        setPaths(editableFields(value.settings));
       })
       .catch(() => { if (active) setMessage("Could not read the assistant settings."); });
     return () => { active = false; };
@@ -38,7 +42,7 @@ export function AssistantSettingsPanel() {
     try {
       const saved = await saveAssistantSettings({ ...status.settings, ...next });
       setStatus(saved);
-      setPaths({ claudePath: saved.settings.claudePath, codexPath: saved.settings.codexPath });
+      setPaths(editableFields(saved.settings));
       if (confirmation) setMessage(confirmation);
     } catch (error) { setMessage(String(error instanceof Error ? error.message : error)); }
     finally { setBusy(false); }
@@ -57,7 +61,7 @@ export function AssistantSettingsPanel() {
   }
 
   const preview = !isTauriRuntime();
-  const pathsChanged = status !== null && (paths.claudePath.trim() !== status.settings.claudePath || paths.codexPath.trim() !== status.settings.codexPath);
+  const pathsChanged = status !== null && (Object.keys(paths) as (keyof typeof paths)[]).some((key) => paths[key].trim() !== status.settings[key]);
 
   return <section className="display-settings__section assistant-settings" aria-labelledby="assistant-settings-title">
     <header>
@@ -86,7 +90,10 @@ export function AssistantSettingsPanel() {
     <div className="assistant-settings__paths">
       <label className="metadata-token-field"><span>Claude Code executable (optional)</span><input type="text" spellCheck={false} value={paths.claudePath} disabled={busy || preview} placeholder={status?.claude.source === "detected" ? status.claude.path ?? "" : "Detected automatically"} onChange={(event) => setPaths((current) => ({ ...current, claudePath: event.target.value }))} /></label>
       <label className="metadata-token-field"><span>Codex executable (optional)</span><input type="text" spellCheck={false} value={paths.codexPath} disabled={busy || preview} placeholder={status?.codex.source === "detected" ? status.codex.path ?? "" : "Detected automatically · codex.exe"} onChange={(event) => setPaths((current) => ({ ...current, codexPath: event.target.value }))} /></label>
-      <div className="artist-settings-actions"><button type="button" className="button button--primary" disabled={busy || !pathsChanged} onClick={() => void save({ claudePath: paths.claudePath, codexPath: paths.codexPath }, "Executable paths saved.")}>Save paths</button></div>
+      <label className="metadata-token-field"><span>Claude Code model</span><input type="text" spellCheck={false} value={paths.claudeModel} disabled={busy || preview} placeholder="Claude Code’s default model" onChange={(event) => setPaths((current) => ({ ...current, claudeModel: event.target.value }))} /></label>
+      <label className="metadata-token-field"><span>Codex model</span><input type="text" spellCheck={false} value={paths.codexModel} disabled={busy || preview} placeholder="Codex’s default model" onChange={(event) => setPaths((current) => ({ ...current, codexModel: event.target.value }))} /></label>
+      <small className="assistant-settings__hint">Leave a model empty to use the CLI’s own default. Aurora starts with Claude Haiku 5.5 (claude-haiku-5-5) and GPT-6-Luna (gpt-6-luna), which are fast and inexpensive.</small>
+      <div className="artist-settings-actions"><button type="button" className="button button--primary" disabled={busy || !pathsChanged} onClick={() => void save({ claudePath: paths.claudePath, codexPath: paths.codexPath, claudeModel: paths.claudeModel, codexModel: paths.codexModel }, "Assistant settings saved.")}>Save</button></div>
     </div>
 
     {status && <div className="assistant-settings__terminal">
