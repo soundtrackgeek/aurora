@@ -8,6 +8,8 @@ export interface AssistantSettings {
   libraryAccess: boolean;
   /** Lets assistants show views in Aurora and propose tag changes for review. */
   appControl: boolean;
+  /** Lets the Assistant in Aurora search and read the web. */
+  webAccess: boolean;
   backend: AssistantBackend;
   claudePath: string;
   codexPath: string;
@@ -62,7 +64,7 @@ export const emptyConversation: AssistantConversation = { sessions: {}, turns: [
 export const backendLabels: Record<AssistantBackend, string> = { claudeCode: "Claude Code", codex: "OpenAI Codex" };
 
 const previewStatus: AssistantStatus = {
-  settings: { libraryAccess: false, appControl: false, backend: "claudeCode", claudePath: "", codexPath: "", claudeModel: "claude-haiku-5-5", codexModel: "gpt-6-luna" },
+  settings: { libraryAccess: false, appControl: false, webAccess: true, backend: "claudeCode", claudePath: "", codexPath: "", claudeModel: "claude-haiku-5-5", codexModel: "gpt-6-luna" },
   claude: { path: null, source: null },
   codex: { path: null, source: null },
   mcpCommand: ["aurora.exe", "--mcp"],
@@ -245,4 +247,7 @@ export const toolLabels: Record<string, string> = {
   show_in_aurora: "Showing it in Aurora",
   propose_genre_changes: "Sending genre changes for review",
   proposal_status: "Checking the review",
+  WebSearch: "Searching the web",
+  WebFetch: "Reading a web page",
+  web_search: "Searching the web",
 };

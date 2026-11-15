@@ -24,6 +24,7 @@ const suggestions = [
   "What did I listen to most last month?",
   "Find albums whose tracks have mixed genres, starting with Synthpop.",
   "Which 1980s albums have I loved the most tracks on?",
+  "Look up the genre of the album I have open on Discogs or MusicBrainz.",
 ];
 
 type AssistantPanelProps = {
@@ -148,7 +149,7 @@ export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery, r
   return <aside className="assistant-panel" aria-label="Assistant">
     <header className="assistant-panel__header">
       <BotMessageSquare aria-hidden="true" />
-      <div><strong>Assistant</strong><small>{status?.settings.appControl ? "Controls Aurora" : "Read-only"} · {(backend === "claudeCode" ? status?.settings.claudeModel : status?.settings.codexModel) || "CLI default model"}</small></div>
+      <div><strong>Assistant</strong><small>{status?.settings.appControl ? "Controls Aurora" : "Read-only"}{status?.settings.webAccess ? " · Web" : ""} · {(backend === "claudeCode" ? status?.settings.claudeModel : status?.settings.codexModel) || "CLI default model"}</small></div>
       <select aria-label="Assistant backend" value={backend} disabled={busy} onChange={(event) => void chooseBackend(event.target.value as AssistantBackend)}>
         {(["claudeCode", "codex"] as const).map((value) => <option key={value} value={value}>{backendLabels[value]}</option>)}
       </select>

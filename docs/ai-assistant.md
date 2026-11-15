@@ -1,6 +1,6 @@
 # AI assistant and MCP server
 
-*Aurora 0.63.0*
+*Aurora 0.64.0*
 
 Aurora exposes its library to AI assistants through a local [Model Context Protocol](https://modelcontextprotocol.io) server, and its **Assistant** panel runs Claude Code or OpenAI Codex against that server. Most tools only read. Two tools act on Aurora, and only while **Let AI assistants control Aurora** is on: one opens a search in the running app, and one sends genre changes that the user reviews and applies in Aurora. The design and later phases are in [ai-assistant-proposal.md](ai-assistant-proposal.md).
 
@@ -55,8 +55,14 @@ The server cleans every result before it leaves:
 
 For each message, Aurora runs the chosen CLI with the prompt on stdin. It parses the CLI's streamed JSON into text, tool-status and done events, which it sends to the panel on `assistant://event`.
 
-- **Claude Code:** `-p --output-format stream-json --verbose --include-partial-messages --mcp-config <generated> --strict-mcp-config --tools "" --allowedTools mcp__aurora --permission-mode dontAsk --setting-sources ""`, with Aurora's system prompt, `--model` (default `claude-haiku-5-5`), and `--resume` for follow-ups.
-- **Codex:** `exec --json --ignore-user-config --sandbox read-only`, with Aurora's MCP server added through `-c`, `approval_policy="never"`, web search off, and the shell, plugin, app and multi-agent features off. Because `never` declines tools that are not read-only, `show_in_aurora` and `propose_genre_changes` get `approval_mode="approve"`. `-m` picks the model (default `gpt-6-luna`), and `resume <id>` continues a conversation.
+- **Claude Code:** `-p --output-format stream-json --verbose --include-partial-messages --mcp-config <generated> --strict-mcp-config --tools "WebSearch,WebFetch" --allowedTools mcp__aurora,WebSearch,WebFetch --permission-mode dontAsk --setting-sources ""`, with Aurora's system prompt, `--model` (default `claude-haiku-5-5`), and `--resume` for follow-ups. With web search off, `--tools ""` and `--allowedTools mcp__aurora`.
+- **Codex:** `exec --json --ignore-user-config --sandbox read-only`, with Aurora's MCP server added through `-c`, `approval_policy="never"`, `web_search="live"` (`"disabled"` with web search off), and the shell, plugin, app and multi-agent features off. Because `never` declines tools that are not read-only, `show_in_aurora` and `propose_genre_changes` get `approval_mode="approve"`. `-m` picks the model (default `gpt-6-luna`), and `resume <id>` continues a conversation.
+
+## Web search
+
+`webAccess` in `aurora-assistant.json` (on by default, **Let the assistant search the web** in the settings) gives the Assistant in Aurora its CLI's own web search: Claude Code's `WebSearch` and `WebFetch`, or Codex's live web search. The prompt asks it to use the web when the library cannot answer, such as an obscure album's genre, label or year, to prefer Discogs, MusicBrainz, Bandcamp, AllMusic, RateYourMusic and Wikipedia, to name sources, to separate web facts from library facts, and never to put file paths or private details in a search. The panel shows each search and page read as a step. The switch does not affect Claude Code or Codex in a terminal, where the CLI's own settings decide.
+
+Web pages are untrusted text. They cannot write anything: tag changes still only reach Aurora as proposals the user reviews.
 
 The system prompt tells the assistant what it may do: with control on, to call `show_in_aurora` when asked to show something and to propose genre changes instead of claiming to write them; with control off, to point to the switch and give a query to paste. In a terminal, Claude Code and Codex ask before the acting tools unless you allow them.
 

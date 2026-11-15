@@ -81,6 +81,12 @@ export function AssistantSettingsPanel() {
       <i aria-hidden="true" />
     </label>
 
+    <label className="settings-switch">
+      <span><strong>Let the assistant search the web</strong><small>The Assistant in Aurora can look things up online, such as the genre, label or year of an obscure album, with Claude Code's or Codex's own web search, and names its sources. Searches contain artist and album names, never file paths. In a terminal, the CLI's own settings decide.</small></span>
+      <input type="checkbox" checked={status?.settings.webAccess ?? true} disabled={busy || !status || preview} onChange={(event) => void save({ webAccess: event.target.checked })} />
+      <i aria-hidden="true" />
+    </label>
+
     <fieldset className="assistant-settings__backends" disabled={busy || !status || preview}>
       <legend>Assistant in Aurora uses</legend>
       {(["claudeCode", "codex"] as const).map((backend) => {

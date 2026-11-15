@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.64.0] - 2026-11-15
+
+### Added
+- The Assistant in Aurora can search and read the web, as Claude Code and Codex do in a terminal, for example to find the genre, label or year of an obscure album. It is told to prefer Discogs, MusicBrainz, Bandcamp, AllMusic, RateYourMusic and Wikipedia, to name its sources, and to say what comes from the web and what from the library. **Settings → Connections → AI assistant → Let the assistant search the web** turns it off; it is on by default.
+- The panel shows web searches and page reads as steps, and its header says "Web" while it is on. A new suggestion looks up the open album's genre.
+
+### Changed
+- Claude Code in Aurora gets only its `WebSearch` and `WebFetch` tools besides Aurora's (still no files or shell), and Codex runs with `web_search="live"`. With the switch off, both stay offline as before.
+
 ## [0.63.0] - 2026-11-15
 
 ### Added

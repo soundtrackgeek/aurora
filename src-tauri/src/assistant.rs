@@ -60,6 +60,9 @@ pub(crate) struct AssistantSettings {
     /// Lets them show views in the running Aurora and propose tag changes
     /// for the user to review. Off by default; needs `library_access`.
     pub(crate) app_control: bool,
+    /// Lets the Assistant in Aurora search and read the web, for example to
+    /// look up the genre of an obscure album. On by default.
+    pub(crate) web_access: bool,
     pub(crate) backend: Backend,
     /// A user-chosen CLI executable; empty means detect it.
     pub(crate) claude_path: String,
@@ -74,6 +77,7 @@ impl Default for AssistantSettings {
         Self {
             library_access: false,
             app_control: false,
+            web_access: true,
             backend: Backend::default(),
             claude_path: String::new(),
             codex_path: String::new(),
@@ -491,7 +495,7 @@ impl AssistantRuns {
     }
 }
 
-fn system_prompt(request: &SendRequest, app_control: bool) -> String {
+fn system_prompt(request: &SendRequest, app_control: bool, web_access: bool) -> String {
     let mut prompt = format!(
         "You are the assistant inside Aurora, a desktop app for exploring the user's own music library \
          (about a million MP3s catalogued by the companion app Music Library). Answer with facts from the \
@@ -500,9 +504,20 @@ fn system_prompt(request: &SendRequest, app_control: bool) -> String {
          Today is {today}. The user's UTC offset is {offset} minutes: pass utcOffsetMinutes={offset} to \
          listening_report and resolve dates such as \"last month\" from today.\n\
          {abilities}\n\
+         {web}\n\
          Be concise. Use short Markdown lists or tables. Name albums as Artist – Album (Year).",
         today = request.today,
         offset = request.utc_offset_minutes,
+        web = if web_access {
+            "You can search and read the web. Use it when the library cannot answer, for example to find \
+             the genre, label, year or background of an obscure album or artist: prefer Discogs, \
+             MusicBrainz, Bandcamp, AllMusic, RateYourMusic and Wikipedia, and name the sources you used. \
+             Say what comes from the web and what comes from the library. Never send file paths or \
+             other private details in a search."
+        } else {
+            "Web search is turned off. If the user asks you to look something up online, say that they \
+             can turn on \"Let the assistant search the web\" in Settings → Connections → AI assistant."
+        },
         abilities = if app_control {
             "You can change what Aurora shows: when the user asks to see, show or open results, call \
              show_in_aurora with the view and a query (field terms joined with AND) instead of only \
@@ -577,7 +592,8 @@ pub(crate) fn send(
                     &executable,
                     &config,
                     &settings.claude_model,
-                    &system_prompt(&request, settings.app_control),
+                    &system_prompt(&request, settings.app_control, settings.web_access),
+                    settings.web_access,
                     &request,
                 ),
                 message.to_owned(),
@@ -589,7 +605,7 @@ pub(crate) fn send(
             } else {
                 format!(
                     "<aurora_instructions>\n{}\n</aurora_instructions>\n\n{message}",
-                    system_prompt(&request, settings.app_control)
+                    system_prompt(&request, settings.app_control, settings.web_access)
                 )
             };
             (
@@ -598,6 +614,7 @@ pub(crate) fn send(
                     &workspace,
                     &mcp,
                     &settings.codex_model,
+                    settings.web_access,
                     &request,
                 ),
                 text,
@@ -682,6 +699,7 @@ fn claude_command(
     config: &Path,
     model: &str,
     system: &str,
+    web_access: bool,
     request: &SendRequest,
 ) -> Command {
     let mut command = Command::new(executable);
@@ -694,13 +712,20 @@ fn claude_command(
         "--mcp-config",
     ]);
     command.arg(config);
+    // No files or shell. With web access, only web search and fetch.
+    let (tools, allowed) = if web_access {
+        ("WebSearch,WebFetch", "mcp__aurora,WebSearch,WebFetch")
+    } else {
+        ("", "mcp__aurora")
+    };
     command.args([
         "--strict-mcp-config",
-        // No built-in tools: no files, shell, or web.
         "--tools",
-        "",
+        tools,
         "--allowedTools",
-        "mcp__aurora",
+        allowed,
+    ]);
+    command.args([
         // Anything not allowed is refused instead of waiting for a prompt.
         "--permission-mode",
         "dontAsk",
@@ -724,6 +749,7 @@ fn codex_command(
     workspace: &Path,
     mcp: &[String],
     model: &str,
+    web_access: bool,
     request: &SendRequest,
 ) -> Command {
     let mut command = Command::new(executable);
@@ -743,7 +769,11 @@ fn codex_command(
         mcp_command.as_str(),
         mcp_args.as_str(),
         "approval_policy=\"never\"",
-        "web_search=\"disabled\"",
+        if web_access {
+            "web_search=\"live\""
+        } else {
+            "web_search=\"disabled\""
+        },
         "features.shell_tool=false",
         "features.unified_exec=false",
         "features.apps=false",
@@ -1069,6 +1099,15 @@ impl StreamParser {
                             },
                         }]
                     }
+                    Some("web_search") => vec![AssistantEvent::Tool {
+                        id: text(item, "id").unwrap_or_default(),
+                        name: "web_search".to_owned(),
+                        status: if completed {
+                            ToolStatus::Done
+                        } else {
+                            ToolStatus::Running
+                        },
+                    }],
                     // `error` items are configuration warnings, not failures.
                     _ => Vec::new(),
                 }
@@ -1210,6 +1249,8 @@ mod tests {
                 r#"{"type":"item.completed","item":{"id":"item_0","type":"error","message":"deprecated feature"}}"#,
                 r#"{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"aurora","tool":"library_overview","status":"in_progress","error":null}}"#,
                 r#"{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"aurora","tool":"library_overview","status":"completed","error":null}}"#,
+                r#"{"type":"item.started","item":{"id":"ws-1","type":"web_search","query":""}}"#,
+                r#"{"type":"item.completed","item":{"id":"ws-1","type":"web_search","query":"ladyhawke discogs"}}"#,
                 r#"{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"You have 5,921 loved tracks."}}"#,
                 r#"{"type":"turn.completed","usage":{}}"#,
             ],
@@ -1229,6 +1270,16 @@ mod tests {
                 AssistantEvent::Tool {
                     id: "item_1".into(),
                     name: "library_overview".into(),
+                    status: ToolStatus::Done
+                },
+                AssistantEvent::Tool {
+                    id: "ws-1".into(),
+                    name: "web_search".into(),
+                    status: ToolStatus::Running
+                },
+                AssistantEvent::Tool {
+                    id: "ws-1".into(),
+                    name: "web_search".into(),
                     status: ToolStatus::Done
                 },
                 AssistantEvent::TextBlock {
@@ -1273,6 +1324,44 @@ mod tests {
             ..AssistantSettings::default()
         };
         assert!(update_settings(directory.path(), rejected).is_err());
+    }
+
+    #[test]
+    fn web_access_is_on_by_default_and_adds_only_web_tools() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join(SETTINGS_FILE),
+            r#"{"libraryAccess":true}"#,
+        )
+        .unwrap();
+        assert!(read_settings(directory.path()).web_access);
+        let request: SendRequest = serde_json::from_value(json!({
+            "backend": "claudeCode", "message": "hi", "today": "2026-11-15", "utcOffsetMinutes": 60
+        }))
+        .unwrap();
+        let args = |command: &Command| {
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        let path = Path::new("x");
+        let claude = args(&claude_command(path, path, "", "s", true, &request));
+        let tools = claude.iter().position(|arg| arg == "--tools").unwrap();
+        assert_eq!(claude[tools + 1], "WebSearch,WebFetch");
+        assert_eq!(claude[tools + 3], "mcp__aurora,WebSearch,WebFetch");
+        let offline = args(&claude_command(path, path, "", "s", false, &request));
+        let tools = offline.iter().position(|arg| arg == "--tools").unwrap();
+        assert_eq!(offline[tools + 1], "");
+        assert_eq!(offline[tools + 3], "mcp__aurora");
+        let mcp = ["aurora".to_owned(), "--mcp".to_owned()];
+        let codex = args(&codex_command(path, path, &mcp, "", true, &request));
+        assert!(codex.iter().any(|arg| arg == "web_search=\"live\""));
+        assert!(codex.iter().any(|arg| arg == "features.shell_tool=false"));
+        let codex = args(&codex_command(path, path, &mcp, "", false, &request));
+        assert!(codex.iter().any(|arg| arg == "web_search=\"disabled\""));
+        assert!(system_prompt(&request, false, true).contains("search and read the web"));
+        assert!(system_prompt(&request, false, false).contains("Web search is turned off"));
     }
 
     #[test]
