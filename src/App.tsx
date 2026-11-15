@@ -1,4 +1,5 @@
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
+import { listenToAssistantShow, listenToGenreProposals, loadGenreProposals, upsertProposal, type GenreProposal } from "./assistant";
 import { AlbumSidesPanel } from "./components/AlbumSidesPanel";
 import { SonicJourneyPanel } from "./components/SonicJourneyPanel";
 import { useSonicJourney } from "./useSonicJourney";
@@ -178,6 +179,7 @@ import {
 } from "./years";
 
 const LazyAssistantPanel = lazy(async () => ({ default: (await import("./components/AssistantPanel")).AssistantPanel }));
+const LazyAssistantProposalsDialog = lazy(async () => ({ default: (await import("./components/AssistantProposalsDialog")).AssistantProposalsDialog }));
 const AddFolderDialog = lazy(async () => {
   const module = await import("./components/AddFolderDialog");
   return { default: module.AddFolderDialog };
@@ -636,6 +638,8 @@ function App() {
 
   const onChartsChanged = useCallback(() => setChartReloadToken(value => value + 1), [setChartReloadToken]);
   const [librarySyncOpen, setLibrarySyncOpen] = useState(false);
+  const [genreProposals, setGenreProposals] = useState<GenreProposal[]>([]);
+  const [proposalsOpen, setProposalsOpen] = useState(false);
   const { catalogSyncNotice, handleCatalogSync } = usePendingLibrarySync({
     libraryReady,
     reloadToken,
@@ -1072,6 +1076,34 @@ function App() {
     },
   });
 
+  // Assistants in Aurora or a terminal can open a search here and send genre changes for review.
+  const openSavedExplorerViewRef = useRef(openSavedExplorerView);
+  useLayoutEffect(() => { openSavedExplorerViewRef.current = openSavedExplorerView; }, [openSavedExplorerView]);
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: (() => void)[] = [];
+    const keep = (unlisten: () => void) => { if (disposed) unlisten(); else unlisteners.push(unlisten); };
+    void loadGenreProposals()
+      .then((proposals) => { if (!disposed) setGenreProposals(proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "applying")); })
+      .catch(() => undefined);
+    void listenToAssistantShow(({ view, query }) => {
+      const explorerView = view === "songs" ? "tracks" : view;
+      openSavedExplorerViewRef.current(explorerView, { ...defaultExplorerFilters, sort: defaultExplorerSort[explorerView], query });
+      setSyncMessage(`An AI assistant opened ${view}: ${query}`);
+    }).then(keep).catch(() => undefined);
+    void listenToGenreProposals((proposal) => {
+      setGenreProposals((current) => upsertProposal(current, proposal));
+      if (proposal.status === "pending" && proposal.albums.every((album) => album.status === "pending")) setProposalsOpen(true);
+    }).then(keep).catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, []);
+  const proposalsWaiting = genreProposals
+    .filter((proposal) => proposal.status === "pending")
+    .reduce((count, proposal) => count + proposal.albums.filter((album) => album.status === "pending" || album.status === "failed").length, 0);
+
   function expandLibraryNavigation() {
     setLayoutPreferences((current) => current.libraryExpanded
       ? current
@@ -1431,6 +1463,10 @@ function App() {
       {contextTags && <ContextTagDialog onClose={() => setContextTags(null)}><TagEditor
         target={contextTags.albumIds?.length ? { kind: "albums", albumIds: [...contextTags.albumIds], label: contextTags.label } : { kind: "tracks", tracks: (contextTags.tracks ?? []).map(track => ({ trackId: track.id, trackKey: track.trackKey })), label: contextTags.label }}
         onTracksChange={applyTrackChanges} onCatalogSync={refreshTagEditorCatalogViews} onAlbumRenamed={refreshAfterAlbumRename} /></ContextTagDialog>}
+      {proposalsOpen && <Suspense fallback={null}><LazyAssistantProposalsDialog proposals={genreProposals} onClose={() => setProposalsOpen(false)}
+        onProposalChange={(proposal) => setGenreProposals((current) => upsertProposal(current, proposal))}
+        onClear={(proposalId) => setGenreProposals((current) => current.filter((proposal) => proposal.id !== proposalId))}
+        onApplied={(albums) => void refreshTagEditorCatalogViews({ status: "pending", pendingFolderCount: albums })} /></Suspense>}
       {librarySyncOpen && <LibrarySyncDialog onClose={() => setLibrarySyncOpen(false)} onCatalogSync={(sync) => void handleCatalogSync(sync)}
         onOpenAlbum={(albumId, albumTitle) => { setLibrarySyncOpen(false); openAlbum(albumId, albumTitle); }} />}
       {playlistSaveMessage && <div className="curation-message" role="status">{playlistSaveMessage}<button type="button" aria-label="Dismiss playlist message" onClick={()=>setPlaylistSaveMessage(null)}>×</button></div>}
@@ -1467,7 +1503,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.62.1</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.63.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2123,6 +2159,8 @@ function App() {
               const view = activeNav === "Songs" ? "tracks" : activeNav === "Artists" ? "artists" : "albums";
               openSavedExplorerView(view, { ...defaultExplorerFilters, sort: defaultExplorerSort[view], query });
             }}
+            reviewCount={proposalsWaiting}
+            onReviewChanges={() => setProposalsOpen(true)}
           />
         </Suspense>
       )}

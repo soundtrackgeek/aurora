@@ -968,6 +968,8 @@ enum CatalogSearchField {
     Completeness,
     Love,
     Single,
+    /// `genres:` counts genre values: Music Library joins several with `;`.
+    GenreCount,
     Sonic,
     Extended(ExtendedSearchField),
 }
@@ -982,6 +984,7 @@ impl CatalogSearchField {
             | Self::Completeness
             | Self::Love
             | Self::Single
+            | Self::GenreCount
             | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
@@ -1002,6 +1005,7 @@ impl CatalogSearchField {
             | Self::Completeness
             | Self::Love
             | Self::Single
+            | Self::GenreCount
             | Self::Sonic
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
@@ -1044,6 +1048,10 @@ enum CatalogSearchMatch {
     },
     /// Official singles (Music Library's MusicBrainz data): per album in
     /// Albums and Artists, per track in Songs.
+    GenreCountRange {
+        from: Option<u32>,
+        to: Option<u32>,
+    },
     SinglesRange {
         from: Option<u32>,
         to: Option<u32>,
@@ -1090,6 +1098,7 @@ impl CatalogSearch {
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
             | CatalogSearchMatch::SinglesRange { .. }
+            | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
             CatalogSearchMatch::Analyzed(_) => None,
         }
@@ -1218,6 +1227,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "sonic" => Some(CatalogSearchField::Sonic),
         "love" => Some(CatalogSearchField::Love),
         "single" | "singles" => Some(CatalogSearchField::Single),
+        "genres" => Some(CatalogSearchField::GenreCount),
         _ => None,
     }
 }
@@ -1404,6 +1414,7 @@ fn search_number_label(field: CatalogSearchField) -> &'static str {
     match field {
         CatalogSearchField::Completeness => "cr",
         CatalogSearchField::Single => "single",
+        CatalogSearchField::GenreCount => "genres",
         _ => "love",
     }
 }
@@ -1412,6 +1423,9 @@ fn parse_search_number(value: &str, field: CatalogSearchField) -> Result<u32, St
     let invalid = match field {
         CatalogSearchField::Completeness => {
             "cr bounds must be whole percentages from 0 through 100.".to_owned()
+        }
+        CatalogSearchField::GenreCount => {
+            "genres bounds must be non-negative whole genre counts.".to_owned()
         }
         field => format!(
             "{} bounds must be non-negative whole track counts.",
@@ -1436,6 +1450,8 @@ fn parse_search_number_range(
         let number = parse_search_number(value, field)?;
         return match field {
             CatalogSearchField::Completeness => Ok((Some(0), Some(number))),
+            // A genre count is exact: genres:1 means one genre, not one or more.
+            CatalogSearchField::GenreCount => Ok((Some(number), Some(number))),
             CatalogSearchField::Love | CatalogSearchField::Single if number == 0 => {
                 Ok((Some(0), Some(0)))
             }
@@ -1670,6 +1686,11 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                             parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
                         CatalogSearchMatch::SinglesRange { from, to }
                     }
+                    CatalogSearchField::GenreCount => {
+                        let (from, to) =
+                            parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
+                        CatalogSearchMatch::GenreCountRange { from, to }
+                    }
                     CatalogSearchField::Sonic => {
                         match exact
                             .as_deref()
@@ -1895,6 +1916,7 @@ fn non_prefix_predicate(
         CatalogSearchMatch::CompletenessRange { .. }
         | CatalogSearchMatch::LovedTracksRange { .. }
         | CatalogSearchMatch::SinglesRange { .. }
+        | CatalogSearchMatch::GenreCountRange { .. }
         | CatalogSearchMatch::Extended { .. } => None,
     }
 }
@@ -1939,8 +1961,62 @@ fn album_level_predicate(
             }
             Some(format!("({})", predicates.join(" AND ")))
         }
+        CatalogSearchMatch::GenreCountRange { from, to } => Some(count_range_predicate(
+            &album_genre_count_sql(alias),
+            *from,
+            *to,
+            params,
+        )),
         _ => None,
     }
+}
+
+fn count_range_predicate(
+    count: &str,
+    from: Option<u32>,
+    to: Option<u32>,
+    params: &mut Vec<Value>,
+) -> String {
+    let mut predicates = Vec::new();
+    if let Some(from) = from {
+        params.push(Value::Integer(i64::from(from)));
+        predicates.push(format!("{count} >= ?"));
+    }
+    if let Some(to) = to {
+        params.push(Value::Integer(i64::from(to)));
+        predicates.push(format!("{count} <= ?"));
+    }
+    if predicates.is_empty() {
+        return "1".to_owned();
+    }
+    format!("({})", predicates.join(" AND "))
+}
+
+/// How many genre values one track's tag holds. Music Library joins several
+/// genres with `;`, so `Electro; Dance` holds two and an empty tag none.
+fn genre_value_count_sql(genre: &str) -> String {
+    format!(
+        "(CASE WHEN NULLIF(TRIM(COALESCE({genre}, '')), '') IS NULL THEN 0          ELSE 1 + LENGTH({genre}) - LENGTH(REPLACE({genre}, ';', '')) END)"
+    )
+}
+
+pub(crate) fn track_genre_count_sql(track_alias: &str) -> String {
+    let raw = crate::live_genres::raw_track_sql(track_alias);
+    format!(
+        "(SELECT {} FROM (SELECT ({raw}) AS raw_genre))",
+        genre_value_count_sql("raw_genre")
+    )
+}
+
+/// The genres an album's tracks carry: the most values on one track, or the
+/// number of different tag values, whichever is larger. One means the album
+/// follows a one-genre rule; tracks without a genre are not counted.
+pub(crate) fn album_genre_count_sql(album_alias: &str) -> String {
+    let raw = crate::live_genres::raw_track_sql("genre_track");
+    format!(
+        "(SELECT COALESCE(MAX(MAX(genre_values), COUNT(DISTINCT genre_key)), 0) FROM (         SELECT {} AS genre_values, lower(TRIM(raw_genre)) AS genre_key FROM (         SELECT ({raw}) AS raw_genre FROM tracks AS genre_track WHERE genre_track.album_id = {album_alias}.id)          WHERE NULLIF(TRIM(COALESCE(raw_genre, '')), '') IS NOT NULL))",
+        genre_value_count_sql("raw_genre")
+    )
 }
 
 /// True for tracks Music Library confirmed as official singles. `track_singles`
@@ -2069,6 +2145,7 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::CompletenessRange { .. }
             | CatalogSearchMatch::LovedTracksRange { .. }
             | CatalogSearchMatch::SinglesRange { .. }
+            | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
             CatalogSearchMatch::Analyzed(_) => None,
         })
@@ -2121,6 +2198,12 @@ pub(crate) fn push_track_search_predicates(
                 CatalogSearchMatch::SinglesRange { from, to } => {
                     Some(track_single_range_predicate("t", *from, *to, params))
                 }
+                CatalogSearchMatch::GenreCountRange { from, to } => Some(count_range_predicate(
+                    &track_genre_count_sql("t"),
+                    *from,
+                    *to,
+                    params,
+                )),
                 matcher => track_album_level_predicate("t", matcher, params),
             }
         }));
@@ -3864,6 +3947,74 @@ mod tests {
         assert!(parse_catalog_search("love=2").is_err());
         assert!(parse_catalog_search("cr:80..50").is_err());
         assert!(parse_catalog_search("love:..").is_err());
+    }
+
+    #[test]
+    fn catalog_search_parses_exact_genre_counts() {
+        let range = |query: &str| match &parse_catalog_search(query).expect("genres search").groups
+            [0]
+        .alternatives[0]
+            .matcher
+        {
+            CatalogSearchMatch::GenreCountRange { from, to } => (*from, *to),
+            other => panic!("unexpected matcher {other:?}"),
+        };
+        assert_eq!(range("genres:1"), (Some(1), Some(1)));
+        assert_eq!(range("genres:2.."), (Some(2), None));
+        assert_eq!(range("genres:0"), (Some(0), Some(0)));
+        assert!(parse_catalog_search("genres:x").is_err());
+    }
+
+    #[test]
+    fn genre_counts_follow_the_one_genre_rule() {
+        let connection = Connection::open_in_memory().unwrap();
+        crate::live_genres::create_empty_overlay(&connection).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE albums (id TEXT PRIMARY KEY);
+                 CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id TEXT, genre TEXT);
+                 INSERT INTO albums VALUES ('one'), ('multi'), ('mixed'), ('case'), ('none');
+                 INSERT INTO tracks (album_id, genre) VALUES
+                   ('one', 'Rock'), ('one', 'Rock'),
+                   ('multi', 'Electro; Dance'), ('multi', 'Electro; Dance'),
+                   ('mixed', 'Electro'), ('mixed', 'Pop'), ('mixed', 'Jazz'),
+                   ('case', 'Rock'), ('case', ' rock '),
+                   ('none', NULL), ('none', '');",
+            )
+            .unwrap();
+        let counts = connection
+            .prepare(&format!(
+                "SELECT a.id, {} FROM albums a ORDER BY a.id",
+                album_genre_count_sql("a")
+            ))
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            counts,
+            [
+                ("case".to_owned(), 1),
+                ("mixed".to_owned(), 3),
+                ("multi".to_owned(), 2),
+                ("none".to_owned(), 0),
+                ("one".to_owned(), 1),
+            ]
+        );
+        let track: i64 = connection
+            .query_row(
+                &format!(
+                    "SELECT {} FROM tracks t WHERE t.genre = 'Electro; Dance' LIMIT 1",
+                    track_genre_count_sql("t")
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(track, 2);
     }
 
     #[test]

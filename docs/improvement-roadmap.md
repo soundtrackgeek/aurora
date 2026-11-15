@@ -540,7 +540,7 @@ setlist.fm's terms require an attribution link.
 
 ### 20. Local read-only MCP server - DONE
 
-**Completed 2026-11-15 in Aurora 0.62.0** as `aurora.exe --mcp` over stdio, with 14 read-only tools; see [ai-assistant.md](ai-assistant.md).
+**Completed 2026-11-15 in Aurora 0.62.0** as `aurora.exe --mcp` over stdio, with 14 read-only tools; see [ai-assistant.md](ai-assistant.md). Aurora 0.63.0 added opt-in tools that open views in the running app and propose genre changes the user reviews.
 
 **What.** Expose library tools to Claude Desktop and Claude Code through the official Rust MCP SDK ([`rmcp`](https://github.com/modelcontextprotocol/rust-sdk)), over stdio or localhost Streamable HTTP. Possible tools: `search_catalog` (using the query language), `album_detail`, `listening_report`, `ratings_overview`, and optionally `queue_tracks`.
 

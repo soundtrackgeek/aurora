@@ -1,4 +1,4 @@
-//! Aurora's read-only MCP server.
+//! Aurora's MCP server.
 //!
 //! `aurora.exe --mcp` speaks the Model Context Protocol over stdio, so Claude
 //! Code, OpenAI Codex, Gemini CLI, Claude Desktop, and Aurora's own Assistant
@@ -7,13 +7,15 @@
 //! state: it opens Music Library's catalog read-only and opens Aurora's state
 //! and listening history with side-effect-free reader constructors.
 //!
-//! A stdio server is reachable only by the process that started it, so it
-//! needs no network listener or token. Every tool keeps the bounded page
-//! sizes of the commands it reuses, and results never contain file paths.
+//! A stdio server is reachable only by the process that started it. The
+//! control tools (`show_in_aurora`, `propose_genre_changes`, `proposal_status`)
+//! ask the running Aurora window through `control`; proposed tag changes wait
+//! there for the user to apply them. Every tool keeps the bounded page sizes
+//! of the commands it reuses, and results never contain file paths.
 
 use crate::{
-    assistant, catalog, connections, device_mode, explorer, genres, history::HistoryStore, ratings,
-    state_store::StateStore, state_sync, years,
+    assistant, catalog, connections, control, device_mode, explorer, genre_rule, genres,
+    history::HistoryStore, ratings, state_store::StateStore, state_sync, years,
 };
 use serde_json::{Map, Value, json};
 use std::{
@@ -30,8 +32,14 @@ const MAX_PAGE_SIZE: u64 = 100;
 const SEARCH_GUIDE: &str = include_str!("../../docs/search.md");
 
 const INSTRUCTIONS: &str = "Aurora is a local music library explorer. Its catalog comes from Music Library, \
-which imports the user's MP3 collection (about a million tracks). These tools are read-only: they never change \
-tags, files, ratings, or playlists. Ratings are stars from 0.5 to 5 in half steps; loved tracks have loved=true. \
+which imports the user's MP3 collection (about a million tracks). The library tools are read-only. No tool \
+writes tags directly: propose_genre_changes sends genre changes to Aurora, where the user reviews and applies \
+them; check the outcome with proposal_status. show_in_aurora opens a Songs, Albums or Artists search in the \
+running Aurora window so the user can see results; prefer it when the user asks to see or show something. \
+The control tools need Aurora running and its \"Let AI assistants control Aurora\" setting. The user's rule is \
+usually one genre per album: albums_with_multiple_genres lists albums that break it (a tag holding several \
+genres joined by ';', or tracks that disagree) with each album's primaryGenre, and `genres:2..` finds the \
+same albums in a search. Ratings are stars from 0.5 to 5 in half steps; loved tracks have loved=true. \
 `plays` and listening reports are the user's own plays recorded by Aurora on all their devices. \
 Album IDs and track IDs are opaque; pass them back unchanged. Searches use Aurora's query language: call \
 search_syntax before writing anything beyond plain words. Join field terms with an explicit AND (or OR, NOT, \
@@ -70,6 +78,8 @@ pub fn run_stdio() -> i32 {
 #[derive(Default)]
 struct Server {
     context: Option<Context>,
+    /// The MCP client's name from `initialize`, shown with proposals.
+    client: String,
 }
 
 struct Context {
@@ -109,7 +119,12 @@ impl Server {
 
     fn dispatch(&mut self, method: &str, params: &Value) -> Result<Value, (i64, String)> {
         match method {
-            "initialize" => Ok(initialize_result(params)),
+            "initialize" => {
+                if let Some(name) = params.pointer("/clientInfo/name").and_then(Value::as_str) {
+                    self.client = name.chars().take(80).collect();
+                }
+                Ok(initialize_result(params))
+            }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": tool_definitions() })),
             "tools/call" => {
@@ -131,6 +146,7 @@ impl Server {
     }
 
     fn call_tool(&mut self, name: &str, arguments: &Value) -> Value {
+        let client = self.client.clone();
         let outcome = self
             .context()
             .and_then(|context| {
@@ -141,7 +157,7 @@ impl Server {
                             .to_owned(),
                     );
                 }
-                run_tool(context, name, arguments)
+                run_tool(context, &client, name, arguments)
             })
             .map(|value| {
                 let mut value = value;
@@ -276,6 +292,24 @@ fn tool(name: &str, title: &str, description: &str, properties: Value, required:
     })
 }
 
+/// A tool that asks the running Aurora to do something. It never writes tags.
+fn control_tool(
+    name: &str,
+    title: &str,
+    description: &str,
+    properties: Value,
+    required: &[&str],
+) -> Value {
+    let mut definition = tool(name, title, description, properties, required);
+    definition["annotations"]["readOnlyHint"] = json!(false);
+    definition["annotations"]["idempotentHint"] = json!(false);
+    definition
+}
+
+/// Tools that act on the running Aurora window instead of only reading.
+#[cfg(test)]
+const CONTROL_TOOLS: [&str; 2] = ["show_in_aurora", "propose_genre_changes"];
+
 fn paging_properties(extra: Value) -> Value {
     let mut properties = json!({
         "query": {
@@ -404,6 +438,56 @@ fn tool_definitions() -> Vec<Value> {
             &[],
         ),
         tool(
+            "albums_with_multiple_genres",
+            "Albums with more than one genre",
+            "Albums that break a one-genre-per-album rule, read from the genre tags as written: a tag holding several genres joined by ';' (\"Electro; Dance\") or tracks whose tags differ. Each album lists its tag values and track counts, the genres after splitting, and primaryGenre, the genre listed first on most tracks. `total` counts every matching album. Paged by offset. Reflects Music Library's last import plus Aurora's own edits once Music Library imports them.",
+            json!({
+                "genre": { "type": "string", "description": "Only albums whose canonical album genre is this." },
+                "tagContains": { "type": "string", "description": "Only albums with a track whose raw genre tag contains this text, for example \"Dance\"." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Default 25." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Default 0." },
+            }),
+            &[],
+        ),
+        control_tool(
+            "show_in_aurora",
+            "Show in Aurora",
+            "Opens a search in the running Aurora window: the Songs, Albums or Artists view with this query in the search box. Use Aurora's query language, for example `genres:2..` (albums with more than one genre) or `genre:electro AND genres:2..`. Returns how many results the view shows. Needs Aurora running with assistant control on.",
+            json!({
+                "view": { "type": "string", "enum": ["songs", "albums", "artists"] },
+                "query": { "type": "string", "description": "Aurora search text, with explicit AND between field terms." },
+            }),
+            &["view", "query"],
+        ),
+        control_tool(
+            "propose_genre_changes",
+            "Propose genre changes",
+            "Sends genre changes for whole albums to Aurora for the user to review. Nothing is written until the user applies them in Aurora; they can edit or untick albums first. Each change sets every track of the album to one genre, through Aurora's verified tag writer, which keeps an undo journal and updates Music Library. Use album IDs from Aurora's tools unchanged. Up to 500 albums per proposal. Returns a proposalId for proposal_status.",
+            json!({
+                "changes": {
+                    "type": "array", "minItems": 1, "maxItems": 500,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "albumId": { "type": "string" },
+                            "genre": { "type": "string", "description": "The one genre the album's tracks get, for example its primaryGenre." },
+                        },
+                        "required": ["albumId", "genre"],
+                        "additionalProperties": false,
+                    },
+                },
+                "reason": { "type": "string", "description": "One sentence shown to the user, for example \"Keep only the first genre so each album has one genre.\"" },
+            }),
+            &["changes"],
+        ),
+        tool(
+            "proposal_status",
+            "Proposal status",
+            "Whether the user applied, edited, skipped or dismissed a proposal, album by album, with any errors.",
+            json!({ "proposalId": { "type": "string" } }),
+            &["proposalId"],
+        ),
+        tool(
             "listening_report",
             "Listening report",
             "The user's listening across all their devices for a date range: totals, top artists, albums, and tracks, genres, decades, and discovery. Dates are inclusive YYYY-MM-DD; omit both for all time.",
@@ -438,9 +522,33 @@ fn tool_definitions() -> Vec<Value> {
 // Tool implementations
 // ---------------------------------------------------------------------------
 
-fn run_tool(context: &Context, name: &str, arguments: &Value) -> Result<Value, String> {
+fn run_tool(
+    context: &Context,
+    client: &str,
+    name: &str,
+    arguments: &Value,
+) -> Result<Value, String> {
     let arguments = arguments.as_object().cloned().unwrap_or_default();
     match name {
+        "albums_with_multiple_genres" => albums_with_multiple_genres(&arguments),
+        "show_in_aurora" => show_in_aurora(context, &arguments),
+        "propose_genre_changes" => control::request(
+            &context.state_directory,
+            "proposeGenreChanges",
+            json!({
+                "changes": arguments.get("changes").cloned().unwrap_or(Value::Null),
+                "reason": optional_text(&arguments, "reason").unwrap_or_default(),
+                "source": client,
+            }),
+        ),
+        "proposal_status" => {
+            let id = required_text(&arguments, "proposalId")?;
+            control::request(
+                &context.state_directory,
+                "proposalStatus",
+                json!({ "proposalId": id }),
+            )
+        }
         "library_overview" => library_overview(),
         "search_syntax" => Ok(json!({ "guide": SEARCH_GUIDE })),
         "search_songs" => search_songs(context, &arguments),
@@ -737,6 +845,59 @@ fn albums_with_mixed_genres(arguments: &Map<String, Value>) -> Result<Value, Str
     Ok(json!({ "albums": rows, "nextOffset": next_offset }))
 }
 
+fn albums_with_multiple_genres(arguments: &Map<String, Value>) -> Result<Value, String> {
+    let limit = bounded_integer(arguments, "limit", 25, 100)? as i64;
+    let offset = arguments
+        .get("offset")
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 0)
+        .unwrap_or(0);
+    let genre = optional_text(arguments, "genre");
+    let tag = optional_text(arguments, "tagContains");
+    let connection = catalog::open_catalog(&catalog::default_catalog_path()?)?;
+    let (albums, total) = genre_rule::albums_with_multiple_genres(
+        &connection,
+        genre.as_deref(),
+        tag.as_deref(),
+        limit,
+        offset,
+    )?;
+    let next_offset = (offset + (albums.len() as i64) < total).then_some(offset + limit);
+    Ok(json!({ "albums": to_value(albums)?, "total": total, "nextOffset": next_offset }))
+}
+
+fn show_in_aurora(context: &Context, arguments: &Map<String, Value>) -> Result<Value, String> {
+    let view = required_text(arguments, "view")?;
+    let query = arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    // Run the search first: a query Aurora cannot parse fails here, where the
+    // assistant can fix it, instead of only in the user's search box.
+    let mut probe = Map::new();
+    probe.insert("query".to_owned(), json!(query));
+    probe.insert("pageSize".to_owned(), json!(1));
+    let page = match view.as_str() {
+        "songs" => search_songs(context, &probe)?,
+        "albums" => search_albums(context, &probe)?,
+        "artists" => search_artists(context, &probe)?,
+        _ => return Err("view must be songs, albums or artists.".to_owned()),
+    };
+    control::request(
+        &context.state_directory,
+        "show",
+        json!({ "view": view, "query": query }),
+    )?;
+    Ok(json!({
+        "shown": true,
+        "view": view,
+        "query": query,
+        "totalCount": page.get("totalCount").or_else(|| page.get("total")).cloned(),
+    }))
+}
+
 fn listening_report(context: &Context, arguments: &Map<String, Value>) -> Result<Value, String> {
     let offset = arguments
         .get("utcOffsetMinutes")
@@ -924,13 +1085,15 @@ mod tests {
     }
 
     #[test]
-    fn every_tool_is_read_only_and_closed() {
+    fn only_control_tools_act_and_every_tool_is_closed() {
         for tool in tool_definitions() {
+            let name = tool["name"].as_str().unwrap();
             assert_eq!(
-                tool["annotations"]["readOnlyHint"], true,
-                "{}",
-                tool["name"]
+                tool["annotations"]["readOnlyHint"],
+                !CONTROL_TOOLS.contains(&name),
+                "{name}"
             );
+            assert_eq!(tool["annotations"]["destructiveHint"], false, "{name}");
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
         }
     }

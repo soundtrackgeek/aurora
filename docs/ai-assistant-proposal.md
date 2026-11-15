@@ -1,6 +1,6 @@
 # AI library assistant: potential improvement
 
-*Proposal · 14 November 2026 · phases 1 and 3 implemented in Aurora 0.62.0, plus the Codex backend from phase 4; see [ai-assistant.md](ai-assistant.md)*
+*Proposal · 14 November 2026 · phases 1 and 3 implemented in Aurora 0.62.0, plus the Codex backend from phase 4; phase 2 started in 0.63.0 with app control and reviewed genre-change proposals; see [ai-assistant.md](ai-assistant.md)*
 
 **What shipped differs from this proposal in four ways.** The server uses stdio only, so it needs no localhost token: only the process that started it can talk to it. It is a small hand-written JSON-RPC server instead of `rmcp`, because it is synchronous and handles only four methods. The Assistant is a panel opened from the top bar, not a tab. Conversations stay in memory for now and are not saved in the state database.
 

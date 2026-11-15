@@ -807,7 +807,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "sonic";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "genres" | "sonic";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -827,7 +827,7 @@ interface LibrarySearchGroup {
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
 const librarySearchFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "sonic",
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "genres", "sonic",
 ]);
 
 const scoreGenreGroup = new Set([
@@ -932,7 +932,7 @@ function parseLibrarySearchYearRange(
 
 function parseLibrarySearchNumberRange(
   value: string,
-  field: "cr" | "love" | "single",
+  field: "cr" | "love" | "single" | "genres",
 ): { numberFrom: number | null; numberTo: number | null } {
   const parts = value.trim().split("..");
   if (parts.length > 2) {
@@ -940,7 +940,9 @@ function parseLibrarySearchNumberRange(
   }
   const invalid = field === "cr"
     ? "cr bounds must be whole percentages from 0 through 100."
-    : `${field} bounds must be non-negative whole track counts.`;
+    : field === "genres"
+      ? "genres bounds must be non-negative whole genre counts."
+      : `${field} bounds must be non-negative whole track counts.`;
   const parseBound = (bound: string): number | null => {
     const trimmed = bound.trim();
     if (!trimmed) return null;
@@ -955,6 +957,8 @@ function parseLibrarySearchNumberRange(
     const number = parseBound(parts[0]);
     if (number === null) throw new Error(invalid);
     if (field === "cr") return { numberFrom: 0, numberTo: number };
+    // A genre count is exact: genres:1 means one genre, not one or more.
+    if (field === "genres") return { numberFrom: number, numberTo: number };
     if (number === 0) return { numberFrom: 0, numberTo: 0 };
     if (number === 1) return { numberFrom: 1, numberTo: null };
     throw new Error(`${field} must be 0, 1, or an inclusive range such as ${field}:1..3.`);
@@ -1016,7 +1020,7 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
       let numberTo: number | null = null;
       if (field === "year" || field === "ryear") {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
-      } else if (field === "cr" || field === "love" || field === "single") {
+      } else if (field === "cr" || field === "love" || field === "single" || field === "genres") {
         ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
       } else if (field === "sonic") {
         if (!["yes", "no"].includes((exact ?? value).toLowerCase())) throw new Error("Use sonic:yes or sonic:no to filter audio analysis coverage.");
@@ -1075,6 +1079,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "cr":
     case "sonic":
     case "single":
+    case "genres":
     case "love": return [];
     case "year":
     case "ryear": return [];
@@ -1093,14 +1098,22 @@ interface AlbumSearchStats {
   totalTracks: number;
   ratedTracks: number;
   lovedTracks: number;
+  /** Lowercased genre tags, and the most genres one tag holds. */
+  genreTags: Set<string>;
+  widestGenreTag: number;
 }
 
 function albumSearchStats(tracks: readonly Track[]): Map<string, AlbumSearchStats> {
   const stats = new Map<string, AlbumSearchStats>();
   for (const track of tracks) {
     if (!track.albumId) continue;
-    const album = stats.get(track.albumId) ?? { totalTracks: 0, ratedTracks: 0, lovedTracks: 0 };
+    const album = stats.get(track.albumId) ?? { totalTracks: 0, ratedTracks: 0, lovedTracks: 0, genreTags: new Set<string>(), widestGenreTag: 0 };
     album.totalTracks += 1;
+    const genreValues = (track.genre ?? "").split(";").filter((part) => part.trim()).length;
+    if (genreValues) {
+      album.genreTags.add((track.genre ?? "").trim().toLocaleLowerCase());
+      album.widestGenreTag = Math.max(album.widestGenreTag, genreValues);
+    }
     if (track.rating !== null) album.ratedTracks += 1;
     if (track.loved) album.lovedTracks += 1;
     stats.set(track.albumId, album);
@@ -1132,6 +1145,12 @@ function matchesLibrarySearchAlternative(
     const singles = track.officialSingle ? 1 : 0;
     return (alternative.numberFrom === null || singles >= alternative.numberFrom)
       && (alternative.numberTo === null || singles <= alternative.numberTo);
+  }
+  if (alternative.field === "genres") {
+    const album = track.albumId ? albumStats.get(track.albumId) : undefined;
+    const genres = album ? Math.max(album.widestGenreTag, album.genreTags.size) : 0;
+    return (alternative.numberFrom === null || genres >= alternative.numberFrom)
+      && (alternative.numberTo === null || genres <= alternative.numberTo);
   }
   if (alternative.field === "love") {
     const album = track.albumId ? albumStats.get(track.albumId) : undefined;

@@ -265,6 +265,18 @@ pub(crate) fn track_sql(alias: &str) -> String {
     )
 }
 
+/// The genre tag as written, which a pending edit overrides like `track_sql`.
+pub(crate) fn raw_track_sql(alias: &str) -> String {
+    format!(
+        "CASE WHEN {alias}.id IN (SELECT track_id FROM temp.aurora_live_track_genres) THEN (SELECT genre FROM temp.aurora_live_track_genres WHERE track_id = {alias}.id) ELSE {alias}.genre END"
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn create_empty_overlay(connection: &Connection) -> Result<(), String> {
+    connection.execute_batch(SCHEMA).map_err(|e| e.to_string())
+}
+
 pub(crate) fn album_sql(alias: &str) -> String {
     format!(
         "CASE WHEN {alias}.id IN (SELECT album_id FROM temp.aurora_live_album_genres) THEN (SELECT genre FROM temp.aurora_live_album_genres WHERE album_id = {alias}.id) ELSE {alias}.canonical_genre END"

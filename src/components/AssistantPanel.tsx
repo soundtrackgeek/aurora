@@ -33,12 +33,15 @@ type AssistantPanelProps = {
   onOpenSettings: () => void;
   /** Runs a search query the assistant suggested. */
   onUseQuery: (query: string) => void;
+  /** Genre changes from assistants that wait for review. */
+  reviewCount?: number;
+  onReviewChanges?: () => void;
 };
 
 let turnCounter = 0;
 const nextTurnId = () => `turn-${Date.now()}-${(turnCounter += 1)}`;
 
-export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery }: AssistantPanelProps) {
+export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery, reviewCount = 0, onReviewChanges }: AssistantPanelProps) {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [backend, setBackend] = useState<AssistantBackend>("claudeCode");
@@ -145,7 +148,7 @@ export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery }:
   return <aside className="assistant-panel" aria-label="Assistant">
     <header className="assistant-panel__header">
       <BotMessageSquare aria-hidden="true" />
-      <div><strong>Assistant</strong><small>Read-only · {(backend === "claudeCode" ? status?.settings.claudeModel : status?.settings.codexModel) || "CLI default model"}</small></div>
+      <div><strong>Assistant</strong><small>{status?.settings.appControl ? "Controls Aurora" : "Read-only"} · {(backend === "claudeCode" ? status?.settings.claudeModel : status?.settings.codexModel) || "CLI default model"}</small></div>
       <select aria-label="Assistant backend" value={backend} disabled={busy} onChange={(event) => void chooseBackend(event.target.value as AssistantBackend)}>
         {(["claudeCode", "codex"] as const).map((value) => <option key={value} value={value}>{backendLabels[value]}</option>)}
       </select>
@@ -165,6 +168,10 @@ export function AssistantPanel({ context, onClose, onOpenSettings, onUseQuery }:
         <AlertTriangle aria-hidden="true" />
         <span>Aurora could not find {backendLabels[backend]}. Install it, or choose its executable in settings.</span>
         <button type="button" className="button" onClick={onOpenSettings}>Open settings</button>
+      </div>}
+      {reviewCount > 0 && onReviewChanges && <div className="assistant-panel__notice">
+        <span>{reviewCount === 1 ? "1 album has" : `${reviewCount} albums have`} genre changes waiting for your review.</span>
+        <button type="button" className="button" onClick={onReviewChanges}>Review changes</button>
       </div>}
       {!conversation.turns.length && <div className="assistant-panel__empty">
         <p>Ask about your genres, ratings, listening history, albums and artists. {backendLabels[backend]} answers with your own sign-in.</p>

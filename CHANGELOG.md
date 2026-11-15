@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.63.0] - 2026-11-15
+
+### Added
+- AI assistants can control Aurora, from the Assistant panel or from Claude Code and Codex in a terminal. Turn on **Settings → Connections → AI assistant → Let AI assistants control Aurora** (off by default; it needs library access). `show_in_aurora` opens Songs, Albums or Artists in the running app with a search query, and `propose_genre_changes` sends genre changes for review.
+- **Review genre changes** opens when an assistant sends changes. It shows each album's current genre tags with track counts and marks tags that hold several genres. Untick albums or edit a genre, then **Write genre** applies it to every track of the album through the album tag editor's verified path and queues the Music Library sync. Nothing is written until you apply it, failed albums can be tried again, and **Dismiss** skips the rest. The Assistant panel shows how many albums are waiting.
+- `albums_with_multiple_genres` finds albums that break a one-genre-per-album rule in their tags as written: tags such as `Electro; Dance`, or tracks whose tags differ. It suggests the genre listed first on most tracks. `proposal_status` reports what happened to a proposal.
+- `genres:` in the search box counts genres in the raw genre tags. A single number is exact, so `genres:1` finds albums with one genre and `genres:2..` finds albums with more; Songs counts each track. [docs/search.md](docs/search.md) documents it.
+
+### Security
+- The running app accepts control requests only on `127.0.0.1`, with a random token kept in its app data folder, and rereads both switches on every request. Codex in Aurora auto-approves only the two control tools; Claude Code and Codex in a terminal ask before them.
+
 ## [0.62.1] - 2026-11-15
 
 ### Changed

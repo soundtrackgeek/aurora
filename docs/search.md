@@ -31,7 +31,7 @@ On the local 1.1-million-track / 72,600-album catalog, the October 6 benchmark f
 
 ## Catalog search: Songs, Albums, and Artists
 
-An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through `country:`. Album rating completeness and album Love status are available through `cr:` and `love:`, and official singles through `single:`.
+An ordinary query searches across title, Display Artist, Album Artist, album, genre, and publisher metadata. Each unquoted word is a word prefix, not an arbitrary substring. Origin country is available through `country:`. Album rating completeness and album Love status are available through `cr:` and `love:`, official singles through `single:`, and the number of genres in the genre tags through `genres:`.
 
 Every named catalog field accepts either `:` or `=` as its separator. This guide uses `:` as Aurora's conventional form, but `artist:cher` and `artist=cher`, or `cr:80` and `cr=80`, are equivalent.
 
@@ -62,6 +62,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `cr:` | Album rating-completeness percentage or range | `cr:50..80` |
 | `love:` | Loved-track count or range for the album | `love:1..3` |
 | `single:` | Official-single count or range: per album in Albums and Artists, per track in Songs (`singles:` is an alias) | `single:2..5` |
+| `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
@@ -280,7 +281,13 @@ year:1985..1987 OR 1990..1992
 
 ### Completeness, Love and single ranges
 
-`cr:`, `love:` and `single:` use the same inclusive `..` notation as years:
+### Genre count
+
+`genres:` counts genres in the raw genre tag, which Music Library joins with `;` (`Electro; Dance` holds two). An album's count is the larger of the most genres on one track and the number of different genre tags on its tracks, compared without case, so an album whose tracks say `Rock` and `Pop` also counts two. Tracks without a genre add nothing, and an album with no genre at all counts zero.
+
+Unlike `love:` and `single:`, a single number is exact: `genres:1` finds albums that follow a one-genre-per-album rule, `genres:2..` finds albums that break it, and `genres:0` finds albums without a genre. `genre:` still matches the first (canonical) genre, so `genre:electro AND genres:2..` lists Electro albums that carry a second genre.
+
+`cr:`, `love:`, `single:` and `genres:` use the same inclusive `..` notation as years:
 
 ```text
 cr:50..80
@@ -331,6 +338,8 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | Albums from 50% through 80% rated | `cr:50..80` |
 | Incomplete albums with one to three loved tracks | `cr:99,love:1..3` |
 | Albums with at least one official single | `single:1` |
+| Albums with more than one genre | `genres:2..` |
+| Electro albums that also carry another genre | `genre:electro AND genres:2..` |
 | Albums with three or more singles | `single:3..` |
 | Albums with two to five singles | `single:2..5` |
 | Albums with at most three singles | `single:..3` |
@@ -389,6 +398,7 @@ The Genre Atlas also repeats its genre-name search inside the atlas for convenie
 - If an artist result looks too broad, use `aartist:` instead of unscoped text; use `artist:` only when you mean per-track Display Artist.
 - If a year looks wrong, confirm whether you need Original Year (`year:`) or Release Year (`ryear:`).
 - If `cr` or `love` is rejected, use whole, non-negative bounds in ascending order. Completeness bounds are limited to 0–100; a single `love` value remains limited to the `0` and `1` shorthands, while positive exact counts use a repeated range such as `love:3..3`. Either `:` or `=` is accepted.
+- If `genres:` is rejected, use a whole, non-negative count or an ascending range, such as `genres:1` or `genres:2..`.
 - If `single:` is rejected, use `0`, `1`, or a range with whole, non-negative bounds in ascending order, such as `single:2..5`; an exact count repeats the bound (`single:3..3`). If it finds nothing, update Music Library to 0.210.0 or newer and run **Settings → Providers → Album singles** so the catalog has singles to search.
 - If `genre:scores` is too broad, search one exact genre such as `genre:"video game"`.
 - If `sort:` or `group:` is rejected, check that the view offers it: `sort:genre`, `sort:publisher`, `sort:minutes`, `sort:plays` and `sort:love` are Songs only, and `group:` is not available in Artists. Use one of each per query, `az`/`za` after text fields, and `..` before or after numeric ones. A `sort:` or `group:` inside quotes, such as `title:"sort:az"`, is ordinary search text.

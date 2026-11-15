@@ -10,6 +10,7 @@ mod chart_identity;
 mod chart_song_match;
 mod charts;
 mod connections;
+mod control;
 mod cover_cache;
 mod cover_protocol;
 mod curation;
@@ -19,6 +20,7 @@ mod device_mode;
 mod explorer;
 mod fanart;
 mod file_observations;
+mod genre_rule;
 mod genres;
 mod hidden_favorites;
 mod history;
@@ -114,7 +116,10 @@ use ratings::{
 };
 use state_store::{LibrarySyncFolder, StateStore};
 use std::sync::Mutex;
-use tag_model::{TagEditRequest, TagEditorTarget, TagEditorUpdateRequest, TagEditorUpdateResult};
+use tag_model::{
+    EditableTagField, EditableTagValues, TagEditRequest, TagEditorTarget, TagEditorUpdateRequest,
+    TagEditorUpdateResult,
+};
 use tagging::{TagReconciliationReport, TagService, TrackTagSnapshot};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -1136,6 +1141,94 @@ async fn ratings_overview(app: AppHandle) -> Result<RatingsOverview, String> {
     })
     .await
     .map_err(|error| format!("The Ratings overview worker stopped unexpectedly: {error}"))?
+}
+
+/// Open genre proposals from AI assistants, for the review dialog.
+#[tauri::command]
+fn assistant_proposals(app: AppHandle) -> Result<Vec<control::GenreProposal>, String> {
+    app.state::<control::AssistantProposals>().list()
+}
+
+/// Applies the approved albums of a proposal, one album at a time, through
+/// the same verified writer, journal and Music Library sync as the tag editor.
+#[tauri::command]
+async fn apply_assistant_proposal(
+    app: AppHandle,
+    proposal_id: String,
+    changes: Vec<control::ProposedChange>,
+) -> Result<control::GenreProposal, String> {
+    connections::require_music_writes()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let proposals = app.state::<control::AssistantProposals>();
+        let (changes, state) = proposals.begin(&proposal_id, changes)?;
+        let _ = app.emit(control::PROPOSAL_EVENT, &state);
+        for change in &changes {
+            let outcome = apply_album_genre(&app, &change.album_id, &change.genre);
+            if let Ok(state) = proposals.record(&proposal_id, change, outcome) {
+                let _ = app.emit(control::PROPOSAL_EVENT, &state);
+            }
+        }
+        let state = proposals.finish(&proposal_id)?;
+        let _ = app.emit(control::PROPOSAL_EVENT, &state);
+        Ok(state)
+    })
+    .await
+    .map_err(|error| format!("The tag writer stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+fn dismiss_assistant_proposal(
+    app: AppHandle,
+    proposal_id: String,
+) -> Result<control::GenreProposal, String> {
+    let state = app
+        .state::<control::AssistantProposals>()
+        .dismiss(&proposal_id)?;
+    let _ = app.emit(control::PROPOSAL_EVENT, &state);
+    Ok(state)
+}
+
+/// Sets one genre on every track of an album, as the album tag editor does.
+fn apply_album_genre(app: &AppHandle, album_id: &str, genre: &str) -> Result<(), String> {
+    let coordinator = app.state::<LibrarySyncCoordinator>();
+    let (result, _) = coordinator.serialize_tag_edit(|| {
+        let result = {
+            let state = app.state::<TagState>();
+            let service = state
+                .lock()
+                .map_err(|_| "Aurora's tag writer stopped unexpectedly.".to_owned())?;
+            let target = TagEditorTarget::Album {
+                album_id: album_id.to_owned(),
+                label: None,
+            };
+            let current = service.inspect_editor(target.clone())?;
+            service.update_editor(
+                TagEditorUpdateRequest {
+                    target,
+                    expected: current.state,
+                    fields: vec![EditableTagField::Genre],
+                    values: EditableTagValues {
+                        genre: Some(genre.to_owned()),
+                        ..EditableTagValues::default()
+                    },
+                    artwork_token: None,
+                },
+                None,
+            )?
+        };
+        let directories = result
+            .tracks
+            .iter()
+            .filter(|track| track.tag_sync_state.is_some())
+            .map(|track| track.directory.clone())
+            .collect::<Vec<_>>();
+        coordinator.queue_after_edit(app, &directories);
+        for track in &result.tracks {
+            refresh_playback_track_metadata(app, track);
+        }
+        Ok::<(), String>(())
+    });
+    result
 }
 
 fn assistant_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -2326,6 +2419,7 @@ pub fn run() {
             app.manage(WaveformWorkCoordinator::default());
             app.manage(LibrarySyncCoordinator::default());
             app.manage(std::sync::Arc::new(assistant::AssistantRuns::default()));
+            app.manage(control::AssistantProposals::default());
             app.manage(shortcuts::ShortcutTagQueue::default());
             app.manage(Mutex::new(shortcuts::GlobalShortcutRuntime::load(
                 state_directory.join("aurora-shortcuts.json"),
@@ -2341,6 +2435,13 @@ pub fn run() {
             if let Err(error) = background.start(app.handle()) {
                 background.stop();
                 return Err(std::io::Error::other(error).into());
+            }
+            // Assistants reach the running app through this channel; without it
+            // only their read-only tools work.
+            if let Ok(directory) = app.path().app_data_dir()
+                && let Err(error) = control::start(app.handle().clone(), directory)
+            {
+                eprintln!("{error}");
             }
             Ok(())
         })
@@ -2437,6 +2538,9 @@ pub fn run() {
             test_assistant_backend,
             assistant_send,
             assistant_cancel,
+            assistant_proposals,
+            apply_assistant_proposal,
+            dismiss_assistant_proposal,
             update_jev_credentials,
             test_jev_connection,
             tonight_suggestions,

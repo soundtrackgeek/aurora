@@ -57,6 +57,9 @@ pub(crate) const DEFAULT_CODEX_MODEL: &str = "gpt-6-luna";
 pub(crate) struct AssistantSettings {
     /// Lets MCP clients and the Assistant read the library. Off by default.
     pub(crate) library_access: bool,
+    /// Lets them show views in the running Aurora and propose tag changes
+    /// for the user to review. Off by default; needs `library_access`.
+    pub(crate) app_control: bool,
     pub(crate) backend: Backend,
     /// A user-chosen CLI executable; empty means detect it.
     pub(crate) claude_path: String,
@@ -70,6 +73,7 @@ impl Default for AssistantSettings {
     fn default() -> Self {
         Self {
             library_access: false,
+            app_control: false,
             backend: Backend::default(),
             claude_path: String::new(),
             codex_path: String::new(),
@@ -487,7 +491,7 @@ impl AssistantRuns {
     }
 }
 
-fn system_prompt(request: &SendRequest) -> String {
+fn system_prompt(request: &SendRequest, app_control: bool) -> String {
     let mut prompt = format!(
         "You are the assistant inside Aurora, a desktop app for exploring the user's own music library \
          (about a million MP3s catalogued by the companion app Music Library). Answer with facts from the \
@@ -495,12 +499,23 @@ fn system_prompt(request: &SendRequest) -> String {
          fine for context, but say when something is not in the library.\n\
          Today is {today}. The user's UTC offset is {offset} minutes: pass utcOffsetMinutes={offset} to \
          listening_report and resolve dates such as \"last month\" from today.\n\
-         Your tools are read-only. If the user asks you to change tags, ratings, files, or playlists, say \
-         that the assistant cannot make changes yet, and where it helps, give an Aurora search query they \
-         can paste into the Songs or Albums search box (field terms joined with AND).\n\
+         {abilities}\n\
          Be concise. Use short Markdown lists or tables. Name albums as Artist – Album (Year).",
         today = request.today,
         offset = request.utc_offset_minutes,
+        abilities = if app_control {
+            "You can change what Aurora shows: when the user asks to see, show or open results, call \
+             show_in_aurora with the view and a query (field terms joined with AND) instead of only \
+             describing them. You cannot write tags yourself. For genre fixes, find the albums (for example \
+             with albums_with_multiple_genres), then call propose_genre_changes; Aurora shows the changes \
+             to the user, who reviews and applies them. Say that they are waiting for review. Ratings, \
+             files and playlists cannot be changed yet."
+        } else {
+            "Your tools are read-only, and controlling Aurora is turned off. If the user asks you to show \
+             results in Aurora or change tags, say that they can turn on \"Let AI assistants control \
+             Aurora\" in Settings → Connections → AI assistant, and meanwhile give an Aurora search query \
+             they can paste into the Songs or Albums search box (field terms joined with AND)."
+        },
     );
     if let Some(context) = request
         .context
@@ -558,7 +573,13 @@ pub(crate) fn send(
             fs::write(&config, json.to_string())
                 .map_err(|error| format!("Could not write the MCP configuration: {error}"))?;
             (
-                claude_command(&executable, &config, &settings.claude_model, &request),
+                claude_command(
+                    &executable,
+                    &config,
+                    &settings.claude_model,
+                    &system_prompt(&request, settings.app_control),
+                    &request,
+                ),
                 message.to_owned(),
             )
         }
@@ -568,7 +589,7 @@ pub(crate) fn send(
             } else {
                 format!(
                     "<aurora_instructions>\n{}\n</aurora_instructions>\n\n{message}",
-                    system_prompt(&request)
+                    system_prompt(&request, settings.app_control)
                 )
             };
             (
@@ -656,7 +677,13 @@ fn valid_session_id(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
-fn claude_command(executable: &Path, config: &Path, model: &str, request: &SendRequest) -> Command {
+fn claude_command(
+    executable: &Path,
+    config: &Path,
+    model: &str,
+    system: &str,
+    request: &SendRequest,
+) -> Command {
     let mut command = Command::new(executable);
     command.args([
         "-p",
@@ -682,7 +709,7 @@ fn claude_command(executable: &Path, config: &Path, model: &str, request: &SendR
         "",
         "--system-prompt",
     ]);
-    command.arg(system_prompt(request));
+    command.arg(system);
     if !model.is_empty() {
         command.args(["--model", model]);
     }
@@ -724,6 +751,11 @@ fn codex_command(
         "features.multi_agent=false",
         "features.multi_agent_v2=false",
         "features.view_image=false",
+        // Codex asks before tools that are not read-only, and approval_policy=never declines
+        // them. These two only open a view or queue changes for review in Aurora, and Aurora
+        // refuses both while "Let AI assistants control Aurora" is off.
+        "mcp_servers.aurora.tools.show_in_aurora.approval_mode=\"approve\"",
+        "mcp_servers.aurora.tools.propose_genre_changes.approval_mode=\"approve\"",
     ] {
         command.args(["-c", override_value]);
     }

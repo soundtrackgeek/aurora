@@ -75,6 +75,12 @@ export function AssistantSettingsPanel() {
       <i aria-hidden="true" />
     </label>
 
+    <label className="settings-switch">
+      <span><strong>Let AI assistants control Aurora</strong><small>Assistants in Aurora and in your terminal can open searches here, for example the albums that have more than one genre, and propose genre changes. You review every change and apply it yourself; nothing is written until you do. Aurora must be running.</small></span>
+      <input type="checkbox" checked={status?.settings.appControl ?? false} disabled={busy || !status || preview || !status.settings.libraryAccess} onChange={(event) => void save({ appControl: event.target.checked })} />
+      <i aria-hidden="true" />
+    </label>
+
     <fieldset className="assistant-settings__backends" disabled={busy || !status || preview}>
       <legend>Assistant in Aurora uses</legend>
       {(["claudeCode", "codex"] as const).map((backend) => {

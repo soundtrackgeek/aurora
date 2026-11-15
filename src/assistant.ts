@@ -6,6 +6,8 @@ export type AssistantBackend = "claudeCode" | "codex";
 
 export interface AssistantSettings {
   libraryAccess: boolean;
+  /** Lets assistants show views in Aurora and propose tag changes for review. */
+  appControl: boolean;
   backend: AssistantBackend;
   claudePath: string;
   codexPath: string;
@@ -60,7 +62,7 @@ export const emptyConversation: AssistantConversation = { sessions: {}, turns: [
 export const backendLabels: Record<AssistantBackend, string> = { claudeCode: "Claude Code", codex: "OpenAI Codex" };
 
 const previewStatus: AssistantStatus = {
-  settings: { libraryAccess: false, backend: "claudeCode", claudePath: "", codexPath: "", claudeModel: "claude-haiku-5-5", codexModel: "gpt-6-luna" },
+  settings: { libraryAccess: false, appControl: false, backend: "claudeCode", claudePath: "", codexPath: "", claudeModel: "claude-haiku-5-5", codexModel: "gpt-6-luna" },
   claude: { path: null, source: null },
   codex: { path: null, source: null },
   mcpCommand: ["aurora.exe", "--mcp"],
@@ -102,6 +104,70 @@ export async function cancelAssistantRun(runId: string): Promise<void> {
 export async function listenToAssistant(handler: (event: AssistantEventEnvelope) => void): Promise<UnlistenFn> {
   if (!isTauriRuntime()) return () => undefined;
   return listen<AssistantEventEnvelope>("assistant://event", (event) => handler(event.payload));
+}
+
+export type AssistantExplorerView = "songs" | "albums" | "artists";
+
+/** An assistant asked Aurora to show a search. */
+export interface AssistantShowRequest { view: AssistantExplorerView; query: string }
+
+export type GenreProposalStatus = "pending" | "applying" | "done" | "dismissed";
+export type GenreChangeStatus = "pending" | "applied" | "skipped" | "failed";
+
+export interface GenreProposalAlbum {
+  albumId: string;
+  artist: string | null;
+  title: string | null;
+  year: number | null;
+  currentTags: { tag: string; tracks: number }[];
+  proposedGenre: string;
+  appliedGenre: string | null;
+  status: GenreChangeStatus;
+  error: string | null;
+}
+
+export interface GenreProposal {
+  id: string;
+  createdAtMs: number;
+  /** The MCP client that sent it, for example "claude-code". */
+  source: string;
+  reason: string;
+  status: GenreProposalStatus;
+  albums: GenreProposalAlbum[];
+}
+
+export async function listenToAssistantShow(handler: (request: AssistantShowRequest) => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen<AssistantShowRequest>("assistant://show", (event) => handler(event.payload));
+}
+
+export async function listenToGenreProposals(handler: (proposal: GenreProposal) => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen<GenreProposal>("assistant://proposal", (event) => handler(event.payload));
+}
+
+export async function loadGenreProposals(): Promise<GenreProposal[]> {
+  return isTauriRuntime() ? invoke("assistant_proposals") : [];
+}
+
+export async function applyGenreProposal(proposalId: string, changes: { albumId: string; genre: string }[]): Promise<GenreProposal> {
+  return invoke("apply_assistant_proposal", { proposalId, changes });
+}
+
+export async function dismissGenreProposal(proposalId: string): Promise<GenreProposal> {
+  return invoke("dismiss_assistant_proposal", { proposalId });
+}
+
+/** Replaces a proposal in a list by id, or adds it. */
+export function upsertProposal(proposals: readonly GenreProposal[], proposal: GenreProposal): GenreProposal[] {
+  const index = proposals.findIndex((item) => item.id === proposal.id);
+  if (index < 0) return [...proposals, proposal];
+  return proposals.map((item, position) => position === index ? proposal : item);
+}
+
+/** "Electro; Dance" holds two genres; the rule is one per album. */
+export function genreTagHoldsSeveral(tag: string): boolean {
+  return tag.split(";").filter((part) => part.trim()).length > 1;
 }
 
 /** Shell-quotes an argument for the `claude mcp add` / `codex mcp add` hints. */
@@ -175,4 +241,8 @@ export const toolLabels: Record<string, string> = {
   listening_report: "Listening history",
   ratings_overview: "Ratings",
   year_overview: "Years",
+  albums_with_multiple_genres: "Albums with more than one genre",
+  show_in_aurora: "Showing it in Aurora",
+  propose_genre_changes: "Sending genre changes for review",
+  proposal_status: "Checking the review",
 };
