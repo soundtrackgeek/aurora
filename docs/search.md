@@ -132,7 +132,8 @@ albums), an Albums search took about 0.2 s and a Songs search about 0.7 s, plus
 Albums it waits for Aurora's background pass to average each album, a few minutes
 after a new version starts. Like `sound:`, it is an estimate: CLAP matches broad
 character such as instruments, mood and texture well, and exact facts such as a
-composer or a year not at all, so leave those to the other fields.
+composer or a year not at all, so leave those to the other fields. See
+[vibe search](vibe.md) for example descriptions and how it works.
 
 ### Sort and group in the search: `sort:` and `group:`
 
