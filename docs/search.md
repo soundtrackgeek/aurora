@@ -65,6 +65,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
 | `sound:` | A sound descriptor heard in the audio: per track in Songs; in Albums and Artists, on at least a third of an album's tracks | `sound:choir`, `sound:synth OR chiptune` |
+| `vibe:` | A description of the sound in your own words: the best-fitting 2% of tracks in Songs, of albums in Albums and Artists | `vibe:"dark ambient drone"`, `vibe:"heroic brass fanfare" sort:vibe` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
 
@@ -107,6 +108,32 @@ works them out in the background; the first pass over a million tracks takes a
 few minutes, and later passes only read new results. See
 [sound descriptors](sound-descriptors.md).
 
+`vibe:` goes past the twelve descriptors: describe the sound in your own words
+and Aurora finds what sounds most like it. Quote descriptions of more than one
+word, as in `vibe:"dark ambient drone"`. It keeps the best-fitting **2%**: 2% of
+the analyzed tracks in **Songs**, and 2% of the albums in **Albums** and
+**Artists**, where an album is compared as the average of its tracks. Combine it
+with any other field to narrow those down, and add `sort:vibe` to put the best
+fit first:
+
+```text
+vibe:"dark ambient drone" AND year:1990..1999 AND cr:..50
+vibe:"heroic orchestral fanfare" AND genre:scores sort:vibe
+vibe:"lonely solo piano" NOT sound:strings
+```
+
+Descriptions are case-insensitive and at most 200 characters; spacing does not
+matter. The first search with a new description takes a few seconds while Music
+Library's CLAP model reads it (Aurora runs `music-clap-worker.exe`, installed
+with Music Library 0.216.0 or newer); Aurora saves the result, so the same words
+are quick afterwards. On the reference library (1.1 million tracks, 73,000
+albums), an Albums search took about 0.2 s and a Songs search about 0.7 s, plus
+1.6 s the first time to score every track; scores are kept for half an hour. `vibe:` needs the same sound search results as `sound:`, and in
+Albums it waits for Aurora's background pass to average each album, a few minutes
+after a new version starts. Like `sound:`, it is an estimate: CLAP matches broad
+character such as instruments, mood and texture well, and exact facts such as a
+composer or a year not at all, so leave those to the other fields.
+
 ### Sort and group in the search: `sort:` and `group:`
 
 `sort:` orders results and `group:` puts them together under headings. Neither filters anything. Each can appear once, anywhere in a Songs, Albums, or Artists query, either alone or next to a search. Separate it with a space, a comma, or `AND`, and use `=` in place of `:` if you prefer:
@@ -139,6 +166,7 @@ A `sort:` in the search replaces the **Sort** menu's choice while it is in the q
 | `sort:aartist az` / `sort:aartist za` | Album artist, then title | ✓ | ✓ | ✓ |
 | `sort:genre az` / `sort:genre za` | Genre | ✓ | — | — |
 | `sort:publisher az` / `sort:publisher za` | Publisher | ✓ | — | — |
+| `sort:vibe` | Best fit to the query's first `vibe:` description first; needs a `vibe:` in the query | ✓ | ✓ | — |
 
 Numeric sorts use the same `..` notation as ranges. `year..` reads as "from the earliest year onward", so oldest first, and `..year` is newest first. Text sorts take `az` or `za` after a space, and without either they sort A–Z. Items without a year or rating come last. A sort that a view does not offer, such as `sort:genre` in Albums, is reported as an error instead of being ignored.
 
@@ -373,11 +401,13 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | 1980s synth scores | `genre:scores AND sound:synth AND year:1980..1989` |
 | Game music that is not chiptune | `genre:"video game" NOT sound:chiptune` |
 | Sci-Fi scores by how they sound | `genre:sci-fi group:sound` |
+| Cheaper 1990s drone, best fit first | `vibe:"dark ambient drone" AND year:1990..1999 AND cr:..50 sort:vibe` |
+| Songs that sound like a description | `vibe:"warm analog synth arpeggios" sort:vibe` |
 
 ### Differences between Songs, Albums, and Artists
 
-- **Songs** returns matching tracks. An album-wide `cr:` clause returns every matching track from qualifying albums; `love:`, `single:` and `sound:` check each track itself.
-- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:`, `love:`, `single:` and `sound:` evaluate the album itself.
+- **Songs** returns matching tracks. An album-wide `cr:` clause returns every matching track from qualifying albums; `love:`, `single:`, `sound:` and `vibe:` check each track itself.
+- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:`, `love:`, `single:`, `sound:` and `vibe:` evaluate the album itself.
 - **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks, including album-wide `cr:`, `love:` and `single:` clauses.
 
 The same query can therefore produce different result counts in each view.

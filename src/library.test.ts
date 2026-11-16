@@ -38,6 +38,13 @@ it("filters partial sonic coverage with boolean search syntax", () => {
   expect(() => filterTracks(partial, "sonic:maybe", null)).toThrow(/sonic:yes/);
 });
 
+it("accepts vibe descriptions, which the preview cannot score", () => {
+  expect(filterTracks(tracks, 'vibe:"dark ambient drone"', null)).toEqual([]);
+  expect(filterTracks(tracks, 'NOT vibe:"dark ambient"', null)).toEqual(tracks);
+  expect(() => filterTracks(tracks, 'vibe:"   "', null)).toThrow(/cannot be empty/);
+  expect(() => filterTracks(tracks, `vibe:"${"x".repeat(201)}"`, null)).toThrow(/200 characters/);
+});
+
 it("accepts sound descriptors, which the preview has none of", () => {
   expect(filterTracks(tracks, "sound:choir", null)).toEqual([]);
   expect(filterTracks(tracks, "NOT sound:synthesizer", null)).toEqual(tracks);

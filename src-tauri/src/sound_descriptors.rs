@@ -14,6 +14,10 @@
 //! Album rows are rebuilt when the catalog, the analysis bindings or the track
 //! rows change. Searches attach the cache read-only; Music Library's files are
 //! only ever read.
+//!
+//! The cache also keeps what `vibe:` needs (see `vibe`): each album's mean
+//! embedding (`sound_album_vectors`) and the text embeddings of descriptions
+//! already searched for (`sound_queries`), which Aurora NG reads too.
 use music_sonic_core::PROFILE;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Deserialize;
@@ -30,6 +34,11 @@ const ANALYSIS_FILE: &str = "music-analysis.sqlite3";
 /// Embeddings read and classified per transaction.
 const BATCH: i64 = 4096;
 const SCHEMA_VERSION: i32 = 1;
+/// CLAP embeddings have 512 dimensions.
+pub(crate) const DIMENSIONS: usize = 512;
+/// Album vectors read every embedding, so while Music Library is analyzing
+/// they are rebuilt at most this often.
+const VECTOR_INTERVAL_SECONDS: i64 = 30 * 60;
 /// Search aliases for label ids.
 const ALIASES: [(&str, &str); 9] = [
     ("orchestra", "orchestral"),
@@ -87,6 +96,10 @@ pub(crate) fn model() -> &'static Model {
     MODEL.get_or_init(|| {
         let file: ModelFile = serde_json::from_str(include_str!("sound_descriptors_model.json"))
             .expect("the compiled-in sound descriptor model is valid JSON");
+        assert_eq!(
+            file.dimensions, DIMENSIONS,
+            "CLAP embeddings have 512 dimensions"
+        );
         assert!(
             file.labels.len() <= 31,
             "descriptor masks hold at most 31 labels"
@@ -168,7 +181,7 @@ impl Model {
     }
 }
 
-fn f16_to_f32(bits: u16) -> f32 {
+pub(crate) fn f16_to_f32(bits: u16) -> f32 {
     let sign = u32::from(bits >> 15) << 31;
     let exponent = u32::from((bits >> 10) & 0x1f);
     let fraction = u32::from(bits & 0x3ff);
@@ -183,6 +196,50 @@ fn f16_to_f32(bits: u16) -> f32 {
         _ => sign | ((exponent + 127 - 15) << 23) | (fraction << 13),
     };
     f32::from_bits(value)
+}
+
+/// Half floats to f32 as a table, for reading a million embeddings.
+pub(crate) fn half_table() -> &'static [f32] {
+    static TABLE: OnceLock<Vec<f32>> = OnceLock::new();
+    TABLE.get_or_init(|| (0..=u16::MAX).map(f16_to_f32).collect())
+}
+
+/// f32 to a half float, rounding to nearest even.
+pub(crate) fn f32_to_f16(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exponent = ((bits >> 23) & 0xff) as i32;
+    let mantissa = bits & 0x7f_ffff;
+    if exponent == 0xff {
+        return sign | 0x7c00 | if mantissa == 0 { 0 } else { 0x200 };
+    }
+    let half_exponent = exponent - 127 + 15;
+    if half_exponent >= 0x1f {
+        return sign | 0x7c00;
+    }
+    let round = |value: u32, shift: u32| {
+        let kept = value >> shift;
+        let rest = value & ((1 << shift) - 1);
+        let halfway = 1 << (shift - 1);
+        kept + u32::from(rest > halfway || (rest == halfway && kept & 1 == 1))
+    };
+    if half_exponent <= 0 {
+        // Subnormal: the mantissa with its leading one, shifted down.
+        if half_exponent < -10 {
+            return sign;
+        }
+        return sign | round(mantissa | 0x80_0000, (14 - half_exponent) as u32) as u16;
+    }
+    // A carry out of the fraction correctly moves up an exponent.
+    sign | round(((half_exponent as u32) << 23) | mantissa, 13) as u16
+}
+
+/// Little-endian half floats, as Music Library stores embeddings.
+pub(crate) fn to_f16_bytes(values: &[f32]) -> Vec<u8> {
+    values
+        .iter()
+        .flat_map(|value| f32_to_f16(*value).to_le_bytes())
+        .collect()
 }
 
 /// The label index for a `sound:` value: a label id, its display name or an alias.
@@ -245,7 +302,7 @@ fn open_cache(path: &Path) -> Result<Connection, String> {
         .map_err(|error| error.to_string())?;
     if version != SCHEMA_VERSION {
         c.execute_batch(
-            "DROP TABLE IF EXISTS sound_meta; DROP TABLE IF EXISTS sound_audio; DROP TABLE IF EXISTS sound_albums;",
+            "DROP TABLE IF EXISTS sound_meta; DROP TABLE IF EXISTS sound_audio; DROP TABLE IF EXISTS sound_albums; DROP TABLE IF EXISTS sound_album_vectors; DROP TABLE IF EXISTS sound_queries;",
         )
         .map_err(|error| error.to_string())?;
     }
@@ -254,6 +311,8 @@ fn open_cache(path: &Path) -> Result<Connection, String> {
         CREATE TABLE IF NOT EXISTS sound_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sound_audio(audio_hash TEXT PRIMARY KEY, mask INTEGER NOT NULL, top INTEGER) WITHOUT ROWID;
         CREATE TABLE IF NOT EXISTS sound_albums(album_id TEXT PRIMARY KEY, tracks INTEGER NOT NULL, mask INTEGER NOT NULL, top INTEGER) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS sound_album_vectors(album_id TEXT PRIMARY KEY, vector BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS sound_queries(query TEXT NOT NULL, model TEXT NOT NULL, embedding BLOB NOT NULL, PRIMARY KEY(query, model));
         PRAGMA user_version={SCHEMA_VERSION};"
     ))
     .map_err(|error| format!("Could not prepare the sound descriptor cache: {error}"))?;
@@ -261,7 +320,7 @@ fn open_cache(path: &Path) -> Result<Connection, String> {
     let identity = format!("{}|{}", model.version, model.clap_model);
     if meta(&c, "model")?.as_deref() != Some(identity.as_str()) {
         c.execute_batch(
-            "DELETE FROM sound_meta; DELETE FROM sound_audio; DELETE FROM sound_albums;",
+            "DELETE FROM sound_meta; DELETE FROM sound_audio; DELETE FROM sound_albums; DELETE FROM sound_album_vectors; DELETE FROM sound_queries;",
         )
         .map_err(|error| error.to_string())?;
         set_meta(&c, "model", &identity)?;
@@ -288,6 +347,33 @@ fn set_meta(c: &Connection, key: &str, value: &str) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+/// A description's saved text embedding (see `vibe`).
+pub(crate) fn saved_query(cache: &Path, text: &str) -> Result<Option<Vec<f32>>, String> {
+    if !cache.is_file() {
+        return Ok(None);
+    }
+    let c = open_read_only(cache)?;
+    let bytes: Option<Vec<u8>> = c
+        .query_row(
+            "SELECT embedding FROM sound_queries WHERE query = ?1 AND model = ?2",
+            params![text, model().clap_model],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(bytes.and_then(|bytes| model().decode(&bytes)))
+}
+
+pub(crate) fn save_query(cache: &Path, text: &str, embedding: &[f32]) -> Result<(), String> {
+    let c = open_cache(cache)?;
+    c.execute(
+        "INSERT OR REPLACE INTO sound_queries(query, model, embedding) VALUES(?1, ?2, ?3)",
+        params![text, model().clap_model, to_f16_bytes(embedding)],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
 fn open_read_only(path: &Path) -> Result<Connection, String> {
     let c = Connection::open_with_flags(
         path,
@@ -305,6 +391,8 @@ pub(crate) struct RefreshReport {
     pub(crate) tracks: usize,
     /// Albums written, when the album rows were rebuilt.
     pub(crate) albums: Option<usize>,
+    /// Album vectors written, when they were rebuilt.
+    pub(crate) vectors: Option<usize>,
 }
 
 /// Brings the cache up to date with Music Library's embeddings and catalog.
@@ -403,30 +491,139 @@ pub(crate) fn refresh(
         )
         .map_err(|error| format!("Could not read Music Library's analysis: {error}"))?;
     let signature = format!("{revision}|{last}|{}|{}", bindings.0, bindings.1);
-    if meta(&c, "albums_signature")?.as_deref() == Some(signature.as_str()) {
+    let rollups_current = meta(&c, "albums_signature")?.as_deref() == Some(signature.as_str());
+    let now = unix_seconds();
+    let vectors_built = meta(&c, "vectors_built_at")?.and_then(|value| value.parse::<i64>().ok());
+    let vectors_due = meta(&c, "vectors_signature")?.as_deref() != Some(signature.as_str())
+        && vectors_built.is_none_or(|built| now - built >= VECTOR_INTERVAL_SECONDS);
+    if rollups_current && !vectors_due {
         return Ok(report);
     }
-    let albums = album_rollups(catalog, &analysis_path, cache)?;
-    let transaction = c
-        .unchecked_transaction()
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute("DELETE FROM sound_albums", [])
-        .map_err(|error| error.to_string())?;
-    {
-        let mut insert = transaction
-            .prepare("INSERT INTO sound_albums(album_id, tracks, mask, top) VALUES(?1, ?2, ?3, ?4)")
+    let albums = album_tracks(catalog, &analysis_path, cache)?;
+    if !rollups_current {
+        let transaction = c
+            .unchecked_transaction()
             .map_err(|error| error.to_string())?;
-        for (album, rollup) in &albums {
-            insert
-                .execute(params![album, rollup.tracks, rollup.mask, rollup.top])
+        transaction
+            .execute("DELETE FROM sound_albums", [])
+            .map_err(|error| error.to_string())?;
+        {
+            let mut insert = transaction
+                .prepare(
+                    "INSERT INTO sound_albums(album_id, tracks, mask, top) VALUES(?1, ?2, ?3, ?4)",
+                )
                 .map_err(|error| error.to_string())?;
+            for (album, rollup) in albums.ids.iter().zip(&albums.rollups) {
+                insert
+                    .execute(params![album, rollup.tracks, rollup.mask, rollup.top])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        set_meta(&transaction, "albums_signature", &signature)?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        report.albums = Some(albums.ids.len());
+    }
+    if vectors_due {
+        let vectors = album_vectors(&clap, &albums)?;
+        let transaction = c
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute("DELETE FROM sound_album_vectors", [])
+            .map_err(|error| error.to_string())?;
+        {
+            let mut insert = transaction
+                .prepare("INSERT INTO sound_album_vectors(album_id, vector) VALUES(?1, ?2)")
+                .map_err(|error| error.to_string())?;
+            for (album, vector) in &vectors {
+                insert
+                    .execute(params![album, vector])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        set_meta(&transaction, "vectors_signature", &signature)?;
+        set_meta(&transaction, "vectors_built_at", &now.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        report.vectors = Some(vectors.len());
+    }
+    Ok(report)
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64)
+}
+
+/// A short in-memory key for an audio hash.
+fn hash_key(hash: &str) -> u64 {
+    use std::hash::BuildHasher;
+    std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(hash)
+}
+
+/// Each album's descriptor counts, and which audio belongs to which album.
+struct AlbumTracks {
+    ids: Vec<String>,
+    rollups: Vec<AlbumRollup>,
+    /// (audio hash key, album index), sorted.
+    audio: Vec<(u64, u32)>,
+}
+
+/// Every album's embedding averaged over its tracks, as half floats: its dot
+/// product with a description is the mean of its tracks' scores.
+fn album_vectors(
+    clap: &Connection,
+    albums: &AlbumTracks,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut sums = vec![0f32; albums.ids.len() * DIMENSIONS];
+    let mut counts = vec![0u32; albums.ids.len()];
+    let table = half_table();
+    let mut statement = clap
+        .prepare("SELECT audio_hash, embedding FROM clap_audio WHERE model = ?1 AND embedding IS NOT NULL")
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query([&model().clap_model])
+        .map_err(|error| error.to_string())?;
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        let bytes = row
+            .get_ref(1)
+            .and_then(|value| value.as_blob().map_err(Into::into))
+            .map_err(|error| error.to_string())?;
+        if bytes.len() != DIMENSIONS * 2 {
+            continue;
+        }
+        let key = hash_key(
+            row.get_ref(0)
+                .and_then(|value| value.as_str().map_err(Into::into))
+                .map_err(|error| error.to_string())?,
+        );
+        let start = albums.audio.partition_point(|(audio, _)| *audio < key);
+        for &(_, album) in albums.audio[start..]
+            .iter()
+            .take_while(|(audio, _)| *audio == key)
+        {
+            let album = album as usize;
+            counts[album] += 1;
+            let sum = &mut sums[album * DIMENSIONS..(album + 1) * DIMENSIONS];
+            for (total, pair) in sum.iter_mut().zip(bytes.as_chunks::<2>().0) {
+                *total += table[usize::from(u16::from_le_bytes(*pair))];
+            }
         }
     }
-    set_meta(&transaction, "albums_signature", &signature)?;
-    transaction.commit().map_err(|error| error.to_string())?;
-    report.albums = Some(albums.len());
-    Ok(report)
+    Ok(albums
+        .ids
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| counts[*index] > 0)
+        .map(|(index, id)| {
+            let count = counts[index] as f32;
+            let mean: Vec<f32> = sums[index * DIMENSIONS..(index + 1) * DIMENSIONS]
+                .iter()
+                .map(|total| total / count)
+                .collect();
+            (id.clone(), to_f16_bytes(&mean))
+        })
+        .collect())
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -439,11 +636,7 @@ struct AlbumRollup {
 /// Counts each album's tracks per descriptor. An album carries a descriptor
 /// when at least `album_share` of its described tracks do; its top descriptor
 /// is the one the most tracks carry (the earlier label on a tie).
-fn album_rollups(
-    catalog: &Path,
-    analysis: &Path,
-    cache: &Path,
-) -> Result<HashMap<String, AlbumRollup>, String> {
+fn album_tracks(catalog: &Path, analysis: &Path, cache: &Path) -> Result<AlbumTracks, String> {
     let c = open_read_only(catalog)?;
     for (path, name) in [(analysis, "sonic"), (cache, "sound")] {
         c.execute(
@@ -453,10 +646,13 @@ fn album_rollups(
         .map_err(|error| error.to_string())?;
     }
     let labels = model().labels.len();
-    let mut counts: HashMap<String, (u32, Vec<u32>)> = HashMap::new();
+    let mut index: HashMap<String, u32> = HashMap::new();
+    let mut ids = Vec::new();
+    let mut counts: Vec<(u32, Vec<u32>)> = Vec::new();
+    let mut audio = Vec::new();
     let mut rows = c
         .prepare(
-            "SELECT t.album_id, d.mask FROM tracks AS t
+            "SELECT t.album_id, d.mask, s.audio_hash FROM tracks AS t
              JOIN sonic.sonic_tracks AS s ON s.directory = t.file_path AND s.filename = t.filename AND s.profile = ?1
              JOIN sound.sound_audio AS d ON d.audio_hash = s.audio_hash
              WHERE t.album_id IS NOT NULL",
@@ -466,17 +662,33 @@ fn album_rollups(
     while let Some(row) = query.next().map_err(|error| error.to_string())? {
         let album: String = row.get(0).map_err(|error| error.to_string())?;
         let mask: u32 = row.get(1).map_err(|error| error.to_string())?;
-        let entry = counts.entry(album).or_insert_with(|| (0, vec![0; labels]));
+        let hash = row
+            .get_ref(2)
+            .and_then(|value| value.as_str().map_err(Into::into))
+            .map_err(|error| error.to_string())?;
+        let position = *index.entry(album).or_insert_with_key(|album| {
+            ids.push(album.clone());
+            counts.push((0, vec![0; labels]));
+            (ids.len() - 1) as u32
+        });
+        audio.push((hash_key(hash), position));
+        let entry = &mut counts[position as usize];
         entry.0 += 1;
-        for (index, count) in entry.1.iter_mut().enumerate() {
-            *count += (mask >> index) & 1;
+        for (label, count) in entry.1.iter_mut().enumerate() {
+            *count += (mask >> label) & 1;
         }
     }
+    audio.sort_unstable();
+    audio.dedup();
     let share = model().album_share;
-    Ok(counts
-        .into_iter()
-        .map(|(album, (tracks, per_label))| (album, rollup(tracks, &per_label, share)))
-        .collect())
+    Ok(AlbumTracks {
+        ids,
+        rollups: counts
+            .iter()
+            .map(|(tracks, per_label)| rollup(*tracks, per_label, share))
+            .collect(),
+        audio,
+    })
 }
 
 fn rollup(tracks: u32, per_label: &[u32], share: f64) -> AlbumRollup {
@@ -508,11 +720,11 @@ pub(crate) fn prepare_search(c: &Connection, cache: Option<&Path>) -> Result<(),
     };
     let sql = if usable {
         format!(
-            "CREATE TEMP VIEW aurora_sound_tracks AS SELECT s.directory AS file_path, s.filename AS filename, d.mask AS mask, d.top AS top FROM sonic.sonic_tracks AS s JOIN sound.sound_audio AS d ON d.audio_hash = s.audio_hash WHERE s.profile = '{PROFILE}';
+            "CREATE TEMP VIEW aurora_sound_tracks AS SELECT s.directory AS file_path, s.filename AS filename, s.audio_hash AS audio_hash, d.mask AS mask, d.top AS top FROM sonic.sonic_tracks AS s JOIN sound.sound_audio AS d ON d.audio_hash = s.audio_hash WHERE s.profile = '{PROFILE}';
             CREATE TEMP VIEW aurora_sound_albums AS SELECT album_id, mask, top FROM sound.sound_albums;"
         )
     } else {
-        "CREATE TEMP TABLE aurora_sound_tracks(file_path TEXT, filename TEXT, mask INTEGER, top INTEGER);
+        "CREATE TEMP TABLE aurora_sound_tracks(file_path TEXT, filename TEXT, audio_hash TEXT, mask INTEGER, top INTEGER);
         CREATE TEMP TABLE aurora_sound_albums(album_id TEXT PRIMARY KEY, mask INTEGER, top INTEGER);"
             .to_owned()
     };
@@ -575,25 +787,6 @@ pub(crate) mod tests {
         weights.iter().map(|w| w / norm).collect()
     }
 
-    fn to_f16_bytes(values: &[f32]) -> Vec<u8> {
-        values
-            .iter()
-            .flat_map(|value| f32_to_f16(*value).to_le_bytes())
-            .collect()
-    }
-
-    /// Round-to-nearest conversion for normal values, enough for fixtures.
-    fn f32_to_f16(value: f32) -> u16 {
-        let bits = value.to_bits();
-        let sign = ((bits >> 16) & 0x8000) as u16;
-        let exponent = ((bits >> 23) & 0xff) as i32 - 127 + 15;
-        if value == 0.0 || exponent <= 0 {
-            return sign;
-        }
-        let fraction = ((bits & 0x7f_ffff) + 0x1000) >> 13;
-        sign | (((exponent as u16) << 10) + fraction as u16)
-    }
-
     #[test]
     fn the_compiled_in_model_has_twelve_labels() {
         let model = model();
@@ -630,9 +823,18 @@ pub(crate) mod tests {
             assert_eq!(f16_to_f32(bits), value, "{bits:#06x}");
         }
         assert!(f16_to_f32(0x7c00).is_infinite());
-        for value in [0.031_25f32, -0.75, 0.2] {
-            assert!((f16_to_f32(f32_to_f16(value)) - value).abs() < 1e-3);
+        for value in [0.031_25f32, -0.75, 0.2, 1e-6, -3e-5, 0.0] {
+            let back = f16_to_f32(f32_to_f16(value));
+            assert!(
+                (back - value).abs() <= value.abs() / 1000.0 + 6e-8,
+                "{value} {back}"
+            );
         }
+        // Every finite half float survives the round trip.
+        for bits in (0..=u16::MAX).filter(|bits| bits & 0x7c00 != 0x7c00) {
+            assert_eq!(f32_to_f16(f16_to_f32(bits)), bits, "{bits:#06x}");
+        }
+        assert_eq!(f32_to_f16(1e9), 0x7c00);
     }
 
     #[test]
@@ -755,7 +957,8 @@ pub(crate) mod tests {
             report,
             RefreshReport {
                 tracks: 6,
-                albums: Some(2)
+                albums: Some(2),
+                vectors: Some(2)
             }
         );
         let found = albums(&cache);
@@ -771,12 +974,14 @@ pub(crate) mod tests {
             refresh(&cache, &catalog, "r1").unwrap(),
             RefreshReport::default()
         );
-        // A new catalog revision rebuilds the albums only.
+        // A new catalog revision rebuilds the albums only; the vectors wait
+        // for half an hour while Music Library is busy.
         assert_eq!(
             refresh(&cache, &catalog, "r2").unwrap(),
             RefreshReport {
                 tracks: 0,
-                albums: Some(2)
+                albums: Some(2),
+                vectors: None
             }
         );
 
@@ -792,10 +997,70 @@ pub(crate) mod tests {
             report,
             RefreshReport {
                 tracks: 1,
-                albums: Some(2)
+                albums: Some(2),
+                vectors: None
             }
         );
         assert_eq!(albums(&cache)[1].2 & (1 << 1), 0, "B lost its choir track");
+
+        // Once the half hour has passed, the vectors catch up.
+        Connection::open(&cache)
+            .unwrap()
+            .execute(
+                "UPDATE sound_meta SET value = '0' WHERE key = 'vectors_built_at'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(refresh(&cache, &catalog, "r2").unwrap().vectors, Some(2));
+    }
+
+    #[test]
+    fn album_vectors_average_their_tracks() {
+        let (_dir, catalog, cache) = fixture();
+        refresh(&cache, &catalog, "r1").unwrap();
+        let c = Connection::open(&cache).unwrap();
+        let vector = |album: &str| -> Vec<f32> {
+            let bytes: Vec<u8> = c
+                .query_row(
+                    "SELECT vector FROM sound_album_vectors WHERE album_id = ?1",
+                    [album],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            model().decode(&bytes).unwrap()
+        };
+        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
+        let (choir, synth) = (embedding_for(1), embedding_for(5));
+        // A is three choir tracks; B two synth and one choir.
+        assert!((dot(&vector("A"), &choir) - 1.0).abs() < 0.01);
+        let expected = (2.0 * dot(&synth, &synth) + dot(&choir, &synth)) / 3.0;
+        assert!((dot(&vector("B"), &synth) - expected).abs() < 0.01);
+        // C has no embeddings, so no vector.
+        let missing: bool = c
+            .query_row(
+                "SELECT NOT EXISTS (SELECT 1 FROM sound_album_vectors WHERE album_id = 'C')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(missing);
+    }
+
+    #[test]
+    fn descriptions_are_saved_with_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join(FILE_NAME);
+        assert_eq!(saved_query(&cache, "dark ambient"), Ok(None));
+        let embedding = embedding_for(7);
+        save_query(&cache, "dark ambient", &embedding).unwrap();
+        let saved = saved_query(&cache, "dark ambient").unwrap().unwrap();
+        assert!(
+            saved
+                .iter()
+                .zip(&embedding)
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        );
+        assert_eq!(saved_query(&cache, "bright"), Ok(None));
     }
 
     #[test]
@@ -812,11 +1077,7 @@ pub(crate) mod tests {
         let (dir, catalog, cache) = fixture();
         refresh(&cache, &catalog, "r1").unwrap();
         let c = Connection::open(&catalog).unwrap();
-        c.execute(
-            "ATTACH DATABASE ?1 AS sonic",
-            [dir.path().join(ANALYSIS_FILE).to_string_lossy().as_ref()],
-        )
-        .unwrap();
+        crate::sonic::prepare_search(&c, &catalog).unwrap();
         prepare_search(&c, Some(&cache)).unwrap();
         (dir, c)
     }

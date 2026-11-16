@@ -236,7 +236,8 @@ pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), 
                 )))
             },
         )
-        .map_err(|error| format!("Could not configure live catalog file checks: {error}"))
+        .map_err(|error| format!("Could not configure live catalog file checks: {error}"))?;
+    crate::vibe::register(connection)
 }
 
 pub(crate) fn attach_aurora_state(
@@ -977,6 +978,8 @@ enum CatalogSearchField {
     Sonic,
     /// `sound:` matches a sound descriptor (see `sound_descriptors`).
     Sound,
+    /// `vibe:` matches a description of the sound (see `vibe`).
+    Vibe,
     Extended(ExtendedSearchField),
 }
 
@@ -993,6 +996,7 @@ impl CatalogSearchField {
             | Self::GenreCount
             | Self::Sonic
             | Self::Sound
+            | Self::Vibe
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -1015,6 +1019,7 @@ impl CatalogSearchField {
             | Self::GenreCount
             | Self::Sonic
             | Self::Sound
+            | Self::Vibe
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -1032,6 +1037,9 @@ enum CatalogSearchMatch {
     /// A sound descriptor's label index: per track in Songs, per album share in
     /// Albums and Artists.
     Sound(u8),
+    /// A normalized description: the best-fitting share of tracks in Songs,
+    /// of albums in Albums and Artists.
+    Vibe(String),
     Extended {
         field: ExtendedSearchField,
         from: Option<f64>,
@@ -1091,6 +1099,17 @@ impl CatalogSearch {
         self.groups.is_empty()
     }
 
+    /// The first `vibe:` description, which `sort:vibe` orders by.
+    pub(crate) fn first_vibe(&self) -> Option<&str> {
+        self.groups
+            .iter()
+            .flat_map(|group| &group.alternatives)
+            .find_map(|alternative| match &alternative.matcher {
+                CatalogSearchMatch::Vibe(text) => Some(text.as_str()),
+                _ => None,
+            })
+    }
+
     pub(crate) fn plain_fts_query(&self) -> Option<&str> {
         let group = self.groups.first()?;
         if self.groups.len() != 1 || group.negated || group.alternatives.len() != 1 {
@@ -1111,7 +1130,9 @@ impl CatalogSearch {
             | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
-            CatalogSearchMatch::Analyzed(_) | CatalogSearchMatch::Sound(_) => None,
+            CatalogSearchMatch::Analyzed(_)
+            | CatalogSearchMatch::Sound(_)
+            | CatalogSearchMatch::Vibe(_) => None,
         }
     }
 
@@ -1237,6 +1258,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "cr" => Some(CatalogSearchField::Completeness),
         "sonic" => Some(CatalogSearchField::Sonic),
         "sound" => Some(CatalogSearchField::Sound),
+        "vibe" => Some(CatalogSearchField::Vibe),
         "love" => Some(CatalogSearchField::Love),
         "single" | "singles" => Some(CatalogSearchField::Single),
         "genres" => Some(CatalogSearchField::GenreCount),
@@ -1706,6 +1728,9 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                     CatalogSearchField::Sound => CatalogSearchMatch::Sound(
                         crate::sound_descriptors::parse_label(exact.as_deref().unwrap_or(value))?,
                     ),
+                    CatalogSearchField::Vibe => CatalogSearchMatch::Vibe(crate::vibe::normalize(
+                        exact.as_deref().unwrap_or(value),
+                    )?),
                     CatalogSearchField::Sonic => {
                         match exact
                             .as_deref()
@@ -1933,6 +1958,7 @@ fn non_prefix_predicate(
         | CatalogSearchMatch::SinglesRange { .. }
         | CatalogSearchMatch::GenreCountRange { .. }
         | CatalogSearchMatch::Sound(_)
+        | CatalogSearchMatch::Vibe(_)
         | CatalogSearchMatch::Extended { .. } => None,
     }
 }
@@ -1989,6 +2015,10 @@ fn album_level_predicate(
                 "(COALESCE((SELECT sound_album.mask FROM temp.aurora_sound_albums AS sound_album WHERE sound_album.album_id = {alias}.id), 0) & ?) != 0"
             ))
         }
+        CatalogSearchMatch::Vibe(text) => Some(format!(
+            "{} IS NOT NULL",
+            crate::vibe::album_sql(text, &format!("{alias}.id"))
+        )),
         _ => None,
     }
 }
@@ -2177,7 +2207,9 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
-            CatalogSearchMatch::Analyzed(_) | CatalogSearchMatch::Sound(_) => None,
+            CatalogSearchMatch::Analyzed(_)
+            | CatalogSearchMatch::Sound(_)
+            | CatalogSearchMatch::Vibe(_) => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -2237,6 +2269,7 @@ pub(crate) fn push_track_search_predicates(
                 CatalogSearchMatch::Sound(label) => {
                     Some(track_sound_predicate("t", *label, params))
                 }
+                CatalogSearchMatch::Vibe(text) => Some(crate::vibe::track_predicate(text, "t")),
                 matcher => track_album_level_predicate("t", matcher, params),
             }
         }));

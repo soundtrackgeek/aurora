@@ -274,7 +274,7 @@ enum CursorKind {
 #[derive(Clone, Copy)]
 struct SortDefinition<'a> {
     cursor_tag: &'a str,
-    expression: &'static str,
+    expression: &'a str,
     descending: bool,
     cursor_kind: CursorKind,
 }
@@ -502,6 +502,34 @@ fn push_order_by(sql: &mut String, sort: SortDefinition<'_>, id_expression: &str
     sql.push_str(id_expression);
     sql.push(' ');
     sql.push_str(direction);
+}
+
+/// The score `sort:vibe` orders by: the search's first `vibe:` description.
+fn vibe_sort(
+    view: &CatalogView,
+    search: Option<&crate::catalog::CatalogSearch>,
+    score_sql: impl Fn(&str) -> String,
+) -> Result<Option<String>, String> {
+    if view.sort != Some(crate::catalog_view::ViewSort::Vibe) {
+        return Ok(None);
+    }
+    search
+        .and_then(crate::catalog::CatalogSearch::first_vibe)
+        .map(|text| Some(score_sql(text)))
+        .ok_or_else(|| {
+            "sort:vibe orders by a vibe: description, like vibe:\"dark ambient\" sort:vibe."
+                .to_owned()
+        })
+}
+
+/// The best fit first; results without a score (outside `vibe:`) last.
+fn vibe_sort_definition<'a>(cursor_tag: &'a str, expression: &'a str) -> SortDefinition<'a> {
+    SortDefinition {
+        cursor_tag,
+        expression,
+        descending: true,
+        cursor_kind: CursorKind::NullableInteger,
+    }
 }
 
 /// Takes `sort:` and `group:` out of the search text; `None` when nothing
@@ -920,9 +948,14 @@ fn track_page_from_connection(
             crate::artist_identity::key_sql(connection, column)
         })
     });
+    let vibe = vibe_sort(&view, parsed_search.as_ref(), |text| {
+        crate::vibe::track_sql(text, "t")
+    })?;
     let mut sort = track_sort(sort_choice.unwrap_or_default());
     let random_tag = format!("track-random-{}", request.random_seed.unwrap_or(0));
-    if sort_choice == Some(TrackSort::Random) {
+    if let Some(expression) = &vibe {
+        sort = vibe_sort_definition("track-vibe", expression);
+    } else if sort_choice == Some(TrackSort::Random) {
         register_random_order(connection, request.random_seed.unwrap_or(0))?;
         sort.cursor_tag = &random_tag;
     }
@@ -1229,9 +1262,14 @@ fn album_page_from_connection(
             crate::artist_identity::key_sql(connection, column)
         })
     });
+    let vibe = vibe_sort(&view, parsed_search.as_ref(), |text| {
+        crate::vibe::album_sql(text, "a.id")
+    })?;
     let mut sort = album_sort(sort_choice.unwrap_or_default());
     let random_tag = format!("album-random-{}", request.random_seed.unwrap_or(0));
-    if sort_choice == Some(AlbumSort::Random) {
+    if let Some(expression) = &vibe {
+        sort = vibe_sort_definition("album-vibe", expression);
+    } else if sort_choice == Some(AlbumSort::Random) {
         register_random_order(connection, request.random_seed.unwrap_or(0))?;
         sort.cursor_tag = &random_tag;
     }

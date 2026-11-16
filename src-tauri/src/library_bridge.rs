@@ -1811,7 +1811,7 @@ fn build_stamp_for(executable: &Path) -> Option<String> {
     Some(format!("{}:{modified}", metadata.len()))
 }
 
-fn discover_music_library_executable() -> Result<PathBuf, String> {
+pub(crate) fn discover_music_library_executable() -> Result<PathBuf, String> {
     #[cfg(target_os = "macos")]
     {
         let candidate = std::env::var_os(MUSIC_LIBRARY_EXE_ENV)

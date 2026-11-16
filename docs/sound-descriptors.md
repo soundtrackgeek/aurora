@@ -106,8 +106,15 @@ tracks reads every embedding and took about three minutes on the reference PC;
 later passes take a fraction of a second. Album descriptors are rebuilt when
 the catalog, the analysis or the descriptors change (a few seconds).
 
+The same pass keeps an average CLAP embedding per album for
+[`vibe:`](search.md), in the `sound_album_vectors` table: about 100 MB for 73,000
+albums, built in under a minute, and rebuilt at most every 30 minutes while
+the library changes. Descriptions searched with `vibe:` are saved with their
+embedding in `sound_queries`, so Music Library's CLAP worker reads each one only
+once; Aurora NG reads both tables from the same file.
+
 Results are kept in Aurora's data folder as `aurora-sound-descriptors.sqlite3`,
-about 90 MB for 1.1 million tracks, keyed by audio hash, so identical files share
+about 200 MB for 1.1 million tracks with the album vectors, keyed by audio hash, so identical files share
 one row and renamed folders keep their descriptors. Delete the file to rebuild it.
 Music Library's files are only read. Searches see descriptors as soon as they
 are saved, including from `aurora.exe --mcp`.

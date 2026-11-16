@@ -48,6 +48,8 @@ pub(crate) enum ViewSort {
     Publisher {
         descending: bool,
     },
+    /// Best fit to the search's first `vibe:` description first.
+    Vibe,
 }
 
 /// What `group:` puts results together by.
@@ -138,7 +140,7 @@ pub(crate) struct CatalogView {
     pub(crate) group: Option<CatalogGroup>,
 }
 
-const SORT_HELP: &str = "Use sort:random, sort:year.., sort:..year, sort:ryear.., sort:added.., sort:rating.., sort:az, sort:za, sort:title az, sort:album az or sort:aartist za.";
+const SORT_HELP: &str = "Use sort:random, sort:year.., sort:..year, sort:ryear.., sort:added.., sort:rating.., sort:az, sort:za, sort:title az, sort:album az, sort:aartist za or sort:vibe.";
 const GROUP_HELP: &str = "Use group:genre, group:aartist, group:artist, group:album, group:publisher, group:country, group:year, group:ryear, group:decade, group:love, group:ar or group:sound.";
 
 /// Fields that order by a number and take `name..` / `..name`.
@@ -172,6 +174,7 @@ fn parse_sort(value: &str, direction: Option<bool>) -> Result<ViewSort, String> 
     match value {
         "" => return Err(format!("sort: needs a value. {SORT_HELP}")),
         "random" => return Ok(ViewSort::Random),
+        "vibe" => return Ok(ViewSort::Vibe),
         "az" => return Ok(ViewSort::Title { descending: false }),
         "za" => return Ok(ViewSort::Title { descending: true }),
         _ => {}
@@ -329,6 +332,7 @@ fn sort_name(sort: ViewSort) -> &'static str {
         ViewSort::AlbumArtist { .. } => "aartist",
         ViewSort::Genre { .. } => "genre",
         ViewSort::Publisher { .. } => "publisher",
+        ViewSort::Vibe => "vibe",
     }
 }
 
@@ -376,6 +380,8 @@ pub(crate) fn track_sort(sort: ViewSort) -> TrackSort {
             TrackSort::PublisherAsc,
             TrackSort::PublisherDesc,
         ),
+        // The explorer orders by the vibe score itself (`vibe_sort`).
+        ViewSort::Vibe => TrackSort::default(),
     }
 }
 
@@ -405,6 +411,8 @@ pub(crate) fn album_sort(sort: ViewSort) -> Result<AlbumSort, String> {
         ViewSort::AlbumArtist { descending } => {
             pick(descending, AlbumSort::ArtistAsc, AlbumSort::ArtistDesc)
         }
+        // The explorer orders by the vibe score itself (`vibe_sort`).
+        ViewSort::Vibe => AlbumSort::default(),
         other => return Err(unavailable("Albums", other)),
     })
 }

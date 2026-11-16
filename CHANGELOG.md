@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.0] - 2026-11-16
+
+### Added
+- `vibe:` in the search box finds music that sounds like a description in your own words, such as `vibe:"dark ambient drone"`, and combines with every other field: `vibe:"dark ambient drone" AND year:1990..1999 AND cr:..50`. It keeps the best-fitting 2% of tracks in Songs and of albums in Albums and Artists, comparing each album as the average of its tracks.
+- `sort:vibe` puts the best fit to the query's first `vibe:` description first, in Songs and Albums.
+- Music Library's CLAP worker (Music Library 0.216.0 or newer) reads each new description once, in about a second; Aurora saves the result in `aurora-sound-descriptors.sqlite3`, where Aurora NG can read it too. The sound descriptor pass now also keeps an average embedding per album there (about 100 MB for 73,000 albums).
+
 ## [0.65.0] - 2026-11-16
 
 ### Added

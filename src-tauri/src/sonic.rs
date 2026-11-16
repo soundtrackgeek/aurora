@@ -140,9 +140,9 @@ pub(crate) fn prepare_search(c: &Connection, catalog_path: &std::path::Path) -> 
             [analysis.to_string_lossy().as_ref()],
         )
         .map_err(|e| e.to_string())?;
-        c.execute_batch(&format!("CREATE TEMP VIEW aurora_sonic_paths AS SELECT directory AS file_path,filename FROM sonic.sonic_tracks WHERE profile='{PROFILE}';")).map_err(|e|e.to_string())?;
+        c.execute_batch(&format!("CREATE TEMP VIEW aurora_sonic_paths AS SELECT directory AS file_path,filename,audio_hash FROM sonic.sonic_tracks WHERE profile='{PROFILE}';")).map_err(|e|e.to_string())?;
     } else {
-        c.execute_batch("CREATE TEMP TABLE aurora_sonic_paths(file_path TEXT,filename TEXT,PRIMARY KEY(file_path,filename));").map_err(|e|e.to_string())?;
+        c.execute_batch("CREATE TEMP TABLE aurora_sonic_paths(file_path TEXT,filename TEXT,audio_hash TEXT,PRIMARY KEY(file_path,filename));").map_err(|e|e.to_string())?;
     }
     Ok(())
 }
@@ -412,7 +412,7 @@ mod tests {
             ATTACH DATABASE ':memory:' AS sonic;CREATE TABLE sonic.sonic_profiles(profile TEXT PRIMARY KEY,weights TEXT);
             CREATE TABLE sonic.sonic_audio(audio_hash TEXT,profile TEXT,features TEXT,PRIMARY KEY(audio_hash,profile));
             CREATE TABLE sonic.sonic_tracks(track_key TEXT PRIMARY KEY,directory TEXT,filename TEXT,audio_hash TEXT,profile TEXT,size INTEGER,modified TEXT);
-            CREATE TEMP VIEW aurora_sonic_paths AS SELECT directory AS file_path,filename FROM sonic.sonic_tracks;").unwrap();
+            CREATE TEMP VIEW aurora_sonic_paths AS SELECT directory AS file_path,filename,audio_hash FROM sonic.sonic_tracks;").unwrap();
         let mut weights = vec![0f32; DIMENSIONS * DIMENSIONS];
         for i in 0..DIMENSIONS {
             weights[i * DIMENSIONS + i] = 1.;

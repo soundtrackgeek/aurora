@@ -75,6 +75,7 @@ mod timing;
 mod tonehavn;
 mod tonight;
 mod track_deletion;
+mod vibe;
 mod waveform;
 mod years;
 

@@ -807,7 +807,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "genres" | "sonic" | "sound";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "genres" | "sonic" | "sound" | "vibe";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -827,7 +827,7 @@ interface LibrarySearchGroup {
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
 const librarySearchFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "genres", "sonic", "sound",
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "genres", "sonic", "sound", "vibe",
 ]);
 
 /** Mirrors src-tauri/src/sound_descriptors.rs (labels and aliases). */
@@ -1033,6 +1033,11 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
       } else if (field === "sound") {
         if (!soundDescriptorValues.has((exact ?? value).trim().toLocaleLowerCase())) throw new Error(`Unknown sound "${(exact ?? value).trim()}". Use sound: with ${soundDescriptorLabels.join(", ")}.`);
+      } else if (field === "vibe") {
+        // Mirrors src-tauri/src/vibe.rs (normalize).
+        const description = (exact ?? value).trim().split(/\s+/).join(" ");
+        if (description.length === 0) throw new Error("Describe the sound after vibe:, like vibe:\"dark ambient drone\".");
+        if ([...description].length > 200) throw new Error("A vibe: description can be at most 200 characters.");
       } else if (field === "sonic") {
         if (!["yes", "no"].includes((exact ?? value).toLowerCase())) throw new Error("Use sonic:yes or sonic:no to filter audio analysis coverage.");
       } else if (exact === null) {
@@ -1090,6 +1095,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "cr":
     case "sonic":
     case "sound":
+    case "vibe":
     case "single":
     case "genres":
     case "love": return [];
@@ -1140,7 +1146,7 @@ function matchesLibrarySearchAlternative(
 ): boolean {
   if (alternative.field === "sonic") return Boolean(track.sonicAnalyzed) === (alternative.value.toLowerCase() === "yes");
   // Descriptors come from Music Library's CLAP results, which the preview does not have.
-  if (alternative.field === "sound") return false;
+  if (alternative.field === "sound" || alternative.field === "vibe") return false;
   if (alternative.field === "year" || alternative.field === "ryear") {
     const year = alternative.field === "year" ? track.originalYear : track.releaseYear;
     if (year === null || year === undefined) return false;
