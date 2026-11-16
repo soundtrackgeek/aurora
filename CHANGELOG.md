@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.68.0] - 2026-11-16
+
+### Added
+- **Genres → Check genres by sound** finds albums whose genre tag does not match their sound and opens them in Review genre changes. It flags albums that sound clearly more like another of your genres than their own (tag errors), and suggests a specific genre for albums tagged with a broad one such as Rock or Pop, from the genre most of their 15 nearest-sounding albums carry. It only suggests genres you already use on at least 30 albums. It never checks or suggests score genres named after a kind of film or game, Soundtrack, Trailer, Christmas Music or Children's Music. It never suggests broad genres or a less common spelling of another genre, such as Rock And Roll beside Rock & Roll. It needs Music Library's audio analysis and takes 10 to 20 seconds for 73,000 albums. See [docs/genre-check.md](docs/genre-check.md).
+- Review genre changes shows each finding's confidence, why it was flagged, and up to three songs of the suggested genre that sound most like the album. Medium-confidence albums start unticked.
+
+### Changed
+- The review dialog's label reads "Genre review" instead of "AI assistant", since changes can now come from Aurora itself.
+
 ## [0.67.0] - 2026-11-16
 
 ### Added

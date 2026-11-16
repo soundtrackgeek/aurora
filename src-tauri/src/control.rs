@@ -313,6 +313,9 @@ pub(crate) struct ProposalAlbum {
     pub(crate) applied_genre: Option<String>,
     pub(crate) status: ChangeStatus,
     pub(crate) error: Option<String>,
+    /// Why the genre check suggests the genre; assistants send none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) evidence: Option<crate::genre_check::Evidence>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -345,18 +348,46 @@ pub(crate) fn validate_genre(genre: &str) -> Result<String, String> {
 
 impl AssistantProposals {
     fn create(&self, request: ProposalRequest) -> Result<GenreProposal, String> {
-        if request.changes.is_empty() {
+        let changes = request
+            .changes
+            .into_iter()
+            .map(|change| (change, None))
+            .collect();
+        self.create_with(&request.source, &request.reason, changes)
+    }
+
+    /// A proposal from Aurora's own genre check, with evidence per album.
+    pub(crate) fn create_checked(
+        &self,
+        source: &str,
+        reason: &str,
+        changes: Vec<(ProposedChange, crate::genre_check::Evidence)>,
+    ) -> Result<GenreProposal, String> {
+        let changes = changes
+            .into_iter()
+            .map(|(change, evidence)| (change, Some(evidence)))
+            .collect();
+        self.create_with(source, reason, changes)
+    }
+
+    fn create_with(
+        &self,
+        source: &str,
+        reason: &str,
+        changes: Vec<(ProposedChange, Option<crate::genre_check::Evidence>)>,
+    ) -> Result<GenreProposal, String> {
+        if changes.is_empty() {
             return Err("Propose at least one album change.".to_owned());
         }
-        if request.changes.len() > MAX_PROPOSAL_ALBUMS {
+        if changes.len() > MAX_PROPOSAL_ALBUMS {
             return Err(format!(
                 "Propose at most {MAX_PROPOSAL_ALBUMS} albums at a time."
             ));
         }
         let connection = catalog::open_catalog(&catalog::default_catalog_path()?)?;
-        let mut albums: Vec<ProposalAlbum> = Vec::with_capacity(request.changes.len());
+        let mut albums: Vec<ProposalAlbum> = Vec::with_capacity(changes.len());
         let mut unknown = Vec::new();
-        for change in request.changes {
+        for (change, evidence) in changes {
             let genre = validate_genre(&change.genre)?;
             if albums.iter().any(|album| album.album_id == change.album_id) {
                 return Err("Each album may appear only once in a proposal.".to_owned());
@@ -372,6 +403,7 @@ impl AssistantProposals {
                     applied_genre: None,
                     status: ChangeStatus::Pending,
                     error: None,
+                    evidence,
                 }),
                 None => unknown.push(change.album_id),
             }
@@ -387,8 +419,8 @@ impl AssistantProposals {
             created_at_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_millis() as u64),
-            source: truncate(request.source.trim(), 80),
-            reason: truncate(request.reason.trim(), 2000),
+            source: truncate(source.trim(), 80),
+            reason: truncate(reason.trim(), 2000),
             status: ProposalStatus::Pending,
             albums,
         };
@@ -567,6 +599,7 @@ mod tests {
                     applied_genre: None,
                     status: ChangeStatus::Pending,
                     error: None,
+                    evidence: None,
                 })
                 .collect(),
         }

@@ -10,6 +10,8 @@
 .genre-atlas__scope strong, .genre-atlas__scope span, .genre-atlas__scope small { display: block; }
 .genre-atlas__scope strong { color: #d9b5ff; font-size: max(var(--aurora-font-min), calc(28px + var(--aurora-font-offset))); font-weight: 500; }
 .genre-atlas__scope span { color: #dce3eb; font-size: max(var(--aurora-font-min), calc(11px + var(--aurora-font-offset))); }
+.genre-atlas__sound-check { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; }
+.genre-atlas__sound-check svg { width: 14px; height: 14px; }
 .genre-atlas__scope small { margin-top: 4px; color: var(--subtle); font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
 .genre-atlas__workspace { display: grid; grid-template-columns: minmax(248px, 310px) minmax(0, 1fr); align-items: start; gap: 12px; }
 

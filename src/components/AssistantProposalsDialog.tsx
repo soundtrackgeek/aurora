@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Sparkles, TriangleAlert, X } from "lucide-react";
+import { AudioLines, Check, Sparkles, TriangleAlert, X } from "lucide-react";
 import { formatCount } from "../library";
 import {
   applyGenreProposal,
   dismissGenreProposal,
   genreTagHoldsSeveral,
+  type GenreEvidence,
+  type GenreEvidenceTrack,
   type GenreProposal,
   type GenreProposalAlbum,
 } from "../assistant";
@@ -25,6 +27,7 @@ const sourceNames: Record<string, string> = {
   "claude-code": "Claude Code",
   "codex-mcp-client": "Codex",
   codex: "Codex",
+  "genre-check": "Genre check by sound",
 };
 
 function errorText(error: unknown): string {
@@ -42,8 +45,25 @@ function isOpen(album: GenreProposalAlbum): boolean {
   return album.status === "pending" || album.status === "failed";
 }
 
+function trackLabel(track: GenreEvidenceTrack): string {
+  const artist = track.artist ? `${track.artist} — ` : "";
+  return `${artist}${track.title ?? "Unknown track"}${track.album ? ` (${track.album}${track.year ? `, ${track.year}` : ""})` : ""}`;
+}
+
+/** The genre check's reasoning: confidence, the numbers, and the closest songs. */
+function Evidence({ evidence }: { evidence: GenreEvidence }) {
+  return <div className="assistant-proposal__evidence" data-confidence={evidence.confidence}>
+    <span className="assistant-proposal__confidence">{evidence.confidence === "high" ? "High confidence" : "Medium confidence"} · {evidence.kind === "refine" ? "more specific genre" : "sounds like another genre"}</span>
+    <span>{evidence.summary}</span>
+    {evidence.tracks.length > 0 && <ul aria-label="Closest songs of the suggested genre">
+      {evidence.tracks.map((track) => <li key={track.trackId}><AudioLines aria-hidden="true" />{trackLabel(track)}</li>)}
+    </ul>}
+  </div>;
+}
+
 function ProposalCard({ proposal, onProposalChange, onClear, onApplied }: Omit<AssistantProposalsDialogProps, "proposals" | "onClose"> & { proposal: GenreProposal }) {
-  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
+  // Medium-confidence findings wait for an explicit tick.
+  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(() => new Set(proposal.albums.filter((album) => album.evidence?.confidence === "medium").map((album) => album.albumId)));
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -110,6 +130,7 @@ function ProposalCard({ proposal, onProposalChange, onClear, onApplied }: Omit<A
             <span className="assistant-proposal__tags">
               {album.currentTags.length ? album.currentTags.map((tag) => <span key={tag.tag} data-several={genreTagHoldsSeveral(tag.tag) || undefined}>{tag.tag}<small> · {formatCount(tag.tracks)}</small></span>) : <span>No genre</span>}
             </span>
+            {album.evidence && <Evidence evidence={album.evidence} />}
             {album.error && <span className="assistant-proposal__error">{album.error}</span>}
           </div>
           {isOpen(album)
@@ -143,7 +164,7 @@ export function AssistantProposalsDialog({ proposals, onProposalChange, onClear,
   }}>
     <header>
       <div>
-        <p className="eyebrow"><Sparkles aria-hidden="true" /> AI assistant</p>
+        <p className="eyebrow"><Sparkles aria-hidden="true" /> Genre review</p>
         <h2 id="assistant-proposals-title">Review genre changes</h2>
         <p>Each album gets the genre you approve on every track, written to the MP3 files and sent to Music Library. You can change a genre before writing it.</p>
       </div>
@@ -151,7 +172,7 @@ export function AssistantProposalsDialog({ proposals, onProposalChange, onClear,
     </header>
     <div className="assistant-proposals-dialog__body">
       {visible.length ? [...visible].reverse().map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} onProposalChange={onProposalChange} onClear={onClear} onApplied={onApplied} />)
-        : <p className="assistant-proposals-dialog__empty">No changes are waiting. Ask an assistant, for example: “Find albums with more than one genre and propose one genre for each.”</p>}
+        : <p className="assistant-proposals-dialog__empty">No changes are waiting. Run “Check genres by sound” on the Genres page, or ask an assistant, for example: “Find albums with more than one genre and propose one genre for each.”</p>}
     </div>
   </dialog>;
 }

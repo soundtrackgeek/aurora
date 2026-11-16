@@ -79,6 +79,25 @@ describe("AssistantProposalsDialog", () => {
     expect(next.onClear).toHaveBeenCalledWith("p1");
   });
 
+  it("shows the genre check's evidence and leaves medium-confidence albums unticked", () => {
+    const checked: assistant.GenreProposal = {
+      ...proposal,
+      source: "genre-check",
+      albums: [
+        { ...album("a", "First", ["Synthwave"], "Hard Rock"), evidence: { kind: "retag", confidence: "high", summary: "Sounds more like Hard Rock than Synthwave.", tracks: [{ trackId: "7", title: "Lucy", artist: "Y&T", album: "Ten", year: 1990 }] } },
+        { ...album("b", "Second", ["Rock"], "Hard Rock"), evidence: { kind: "refine", confidence: "medium", summary: "Rock is a broad genre.", tracks: [] } },
+      ],
+    };
+    renderDialog([checked]);
+    expect(screen.getByText("Genre check by sound")).toBeTruthy();
+    expect(screen.getByText("High confidence · sounds like another genre")).toBeTruthy();
+    expect(screen.getByText("Medium confidence · more specific genre")).toBeTruthy();
+    expect(screen.getByText("Y&T — Lucy (Ten, 1990)")).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Change Artist — First (1985)" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Change Artist — Second (1985)" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole("button", { name: "Write genre to 1 album" })).toBeTruthy();
+  });
+
   it("hides dismissed proposals", () => {
     renderDialog([{ ...proposal, status: "dismissed" }]);
     expect(screen.getByText(/No changes are waiting/)).toBeTruthy();

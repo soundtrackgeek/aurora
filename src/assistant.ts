@@ -126,6 +126,25 @@ export interface GenreProposalAlbum {
   appliedGenre: string | null;
   status: GenreChangeStatus;
   error: string | null;
+  /** Why Aurora's genre check suggests the genre; assistants send none. */
+  evidence?: GenreEvidence;
+}
+
+/** A song of the suggested genre that sounds like the album. */
+export interface GenreEvidenceTrack {
+  trackId: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  year: number | null;
+}
+
+export interface GenreEvidence {
+  /** `retag`: sounds like another genre. `refine`: a specific genre for a broad one. */
+  kind: "retag" | "refine";
+  confidence: "high" | "medium";
+  summary: string;
+  tracks: GenreEvidenceTrack[];
 }
 
 export interface GenreProposal {
@@ -154,6 +173,11 @@ export async function loadGenreProposals(): Promise<GenreProposal[]> {
 
 export async function applyGenreProposal(proposalId: string, changes: { albumId: string; genre: string }[]): Promise<GenreProposal> {
   return invoke("apply_assistant_proposal", { proposalId, changes });
+}
+
+/** Runs the genre check that listens; `null` when no album stands out. */
+export async function checkGenresBySound(): Promise<GenreProposal | null> {
+  return isTauriRuntime() ? invoke("check_genres_by_sound") : null;
 }
 
 export async function dismissGenreProposal(proposalId: string): Promise<GenreProposal> {

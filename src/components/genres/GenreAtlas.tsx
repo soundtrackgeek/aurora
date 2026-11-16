@@ -1,6 +1,7 @@
 import { AddToPlaylistButton, PlaylistRow } from "../playlists/PlaylistAuthoring";
 import {
   Album,
+  AudioLines,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -63,6 +64,10 @@ interface GenreAtlasProps {
   onPlayTrack: (track: Track) => void;
   onRatingChange: (track: Track, rating: number | null) => void;
   onLoveChange: (track: Track, loveState: Track["loveState"]) => void;
+  /** Runs the genre check that listens; absent where it cannot run. */
+  onCheckBySound?: () => void;
+  soundCheckBusy?: boolean;
+  soundCheckMessage?: string | null;
 }
 
 const EMPTY_BUSY_TRACK_KEYS: ReadonlySet<string> = new Set();
@@ -461,7 +466,12 @@ export function GenreAtlas(props: GenreAtlasProps) {
     <section className="genre-atlas" aria-labelledby="genre-atlas-title">
       <header className="genre-atlas__heading">
         <div><span className="genre-atlas__kicker"><Disc3 aria-hidden="true" /> Genre Atlas</span><h1 id="genre-atlas-title">Every sound has a place in your universe.</h1><p>Move from the largest worlds to the quietest corners without loading the whole catalog.</p></div>
-        <div className="genre-atlas__scope"><strong>{formatCount(props.genres.length)}</strong><span>canonical genres</span><small>Read-only Music Library authority</small></div>
+        <div className="genre-atlas__scope"><strong>{formatCount(props.genres.length)}</strong><span>canonical genres</span><small>Read-only Music Library authority</small>
+          {props.onCheckBySound && <button type="button" className="button genre-atlas__sound-check" onClick={props.onCheckBySound} disabled={props.soundCheckBusy} title="Finds albums whose sound fits another of your genres, or a specific genre better than a broad one, and opens them for review">
+            <AudioLines aria-hidden="true" />{props.soundCheckBusy ? "Listening…" : "Check genres by sound"}
+          </button>}
+          {props.soundCheckMessage && <small role="status">{props.soundCheckMessage}</small>}
+        </div>
       </header>
       <div className="genre-atlas__workspace">
         <GenreIndex genres={props.genres} selectedGenre={props.selectedGenre} search={props.search} state={props.indexState} error={props.indexError} onSearchChange={props.onSearchChange} onSelectGenre={props.onSelectGenre} onRetry={props.onRetryIndex} />

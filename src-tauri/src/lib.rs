@@ -20,6 +20,7 @@ mod device_mode;
 mod explorer;
 mod fanart;
 mod file_observations;
+mod genre_check;
 mod genre_rule;
 mod genres;
 mod hidden_favorites;
@@ -1177,6 +1178,22 @@ async fn apply_assistant_proposal(
     })
     .await
     .map_err(|error| format!("The tag writer stopped unexpectedly: {error}"))?
+}
+
+/// Runs the genre check that listens and opens its findings for review.
+/// `None` when no album sounds unlike its genre.
+#[tauri::command]
+async fn check_genres_by_sound(app: AppHandle) -> Result<Option<control::GenreProposal>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        let proposal = genre_check::check(&store, &app.state::<control::AssistantProposals>())?;
+        if let Some(proposal) = &proposal {
+            let _ = app.emit(control::PROPOSAL_EVENT, proposal);
+        }
+        Ok(proposal)
+    })
+    .await
+    .map_err(|error| format!("The genre check stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -2544,6 +2561,7 @@ pub fn run() {
             assistant_proposals,
             apply_assistant_proposal,
             dismiss_assistant_proposal,
+            check_genres_by_sound,
             update_jev_credentials,
             test_jev_connection,
             tonight_suggestions,

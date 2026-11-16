@@ -1,5 +1,5 @@
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
-import { listenToAssistantShow, listenToGenreProposals, loadGenreProposals, upsertProposal, type GenreProposal } from "./assistant";
+import { checkGenresBySound, listenToAssistantShow, listenToGenreProposals, loadGenreProposals, upsertProposal, type GenreProposal } from "./assistant";
 import { AlbumSidesPanel } from "./components/AlbumSidesPanel";
 import { SonicJourneyPanel } from "./components/SonicJourneyPanel";
 import { useSonicJourney } from "./useSonicJourney";
@@ -640,6 +640,8 @@ function App() {
   const [librarySyncOpen, setLibrarySyncOpen] = useState(false);
   const [genreProposals, setGenreProposals] = useState<GenreProposal[]>([]);
   const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [soundCheckBusy, setSoundCheckBusy] = useState(false);
+  const [soundCheckMessage, setSoundCheckMessage] = useState<string | null>(null);
   const { catalogSyncNotice, handleCatalogSync } = usePendingLibrarySync({
     libraryReady,
     reloadToken,
@@ -1104,6 +1106,23 @@ function App() {
     .filter((proposal) => proposal.status === "pending")
     .reduce((count, proposal) => count + proposal.albums.filter((album) => album.status === "pending" || album.status === "failed").length, 0);
 
+  async function runSoundCheck() {
+    setSoundCheckBusy(true);
+    setSoundCheckMessage(null);
+    try {
+      const proposal = await checkGenresBySound();
+      if (proposal) {
+        setGenreProposals((current) => upsertProposal(current, proposal));
+        setProposalsOpen(true);
+      }
+      setSoundCheckMessage(proposal ? `${formatCount(proposal.albums.length)} ${proposal.albums.length === 1 ? "album" : "albums"} to review` : "Every album sounds like its genre");
+    } catch (reason) {
+      setSoundCheckMessage(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSoundCheckBusy(false);
+    }
+  }
+
   function expandLibraryNavigation() {
     setLayoutPreferences((current) => current.libraryExpanded
       ? current
@@ -1503,7 +1522,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.67.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.68.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1768,6 +1787,9 @@ function App() {
                   onPlayTrack={(track) => playTrack(track, genreDetail?.highlights ?? [track])}
                   onRatingChange={(track, rating) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
                   onLoveChange={(track, loveState) => void saveInlineTagChange(track, { ...tagValuesForTrack(track), loveState })}
+                  onCheckBySound={() => void runSoundCheck()}
+                  soundCheckBusy={soundCheckBusy}
+                  soundCheckMessage={soundCheckMessage}
                 />
               </RememberedPage>
               <RememberedPage active={!artistPageName && activeNav === "Publishers"}>
