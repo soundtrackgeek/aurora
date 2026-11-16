@@ -84,8 +84,9 @@ describe("AssistantProposalsDialog", () => {
       ...proposal,
       source: "genre-check",
       albums: [
-        { ...album("a", "First", ["Synthwave"], "Hard Rock"), evidence: { kind: "retag", confidence: "high", summary: "Sounds more like Hard Rock than Synthwave.", tracks: [{ trackId: "7", title: "Lucy", artist: "Y&T", album: "Ten", year: 1990 }] } },
-        { ...album("b", "Second", ["Rock"], "Hard Rock"), evidence: { kind: "refine", confidence: "medium", summary: "Rock is a broad genre.", tracks: [] } },
+        { ...album("a", "First", ["Synthwave"], "Hard Rock"), evidence: { kind: "retag", confidence: "high", summary: "Sounds more like Hard Rock than Synthwave.", tracks: [{ trackId: "7", title: "Lucy", artist: "Y&T", album: "Ten", year: 1990 }], closest: [{ genre: "Heavy Metal", percentile: 61 }] } },
+        { ...album("b", "Second", ["Rock"], "Hard Rock"), evidence: { kind: "refine", confidence: "medium", summary: "Rock is a broad genre.", tracks: [], closest: [] } },
+        { ...album("c", "Third", ["Synthwave"], "Synthwave"), evidence: { kind: "fits", summary: "Sounds like Synthwave.", tracks: [], closest: [{ genre: "New Wave", percentile: 52 }, { genre: "Synthpop", percentile: 40 }] } },
       ],
     };
     renderDialog([checked]);
@@ -93,6 +94,12 @@ describe("AssistantProposalsDialog", () => {
     expect(screen.getByText("High confidence · sounds like another genre")).toBeTruthy();
     expect(screen.getByText("Medium confidence · more specific genre")).toBeTruthy();
     expect(screen.getByText("Y&T — Lucy (Ten, 1990)")).toBeTruthy();
+    expect(screen.getByText("Fits its genre")).toBeTruthy();
+    expect(screen.getByText("Close genres: Heavy Metal 61%")).toBeTruthy();
+    expect(screen.getByText("Next closest: New Wave 52% · Synthpop 40%")).toBeTruthy();
+    const options = [...document.querySelectorAll(`#${CSS.escape(`genre-options-p1-c`)} option`)].map((option) => option.getAttribute("value"));
+    expect(options).toEqual(["Synthwave", "New Wave", "Synthpop"]);
+    expect((screen.getByRole("checkbox", { name: "Change Artist — Third (1985)" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("checkbox", { name: "Change Artist — First (1985)" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "Change Artist — Second (1985)" }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByRole("button", { name: "Write genre to 1 album" })).toBeTruthy();
@@ -120,6 +127,11 @@ describe("proposal helpers", () => {
     expect(assistant.soundCheckSummary(result(0, { checked: 70000, fitting: 70000 }), false)).toBe("Every album sounds like its genre");
     expect(assistant.soundCheckSummary(result(1, { checked: 1 }), true)).toBe("A different genre fits its sound better. Opened for review.");
     expect(assistant.soundCheckSummary(result(0, { checked: 1, fitting: 1 }), true)).toBe("Sounds like its genre.");
+    const fits = { ...proposal.albums[0], evidence: { kind: "fits" as const, summary: "", tracks: [], closest: [{ genre: "New Wave", percentile: 93 }, { genre: "Synthpop", percentile: 80 }] } };
+    expect(assistant.soundCheckSummary({ proposal: { ...proposal, albums: [fits] }, checked: 1, fitting: 1, unanalyzed: 0, notChecked: 0 }, true))
+      .toBe("Sounds like its genre. Next closest: New Wave, Synthpop.");
+    expect(assistant.soundCheckSummary({ proposal: { ...proposal, albums: [fits, fits] }, checked: 2, fitting: 2, unanalyzed: 0, notChecked: 0 }, true))
+      .toBe("2 albums sound like their genre");
     expect(assistant.soundCheckSummary(result(0, { notChecked: 1 }), true)).toMatch(/^Not checked: score/);
     expect(assistant.soundCheckSummary(result(0, { unanalyzed: 1 }), true)).toMatch(/no analyzed tracks/);
     expect(assistant.soundCheckSummary(result(1, { checked: 4, fitting: 3, notChecked: 1, unanalyzed: 2 }), true))

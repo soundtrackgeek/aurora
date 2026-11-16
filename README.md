@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.70.0** shows close genres in the genre check by sound. Each album in **Review genre changes** lists the three other genres it sounds most typical of, and the genre field offers them. Albums you check from the right-click menu now all open in the review: those that fit keep their genre and start unticked, with their next closest genres for borderline cases. A single album's message reads, for example, "Sounds like its genre. Next closest: New Wave, Synthpop." The full library check is faster, about 8 seconds. See [Genre check by sound](docs/genre-check.md).
+
 Aurora **0.69.0** checks genres by sound from the Albums page too. Right-click an album, or a selection of albums, and choose **Check genre by sound**. Albums whose sound fits another of your genres open in **Review genre changes**; the others are reported as sounding like their genre. See [Genre check by sound](docs/genre-check.md).
 
 Aurora **0.68.0** adds a genre check that listens. **Genres → Check genres by sound** finds albums whose genre does not match their sound and sends them to **Review genre changes**. Each album comes with a confidence, the reason it was flagged, and the songs of the suggested genre that sound most like it. It finds tag errors, such as a groove metal album tagged Rock. It also suggests a specific genre for albums with a broad one such as Rock or Pop. It only suggests genres you already use, and never checks score genres such as Drama or Video Game. See [Genre check by sound](docs/genre-check.md).

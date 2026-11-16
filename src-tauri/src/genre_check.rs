@@ -46,12 +46,16 @@ const OWN_SHARE: f64 = 0.05;
 const OTHER_SHARE: f64 = 0.5;
 /// Refine: neighbours that vote, and the share that must agree.
 const NEIGHBOURS: usize = 15;
+/// Sources compared with each candidate together; their vectors stay in cache.
+const SOURCE_BLOCK: usize = 32;
 const MEDIUM_VOTE: f64 = 0.6;
 const HIGH_VOTE: f64 = 0.8;
 /// Evidence: albums of the suggested genre to take tracks from, and tracks.
 const EVIDENCE_ALBUMS: usize = 5;
 const EVIDENCE_TRACKS: usize = 3;
 const MAX_FLAGS: usize = 500;
+/// Other genres listed with each album, and offered in the review.
+const CLOSEST_GENRES: usize = 3;
 
 /// Named after a kind of film, game or occasion rather than a sound.
 const NOT_A_SOUND: [&str; 17] = [
@@ -118,6 +122,19 @@ pub(crate) enum Kind {
     Retag,
     /// The album has a broad genre; a specific one fits its sound.
     Refine,
+    /// A chosen album that sounds like its genre, or whose broad genre has no
+    /// clear specific one. Reported only when checking chosen albums.
+    Fits,
+}
+
+/// A genre the album sounds close to.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NearGenre {
+    pub(crate) genre: String,
+    /// The share of the genre's albums this one is closer to its average
+    /// sound than, 0 to 100: how typical of the genre it would be.
+    pub(crate) percentile: u32,
 }
 
 /// Why the check suggests a genre, shown in the review.
@@ -125,10 +142,14 @@ pub(crate) enum Kind {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Evidence {
     pub(crate) kind: Kind,
-    pub(crate) confidence: Confidence,
+    /// None for `Kind::Fits`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) confidence: Option<Confidence>,
     pub(crate) summary: String,
     /// The suggested genre's tracks that sound most like this album.
     pub(crate) tracks: Vec<EvidenceTrack>,
+    /// The other specific genres it sounds closest to, closest first.
+    pub(crate) closest: Vec<NearGenre>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -157,12 +178,13 @@ pub(crate) struct Flag {
     pub(crate) album: usize,
     pub(crate) genre: String,
     pub(crate) kind: Kind,
-    pub(crate) confidence: Confidence,
+    pub(crate) confidence: Option<Confidence>,
     /// Retag: the gap in similarity. Refine: the share of agreeing neighbours.
     pub(crate) strength: f64,
     pub(crate) summary: String,
     /// Albums of `genre` that sound most like this one, closest first.
     pub(crate) neighbours: Vec<usize>,
+    pub(crate) closest: Vec<NearGenre>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -242,7 +264,7 @@ fn percent(share: f64) -> u32 {
 }
 
 /// The `count` albums among `members` closest to `vector`, closest first.
-fn closest(albums: &[Album], members: &[usize], vector: &[f32], count: usize) -> Vec<usize> {
+fn closest_albums(albums: &[Album], members: &[usize], vector: &[f32], count: usize) -> Vec<usize> {
     let mut scored: Vec<(f32, usize)> = members
         .iter()
         .map(|&index| (dot(&albums[index].vector, vector), index))
@@ -271,52 +293,138 @@ pub(crate) fn find(albums: &[Album]) -> Vec<Flag> {
     find_for(albums, None)
 }
 
-/// Like `find`, checking only the albums in `only` when given. The whole
-/// library still sets each genre's sound and the neighbours that vote.
-pub(crate) fn find_for(albums: &[Album], only: Option<&HashSet<usize>>) -> Vec<Flag> {
-    let roles = album_roles(albums);
-    let genres: HashSet<&str> = albums.iter().map(|album| album.genre.as_str()).collect();
-    let mut targets: Vec<&str> = genres
-        .iter()
-        .copied()
-        .filter(|genre| roles[*genre] == Role::Specific)
-        .collect();
-    targets.sort_unstable();
-    let target_index: HashMap<&str, usize> =
-        targets.iter().enumerate().map(|(i, g)| (*g, i)).collect();
-    let mut members: Vec<Vec<usize>> = vec![Vec::new(); targets.len()];
-    let mut sums = vec![vec![0f32; DIMENSIONS]; targets.len()];
-    for (index, album) in albums.iter().enumerate() {
-        if let Some(&target) = target_index.get(album.genre.as_str()) {
-            members[target].push(index);
-            for (sum, value) in sums[target].iter_mut().zip(&album.vector) {
-                *sum += value;
+/// The specific genres' sounds and how typical each member is of its own.
+struct Genres<'a> {
+    names: Vec<&'a str>,
+    members: Vec<Vec<usize>>,
+    centroids: Vec<Vec<f32>>,
+    /// Each member's similarity to its own genre without itself.
+    own: HashMap<usize, f32>,
+    own_sorted: Vec<Vec<f32>>,
+    /// Members' similarity to their own genre, to rank outsiders against.
+    full_sorted: Vec<Vec<f32>>,
+}
+
+impl<'a> Genres<'a> {
+    fn new(albums: &'a [Album], roles: &HashMap<String, Role>) -> Self {
+        let distinct: HashSet<&str> = albums.iter().map(|album| album.genre.as_str()).collect();
+        let mut names: Vec<&str> = distinct
+            .into_iter()
+            .filter(|genre| roles[*genre] == Role::Specific)
+            .collect();
+        names.sort_unstable();
+        let index: HashMap<&str, usize> = names.iter().enumerate().map(|(i, g)| (*g, i)).collect();
+        let mut members: Vec<Vec<usize>> = vec![Vec::new(); names.len()];
+        let mut sums = vec![vec![0f32; DIMENSIONS]; names.len()];
+        for (position, album) in albums.iter().enumerate() {
+            if let Some(&genre) = index.get(album.genre.as_str()) {
+                members[genre].push(position);
+                for (sum, value) in sums[genre].iter_mut().zip(&album.vector) {
+                    *sum += value;
+                }
             }
         }
+        let centroids: Vec<Vec<f32>> = sums
+            .iter()
+            .map(|sum| {
+                let length = norm(sum).max(f32::MIN_POSITIVE);
+                sum.iter().map(|value| value / length).collect()
+            })
+            .collect();
+        let mut own = HashMap::new();
+        let mut own_sorted = Vec::with_capacity(names.len());
+        for (genre, indices) in members.iter().enumerate() {
+            let mut values = Vec::with_capacity(indices.len());
+            for &position in indices {
+                let rest: Vec<f32> = sums[genre]
+                    .iter()
+                    .zip(&albums[position].vector)
+                    .map(|(sum, value)| sum - value)
+                    .collect();
+                let similarity =
+                    dot(&albums[position].vector, &rest) / norm(&rest).max(f32::MIN_POSITIVE);
+                own.insert(position, similarity);
+                values.push(similarity);
+            }
+            values.sort_by(f32::total_cmp);
+            own_sorted.push(values);
+        }
+        let full_sorted = members
+            .iter()
+            .zip(&centroids)
+            .map(|(indices, centroid)| {
+                let mut values: Vec<f32> = indices
+                    .iter()
+                    .map(|&position| dot(&albums[position].vector, centroid))
+                    .collect();
+                values.sort_by(f32::total_cmp);
+                values
+            })
+            .collect();
+        Self {
+            names,
+            members,
+            centroids,
+            own,
+            own_sorted,
+            full_sorted,
+        }
     }
-    let centroids: Vec<Vec<f32>> = sums
-        .iter()
-        .map(|sum| {
-            let length = norm(sum).max(f32::MIN_POSITIVE);
-            sum.iter().map(|value| value / length).collect()
-        })
-        .collect();
 
-    let wanted = |index: usize| only.is_none_or(|only| only.contains(&index));
-    let mut flags = retag(albums, &targets, &members, &sums, &centroids, &wanted);
+    /// The specific genres other than `except` this sound would be most
+    /// typical of, by the share of each genre's albums it is closer than.
+    fn closest(&self, vector: &[f32], except: Option<usize>) -> Vec<NearGenre> {
+        let mut near: Vec<(f64, f32, usize)> = self
+            .centroids
+            .iter()
+            .enumerate()
+            .filter(|(genre, _)| Some(*genre) != except)
+            .map(|(genre, centroid)| {
+                let similarity = dot(vector, centroid);
+                (
+                    share_below(&self.full_sorted[genre], similarity),
+                    similarity,
+                    genre,
+                )
+            })
+            .collect();
+        near.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.total_cmp(&a.1)));
+        near.into_iter()
+            .take(CLOSEST_GENRES)
+            .map(|(share, _, genre)| NearGenre {
+                genre: self.names[genre].to_owned(),
+                percentile: percent(share),
+            })
+            .collect()
+    }
+}
+
+/// Like `find`, checking only the albums in `only` when given. The whole
+/// library still sets each genre's sound and the neighbours that vote. A
+/// check of chosen albums also reports the ones that fit, as `Kind::Fits`.
+pub(crate) fn find_for(albums: &[Album], only: Option<&HashSet<usize>>) -> Vec<Flag> {
+    let roles = album_roles(albums);
+    let genres = Genres::new(albums, &roles);
+    let wanted = |position: usize| only.is_none_or(|only| only.contains(&position));
+    let report_fits = only.is_some();
+    let mut flags = retag(albums, &genres, &wanted, report_fits);
     let broad: Vec<usize> = albums
         .iter()
         .enumerate()
-        .filter(|(index, album)| roles[album.genre.as_str()] == Role::Broad && wanted(*index))
-        .map(|(index, _)| index)
+        .filter(|(position, album)| roles[album.genre.as_str()] == Role::Broad && wanted(*position))
+        .map(|(position, _)| position)
         .collect();
-    let specific: Vec<usize> = members.iter().flatten().copied().collect();
-    flags.extend(refine(albums, &broad, &specific));
+    flags.extend(refine(albums, &genres, &broad, report_fits));
 
-    // Tag errors before refinements, then the most confident.
+    // Tag errors, then refinements, then albums that fit; the most confident first.
+    let rank = |kind: Kind| match kind {
+        Kind::Retag => 0,
+        Kind::Refine => 1,
+        Kind::Fits => 2,
+    };
     flags.sort_by(|a, b| {
-        (a.kind == Kind::Refine)
-            .cmp(&(b.kind == Kind::Refine))
+        rank(a.kind)
+            .cmp(&rank(b.kind))
             .then(b.confidence.cmp(&a.confidence))
             .then(b.strength.total_cmp(&a.strength))
             .then(a.album.cmp(&b.album))
@@ -327,85 +435,70 @@ pub(crate) fn find_for(albums: &[Album], only: Option<&HashSet<usize>>) -> Vec<F
 
 fn retag(
     albums: &[Album],
-    targets: &[&str],
-    members: &[Vec<usize>],
-    sums: &[Vec<f32>],
-    centroids: &[Vec<f32>],
+    genres: &Genres,
     wanted: &dyn Fn(usize) -> bool,
+    report_fits: bool,
 ) -> Vec<Flag> {
-    // Each member's similarity to its own genre without itself.
-    let mut own = HashMap::new();
-    let mut own_sorted = Vec::with_capacity(targets.len());
-    for (target, indices) in members.iter().enumerate() {
-        let mut values = Vec::with_capacity(indices.len());
-        for &index in indices {
-            let rest: Vec<f32> = sums[target]
-                .iter()
-                .zip(&albums[index].vector)
-                .map(|(sum, value)| sum - value)
-                .collect();
-            let similarity = dot(&albums[index].vector, &rest) / norm(&rest).max(f32::MIN_POSITIVE);
-            own.insert(index, similarity);
-            values.push(similarity);
-        }
-        values.sort_by(f32::total_cmp);
-        own_sorted.push(values);
-    }
-    // Each member's similarity to its own genre, to rank outsiders against.
-    let full_sorted: Vec<Vec<f32>> = members
-        .iter()
-        .zip(centroids)
-        .map(|(indices, centroid)| {
-            let mut values: Vec<f32> = indices
-                .iter()
-                .map(|&index| dot(&albums[index].vector, centroid))
-                .collect();
-            values.sort_by(f32::total_cmp);
-            values
-        })
-        .collect();
-
     let mut flags = Vec::new();
-    for (target, indices) in members.iter().enumerate() {
-        for &index in indices.iter().filter(|index| wanted(**index)) {
-            let vector = &albums[index].vector;
-            let Some((other, best)) = centroids
+    for (genre, indices) in genres.members.iter().enumerate() {
+        for &position in indices.iter().filter(|position| wanted(**position)) {
+            let vector = &albums[position].vector;
+            let own_similarity = genres.own[&position];
+            let own_share = share_below(&genres.own_sorted[genre], own_similarity);
+            let name = genres.names[genre];
+            let best = genres
+                .centroids
                 .iter()
                 .enumerate()
-                .filter(|(other, _)| *other != target)
+                .filter(|(other, _)| *other != genre)
                 .map(|(other, centroid)| (other, dot(vector, centroid)))
-                .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
-            else {
-                continue;
-            };
-            let own_similarity = own[&index];
-            let gap = best - own_similarity;
-            if gap < MEDIUM_GAP {
-                continue;
-            }
-            let own_share = share_below(&own_sorted[target], own_similarity);
-            let other_share = share_below(&full_sorted[other], best);
-            if own_share > OWN_SHARE || other_share < OTHER_SHARE {
-                continue;
-            }
-            let (from, to) = (targets[target], targets[other]);
-            flags.push(Flag {
-                album: index,
-                genre: to.to_owned(),
-                kind: Kind::Retag,
-                confidence: if gap >= HIGH_GAP {
-                    Confidence::High
-                } else {
-                    Confidence::Medium
-                },
-                strength: f64::from(gap),
-                summary: format!(
-                    "Sounds more like {to} than {from}: closer to {to}'s average sound than {}% of {to} albums, and further from {from}'s than {}% of {from} albums.",
-                    percent(other_share),
-                    percent(1.0 - own_share),
-                ),
-                neighbours: closest(albums, &members[other], vector, EVIDENCE_ALBUMS),
+                .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)));
+            let flagged = best.and_then(|(other, best)| {
+                let gap = best - own_similarity;
+                let other_share = share_below(&genres.full_sorted[other], best);
+                (gap >= MEDIUM_GAP && own_share <= OWN_SHARE && other_share >= OTHER_SHARE)
+                    .then_some((other, gap, other_share))
             });
+            if let Some((other, gap, other_share)) = flagged {
+                let to = genres.names[other];
+                flags.push(Flag {
+                    album: position,
+                    genre: to.to_owned(),
+                    kind: Kind::Retag,
+                    confidence: Some(if gap >= HIGH_GAP {
+                        Confidence::High
+                    } else {
+                        Confidence::Medium
+                    }),
+                    strength: f64::from(gap),
+                    summary: format!(
+                        "Sounds more like {to} than {name}: closer to {to}'s average sound than {}% of {to} albums, and further from {name}'s than {}% of {name} albums.",
+                        percent(other_share),
+                        percent(1.0 - own_share),
+                    ),
+                    neighbours: closest_albums(
+                        albums,
+                        &genres.members[other],
+                        vector,
+                        EVIDENCE_ALBUMS,
+                    ),
+                    closest: genres.closest(vector, Some(genre)),
+                });
+            } else if report_fits {
+                flags.push(Flag {
+                    album: position,
+                    genre: name.to_owned(),
+                    kind: Kind::Fits,
+                    confidence: None,
+                    strength: own_share,
+                    summary: format!(
+                        "Sounds like {name}: closer to its average sound than {}% of {name} albums.",
+                        percent(own_share),
+                    ),
+                    neighbours: Vec::new(),
+                    closest: genres.closest(vector, Some(genre)),
+                });
+            }
         }
     }
     flags
@@ -423,12 +516,16 @@ fn nearest(albums: &[Album], sources: &[usize], pool: &[usize]) -> Vec<Vec<(f32,
             .chunks(chunk)
             .map(|part| {
                 scope.spawn(move || {
-                    part.iter()
-                        .map(|&source| {
-                            let vector = &albums[source].vector;
-                            let mut best: Vec<(f32, usize)> = Vec::with_capacity(NEIGHBOURS + 1);
-                            for &candidate in pool {
-                                let similarity = dot(vector, &albums[candidate].vector);
+                    // A block of sources meets each candidate while it is in
+                    // cache, instead of streaming the whole pool per source.
+                    let mut results = Vec::with_capacity(part.len());
+                    for block in part.chunks(SOURCE_BLOCK) {
+                        let mut best: Vec<Vec<(f32, usize)>> =
+                            vec![Vec::with_capacity(NEIGHBOURS + 1); block.len()];
+                        for &candidate in pool {
+                            let candidate_vector = &albums[candidate].vector;
+                            for (&source, best) in block.iter().zip(best.iter_mut()) {
+                                let similarity = dot(&albums[source].vector, candidate_vector);
                                 if best.len() == NEIGHBOURS && similarity <= best[NEIGHBOURS - 1].0
                                 {
                                     continue;
@@ -437,9 +534,10 @@ fn nearest(albums: &[Album], sources: &[usize], pool: &[usize]) -> Vec<Vec<(f32,
                                 best.insert(at, (similarity, candidate));
                                 best.truncate(NEIGHBOURS);
                             }
-                            best
-                        })
-                        .collect::<Vec<_>>()
+                        }
+                        results.extend(best);
+                    }
+                    results
                 })
             })
             .collect();
@@ -450,53 +548,74 @@ fn nearest(albums: &[Album], sources: &[usize], pool: &[usize]) -> Vec<Vec<(f32,
     })
 }
 
-fn refine(albums: &[Album], sources: &[usize], pool: &[usize]) -> Vec<Flag> {
+fn refine(albums: &[Album], genres: &Genres, sources: &[usize], report_fits: bool) -> Vec<Flag> {
+    let pool: Vec<usize> = genres.members.iter().flatten().copied().collect();
     if pool.len() < NEIGHBOURS {
         return Vec::new();
     }
-    let neighbours = nearest(albums, sources, pool);
+    let neighbours = nearest(albums, sources, &pool);
     let mut flags = Vec::new();
     for (&source, near) in sources.iter().zip(neighbours) {
         let mut votes: HashMap<&str, (usize, f32)> = HashMap::new();
-        for &(similarity, index) in &near {
-            let vote = votes.entry(albums[index].genre.as_str()).or_default();
+        for &(similarity, position) in &near {
+            let vote = votes.entry(albums[position].genre.as_str()).or_default();
             vote.0 += 1;
             vote.1 += similarity;
         }
-        let Some((genre, (count, _))) = votes.into_iter().max_by(|a, b| {
-            (a.1.0, a.1.1)
-                .partial_cmp(&(b.1.0, b.1.1))
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(b.0.cmp(a.0))
-        }) else {
+        let mut ranked: Vec<(&str, usize, f32)> = votes
+            .into_iter()
+            .map(|(genre, (count, similarity))| (genre, count, similarity))
+            .collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)).then(a.0.cmp(b.0)));
+        let Some(&(genre, count, _)) = ranked.first() else {
             continue;
         };
         let share = count as f64 / near.len() as f64;
-        if share < MEDIUM_VOTE {
-            continue;
-        }
         let from = &albums[source].genre;
-        flags.push(Flag {
-            album: source,
-            genre: genre.to_owned(),
-            kind: Kind::Refine,
-            confidence: if share >= HIGH_VOTE {
-                Confidence::High
-            } else {
-                Confidence::Medium
-            },
-            strength: share,
-            summary: format!(
-                "{from} is a broad genre. {count} of the {} albums that sound most like this one, among albums with a specific genre, are {genre}.",
-                near.len(),
-            ),
-            neighbours: near
+        if share >= MEDIUM_VOTE {
+            flags.push(Flag {
+                album: source,
+                genre: genre.to_owned(),
+                kind: Kind::Refine,
+                confidence: Some(if share >= HIGH_VOTE {
+                    Confidence::High
+                } else {
+                    Confidence::Medium
+                }),
+                strength: share,
+                summary: format!(
+                    "{from} is a broad genre. {count} of the {} albums that sound most like this one, among albums with a specific genre, are {genre}.",
+                    near.len(),
+                ),
+                neighbours: near
+                    .iter()
+                    .filter(|(_, position)| albums[*position].genre == genre)
+                    .take(EVIDENCE_ALBUMS)
+                    .map(|(_, position)| *position)
+                    .collect(),
+                closest: genres.closest(&albums[source].vector, None),
+            });
+        } else if report_fits {
+            let split = ranked
                 .iter()
-                .filter(|(_, index)| albums[*index].genre == genre)
-                .take(EVIDENCE_ALBUMS)
-                .map(|(_, index)| *index)
-                .collect(),
-        });
+                .take(CLOSEST_GENRES)
+                .map(|(genre, count, _)| format!("{genre} {count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            flags.push(Flag {
+                album: source,
+                genre: from.clone(),
+                kind: Kind::Fits,
+                confidence: None,
+                strength: share,
+                summary: format!(
+                    "{from} is a broad genre, and the {} albums that sound most like this one do not agree on a specific one: {split}.",
+                    near.len(),
+                ),
+                neighbours: Vec::new(),
+                closest: genres.closest(&albums[source].vector, None),
+            });
+        }
     }
     flags
 }
@@ -593,46 +712,53 @@ fn album_genres(catalog: &Connection) -> Result<HashMap<String, String>, String>
     Ok(genres)
 }
 
-/// The suggested genre's tracks that sound most like `vector`, at most one
-/// per album.
-fn evidence_tracks(
-    catalog: &Connection,
-    clap: Option<&Connection>,
-    album_ids: &[&str],
-    vector: &[f32],
-) -> Result<Vec<EvidenceTrack>, String> {
-    let Some(clap) = clap else {
-        return Ok(Vec::new());
-    };
-    let model = &sound_descriptors::model().clap_model;
-    let table = sound_descriptors::half_table();
+/// The analyzed tracks of each album, with their audio hashes.
+type Candidates = Vec<Vec<(EvidenceTrack, String)>>;
+
+fn candidate_tracks(catalog: &Connection, album_ids: &[&str]) -> Result<Candidates, String> {
     let mut tracks = catalog
         .prepare_cached(
             "SELECT t.id, t.title, COALESCE(t.display_artist, t.album_artist_display), t.album, COALESCE(t.year, t.release_year), p.audio_hash FROM tracks AS t JOIN temp.aurora_sonic_paths AS p ON p.file_path = t.file_path AND p.filename = t.filename WHERE t.album_id = ?1",
         )
         .map_err(|error| error.to_string())?;
+    album_ids
+        .iter()
+        .map(|album_id| {
+            tracks
+                .query_map([album_id], |row| {
+                    Ok((
+                        EvidenceTrack {
+                            track_id: row.get::<_, i64>(0)?.to_string(),
+                            title: row.get(1)?,
+                            artist: row.get(2)?,
+                            album: row.get(3)?,
+                            year: row.get(4)?,
+                        },
+                        row.get(5)?,
+                    ))
+                })
+                .and_then(Iterator::collect)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+/// Of `candidates`, the tracks that sound most like `vector`, at most one
+/// per album.
+fn best_tracks(
+    clap: &Connection,
+    candidates: Candidates,
+    vector: &[f32],
+) -> Result<Vec<EvidenceTrack>, String> {
+    let model = &sound_descriptors::model().clap_model;
+    let table = sound_descriptors::half_table();
     let mut embedding = clap
         .prepare_cached("SELECT embedding FROM clap_audio WHERE audio_hash = ?1 AND model = ?2")
         .map_err(|error| error.to_string())?;
     let mut best: Vec<(f32, EvidenceTrack)> = Vec::new();
-    for album_id in album_ids {
-        let rows: Vec<(EvidenceTrack, String)> = tracks
-            .query_map([album_id], |row| {
-                Ok((
-                    EvidenceTrack {
-                        track_id: row.get::<_, i64>(0)?.to_string(),
-                        title: row.get(1)?,
-                        artist: row.get(2)?,
-                        album: row.get(3)?,
-                        year: row.get(4)?,
-                    },
-                    row.get(5)?,
-                ))
-            })
-            .and_then(Iterator::collect)
-            .map_err(|error| error.to_string())?;
+    for album in candidates {
         let mut album_best: Option<(f32, EvidenceTrack)> = None;
-        for (track, hash) in rows {
+        for (track, hash) in album {
             let bytes: Option<Vec<u8>> = embedding
                 .query_row(rusqlite::params![hash, model], |row| row.get(0))
                 .optional()
@@ -667,6 +793,51 @@ fn evidence_tracks(
         .take(EVIDENCE_TRACKS)
         .map(|(_, track)| track)
         .collect())
+}
+
+/// Evidence tracks for every job, by worker threads with their own
+/// read-only connection: the embeddings are random reads in a large file.
+fn evidence_for(
+    clap: Option<&Path>,
+    jobs: Vec<(Candidates, &[f32])>,
+) -> Result<Vec<Vec<EvidenceTrack>>, String> {
+    let Some(clap) = clap else {
+        return Ok(vec![Vec::new(); jobs.len()]);
+    };
+    if jobs.iter().all(|(candidates, _)| candidates.is_empty()) {
+        return Ok(vec![Vec::new(); jobs.len()]);
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |count| count.get())
+        .min(jobs.len().max(1));
+    let chunk = jobs.len().div_ceil(threads).max(1);
+    let mut parts: Vec<Vec<(Candidates, &[f32])>> = Vec::new();
+    let mut jobs = jobs.into_iter().peekable();
+    while jobs.peek().is_some() {
+        parts.push(jobs.by_ref().take(chunk).collect());
+    }
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = parts
+            .into_iter()
+            .map(|part| {
+                scope.spawn(move || -> Result<Vec<Vec<EvidenceTrack>>, String> {
+                    let connection = open_read_only(clap)?;
+                    part.into_iter()
+                        .map(|(candidates, vector)| best_tracks(&connection, candidates, vector))
+                        .collect()
+                })
+            })
+            .collect();
+        let mut results = Vec::new();
+        for worker in workers {
+            results.extend(
+                worker
+                    .join()
+                    .map_err(|_| "The genre check stopped unexpectedly.".to_owned())??,
+            );
+        }
+        Ok(results)
+    })
 }
 
 /// What a check found, for the message beside its button.
@@ -721,13 +892,12 @@ pub(crate) fn check(
         .parent()
         .map(|directory| directory.join("music-clap.sqlite3"))
         .filter(|path| path.is_file());
-    let clap = clap_path.as_deref().map(open_read_only).transpose()?;
-    let (changes, counts) = check_with(&connection, clap.as_ref(), &cache, album_ids)?;
+    let (changes, counts) = check_with(&connection, clap_path.as_deref(), &cache, album_ids)?;
     let proposal = if changes.is_empty() {
         None
     } else {
         let reason = if album_ids.is_some() {
-            "The albums you chose whose sound fits another of your genres better than their own, or a specific genre better than a broad one. The tracks are the suggested genre's songs that sound most like each album."
+            "The albums you chose, judged by sound against your whole library. Albums that fit their genre keep it and start unticked; pick one of the close genres to change it. The tracks are the suggested genre's songs that sound most like each album."
         } else {
             "Albums whose sound fits another of your genres better than their own, or a specific genre better than a broad one. The tracks are the suggested genre's songs that sound most like each album."
         };
@@ -761,7 +931,7 @@ fn count_roles(
 /// happened to the albums it was asked about.
 fn check_with(
     catalog: &Connection,
-    clap: Option<&Connection>,
+    clap: Option<&Path>,
     cache: &Path,
     album_ids: Option<&[String]>,
 ) -> Result<(Vec<(ProposedChange, Evidence)>, Counts), String> {
@@ -798,31 +968,49 @@ fn check_with(
         _ => count_roles(&albums, &roles, 0..albums.len(), &mut counts),
     }
     let mut seen = HashSet::new();
-    let changes = flags
+    let flags: Vec<Flag> = flags
         .into_iter()
         .filter(|flag| seen.insert(flag.album))
+        .collect();
+    let jobs = flags
+        .iter()
         .map(|flag| {
-            let album = &albums[flag.album];
             let neighbours: Vec<&str> = flag
                 .neighbours
                 .iter()
                 .map(|index| albums[*index].id.as_str())
                 .collect();
             Ok((
+                candidate_tracks(catalog, &neighbours)?,
+                albums[flag.album].vector.as_slice(),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let tracks = evidence_for(clap, jobs)?;
+    let changes: Vec<(ProposedChange, Evidence)> = flags
+        .into_iter()
+        .zip(tracks)
+        .map(|(flag, tracks)| {
+            (
                 ProposedChange {
-                    album_id: album.id.clone(),
+                    album_id: albums[flag.album].id.clone(),
                     genre: flag.genre,
                 },
                 Evidence {
                     kind: flag.kind,
                     confidence: flag.confidence,
                     summary: flag.summary,
-                    tracks: evidence_tracks(catalog, clap, &neighbours, &album.vector)?,
+                    tracks,
+                    closest: flag.closest,
                 },
-            ))
+            )
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    counts.fitting = counts.checked.saturating_sub(changes.len());
+        .collect();
+    let flagged = changes
+        .iter()
+        .filter(|(_, evidence)| evidence.kind != Kind::Fits)
+        .count();
+    counts.fitting = counts.checked.saturating_sub(flagged);
     Ok((changes, counts))
 }
 
@@ -922,7 +1110,7 @@ mod tests {
         let mistagged = by_id["mistagged"];
         assert_eq!(mistagged.genre, "Hard Rock");
         assert_eq!(mistagged.kind, Kind::Retag);
-        assert_eq!(mistagged.confidence, Confidence::High);
+        assert_eq!(mistagged.confidence, Some(Confidence::High));
         assert_eq!(mistagged.neighbours.len(), EVIDENCE_ALBUMS);
         assert!(
             mistagged
@@ -941,7 +1129,7 @@ mod tests {
         let rock = by_id["rock"];
         assert_eq!(rock.genre, "Hard Rock");
         assert_eq!(rock.kind, Kind::Refine);
-        assert_eq!(rock.confidence, Confidence::High);
+        assert_eq!(rock.confidence, Some(Confidence::High));
         // Pop albums are refined too, never suggested to others.
         assert!(
             flags
@@ -958,8 +1146,39 @@ mod tests {
         let index = |id: &str| albums.iter().position(|album| album.id == id).unwrap();
         let only = HashSet::from([index("rock"), index("leaning"), index("Synthwave-3")]);
         let chosen = find_for(&albums, Some(&only));
-        assert_eq!(chosen.len(), 1);
+        assert_eq!(chosen.len(), 3);
         assert_eq!(chosen[0], *rock);
+        assert!(rock.closest.iter().any(|near| near.genre == "Hard Rock"));
+        for fits in &chosen[1..] {
+            assert_eq!(fits.kind, Kind::Fits);
+            assert_eq!(fits.genre, "Synthwave");
+            assert_eq!(fits.confidence, None);
+            assert!(
+                fits.summary
+                    .starts_with("Sounds like Synthwave: closer to its average sound than")
+            );
+            // Every other specific genre: Hard Rock and Ambient.
+            assert_eq!(fits.closest.len(), 2);
+            assert!(fits.closest.iter().all(|near| near.genre != "Synthwave"));
+        }
+        // The album that leans towards Hard Rock lists it first.
+        let leaning = chosen
+            .iter()
+            .find(|flag| albums[flag.album].id == "leaning")
+            .unwrap();
+        assert_eq!(leaning.closest[0].genre, "Hard Rock");
+        // A broad album without a clear specific genre shows the split vote.
+        let vague = find_for(&albums, Some(&HashSet::from([index("vague")])));
+        assert_eq!(vague.len(), 1);
+        assert_eq!(vague[0].kind, Kind::Fits);
+        assert_eq!(vague[0].genre, "Rock");
+        assert!(
+            vague[0]
+                .summary
+                .contains("do not agree on a specific one: Hard Rock 8, Ambient 7"),
+            "{}",
+            vague[0].summary
+        );
     }
 
     #[test]
@@ -985,10 +1204,46 @@ mod tests {
         let state = crate::mcp::app_data_dir().unwrap();
         let store = StateStore::open_existing(state.join("aurora-state.sqlite3")).unwrap();
         catalog::attach_local_aurora_state(&connection, &store).unwrap();
-        let clap =
-            open_read_only(&catalog_path.parent().unwrap().join("music-clap.sqlite3")).unwrap();
+        let clap = catalog_path.parent().unwrap().join("music-clap.sqlite3");
+        // A few chosen albums, as from the Albums page's menu.
+        let chosen: Vec<String> = connection
+            .prepare("SELECT id FROM (SELECT id, canonical_genre, ROW_NUMBER() OVER (PARTITION BY canonical_genre ORDER BY id) AS n FROM albums WHERE canonical_genre IN ('Synthwave', 'Rock', 'Hard Rock', 'Drama')) WHERE n <= 2")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
         let started = std::time::Instant::now();
-        let (changes, counts) = check_with(&connection, Some(&clap), &cache, None).unwrap();
+        let (picked, counts) =
+            check_with(&connection, Some(clap.as_path()), &cache, Some(&chosen)).unwrap();
+        println!(
+            "chosen {} in {:?}: {counts:?}",
+            chosen.len(),
+            started.elapsed()
+        );
+        for (change, evidence) in &picked {
+            let album = crate::genre_rule::load_album(&connection, &change.album_id)
+                .unwrap()
+                .unwrap();
+            let closest: Vec<String> = evidence
+                .closest
+                .iter()
+                .map(|near| format!("{} {}%", near.genre, near.percentile))
+                .collect();
+            println!(
+                "  {} - {} -> {} [{:?}]\n    {}\n    closest: {}",
+                album.artist.unwrap_or_default(),
+                album.title.unwrap_or_default(),
+                change.genre,
+                evidence.kind,
+                evidence.summary,
+                closest.join(", ")
+            );
+        }
+
+        let started = std::time::Instant::now();
+        let (changes, counts) =
+            check_with(&connection, Some(clap.as_path()), &cache, None).unwrap();
         println!("{counts:?}");
         println!(
             "{} albums flagged in {:?}",
@@ -998,7 +1253,7 @@ mod tests {
         let count = |kind, confidence| {
             changes
                 .iter()
-                .filter(|(_, e)| e.kind == kind && e.confidence == confidence)
+                .filter(|(_, e)| e.kind == kind && e.confidence == Some(confidence))
                 .count()
         };
         println!(

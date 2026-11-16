@@ -5,13 +5,15 @@
 To check only some albums, right-click an album, or a selection of albums, on the Albums page (or wherever albums have a menu) and choose **Check genre by sound** (0.69.0). It uses the same rules and compares against the whole library, so a single album is judged exactly as in the full check. The menu message says what happened to each album:
 
 - **Opened for review.** A different genre fits its sound better.
-- **Sounds like its genre.** Nothing to change.
+- **Sounds like its genre.** For one album, the message also names its next closest genres, such as "Sounds like its genre. Next closest: New Wave, Synthpop."
 - **Not checked.** Its genre is a score genre, another genre that is not a sound, or is used on fewer than 30 albums.
 - **Not analyzed yet.** The album has no analyzed tracks, or no genre.
 
+Every checked album opens in the review (0.70.0), including those that fit. An album that fits keeps its genre, shows **Fits its genre** with how typical of it the album is, and starts unticked. Its next closest genres help with borderline albums: tick it and pick one of them to change the genre.
+
 Up to 500 albums at a time. Even one album takes several seconds, since it is compared with the whole library.
 
-It needs Music Library's audio analysis (CLAP sound search, Music Library 0.216.0 or newer) and Aurora's sound descriptor cache, which Aurora builds a few minutes after it starts. A check of about 73,000 albums takes 10 to 20 seconds.
+It needs Music Library's audio analysis (CLAP sound search, Music Library 0.216.0 or newer) and Aurora's sound descriptor cache, which Aurora builds a few minutes after it starts. A check of about 73,000 albums takes about 8 seconds.
 
 ## What it finds
 
@@ -44,8 +46,9 @@ Each album shows:
 - Its confidence.
 - Why it was flagged, with the numbers. For example: "Sounds more like Hard Rock than Synthwave: closer to Hard Rock's average sound than 72% of Hard Rock albums, and further from Synthwave's than 98% of Synthwave albums."
 - Up to three songs of the suggested genre that sound most like it. At most one song comes from each album; they are taken from the five albums of that genre closest in sound.
+- Its close genres (0.70.0): the three other genres it sounds most typical of, with a percentage. "New Wave 93%" means the album is closer to New Wave's average sound than 93% of New Wave albums. The genre field offers these genres as suggestions.
 
-Medium-confidence albums start unticked.
+Medium-confidence albums, and albums that fit their genre, start unticked.
 
 ## Limits
 

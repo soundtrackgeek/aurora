@@ -139,12 +139,25 @@ export interface GenreEvidenceTrack {
   year: number | null;
 }
 
+/** A genre an album sounds close to. */
+export interface NearGenre {
+  genre: string;
+  /** The share of the genre's albums it is closer to the genre's sound than, 0–100. */
+  percentile: number;
+}
+
 export interface GenreEvidence {
-  /** `retag`: sounds like another genre. `refine`: a specific genre for a broad one. */
-  kind: "retag" | "refine";
-  confidence: "high" | "medium";
+  /**
+   * `retag`: sounds like another genre. `refine`: a specific genre for a broad one.
+   * `fits`: a chosen album that keeps its genre.
+   */
+  kind: "retag" | "refine" | "fits";
+  /** Absent for `fits`. */
+  confidence?: "high" | "medium";
   summary: string;
   tracks: GenreEvidenceTrack[];
+  /** Other genres it sounds closest to, closest first. */
+  closest: NearGenre[];
 }
 
 export interface GenreProposal {
@@ -200,12 +213,16 @@ function albums(count: number): string {
 
 /** One line on what a check found; `chosen` when it checked selected albums. */
 export function soundCheckSummary(result: SoundCheck, chosen: boolean): string {
-  const flagged = result.proposal?.albums.length ?? 0;
+  const reviewed = result.proposal?.albums ?? [];
+  const flagged = reviewed.filter((album) => album.evidence?.kind !== "fits").length;
   if (!chosen) return flagged ? `${albums(flagged)} to review` : "Every album sounds like its genre";
   const single = result.checked + result.unanalyzed + result.notChecked === 1;
   if (single) {
     if (flagged) return "A different genre fits its sound better. Opened for review.";
-    if (result.fitting) return "Sounds like its genre.";
+    if (result.fitting) {
+      const near = reviewed[0]?.evidence?.closest.map((item) => item.genre) ?? [];
+      return near.length ? `Sounds like its genre. Next closest: ${near.join(", ")}.` : "Sounds like its genre.";
+    }
     if (result.notChecked) return "Not checked: score and other non-sound genres, and genres on fewer than 30 albums, are left alone.";
     return "Not checked: this album has no analyzed tracks or no genre yet.";
   }

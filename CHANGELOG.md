@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.70.0] - 2026-11-16
+
+### Added
+- Review genre changes lists each genre-check album's close genres: the three other genres it sounds most typical of, such as "New Wave 93%" (closer to New Wave's average sound than 93% of New Wave albums). The genre field offers them as suggestions.
+- Checking chosen albums from the right-click menu opens every checked album in the review. Albums that fit their genre show "Fits its genre", keep it and start unticked, so a borderline album can be moved to one of its close genres. For one album, the menu message names them: "Sounds like its genre. Next closest: New Wave, Synthpop."
+
+### Changed
+- The genre check by sound is faster: about 8 seconds for 73,000 albums, from 10 to 20. Nearest-album searches compare albums in cache-sized blocks, and evidence songs are read on several threads.
+
 ## [0.69.0] - 2026-11-16
 
 ### Added

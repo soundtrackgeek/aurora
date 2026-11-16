@@ -50,11 +50,20 @@ function trackLabel(track: GenreEvidenceTrack): string {
   return `${artist}${track.title ?? "Unknown track"}${track.album ? ` (${track.album}${track.year ? `, ${track.year}` : ""})` : ""}`;
 }
 
-/** The genre check's reasoning: confidence, the numbers, and the closest songs. */
+function evidenceLabel(evidence: GenreEvidence): string {
+  if (evidence.kind === "fits") return "Fits its genre";
+  const confidence = evidence.confidence === "high" ? "High confidence" : "Medium confidence";
+  return `${confidence} · ${evidence.kind === "refine" ? "more specific genre" : "sounds like another genre"}`;
+}
+
+/** The genre check's reasoning: confidence, the numbers, close genres and the closest songs. */
 function Evidence({ evidence }: { evidence: GenreEvidence }) {
-  return <div className="assistant-proposal__evidence" data-confidence={evidence.confidence}>
-    <span className="assistant-proposal__confidence">{evidence.confidence === "high" ? "High confidence" : "Medium confidence"} · {evidence.kind === "refine" ? "more specific genre" : "sounds like another genre"}</span>
+  return <div className="assistant-proposal__evidence" data-confidence={evidence.kind === "fits" ? "fits" : evidence.confidence}>
+    <span className="assistant-proposal__confidence">{evidenceLabel(evidence)}</span>
     <span>{evidence.summary}</span>
+    {evidence.closest.length > 0 && <span className="assistant-proposal__closest" title="How typical of each genre this album would be: closer to the genre's average sound than this share of its albums">
+      {evidence.kind === "fits" ? "Next closest" : "Close genres"}: {evidence.closest.map((near) => `${near.genre} ${near.percentile}%`).join(" · ")}
+    </span>}
     {evidence.tracks.length > 0 && <ul aria-label="Closest songs of the suggested genre">
       {evidence.tracks.map((track) => <li key={track.trackId}><AudioLines aria-hidden="true" />{trackLabel(track)}</li>)}
     </ul>}
@@ -62,8 +71,8 @@ function Evidence({ evidence }: { evidence: GenreEvidence }) {
 }
 
 function ProposalCard({ proposal, onProposalChange, onClear, onApplied }: Omit<AssistantProposalsDialogProps, "proposals" | "onClose"> & { proposal: GenreProposal }) {
-  // Medium-confidence findings wait for an explicit tick.
-  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(() => new Set(proposal.albums.filter((album) => album.evidence?.confidence === "medium").map((album) => album.albumId)));
+  // Medium-confidence findings and albums that fit wait for an explicit tick.
+  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(() => new Set(proposal.albums.filter((album) => album.evidence && (album.evidence.kind === "fits" || album.evidence.confidence === "medium")).map((album) => album.albumId)));
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -134,7 +143,12 @@ function ProposalCard({ proposal, onProposalChange, onClear, onApplied }: Omit<A
             {album.error && <span className="assistant-proposal__error">{album.error}</span>}
           </div>
           {isOpen(album)
-            ? <input className="assistant-proposal__genre" aria-label={`New genre for ${albumLabel(album)}`} value={genreFor(album)} maxLength={256} disabled={!editable || unchecked.has(album.albumId)} onChange={(event) => setEdits((current) => ({ ...current, [album.albumId]: event.target.value }))} />
+            ? <>
+              <input className="assistant-proposal__genre" aria-label={`New genre for ${albumLabel(album)}`} value={genreFor(album)} maxLength={256} disabled={!editable || unchecked.has(album.albumId)} list={album.evidence?.closest.length ? `genre-options-${proposal.id}-${album.albumId}` : undefined} onChange={(event) => setEdits((current) => ({ ...current, [album.albumId]: event.target.value }))} />
+              {album.evidence?.closest.length ? <datalist id={`genre-options-${proposal.id}-${album.albumId}`}>
+                {[album.proposedGenre, ...album.evidence.closest.map((near) => near.genre)].filter((genre, index, all) => all.indexOf(genre) === index).map((genre) => <option key={genre} value={genre} />)}
+              </datalist> : null}
+            </>
             : <span className="assistant-proposal__result">{album.status === "applied" ? <><Check aria-hidden="true" />{album.appliedGenre}</> : "Skipped"}</span>}
         </li>;
       })}

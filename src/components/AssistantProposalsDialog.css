@@ -94,6 +94,8 @@
 .assistant-proposal__evidence { display: grid; gap: 3px; margin-top: 2px; color: #8f9caa; line-height: 1.4; }
 .assistant-proposal__confidence { color: #9fe1bc; font-size: .92em; text-transform: uppercase; letter-spacing: .04em; }
 .assistant-proposal__evidence[data-confidence="medium"] .assistant-proposal__confidence { color: #e6b877; }
+.assistant-proposal__evidence[data-confidence="fits"] .assistant-proposal__confidence { color: #8fdde8; }
+.assistant-proposal__closest { color: #aab6c1; }
 .assistant-proposal__evidence ul { display: grid; gap: 1px; margin: 2px 0 0; padding: 0; list-style: none; }
 .assistant-proposal .assistant-proposal__evidence li { display: block; padding: 0; overflow: hidden; color: #aab6c1; background: none; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-proposal__evidence li svg { width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; color: #c661e7; }
