@@ -66,6 +66,7 @@ mod sonic_journey;
 #[cfg(test)]
 mod sonic_performance;
 mod sonic_worlds;
+mod sound_descriptors;
 mod state_store;
 mod state_sync;
 mod tag_model;

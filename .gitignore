@@ -41,3 +41,4 @@ release-notes.md
 *.p8
 .private_keys/
 .macos-signing/
+src-tauri/src/sound-descriptors-text.json

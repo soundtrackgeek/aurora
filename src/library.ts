@@ -807,7 +807,7 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "genres" | "sonic";
+type LibrarySearchField = "any" | "artist" | "aartist" | "album" | "genre" | "year" | "ryear" | "publisher" | "country" | "title" | "cr" | "love" | "single" | "genres" | "sonic" | "sound";
 
 interface LibrarySearchAlternative {
   field: LibrarySearchField;
@@ -827,7 +827,16 @@ interface LibrarySearchGroup {
 type LibrarySearchToken = { kind: "text"; value: string } | { kind: "and" | "or" | "not" };
 
 const librarySearchFields = new Set<LibrarySearchField>([
-  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "genres", "sonic",
+  "artist", "aartist", "album", "genre", "year", "ryear", "publisher", "country", "title", "cr", "love", "single", "genres", "sonic", "sound",
+]);
+
+/** Mirrors src-tauri/src/sound_descriptors.rs (labels and aliases). */
+const soundDescriptorLabels = [
+  "orchestral", "choir", "strings", "piano", "guitar", "synth", "hybrid", "ambient", "percussion", "chiptune", "jazz", "vocals",
+];
+const soundDescriptorValues = new Set([
+  ...soundDescriptorLabels,
+  "orchestra", "choral", "string", "synthesizer", "synths", "drums", "chip", "vocal", "voice",
 ]);
 
 const scoreGenreGroup = new Set([
@@ -1022,6 +1031,8 @@ function parseLibrarySearch(query: string): LibrarySearchGroup[] {
         ({ yearFrom, yearTo } = parseLibrarySearchYearRange(exact ?? value, field));
       } else if (field === "cr" || field === "love" || field === "single" || field === "genres") {
         ({ numberFrom, numberTo } = parseLibrarySearchNumberRange(exact ?? value, field));
+      } else if (field === "sound") {
+        if (!soundDescriptorValues.has((exact ?? value).trim().toLocaleLowerCase())) throw new Error(`Unknown sound "${(exact ?? value).trim()}". Use sound: with ${soundDescriptorLabels.join(", ")}.`);
       } else if (field === "sonic") {
         if (!["yes", "no"].includes((exact ?? value).toLowerCase())) throw new Error("Use sonic:yes or sonic:no to filter audio analysis coverage.");
       } else if (exact === null) {
@@ -1078,6 +1089,7 @@ function librarySearchValues(track: Track, field: LibrarySearchField): string[] 
     case "title": return [track.title];
     case "cr":
     case "sonic":
+    case "sound":
     case "single":
     case "genres":
     case "love": return [];
@@ -1127,6 +1139,8 @@ function matchesLibrarySearchAlternative(
   albumStats: ReadonlyMap<string, AlbumSearchStats>,
 ): boolean {
   if (alternative.field === "sonic") return Boolean(track.sonicAnalyzed) === (alternative.value.toLowerCase() === "yes");
+  // Descriptors come from Music Library's CLAP results, which the preview does not have.
+  if (alternative.field === "sound") return false;
   if (alternative.field === "year" || alternative.field === "ryear") {
     const year = alternative.field === "year" ? track.originalYear : track.releaseYear;
     if (year === null || year === undefined) return false;

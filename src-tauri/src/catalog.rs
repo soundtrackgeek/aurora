@@ -169,6 +169,10 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         .map_err(|error| format!("Could not open the music catalog read-only: {error}"))?;
     register_catalog_functions(&connection)?;
     crate::sonic::prepare_search(&connection, path)?;
+    crate::sound_descriptors::prepare_search(
+        &connection,
+        crate::sound_descriptors::cache_path().as_deref(),
+    )?;
     prepare_single_keys(&connection)?;
     connection
         .busy_timeout(Duration::from_secs(2))
@@ -971,6 +975,8 @@ enum CatalogSearchField {
     /// `genres:` counts genre values: Music Library joins several with `;`.
     GenreCount,
     Sonic,
+    /// `sound:` matches a sound descriptor (see `sound_descriptors`).
+    Sound,
     Extended(ExtendedSearchField),
 }
 
@@ -986,6 +992,7 @@ impl CatalogSearchField {
             | Self::Single
             | Self::GenreCount
             | Self::Sonic
+            | Self::Sound
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -1007,6 +1014,7 @@ impl CatalogSearchField {
             | Self::Single
             | Self::GenreCount
             | Self::Sonic
+            | Self::Sound
             | Self::Extended(_) => None,
             Self::Artist => Some("display_artist"),
             Self::AlbumArtist => Some("album_artist_display"),
@@ -1021,6 +1029,9 @@ impl CatalogSearchField {
 #[derive(Clone, Debug, PartialEq)]
 enum CatalogSearchMatch {
     Analyzed(bool),
+    /// A sound descriptor's label index: per track in Songs, per album share in
+    /// Albums and Artists.
+    Sound(u8),
     Extended {
         field: ExtendedSearchField,
         from: Option<f64>,
@@ -1100,7 +1111,7 @@ impl CatalogSearch {
             | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
-            CatalogSearchMatch::Analyzed(_) => None,
+            CatalogSearchMatch::Analyzed(_) | CatalogSearchMatch::Sound(_) => None,
         }
     }
 
@@ -1225,6 +1236,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "title" => Some(CatalogSearchField::Title),
         "cr" => Some(CatalogSearchField::Completeness),
         "sonic" => Some(CatalogSearchField::Sonic),
+        "sound" => Some(CatalogSearchField::Sound),
         "love" => Some(CatalogSearchField::Love),
         "single" | "singles" => Some(CatalogSearchField::Single),
         "genres" => Some(CatalogSearchField::GenreCount),
@@ -1691,6 +1703,9 @@ pub(crate) fn parse_catalog_search(input: &str) -> Result<CatalogSearch, String>
                             parse_search_number_range(exact.as_deref().unwrap_or(value), field)?;
                         CatalogSearchMatch::GenreCountRange { from, to }
                     }
+                    CatalogSearchField::Sound => CatalogSearchMatch::Sound(
+                        crate::sound_descriptors::parse_label(exact.as_deref().unwrap_or(value))?,
+                    ),
                     CatalogSearchField::Sonic => {
                         match exact
                             .as_deref()
@@ -1917,6 +1932,7 @@ fn non_prefix_predicate(
         | CatalogSearchMatch::LovedTracksRange { .. }
         | CatalogSearchMatch::SinglesRange { .. }
         | CatalogSearchMatch::GenreCountRange { .. }
+        | CatalogSearchMatch::Sound(_)
         | CatalogSearchMatch::Extended { .. } => None,
     }
 }
@@ -1967,8 +1983,22 @@ fn album_level_predicate(
             *to,
             params,
         )),
+        CatalogSearchMatch::Sound(label) => {
+            params.push(Value::Integer(1 << label));
+            Some(format!(
+                "(COALESCE((SELECT sound_album.mask FROM temp.aurora_sound_albums AS sound_album WHERE sound_album.album_id = {alias}.id), 0) & ?) != 0"
+            ))
+        }
         _ => None,
     }
+}
+
+/// In track searches, `sound:` checks the track's own descriptors.
+fn track_sound_predicate(track_alias: &str, label: u8, params: &mut Vec<Value>) -> String {
+    params.push(Value::Integer(1 << label));
+    format!(
+        "EXISTS (SELECT 1 FROM temp.aurora_sound_tracks AS sound_track WHERE sound_track.file_path = {track_alias}.file_path AND sound_track.filename = {track_alias}.filename AND (sound_track.mask & ?) != 0)"
+    )
 }
 
 fn count_range_predicate(
@@ -2147,7 +2177,7 @@ fn group_fts_query(group: &CatalogSearchGroup) -> Option<String> {
             | CatalogSearchMatch::SinglesRange { .. }
             | CatalogSearchMatch::GenreCountRange { .. }
             | CatalogSearchMatch::Extended { .. } => None,
-            CatalogSearchMatch::Analyzed(_) => None,
+            CatalogSearchMatch::Analyzed(_) | CatalogSearchMatch::Sound(_) => None,
         })
         .collect::<Vec<_>>();
     (!queries.is_empty()).then(|| queries.join(" OR "))
@@ -2204,6 +2234,9 @@ pub(crate) fn push_track_search_predicates(
                     *to,
                     params,
                 )),
+                CatalogSearchMatch::Sound(label) => {
+                    Some(track_sound_predicate("t", *label, params))
+                }
                 matcher => track_album_level_predicate("t", matcher, params),
             }
         }));

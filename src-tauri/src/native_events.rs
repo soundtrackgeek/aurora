@@ -263,9 +263,33 @@ impl NativeBackgroundTasks {
                 &mut history_previous,
             )
         })?;
+
+        // Sound descriptors follow Music Library's CLAP results. The first pass
+        // reads every embedding (about 1 GB per million tracks), so it waits
+        // until startup has settled; later passes only read new rows.
+        let started = Instant::now();
+        self.schedule(
+            "aurora-sound-descriptors",
+            SOUND_DESCRIPTOR_INTERVAL,
+            move || {
+                if started.elapsed() < SOUND_DESCRIPTOR_DELAY {
+                    return Ok(());
+                }
+                let catalog = catalog::default_catalog_path()?;
+                if !catalog.is_file() {
+                    return Ok(());
+                }
+                let revision = catalog::completed_import_revision()?;
+                let cache = crate::mcp::app_data_dir()?.join(crate::sound_descriptors::FILE_NAME);
+                crate::sound_descriptors::refresh(&cache, &catalog, &revision).map(|_| ())
+            },
+        )?;
         Ok(())
     }
 }
+
+const SOUND_DESCRIPTOR_INTERVAL: Duration = Duration::from_secs(60);
+const SOUND_DESCRIPTOR_DELAY: Duration = Duration::from_secs(55);
 
 fn changed_payload<T: Serialize>(
     payload: &T,

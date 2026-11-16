@@ -64,6 +64,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `single:` | Official-single count or range: per album in Albums and Artists, per track in Songs (`singles:` is an alias) | `single:2..5` |
 | `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
+| `sound:` | A sound descriptor heard in the audio: per track in Songs; in Albums and Artists, on at least a third of an album's tracks | `sound:choir`, `sound:synth OR chiptune` |
 
 `artist:` and `aartist:` are intentionally different. Use `artist:` for a track's credited performer and `aartist:` for the artist used to group an album.
 
@@ -85,6 +86,26 @@ analysis and combine with other fields/boolean operators. Albums and Artists
 qualify through matching tracks, so partly analyzed albums can match either
 value. `sonic=` is accepted too. Searches report saved coverage; similarity
 validates shortlisted files before using them. See [sonic analysis](sonic-analysis.md).
+
+`sound:` finds music by what it sounds like rather than by its tags, which helps
+most with film, TV and game scores, whose genre is only "Sci-Fi" or "Video Game".
+The descriptors are `orchestral`, `choir`, `strings`, `piano`, `guitar`, `synth`,
+`hybrid` (orchestra with electronics), `ambient`, `percussion`, `chiptune`, `jazz`
+and `vocals`; `orchestra`, `choral`, `string`, `synthesizer`, `synths`, `drums`,
+`chip`, `vocal` and `voice` also work. A track can carry several. In **Songs**,
+`sound:choir` lists the tracks that carry it. In **Albums** and **Artists**, an
+album qualifies when at least a third of its described tracks do, so one choral
+cue does not make a 40-track score a choir album. Combine it like any field:
+`genre:scores AND sound:synth AND year:1980..1989`, `sound:choir OR orchestral`,
+`genre:"video game" NOT sound:chiptune`.
+
+Descriptors are estimated from Music Library's sound search results (its
+**Describe a sound** step, Music Library 0.216.0 or newer), so only tracks with
+those results have them, and they are estimates, not tags: expect some mistakes,
+especially between neighbors such as orchestral, strings and choir. Aurora
+works them out in the background; the first pass over a million tracks takes a
+few minutes, and later passes only read new results. See
+[sound descriptors](sound-descriptors.md).
 
 ### Sort and group in the search: `sort:` and `group:`
 
@@ -138,8 +159,9 @@ With `group:`, results are ordered by the group first. Each group starts under a
 | `group:decade` | Decade of the Original Year, such as "1980s" | Oldest first | ✓ | ✓ |
 | `group:love` | Albums: loved-track count, such as "3 loved tracks". Songs: "Loved" or "Not loved" | Most first | ✓ | ✓ |
 | `group:ar` | Album rating in half stars, such as "4.5 stars"; in Songs the containing album's rating | Highest first | ✓ | ✓ |
+| `group:sound` | The track's most likely sound descriptor, such as "Choir"; in Albums the descriptor the most tracks carry | A–Z | ✓ | ✓ |
 
-Text groups take `za` (or `az`) after a space to reverse them: `group:genre za`, `group:country za`. Numeric groups use `..`: `group:year..` / `group:..year` for oldest / newest first, and `group:love..` or `group:ar..` for lowest first. Items without a value come last in either direction, under headings such as "No genre", "No country", "No year" and "Not rated". Grouping is not available in Artists. Group names are compared without regard to case, so "Synthpop" and "synthpop" share a heading.
+Text groups take `za` (or `az`) after a space to reverse them: `group:genre za`, `group:country za`. Numeric groups use `..`: `group:year..` / `group:..year` for oldest / newest first, and `group:love..` or `group:ar..` for lowest first. Items without a value come last in either direction, under headings such as "No genre", "No country", "No year", "Not rated" and "No sound descriptor". Grouping is not available in Artists. Group names are compared without regard to case, so "Synthpop" and "synthpop" share a heading.
 
 Album ratings are grouped to the nearest half star of the catalog's album rating (effective, then calculated, then stored). An album rated 4.34 stars is grouped under "4.5 stars"; use `ar:` ranges for exact bounds.
 
@@ -348,11 +370,14 @@ Quoted `genre:"scores"` is different: it looks only for the exact canonical genr
 | Score albums by decade, best rated first | `genre:scores group:decade sort:..rating` |
 | A random draw of loved songs | `love:1 sort:random` |
 | One artist's songs by album rating | `aartist:"Kate Bush" group:ar` |
+| 1980s synth scores | `genre:scores AND sound:synth AND year:1980..1989` |
+| Game music that is not chiptune | `genre:"video game" NOT sound:chiptune` |
+| Sci-Fi scores by how they sound | `genre:sci-fi group:sound` |
 
 ### Differences between Songs, Albums, and Artists
 
-- **Songs** returns matching tracks. An album-wide `cr:` clause returns every matching track from qualifying albums; `love:` and `single:` check each track itself.
-- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:`, `love:` and `single:` evaluate the album itself.
+- **Songs** returns matching tracks. An album-wide `cr:` clause returns every matching track from qualifying albums; `love:`, `single:` and `sound:` check each track itself.
+- **Albums** returns an album when its indexed album metadata or one of its tracks satisfies the query. `cr:`, `love:`, `single:` and `sound:` evaluate the album itself.
 - **Artists** returns Album Artist groups. A plain artist-name search is a case-insensitive contains match on Album Artist; fielded and boolean queries are evaluated against the artists' albums and tracks, including album-wide `cr:`, `love:` and `single:` clauses.
 
 The same query can therefore produce different result counts in each view.

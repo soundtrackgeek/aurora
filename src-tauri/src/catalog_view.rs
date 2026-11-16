@@ -66,6 +66,8 @@ pub(crate) enum GroupField {
     Decade,
     Love,
     AlbumRating,
+    /// The track's top sound descriptor; in Albums, the one most tracks carry.
+    Sound,
 }
 
 impl GroupField {
@@ -82,6 +84,7 @@ impl GroupField {
             "decade" => Self::Decade,
             "love" => Self::Love,
             "ar" => Self::AlbumRating,
+            "sound" => Self::Sound,
             _ => return None,
         })
     }
@@ -99,6 +102,7 @@ impl GroupField {
             Self::Decade => "decade",
             Self::Love => "love",
             Self::AlbumRating => "ar",
+            Self::Sound => "sound",
         }
     }
 
@@ -111,6 +115,7 @@ impl GroupField {
                 | Self::Album
                 | Self::Publisher
                 | Self::Country
+                | Self::Sound
         )
     }
 
@@ -134,7 +139,7 @@ pub(crate) struct CatalogView {
 }
 
 const SORT_HELP: &str = "Use sort:random, sort:year.., sort:..year, sort:ryear.., sort:added.., sort:rating.., sort:az, sort:za, sort:title az, sort:album az or sort:aartist za.";
-const GROUP_HELP: &str = "Use group:genre, group:aartist, group:artist, group:album, group:publisher, group:country, group:year, group:ryear, group:decade, group:love or group:ar.";
+const GROUP_HELP: &str = "Use group:genre, group:aartist, group:artist, group:album, group:publisher, group:country, group:year, group:ryear, group:decade, group:love, group:ar or group:sound.";
 
 /// Fields that order by a number and take `name..` / `..name`.
 fn numeric_sort(name: &str, descending: bool) -> Option<ViewSort> {
@@ -565,6 +570,15 @@ pub(crate) fn group_sql(
                 true,
             )
         }
+        GroupField::Sound => {
+            let top = if albums {
+                "(SELECT sound_album.top FROM temp.aurora_sound_albums AS sound_album WHERE sound_album.album_id = a.id)".to_owned()
+            } else {
+                "(SELECT sound_track.top FROM temp.aurora_sound_tracks AS sound_track WHERE sound_track.file_path = t.file_path AND sound_track.filename = t.filename LIMIT 1)".to_owned()
+            };
+            let name = crate::sound_descriptors::label_sql(&top);
+            (format!("lower({name})"), name, false)
+        }
     };
     let sortable = if numeric {
         format!("printf('%08d', {value})")
@@ -588,6 +602,7 @@ pub(crate) fn group_sql(
         GroupField::Year | GroupField::ReleaseYear | GroupField::Decade => "No year",
         GroupField::Love => "No loved tracks",
         GroupField::AlbumRating => "Not rated",
+        GroupField::Sound => "No sound descriptor",
     };
     GroupSql {
         key,

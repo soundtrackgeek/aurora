@@ -38,6 +38,12 @@ it("filters partial sonic coverage with boolean search syntax", () => {
   expect(() => filterTracks(partial, "sonic:maybe", null)).toThrow(/sonic:yes/);
 });
 
+it("accepts sound descriptors, which the preview has none of", () => {
+  expect(filterTracks(tracks, "sound:choir", null)).toEqual([]);
+  expect(filterTracks(tracks, "NOT sound:synthesizer", null)).toEqual(tracks);
+  expect(() => filterTracks(tracks, "sound:kazoo", null)).toThrow(/orchestral, choir/);
+});
+
 const similarlyNamedArtists: Track[] = [
   { ...tracks[0], id: "3", trackKey: "c:/music/kiss/strutter.mp3", albumId: "album-3", title: "Strutter", artist: "Kiss", displayArtist: "Kiss", album: "Kiss", originalYear: 1974, releaseYear: 1974, genre: "Rock" },
   { ...tracks[1], id: "4", trackKey: "c:/music/kissing-the-pink/certain-things.mp3", albumId: "album-4", title: "Certain Things Are Likely", artist: "Kissing the Pink", album: "Certain Things Are Likely", releaseYear: 1986, genre: "Synth-pop" },

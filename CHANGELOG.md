@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0] - 2026-11-16
+
+### Added
+- `sound:` in the search box finds music by what it sounds like: `orchestral`, `choir`, `strings`, `piano`, `guitar`, `synth`, `hybrid`, `ambient`, `percussion`, `chiptune`, `jazz` or `vocals`, as in `genre:scores AND sound:synth AND year:1980..1989` or `genre:"video game" NOT sound:chiptune`. Songs checks each track; Albums and Artists need the descriptor on at least a third of an album's tracks.
+- `group:sound` puts Songs and Albums under their most likely descriptor, such as "Choir" or "Synth"; tracks without one go under "No sound descriptor".
+- Descriptors are estimated from Music Library's CLAP sound search results (Music Library 0.216.0 or newer) by a small built-in model, with no audio model in Aurora. A background task keeps `aurora-sound-descriptors.sqlite3` in Aurora's data folder up to date; the first pass over a million tracks takes a few minutes, later ones only read new results. [docs/sound-descriptors.md](docs/sound-descriptors.md) explains the method, its accuracy and how to retrain it with `scripts/train-sound-descriptors.py`.
+
 ## [0.64.0] - 2026-11-15
 
 ### Added
