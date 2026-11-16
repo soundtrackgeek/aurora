@@ -247,6 +247,8 @@ export const toolLabels: Record<string, string> = {
   show_in_aurora: "Showing it in Aurora",
   propose_genre_changes: "Sending genre changes for review",
   proposal_status: "Checking the review",
+  describe_sound: "Listening to the music",
+  tracks_like: "Finding music that sounds alike",
   WebSearch: "Searching the web",
   WebFetch: "Reading a web page",
   web_search: "Searching the web",

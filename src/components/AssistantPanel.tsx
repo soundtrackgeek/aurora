@@ -24,6 +24,7 @@ const suggestions = [
   "What did I listen to most last month?",
   "Find albums whose tracks have mixed genres, starting with Synthpop.",
   "Which 1980s albums have I loved the most tracks on?",
+  "Find unrated albums that sound like Vangelis in the 1980s.",
   "Look up the genre of the album I have open on Discogs or MusicBrainz.",
 ];
 

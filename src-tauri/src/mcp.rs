@@ -15,7 +15,7 @@
 
 use crate::{
     assistant, catalog, connections, control, device_mode, explorer, genre_rule, genres,
-    history::HistoryStore, ratings, state_store::StateStore, state_sync, years,
+    history::HistoryStore, ratings, sound_tools, state_store::StateStore, state_sync, years,
 };
 use serde_json::{Map, Value, json};
 use std::{
@@ -45,7 +45,7 @@ Album IDs and track IDs are opaque; pass them back unchanged. Searches use Auror
 search_syntax before writing anything beyond plain words. Join field terms with an explicit AND (or OR, NOT, \
 parentheses): `genre:synthpop AND year:1980..1989 AND love:1..` works, but `genre:synthpop year:1980..1989` \
 matches nothing. `sort:` and `group:` clauses need no AND, as in `aartist:madonna AND love:1 sort:..year`. \
-Genre names are canonical genres from list_genres. Results are paged: pass nextCursor \
+Genre names are canonical genres from list_genres. Aurora can also hear the music: describe_sound says what albums or tracks sound like (descriptors such as Orchestral, Choir or Synth) and how well they fit a description in words; tracks_like finds the tracks or albums that sound most like one; `vibe:\"dark ambient drone\"` in a search finds music that fits a description and `sound:orchestral` music with a descriptor. Results are paged: pass nextCursor \
 back to continue. When you mention albums or tracks to the user, include artist, title, and year.";
 
 /// Runs the server until stdin closes. Returns the process exit code.
@@ -449,6 +449,46 @@ fn tool_definitions() -> Vec<Value> {
             }),
             &[],
         ),
+        tool(
+            "describe_sound",
+            "Describe the sound",
+            "What albums or tracks sound like, from Music Library's audio analysis: their sound descriptors (Orchestral, Choir, Strings, Piano, Guitar, Synth, Hybrid, Ambient, Percussion, Chiptune, Jazz, Vocals), and for an album the percent of its tracks with each. With a description in words, like \"orchestral film score\" or \"80s synthesizer soundtrack\", also says how well each one fits it, as a percentile of the whole library. Use it to check what albums or tracks found by a search really sound like. To find music that fits a description, search with vibe:\"...\" instead.",
+            json!({
+                "albumIds": {
+                    "type": "array", "maxItems": sound_tools::MAX_ALBUMS,
+                    "items": { "type": "string" },
+                    "description": "albumId values from search results, at most 25.",
+                },
+                "trackIds": {
+                    "type": "array", "maxItems": sound_tools::MAX_TRACKS,
+                    "items": { "type": "string" },
+                    "description": "Track id values from search results, at most 50.",
+                },
+                "description": {
+                    "type": "string", "maxLength": crate::vibe::MAX_CHARS,
+                    "description": "Optional sound in words to measure each one against. The first use of a description takes a few seconds.",
+                },
+            }),
+            &[],
+        ),
+        tool(
+            "tracks_like",
+            "Tracks that sound like this",
+            "The tracks or albums that sound most like one track or album, by Music Library's audio analysis, closest first; the same matches as Aurora's Sounds like. Track results allow at most three per artist and two per album. Narrow the matches with query, in Aurora's search language, for example `cr:0` (albums with no rated tracks), `year:1980..1989`, `sound:orchestral` or `NOT genre:soundtrack`.",
+            json!({
+                "trackId": { "type": "string", "description": "A track id from a search. Give this or albumId." },
+                "albumId": { "type": "string", "description": "An albumId from a search." },
+                "results": {
+                    "type": "string", "enum": ["tracks", "albums"],
+                    "description": "Default: tracks for a trackId, albums for an albumId.",
+                },
+                "limit": { "type": "integer", "minimum": 1, "maximum": sound_tools::MAX_LIKE, "description": "Default 20." },
+                "query": { "type": "string", "description": "Aurora search that the matches must also meet, with AND between field terms and no sort: or group:. Checked against the 100 closest matches." },
+                "sameGenre": { "type": "boolean", "description": "Track results only: keep the seed's genre." },
+                "minimumRating": { "type": "number", "minimum": 0, "maximum": 5, "description": "Track results only: lowest star rating." },
+            }),
+            &[],
+        ),
         control_tool(
             "show_in_aurora",
             "Show in Aurora",
@@ -549,6 +589,8 @@ fn run_tool(
                 json!({ "proposalId": id }),
             )
         }
+        "describe_sound" => describe_sound(&arguments),
+        "tracks_like" => tracks_like(context, &arguments),
         "library_overview" => library_overview(),
         "search_syntax" => Ok(json!({ "guide": SEARCH_GUIDE })),
         "search_songs" => search_songs(context, &arguments),
@@ -699,6 +741,60 @@ fn search_artists(context: &Context, arguments: &Map<String, Value>) -> Result<V
         artist.last_played_at_ms = insight.and_then(|insight| insight.last_played_at_ms);
     }
     to_value(page)
+}
+
+fn text_list(arguments: &Map<String, Value>, key: &str) -> Result<Vec<String>, String> {
+    match arguments.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::String(text) => Ok(text.trim().to_owned()),
+                Value::Number(number) => Ok(number.to_string()),
+                _ => Err(format!("{key} must be a list of IDs.")),
+            })
+            .collect(),
+        Some(_) => Err(format!("{key} must be a list of IDs.")),
+    }
+}
+
+fn describe_sound(arguments: &Map<String, Value>) -> Result<Value, String> {
+    sound_tools::describe(
+        &text_list(arguments, "albumIds")?,
+        &text_list(arguments, "trackIds")?,
+        optional_text(arguments, "description").as_deref(),
+    )
+}
+
+fn tracks_like(context: &Context, arguments: &Map<String, Value>) -> Result<Value, String> {
+    let albums = match optional_text(arguments, "results").as_deref() {
+        None => None,
+        Some("tracks") => Some(false),
+        Some("albums") => Some(true),
+        Some(_) => return Err("results must be tracks or albums.".to_owned()),
+    };
+    let id = |key| {
+        arguments.get(key).and_then(|value| match value {
+            Value::String(text) => Some(text.trim().to_owned()).filter(|text| !text.is_empty()),
+            Value::Number(number) => Some(number.to_string()),
+            _ => None,
+        })
+    };
+    sound_tools::like(
+        sound_tools::LikeRequest {
+            track_id: id("trackId"),
+            album_id: id("albumId"),
+            albums,
+            limit: bounded_integer(arguments, "limit", 20, sound_tools::MAX_LIKE as u64)? as usize,
+            query: optional_text(arguments, "query"),
+            same_genre: arguments
+                .get("sameGenre")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            minimum_rating: arguments.get("minimumRating").and_then(Value::as_f64),
+        },
+        &context.store,
+    )
 }
 
 fn library_overview() -> Result<Value, String> {

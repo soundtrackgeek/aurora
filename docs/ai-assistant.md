@@ -25,9 +25,13 @@ Aurora exposes its library to AI assistants through a local [Model Context Proto
 | `albums_with_multiple_genres` | Albums that break a one-genre-per-album rule in their tags as written: a tag that holds several genres (`Electro; Dance`) or tracks whose tags differ. Each album lists its tags with track counts, its genres, and the genre listed first on most tracks. Filters: `genre` (canonical genre) and `tagContains` (text in a raw tag) |
 | `listening_report` | Plays between two dates in the user's time zone |
 | `ratings_overview`, `year_overview` | Rating and year distributions |
+| `describe_sound` | What up to 25 albums and 50 tracks sound like: their sound descriptors (Orchestral, Choir, Synth and the others from [sound-descriptors.md](sound-descriptors.md)), and for an album the percent of its analyzed tracks with each. With `description` (a sound in words, as for `vibe:`), also each one's fit: the percentile of the library's albums or tracks it fits better, and whether `vibe:` would find it. Descriptors still come back if the description cannot be read |
+| `tracks_like` | The tracks or albums that sound most like one `trackId` or `albumId`, closest first: Aurora's Sounds like matches from Music Library's audio analysis, at most three tracks per artist and two per album. `query` narrows them with an Aurora search such as `cr:0` (checked against the 100 closest); `sameGenre` and `minimumRating` narrow track results. Album results carry year, rating and rated tracks |
 | `show_in_aurora` | **Acts.** Opens Songs, Albums or Artists in the running Aurora with a search query, and brings the window forward. The query is checked first, and the result says how many items it found |
 | `propose_genre_changes` | **Acts.** Sends up to 500 `{albumId, genre}` changes with a reason. Aurora opens a review dialog; nothing is written until the user applies it there |
 | `proposal_status` | Whether a proposal is waiting, applying, done or dismissed, and each album's result |
+
+The two sound tools add what the search language cannot do: `vibe:` and `sound:` find music by its sound, `describe_sound` checks albums or tracks found some other way, and `tracks_like` starts from one example. Audio hashes, which identify files, stay inside Aurora.
 
 Search queries need an explicit `AND` between field terms, as in `aartist:madonna AND love:1`. `sort:` and `group:` clauses need none. `genres:2..` finds albums with more than one genre.
 

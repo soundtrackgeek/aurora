@@ -278,11 +278,12 @@ pub(crate) fn label_sql(index: &str) -> String {
     format!("(CASE {index} {cases} END)")
 }
 
-/// Aurora's descriptor cache. Tests get no cache unless they attach one.
+/// Aurora's descriptor cache. Tests get no cache unless they attach one, or
+/// a real-library proof names one in `AURORA_PROOF_SOUND_CACHE`.
 pub(crate) fn cache_path() -> Option<PathBuf> {
     #[cfg(test)]
     {
-        None
+        std::env::var_os("AURORA_PROOF_SOUND_CACHE").map(PathBuf::from)
     }
     #[cfg(not(test))]
     {

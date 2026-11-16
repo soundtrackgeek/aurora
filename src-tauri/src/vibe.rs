@@ -19,7 +19,7 @@
 //! integer for results in the kept share, and NULL otherwise.
 
 use base64::Engine;
-use rusqlite::{Connection, OpenFlags, functions::FunctionFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags};
 use std::{
     collections::HashMap,
     io::Write,
@@ -211,6 +211,13 @@ fn open_read_only(path: &Path) -> Result<Connection, String> {
 
 /// Albums against the mean embedding of their tracks.
 fn score_albums(cache: &Path, query: &[f32]) -> Result<HashMap<String, i64>, String> {
+    Ok(best_share(album_scores(cache, query)?)
+        .into_iter()
+        .collect())
+}
+
+/// Every album's score, by album id.
+fn album_scores(cache: &Path, query: &[f32]) -> Result<Vec<(String, f32)>, String> {
     let connection = open_read_only(cache)?;
     let present: bool = connection
         .query_row(
@@ -239,11 +246,27 @@ fn score_albums(cache: &Path, query: &[f32]) -> Result<HashMap<String, i64>, Str
     if scored.is_empty() {
         return Err(not_ready());
     }
-    Ok(best_share(scored).into_iter().collect())
+    Ok(scored)
 }
 
 /// Every analyzed track; keeps the best share by audio hash.
 fn score_tracks(clap: &Path, query: &[f32]) -> Result<HashMap<String, i64>, String> {
+    let (connection, scored) = track_scores(clap, query)?;
+    let mut hash = connection
+        .prepare("SELECT audio_hash FROM clap_audio WHERE rowid = ?1")
+        .map_err(|error| error.to_string())?;
+    best_share(scored)
+        .into_iter()
+        .map(|(rowid, score)| {
+            hash.query_row([rowid], |row| row.get::<_, String>(0))
+                .map(|hash| (hash, score))
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+/// Every analyzed track's score, by `clap_audio` row id, with the open store.
+fn track_scores(clap: &Path, query: &[f32]) -> Result<(Connection, Vec<(i64, f32)>), String> {
     if !clap.is_file() {
         return Err(not_ready());
     }
@@ -269,17 +292,93 @@ fn score_tracks(clap: &Path, query: &[f32]) -> Result<HashMap<String, i64>, Stri
         }
     }
     drop(rows);
-    let mut hash = connection
-        .prepare("SELECT audio_hash FROM clap_audio WHERE rowid = ?1")
-        .map_err(|error| error.to_string())?;
-    best_share(scored)
+    drop(statement);
+    Ok((connection, scored))
+}
+
+/// How well one album or track fits a description, against the whole library.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Fit {
+    /// The share of the library's albums (or tracks) it fits better, 0 to 100.
+    pub(crate) percentile: f64,
+    /// Whether `vibe:` with the same description finds it.
+    pub(crate) in_vibe: bool,
+}
+
+/// `own` placed among every score, `sorted` ascending.
+fn fit_among(sorted: &[f32], own: f32) -> Fit {
+    let below = sorted.partition_point(|score| *score < own);
+    let above = sorted.len() - sorted.partition_point(|score| *score <= own);
+    let keep = ((sorted.len() as f64 * SHARE).ceil() as usize).max(1);
+    Fit {
+        percentile: (1000.0 * below as f64 / sorted.len().max(1) as f64).round() / 10.0,
+        in_vibe: above < keep,
+    }
+}
+
+/// How well these albums fit a description, by album id. Albums without
+/// analyzed tracks are left out.
+pub(crate) fn album_fits(text: &str, album_ids: &[String]) -> Result<HashMap<String, Fit>, String> {
+    let query = text_embedding(&normalize(text)?)?;
+    let cache = crate::sound_descriptors::cache_path()
+        .filter(|path| path.is_file())
+        .ok_or_else(not_ready)?;
+    album_fits_at(&cache, &query, album_ids)
+}
+
+fn album_fits_at(
+    cache: &Path,
+    query: &[f32],
+    album_ids: &[String],
+) -> Result<HashMap<String, Fit>, String> {
+    let scored = album_scores(cache, query)?;
+    let mut sorted: Vec<f32> = scored.iter().map(|(_, score)| *score).collect();
+    sorted.sort_by(f32::total_cmp);
+    Ok(scored
         .into_iter()
-        .map(|(rowid, score)| {
-            hash.query_row([rowid], |row| row.get::<_, String>(0))
-                .map(|hash| (hash, score))
-                .map_err(|error| error.to_string())
-        })
-        .collect()
+        .filter(|(id, _)| album_ids.contains(id))
+        .map(|(id, score)| (id, fit_among(&sorted, score)))
+        .collect())
+}
+
+/// How well these tracks fit a description, by audio hash. Reads every
+/// embedding, about two seconds for a million tracks.
+pub(crate) fn track_fits(
+    text: &str,
+    audio_hashes: &[String],
+) -> Result<HashMap<String, Fit>, String> {
+    let query = text_embedding(&normalize(text)?)?;
+    track_fits_at(&music_library_dir()?.join(CLAP_FILE), &query, audio_hashes)
+}
+
+fn track_fits_at(
+    clap: &Path,
+    query: &[f32],
+    audio_hashes: &[String],
+) -> Result<HashMap<String, Fit>, String> {
+    let (connection, scored) = track_scores(clap, query)?;
+    let model = &crate::sound_descriptors::model().clap_model;
+    let mut own = connection
+        .prepare("SELECT embedding FROM clap_audio WHERE audio_hash = ?1 AND model = ?2")
+        .map_err(|error| error.to_string())?;
+    let mut wanted = Vec::new();
+    for hash in audio_hashes {
+        let bytes: Option<Vec<u8>> = own
+            .query_row(rusqlite::params![hash, model], |row| row.get(0))
+            .optional()
+            .map_err(|error| error.to_string())?
+            .flatten();
+        if let Some(score) = bytes.and_then(|bytes| dot_f16(&bytes, query)) {
+            wanted.push((hash.clone(), score));
+        }
+    }
+    drop(own);
+    let mut sorted: Vec<f32> = scored.into_iter().map(|(_, score)| score).collect();
+    sorted.sort_by(f32::total_cmp);
+    Ok(wanted
+        .into_iter()
+        .map(|(hash, score)| (hash, fit_among(&sorted, score)))
+        .collect())
 }
 
 /// The dot product of a little-endian half-float vector with `query`.
@@ -616,6 +715,49 @@ pub(crate) mod tests {
         hashes.sort();
         assert_eq!(hashes, ["h98", "h99"]);
         assert!(score_tracks(&directory.path().join("none.sqlite3"), &query).is_err());
+
+        // describe_sound places single albums and tracks among all of them.
+        let ids = ["a49", "a25", "a0", "missing"].map(str::to_owned);
+        let fits = album_fits_at(&cache, &query, &ids).unwrap();
+        assert_eq!(fits.len(), 3);
+        assert_eq!(
+            fits["a49"],
+            Fit {
+                percentile: 98.0,
+                in_vibe: true
+            }
+        );
+        assert_eq!(
+            fits["a25"],
+            Fit {
+                percentile: 50.0,
+                in_vibe: false
+            }
+        );
+        assert_eq!(
+            fits["a0"],
+            Fit {
+                percentile: 0.0,
+                in_vibe: false
+            }
+        );
+        let hashes = ["h98", "h10", "failed", "missing"].map(str::to_owned);
+        let fits = track_fits_at(&clap, &query, &hashes).unwrap();
+        assert_eq!(fits.len(), 2);
+        assert_eq!(
+            fits["h98"],
+            Fit {
+                percentile: 98.0,
+                in_vibe: true
+            }
+        );
+        assert_eq!(
+            fits["h10"],
+            Fit {
+                percentile: 10.0,
+                in_vibe: false
+            }
+        );
     }
 
     /// Runs against the real library with a scratch cache:

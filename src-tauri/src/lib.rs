@@ -67,6 +67,7 @@ mod sonic_journey;
 mod sonic_performance;
 mod sonic_worlds;
 mod sound_descriptors;
+mod sound_tools;
 mod state_store;
 mod state_sync;
 mod tag_model;

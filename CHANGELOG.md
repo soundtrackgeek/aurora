@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.67.0] - 2026-11-16
+
+### Added
+- AI assistants can hear the library. `describe_sound` says what up to 25 albums and 50 tracks sound like: their sound descriptors, the percent of an album's tracks with each, and, given a description in words, how well each fits it as a percentile of the whole library. `tracks_like` lists the tracks or albums that sound most like one, the same matches as Sounds like, narrowed by an Aurora search such as `cr:0` for unrated albums. Both work in the Assistant panel and from Claude Code or Codex in a terminal, and return no file paths or audio hashes.
+- The Assistant panel suggests "Find unrated albums that sound like Vangelis in the 1980s."
+
 ## [0.66.0] - 2026-11-16
 
 ### Added
