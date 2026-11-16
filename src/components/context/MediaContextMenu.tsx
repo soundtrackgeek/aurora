@@ -30,11 +30,13 @@ interface Props {
   onOpenAlbum: (track: Track) => void;
   onOpenArtist: (artist: string) => void;
   onOpenTags: (selection: PlaylistSelection) => void;
+  /** Checks the albums' genres by sound and returns a one-line summary. */
+  onCheckGenre?: (albumIds: readonly string[]) => Promise<string>;
   onRate: (track: Track, rating: number | null) => Promise<unknown>;
   onPlaylistSaved: () => void;
 }
 
-export function MediaContextMenuProvider({ children, playlists, onPlay, onEnqueue, onOpenAlbum, onOpenArtist, onOpenTags, onRate, onPlaylistSaved }: Props) {
+export function MediaContextMenuProvider({ children, playlists, onPlay, onEnqueue, onOpenAlbum, onOpenArtist, onOpenTags, onCheckGenre, onRate, onPlaylistSaved }: Props) {
   const [request, setRequest] = useState<MediaMenuRequest | null>(null);
   const [section, setSection] = useState<"main" | "playlist" | "rating">("main");
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
@@ -84,7 +86,8 @@ export function MediaContextMenuProvider({ children, playlists, onPlay, onEnqueu
     setWorking(true);
     close();
     setNotice({ text: "Working…" });
-    void action().then(() => setNotice(success ? { text: success } : null)).catch((error: unknown) => setNotice({ text: String(error), error: true })).finally(() => { setWorking(false); });
+    // An action may return its own message, as the genre check does.
+    void action().then((result) => setNotice(success ? { text: success } : typeof result === "string" ? { text: result } : null)).catch((error: unknown) => setNotice({ text: String(error), error: true })).finally(() => { setWorking(false); });
   }
   const selection = request?.selection;
   const track = selection?.tracks?.[0];
@@ -162,6 +165,7 @@ export function MediaContextMenuProvider({ children, playlists, onPlay, onEnqueu
         }, "Copied."))}
         <div role="separator" />
         {item("Open Tags", () => run(async () => { onOpenTags(await playlistSelection()); }), !available || Boolean(selection.artistOnly))}
+        {onCheckGenre && selection.albumIds?.length ? item(selection.albumIds.length === 1 ? "Check genre by sound" : "Check genres by sound", () => run(() => onCheckGenre(selection.albumIds!))) : null}
         {item("Rate", () => setSection("rating"), !singleTrack, true)}
       </> : section === "playlist" ? <>
         {item("‹ Back", () => setSection("main"))}

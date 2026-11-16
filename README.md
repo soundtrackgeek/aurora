@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.69.0** checks genres by sound from the Albums page too. Right-click an album, or a selection of albums, and choose **Check genre by sound**. Albums whose sound fits another of your genres open in **Review genre changes**; the others are reported as sounding like their genre. See [Genre check by sound](docs/genre-check.md).
+
 Aurora **0.68.0** adds a genre check that listens. **Genres → Check genres by sound** finds albums whose genre does not match their sound and sends them to **Review genre changes**. Each album comes with a confidence, the reason it was flagged, and the songs of the suggested genre that sound most like it. It finds tag errors, such as a groove metal album tagged Rock. It also suggests a specific genre for albums with a broad one such as Rock or Pop. It only suggests genres you already use, and never checks score genres such as Drama or Video Game. See [Genre check by sound](docs/genre-check.md).
 
 Aurora **0.66.0** adds `vibe:` to the search: describe the sound in your own words and Aurora finds what sounds most like it, as in `vibe:"dark ambient drone" AND year:1990..1999 AND cr:..50`. Add `sort:vibe` to put the best fit first. It keeps the best-fitting 2% of tracks in Songs and of albums in Albums and Artists, and uses Music Library's CLAP sound search results (Music Library 0.216.0 or newer); see [Search](docs/search.md).

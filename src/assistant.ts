@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "./library";
+import { formatCount, isTauriRuntime } from "./library";
 
 export type AssistantBackend = "claudeCode" | "codex";
 
@@ -175,9 +175,46 @@ export async function applyGenreProposal(proposalId: string, changes: { albumId:
   return invoke("apply_assistant_proposal", { proposalId, changes });
 }
 
-/** Runs the genre check that listens; `null` when no album stands out. */
-export async function checkGenresBySound(): Promise<GenreProposal | null> {
-  return isTauriRuntime() ? invoke("check_genres_by_sound") : null;
+/** What a genre check by sound found. */
+export interface SoundCheck {
+  /** The findings, open in Review genre changes; `null` when no album stands out. */
+  proposal: GenreProposal | null;
+  checked: number;
+  /** Checked albums that sound like their genre. */
+  fitting: number;
+  /** Albums without analyzed tracks or without a genre. */
+  unanalyzed: number;
+  /** Albums with a score, other non-sound or rare genre, which the check leaves alone. */
+  notChecked: number;
+}
+
+/** Runs the genre check that listens on the whole library, or on the given albums. */
+export async function checkGenresBySound(albumIds?: readonly string[]): Promise<SoundCheck> {
+  if (!isTauriRuntime()) throw new Error("Check genres by sound from Aurora desktop.");
+  return invoke("check_genres_by_sound", { albumIds: albumIds ? [...albumIds] : null });
+}
+
+function albums(count: number): string {
+  return `${formatCount(count)} ${count === 1 ? "album" : "albums"}`;
+}
+
+/** One line on what a check found; `chosen` when it checked selected albums. */
+export function soundCheckSummary(result: SoundCheck, chosen: boolean): string {
+  const flagged = result.proposal?.albums.length ?? 0;
+  if (!chosen) return flagged ? `${albums(flagged)} to review` : "Every album sounds like its genre";
+  const single = result.checked + result.unanalyzed + result.notChecked === 1;
+  if (single) {
+    if (flagged) return "A different genre fits its sound better. Opened for review.";
+    if (result.fitting) return "Sounds like its genre.";
+    if (result.notChecked) return "Not checked: score and other non-sound genres, and genres on fewer than 30 albums, are left alone.";
+    return "Not checked: this album has no analyzed tracks or no genre yet.";
+  }
+  const parts: string[] = [];
+  if (flagged) parts.push(`${albums(flagged)} to review`);
+  if (result.fitting) parts.push(`${albums(result.fitting)} sound like their genre`);
+  if (result.notChecked) parts.push(`${albums(result.notChecked)} with a score or rare genre not checked`);
+  if (result.unanalyzed) parts.push(`${albums(result.unanalyzed)} not analyzed yet`);
+  return parts.join(" · ") || "Nothing to check";
 }
 
 export async function dismissGenreProposal(proposalId: string): Promise<GenreProposal> {

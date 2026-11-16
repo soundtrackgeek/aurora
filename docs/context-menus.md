@@ -70,6 +70,8 @@ and Album Artist for albums; multiple selected songs become one line per song.
 Unmatched charts/history still support copy and artist navigation. Play, queue,
 playlist, file and tag actions require a resolved local item.
 
+Check genre by sound (0.69.0) is offered for albums. It runs the genre check that listens on the captured albums, at most 500, and opens any findings in Review genre changes; the menu message summarizes the rest. See [Genre check by sound](genre-check.md).
+
 Open Tags opens the existing verified tag editor for the captured songs/albums,
 independent of the current inspector selection. Rate offers clear and 0.5–5 stars
 for a single song through the existing verified/Network Mode affinity route.

@@ -96,3 +96,19 @@ it("shows a stale playlist error without announcing success or retrying the writ
   expect(onPlaylistSaved).not.toHaveBeenCalled();
   expect(invoke).toHaveBeenCalledOnce();
 });
+
+it("checks the selected albums' genres by sound and shows what it found", async () => {
+  const onCheckGenre = vi.fn(async () => "1 album to review · 2 albums sound like their genre");
+  const callbacks = { onPlay: vi.fn(async () => true), onEnqueue: vi.fn(async () => true), onOpenAlbum: vi.fn(), onOpenArtist: vi.fn(), onOpenTags: vi.fn(), onRate: vi.fn(async () => undefined), onPlaylistSaved: vi.fn() };
+  render(<MediaContextMenuProvider playlists={[]} {...callbacks} onCheckGenre={onCheckGenre}><PlaylistRow selection={{ albumIds: ["a", "b", "c"], label: "3 albums" }}><button>Album row</button></PlaylistRow></MediaContextMenuProvider>);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Album row" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Check genres by sound" }));
+  await waitFor(() => expect(onCheckGenre).toHaveBeenCalledWith(["a", "b", "c"]));
+  expect(await screen.findByText("1 album to review · 2 albums sound like their genre")).toBeInTheDocument();
+});
+
+it("offers the genre check only for albums", () => {
+  const { anchor } = setup();
+  fireEvent.contextMenu(anchor);
+  expect(screen.queryByRole("menuitem", { name: /genre/i })).not.toBeInTheDocument();
+});

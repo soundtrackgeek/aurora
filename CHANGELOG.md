@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.69.0] - 2026-11-16
+
+### Added
+- **Check genre by sound** in the right-click menu of albums checks one album, or every selected album, against the whole library with the same rules as Genres → Check genres by sound. Albums whose sound fits another genre open in Review genre changes. The menu message says what happened to the rest: "Sounds like its genre", not checked (a score genre, another genre that is not a sound, or a genre on fewer than 30 albums) or not analyzed yet. Up to 500 albums at a time.
+
+### Changed
+- Genres → Check genres by sound and the new menu item share one command, which now also reports how many albums were checked, fit their genre, were left alone or have no analyzed tracks.
+
 ## [0.68.0] - 2026-11-16
 
 ### Added

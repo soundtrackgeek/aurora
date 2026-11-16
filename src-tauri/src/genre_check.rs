@@ -255,16 +255,29 @@ fn closest(albums: &[Album], members: &[usize], vector: &[f32], count: usize) ->
         .collect()
 }
 
-/// Every album that sounds unlike its genre, tag errors first, at most
-/// `MAX_FLAGS`.
-pub(crate) fn find(albums: &[Album]) -> Vec<Flag> {
+/// Each genre's role in the check, by the albums that carry it.
+fn album_roles(albums: &[Album]) -> HashMap<String, Role> {
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for album in albums {
         *counts.entry(album.genre.as_str()).or_default() += 1;
     }
-    let roles = roles(&counts);
-    let mut targets: Vec<&str> = counts
-        .keys()
+    roles(&counts)
+}
+
+/// Every album that sounds unlike its genre, tag errors first, at most
+/// `MAX_FLAGS`.
+#[cfg(test)]
+pub(crate) fn find(albums: &[Album]) -> Vec<Flag> {
+    find_for(albums, None)
+}
+
+/// Like `find`, checking only the albums in `only` when given. The whole
+/// library still sets each genre's sound and the neighbours that vote.
+pub(crate) fn find_for(albums: &[Album], only: Option<&HashSet<usize>>) -> Vec<Flag> {
+    let roles = album_roles(albums);
+    let genres: HashSet<&str> = albums.iter().map(|album| album.genre.as_str()).collect();
+    let mut targets: Vec<&str> = genres
+        .iter()
         .copied()
         .filter(|genre| roles[*genre] == Role::Specific)
         .collect();
@@ -289,11 +302,12 @@ pub(crate) fn find(albums: &[Album]) -> Vec<Flag> {
         })
         .collect();
 
-    let mut flags = retag(albums, &targets, &members, &sums, &centroids);
+    let wanted = |index: usize| only.is_none_or(|only| only.contains(&index));
+    let mut flags = retag(albums, &targets, &members, &sums, &centroids, &wanted);
     let broad: Vec<usize> = albums
         .iter()
         .enumerate()
-        .filter(|(_, album)| roles[album.genre.as_str()] == Role::Broad)
+        .filter(|(index, album)| roles[album.genre.as_str()] == Role::Broad && wanted(*index))
         .map(|(index, _)| index)
         .collect();
     let specific: Vec<usize> = members.iter().flatten().copied().collect();
@@ -317,6 +331,7 @@ fn retag(
     members: &[Vec<usize>],
     sums: &[Vec<f32>],
     centroids: &[Vec<f32>],
+    wanted: &dyn Fn(usize) -> bool,
 ) -> Vec<Flag> {
     // Each member's similarity to its own genre without itself.
     let mut own = HashMap::new();
@@ -352,7 +367,7 @@ fn retag(
 
     let mut flags = Vec::new();
     for (target, indices) in members.iter().enumerate() {
-        for &index in indices {
+        for &index in indices.iter().filter(|index| wanted(**index)) {
             let vector = &albums[index].vector;
             let Some((other, best)) = centroids
                 .iter()
@@ -654,12 +669,48 @@ fn evidence_tracks(
         .collect())
 }
 
-/// Runs the check and sends its findings to "Review genre changes". `None`
-/// when no album stands out.
+/// What a check found, for the message beside its button.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SoundCheck {
+    /// The findings, open in "Review genre changes"; `None` when no album
+    /// stands out.
+    pub(crate) proposal: Option<control::GenreProposal>,
+    pub(crate) checked: usize,
+    /// Checked albums that sound like their genre.
+    pub(crate) fitting: usize,
+    /// Albums without analyzed tracks or without a genre.
+    pub(crate) unanalyzed: usize,
+    /// Albums with a genre the check leaves alone: a score or other non-sound
+    /// genre, or one with too few albums to know its sound.
+    pub(crate) not_checked: usize,
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct Counts {
+    checked: usize,
+    fitting: usize,
+    unanalyzed: usize,
+    not_checked: usize,
+}
+
+/// Runs the check on the whole library, or on `album_ids`, and sends its
+/// findings to "Review genre changes".
 pub(crate) fn check(
     store: &StateStore,
     proposals: &AssistantProposals,
-) -> Result<Option<control::GenreProposal>, String> {
+    album_ids: Option<&[String]>,
+) -> Result<SoundCheck, String> {
+    if let Some(ids) = album_ids {
+        if ids.is_empty() {
+            return Err("Choose at least one album to check.".to_owned());
+        }
+        if ids.len() > MAX_FLAGS {
+            return Err(format!(
+                "Check at most {MAX_FLAGS} albums at a time, or use Genres → Check genres by sound for the whole library."
+            ));
+        }
+    }
     let cache = sound_descriptors::cache_path()
         .filter(|path| path.is_file())
         .ok_or_else(not_ready)?;
@@ -671,24 +722,49 @@ pub(crate) fn check(
         .map(|directory| directory.join("music-clap.sqlite3"))
         .filter(|path| path.is_file());
     let clap = clap_path.as_deref().map(open_read_only).transpose()?;
-    let flags = check_with(&connection, clap.as_ref(), &cache)?;
-    if flags.is_empty() {
-        return Ok(None);
-    }
-    proposals.create_checked(
-        SOURCE,
-        "Albums whose sound fits another of your genres better than their own, or a specific genre better than a broad one. The tracks are the suggested genre's songs that sound most like each album.",
-        flags,
-    )
-    .map(Some)
+    let (changes, counts) = check_with(&connection, clap.as_ref(), &cache, album_ids)?;
+    let proposal = if changes.is_empty() {
+        None
+    } else {
+        let reason = if album_ids.is_some() {
+            "The albums you chose whose sound fits another of your genres better than their own, or a specific genre better than a broad one. The tracks are the suggested genre's songs that sound most like each album."
+        } else {
+            "Albums whose sound fits another of your genres better than their own, or a specific genre better than a broad one. The tracks are the suggested genre's songs that sound most like each album."
+        };
+        Some(proposals.create_checked(SOURCE, reason, changes)?)
+    };
+    Ok(SoundCheck {
+        proposal,
+        checked: counts.checked,
+        fitting: counts.fitting,
+        unanalyzed: counts.unanalyzed,
+        not_checked: counts.not_checked,
+    })
 }
 
-/// The check's changes with their evidence, strongest first.
+/// How many of `indices` the check looks at, and how many it leaves alone.
+fn count_roles(
+    albums: &[Album],
+    roles: &HashMap<String, Role>,
+    indices: impl Iterator<Item = usize>,
+    counts: &mut Counts,
+) {
+    for index in indices {
+        match roles[albums[index].genre.as_str()] {
+            Role::Skip | Role::Small => counts.not_checked += 1,
+            Role::Broad | Role::Specific => counts.checked += 1,
+        }
+    }
+}
+
+/// The check's changes with their evidence, strongest first, and what
+/// happened to the albums it was asked about.
 fn check_with(
     catalog: &Connection,
     clap: Option<&Connection>,
     cache: &Path,
-) -> Result<Vec<(ProposedChange, Evidence)>, String> {
+    album_ids: Option<&[String]>,
+) -> Result<(Vec<(ProposedChange, Evidence)>, Counts), String> {
     let mut vectors = album_vectors(cache)?;
     if vectors.is_empty() {
         return Err(not_ready());
@@ -701,9 +777,28 @@ fn check_with(
         })
         .collect();
     albums.sort_by(|a, b| a.id.cmp(&b.id));
-    let flags = find(&albums);
+    let wanted: Option<HashSet<&str>> =
+        album_ids.map(|ids| ids.iter().map(String::as_str).collect());
+    let only: Option<HashSet<usize>> = wanted.as_ref().map(|wanted| {
+        albums
+            .iter()
+            .enumerate()
+            .filter(|(_, album)| wanted.contains(album.id.as_str()))
+            .map(|(index, _)| index)
+            .collect()
+    });
+    let flags = find_for(&albums, only.as_ref());
+    let roles = album_roles(&albums);
+    let mut counts = Counts::default();
+    match (&only, &wanted) {
+        (Some(only), Some(wanted)) => {
+            counts.unanalyzed = wanted.len() - only.len();
+            count_roles(&albums, &roles, only.iter().copied(), &mut counts);
+        }
+        _ => count_roles(&albums, &roles, 0..albums.len(), &mut counts),
+    }
     let mut seen = HashSet::new();
-    flags
+    let changes = flags
         .into_iter()
         .filter(|flag| seen.insert(flag.album))
         .map(|flag| {
@@ -726,7 +821,9 @@ fn check_with(
                 },
             ))
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+    counts.fitting = counts.checked.saturating_sub(changes.len());
+    Ok((changes, counts))
 }
 
 #[cfg(test)]
@@ -855,6 +952,14 @@ mod tests {
         assert!(!by_id.contains_key("vague"));
         // Tag errors lead.
         assert_eq!(flags[0].kind, Kind::Retag);
+
+        // Checking chosen albums reports only those, judged against the
+        // whole library.
+        let index = |id: &str| albums.iter().position(|album| album.id == id).unwrap();
+        let only = HashSet::from([index("rock"), index("leaning"), index("Synthwave-3")]);
+        let chosen = find_for(&albums, Some(&only));
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(chosen[0], *rock);
     }
 
     #[test]
@@ -883,7 +988,8 @@ mod tests {
         let clap =
             open_read_only(&catalog_path.parent().unwrap().join("music-clap.sqlite3")).unwrap();
         let started = std::time::Instant::now();
-        let changes = check_with(&connection, Some(&clap), &cache).unwrap();
+        let (changes, counts) = check_with(&connection, Some(&clap), &cache, None).unwrap();
+        println!("{counts:?}");
         println!(
             "{} albums flagged in {:?}",
             changes.len(),

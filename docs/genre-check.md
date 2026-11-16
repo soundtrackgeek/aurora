@@ -2,6 +2,15 @@
 
 **Genres → Check genres by sound** (0.68.0) listens to the whole library and lists albums whose genre tag does not match their sound. They open in **Review genre changes**, the same review as genre proposals from AI assistants. Nothing is written until you tick albums and choose **Write genre**.
 
+To check only some albums, right-click an album, or a selection of albums, on the Albums page (or wherever albums have a menu) and choose **Check genre by sound** (0.69.0). It uses the same rules and compares against the whole library, so a single album is judged exactly as in the full check. The menu message says what happened to each album:
+
+- **Opened for review.** A different genre fits its sound better.
+- **Sounds like its genre.** Nothing to change.
+- **Not checked.** Its genre is a score genre, another genre that is not a sound, or is used on fewer than 30 albums.
+- **Not analyzed yet.** The album has no analyzed tracks, or no genre.
+
+Up to 500 albums at a time. Even one album takes several seconds, since it is compared with the whole library.
+
 It needs Music Library's audio analysis (CLAP sound search, Music Library 0.216.0 or newer) and Aurora's sound descriptor cache, which Aurora builds a few minutes after it starts. A check of about 73,000 albums takes 10 to 20 seconds.
 
 ## What it finds

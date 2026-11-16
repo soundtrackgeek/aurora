@@ -1180,17 +1180,24 @@ async fn apply_assistant_proposal(
     .map_err(|error| format!("The tag writer stopped unexpectedly: {error}"))?
 }
 
-/// Runs the genre check that listens and opens its findings for review.
-/// `None` when no album sounds unlike its genre.
+/// Runs the genre check that listens on the whole library, or on
+/// `album_ids`, and opens its findings for review.
 #[tauri::command]
-async fn check_genres_by_sound(app: AppHandle) -> Result<Option<control::GenreProposal>, String> {
+async fn check_genres_by_sound(
+    app: AppHandle,
+    album_ids: Option<Vec<String>>,
+) -> Result<genre_check::SoundCheck, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<StateStore>();
-        let proposal = genre_check::check(&store, &app.state::<control::AssistantProposals>())?;
-        if let Some(proposal) = &proposal {
+        let result = genre_check::check(
+            &store,
+            &app.state::<control::AssistantProposals>(),
+            album_ids.as_deref(),
+        )?;
+        if let Some(proposal) = &result.proposal {
             let _ = app.emit(control::PROPOSAL_EVENT, proposal);
         }
-        Ok(proposal)
+        Ok(result)
     })
     .await
     .map_err(|error| format!("The genre check stopped unexpectedly: {error}"))?

@@ -1,5 +1,5 @@
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
-import { checkGenresBySound, listenToAssistantShow, listenToGenreProposals, loadGenreProposals, upsertProposal, type GenreProposal } from "./assistant";
+import { checkGenresBySound, listenToAssistantShow, listenToGenreProposals, loadGenreProposals, soundCheckSummary, upsertProposal, type GenreProposal } from "./assistant";
 import { AlbumSidesPanel } from "./components/AlbumSidesPanel";
 import { SonicJourneyPanel } from "./components/SonicJourneyPanel";
 import { useSonicJourney } from "./useSonicJourney";
@@ -1106,16 +1106,22 @@ function App() {
     .filter((proposal) => proposal.status === "pending")
     .reduce((count, proposal) => count + proposal.albums.filter((album) => album.status === "pending" || album.status === "failed").length, 0);
 
+  /** Checks albums by sound; findings open in Review genre changes. */
+  async function checkGenres(albumIds?: readonly string[]): Promise<string> {
+    const result = await checkGenresBySound(albumIds);
+    const proposal = result.proposal;
+    if (proposal) {
+      setGenreProposals((current) => upsertProposal(current, proposal));
+      setProposalsOpen(true);
+    }
+    return soundCheckSummary(result, Boolean(albumIds));
+  }
+
   async function runSoundCheck() {
     setSoundCheckBusy(true);
     setSoundCheckMessage(null);
     try {
-      const proposal = await checkGenresBySound();
-      if (proposal) {
-        setGenreProposals((current) => upsertProposal(current, proposal));
-        setProposalsOpen(true);
-      }
-      setSoundCheckMessage(proposal ? `${formatCount(proposal.albums.length)} ${proposal.albums.length === 1 ? "album" : "albums"} to review` : "Every album sounds like its genre");
+      setSoundCheckMessage(await checkGenres());
     } catch (reason) {
       setSoundCheckMessage(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1466,7 +1472,7 @@ function App() {
     <MediaContextMenuProvider playlists={savedPlaylists}
       onPlay={async tracks => { endGenreQueue(); const result = await playback.play(tracks, tracks[0].id); if (result) selectTrack(tracks[0]); return Boolean(result); }}
       onEnqueue={async (tracks, next) => Boolean(await playback.enqueue(tracks, next))}
-      onOpenAlbum={openTrackAlbum} onOpenArtist={openArtistAlbums} onOpenTags={setContextTags}
+      onOpenAlbum={openTrackAlbum} onOpenArtist={openArtistAlbums} onOpenTags={setContextTags} onCheckGenre={checkGenres}
       onRate={(track, rating) => saveInlineTagChange(track, { ...tagValuesForTrack(track), rating })}
       onPlaylistSaved={() => setPlaylistsReloadToken(value => value + 1)}>
     <div
@@ -1522,7 +1528,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.68.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.69.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

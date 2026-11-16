@@ -111,6 +111,21 @@ describe("proposal helpers", () => {
     expect(assistant.upsertProposal([proposal], { ...proposal, id: "p2" })).toHaveLength(2);
   });
 
+  it("sums up a genre check by sound", () => {
+    const result = (flagged: number, rest: Partial<assistant.SoundCheck> = {}): assistant.SoundCheck => ({
+      proposal: flagged ? { ...proposal, albums: proposal.albums.slice(0, flagged) } : null,
+      checked: 0, fitting: 0, unanalyzed: 0, notChecked: 0, ...rest,
+    });
+    expect(assistant.soundCheckSummary(result(2, { checked: 70000, fitting: 69998 }), false)).toBe("2 albums to review");
+    expect(assistant.soundCheckSummary(result(0, { checked: 70000, fitting: 70000 }), false)).toBe("Every album sounds like its genre");
+    expect(assistant.soundCheckSummary(result(1, { checked: 1 }), true)).toBe("A different genre fits its sound better. Opened for review.");
+    expect(assistant.soundCheckSummary(result(0, { checked: 1, fitting: 1 }), true)).toBe("Sounds like its genre.");
+    expect(assistant.soundCheckSummary(result(0, { notChecked: 1 }), true)).toMatch(/^Not checked: score/);
+    expect(assistant.soundCheckSummary(result(0, { unanalyzed: 1 }), true)).toMatch(/no analyzed tracks/);
+    expect(assistant.soundCheckSummary(result(1, { checked: 4, fitting: 3, notChecked: 1, unanalyzed: 2 }), true))
+      .toBe("1 album to review · 3 albums sound like their genre · 1 album with a score or rare genre not checked · 2 albums not analyzed yet");
+  });
+
   it("counts genres in a tag by its semicolons", () => {
     expect(assistant.genreTagHoldsSeveral("Electro; Dance")).toBe(true);
     expect(assistant.genreTagHoldsSeveral("Electro;")).toBe(false);
