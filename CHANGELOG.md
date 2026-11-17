@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.72.0] - 2026-11-17
+
+### Added
+- `sbb:`, `suk:`, `sti:` and `snt:` search the Billboard, Official UK, Ti i skuddet and Norsktoppen singles charts. In Albums, an album matches when one of its tracks charted as a single in the range, so `year:1990 AND sti:5..10` finds 1990 albums with a track that peaked between 5th and 10th place on Ti i skuddet; `no` finds albums none of whose tracks charted. In Songs they match the song's own singles rank, like `bb:`, `uk:`, `ti:` and `nt:`. See [Singles charts on Albums](docs/search.md#singles-charts-on-albums).
+
 ## [0.71.0] - 2026-11-17
 
 ### Added

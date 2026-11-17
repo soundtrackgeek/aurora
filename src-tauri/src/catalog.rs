@@ -956,6 +956,25 @@ enum ExtendedSearchField {
     Vg,
     Ti,
     Nt,
+    /// `sbb:`, `suk:`, `sti:` and `snt:` are singles charts. On Albums they
+    /// match albums with a track that charted as a single in that range.
+    SingleBillboard,
+    SingleUk,
+    SingleTi,
+    SingleNt,
+}
+
+impl ExtendedSearchField {
+    /// The songs chart a singles chart field reads.
+    fn single_chart(self) -> Option<Self> {
+        match self {
+            Self::SingleBillboard => Some(Self::Billboard),
+            Self::SingleUk => Some(Self::Uk),
+            Self::SingleTi => Some(Self::Ti),
+            Self::SingleNt => Some(Self::Nt),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1246,6 +1265,12 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "vg" => Some(CatalogSearchField::Extended(ExtendedSearchField::Vg)),
         "ti" => Some(CatalogSearchField::Extended(ExtendedSearchField::Ti)),
         "nt" => Some(CatalogSearchField::Extended(ExtendedSearchField::Nt)),
+        "sbb" => Some(CatalogSearchField::Extended(
+            ExtendedSearchField::SingleBillboard,
+        )),
+        "suk" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleUk)),
+        "sti" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleTi)),
+        "snt" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleNt)),
         "artist" => Some(CatalogSearchField::Artist),
         "aartist" => Some(CatalogSearchField::AlbumArtist),
         "album" => Some(CatalogSearchField::Album),
@@ -1279,7 +1304,8 @@ fn parse_extended_search(
     value: &str,
 ) -> Result<CatalogSearchMatch, String> {
     use ExtendedSearchField::*;
-    if matches!(field, Dissolved | Dead | Billboard | Uk | Vg | Ti | Nt)
+    if (matches!(field, Dissolved | Dead | Billboard | Uk | Vg | Ti | Nt)
+        || field.single_chart().is_some())
         && matches!(value.to_ascii_lowercase().as_str(), "yes" | "no")
     {
         return Ok(CatalogSearchMatch::Extended {
@@ -1353,6 +1379,34 @@ fn extended_search_predicate(
     else {
         return None;
     };
+    if let Some(chart) = field.single_chart() {
+        let song = CatalogSearchMatch::Extended {
+            field: chart,
+            from: *from,
+            to: *to,
+            present: *present,
+        };
+        if !album {
+            return extended_search_predicate(alias, false, &song, params);
+        }
+        // An album matches when one of its tracks charted as a single in the
+        // range; `no` means none of its tracks charted at all.
+        let charted = CatalogSearchMatch::Extended {
+            field: chart,
+            from: *from,
+            to: *to,
+            present: present.map(|_| true),
+        };
+        let condition = extended_search_predicate("chart_track", false, &charted, params)?;
+        let exists = format!(
+            "EXISTS (SELECT 1 FROM tracks AS chart_track WHERE chart_track.album_id = {alias}.id AND {condition})"
+        );
+        return Some(if *present == Some(false) {
+            format!("NOT {exists}")
+        } else {
+            exists
+        });
+    }
     let range = |column: &str, params: &mut Vec<Value>| {
         let mut parts = Vec::new();
         if let Some(n) = from {
@@ -3886,6 +3940,31 @@ mod tests {
             assert_eq!(run(&format!("{field}:no"), false), vec![2, 3]);
             assert!(run(&format!("{field}:yes"), true).is_empty());
         }
+        // Singles charts: songs read the singles rank, albums any of their tracks.
+        for field in ["sbb", "suk", "sti", "snt"] {
+            for album in [false, true] {
+                for suffix in ["yes", "1..5", "..5", "1"] {
+                    assert_eq!(
+                        run(&format!("{field}:{suffix}"), album),
+                        vec![1],
+                        "{field}:{suffix}"
+                    );
+                }
+                assert_eq!(run(&format!("{field}:no"), album), vec![2, 3]);
+                assert!(run(&format!("{field}:2..10"), album).is_empty());
+                assert_eq!(run(&format!("{field}:1 AND minutes:..44"), album), vec![1]);
+            }
+        }
+        db.execute_batch(
+            "INSERT INTO tracks VALUES (4, 2, 'Person', 200, 7, NULL, NULL, 7, NULL);",
+        )
+        .unwrap();
+        assert_eq!(run("sti:5..10", true), vec![2]);
+        assert_eq!(run("sbb:5..10", true), vec![2]);
+        assert_eq!(run("sti:no", true), vec![3]);
+        assert!(run("snt:5..10", true).is_empty());
+        db.execute_batch("DELETE FROM tracks WHERE id = 4;")
+            .unwrap();
         db.execute_batch("UPDATE musicbrainz_artist_infos SET life_end_date = '2004', life_ended = 0 WHERE artist_type = 'Person'; UPDATE musicbrainz_artist_infos SET life_end_date = NULL, life_ended = 0 WHERE artist_type = 'Group';").unwrap();
         for album in [false, true] {
             for query in ["dead:yes", "dead:1999..2004", "dead:..2004", "dead:2004.."] {

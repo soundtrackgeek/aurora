@@ -240,11 +240,25 @@ born:1966..1968 AND dead:no
 minutes:33..44 AND ar:4.34..
 bb:..5 AND uk:yes AND vg:no
 ti:yes OR nt:yes
+year:1990 AND sti:5..10
 dead:1999..2004 OR 2010..
 ar=3..4 AND NOT bb:yes
 ```
 
 Reversed ranges, empty ranges (`..`), non-finite numbers, out-of-range ratings, and fractional years or ranks are rejected.
+
+### Singles charts on Albums
+
+`sbb:`, `suk:`, `sti:`, and `snt:` search the singles charts in Albums too. An album matches when at least one of its tracks charted as a single in the range:
+
+| Singles chart | Presence | Absence | Closed range | Lower bound | Upper bound |
+| --- | --- | --- | --- | --- | --- |
+| Billboard | `sbb:yes` | `sbb:no` | `sbb:5..10` | `sbb:5..` | `sbb:..10` |
+| Official UK | `suk:yes` | `suk:no` | `suk:5..10` | `suk:5..` | `suk:..10` |
+| Ti i skuddet | `sti:yes` | `sti:no` | `sti:5..10` | `sti:5..` | `sti:..10` |
+| Norsktoppen | `snt:yes` | `snt:no` | `snt:5..10` | `snt:5..` | `snt:..10` |
+
+`year:1990 AND sti:5..10` finds albums from 1990 with a track that peaked between 5th and 10th place on Ti i skuddet. `snt:no` finds albums none of whose tracks charted on Norsktoppen. On Songs, the fields are the same as `bb:`, `uk:`, `ti:`, and `nt:`: the song's own singles rank. The ranks follow the same rules as the other chart fields.
 
 ### Prefix and exact matching
 

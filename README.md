@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.72.0** searches the singles charts in Albums. `sbb:`, `suk:`, `sti:` and `snt:` (Billboard, Official UK, Ti i skuddet and Norsktoppen singles) find albums with a track that charted as a single in the range: `year:1990 AND sti:5..10` finds 1990 albums with a track that peaked between 5th and 10th place on Ti i skuddet. They take `yes`, `no` and ranges like the other chart fields, and in Songs they read the song's own singles rank. Aurora NG 0.24.0 has them too. See [Singles charts on Albums](docs/search.md#singles-charts-on-albums).
+
 Aurora **0.71.0** colours the seek bar by sound. The waveform shows brightness (blue dull, gold bright) or stereo width (orange narrow, cyan wide) from Music Library's per-second timelines, switchable with the palette button beside it. Faint ticks mark where the sound changes. Tracks with a long quiet intro get **Skip intro**, which jumps to where the main part starts. See [Coloured seek bar](docs/seek-bar.md).
 
 Aurora **0.70.0** shows close genres in the genre check by sound. Each album in **Review genre changes** lists the three other genres it sounds most typical of, and the genre field offers them. Albums you check from the right-click menu now all open in the review: those that fit keep their genre and start unticked, with their next closest genres for borderline cases. A single album's message reads, for example, "Sounds like its genre. Next closest: New Wave, Synthpop." The full library check is faster, about 8 seconds. See [Genre check by sound](docs/genre-check.md).
