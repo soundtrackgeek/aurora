@@ -3,8 +3,11 @@
 //!
 //! Every album has a sound vector, the mean of its tracks' CLAP embeddings
 //! (`sound_album_vectors`). The check only ever suggests genres already used
-//! on at least `MIN_ALBUMS` albums of the library, so suggestions stay within
-//! the user's own (Rate Your Music) genre names. Two passes:
+//! in the library, so suggestions stay within the user's own genre names:
+//! Rate Your Music subgenres (`rym_genres`) on at least `MIN_RYM_SUGGESTED`
+//! albums, and other genres on at least `MIN_ALBUMS`. Albums of rarer RYM
+//! subgenres, down to `MIN_RYM_CHECKED` albums, are still checked against
+//! their genre's other albums. Two passes:
 //!
 //! - **Retag.** For each specific genre, the normalized sum of its albums'
 //!   vectors is its average sound. An album is flagged when it sits clearly
@@ -17,12 +20,13 @@
 //!
 //! Score genres are named after the kind of film or game they accompany, not
 //! a sound, so they, Soundtrack and a few other non-sound genres are never
-//! checked or suggested. Broad, non-RYM and alternative-spelling genres are
-//! never suggested either.
+//! checked or suggested. Broad genres (RYM's main genres and catch-all names)
+//! and alternative spellings are never suggested either.
 use crate::{
     catalog,
     control::{self, AssistantProposals, ProposedChange},
     live_genres,
+    rym_genres::{self, Level, fold},
     sound_descriptors::{self, DIMENSIONS},
     state_store::StateStore,
 };
@@ -35,8 +39,15 @@ use std::{
 };
 
 pub(crate) const SOURCE: &str = "genre-check";
-/// Genres with fewer albums have no reliable average sound.
+/// Genres that are not Rate Your Music subgenres need this many albums to be
+/// checked or suggested: fewer have no reliable average sound.
 const MIN_ALBUMS: usize = 30;
+/// A Rate Your Music subgenre is checked from this many albums: each album is
+/// compared with the average of at least two others.
+const MIN_RYM_CHECKED: usize = 3;
+/// A Rate Your Music subgenre is suggested to other albums from this many.
+/// A smaller genre's average is mostly one artist's sound.
+const MIN_RYM_SUGGESTED: usize = 10;
 /// Retag: how much closer the other genre must be, in cosine similarity.
 const MEDIUM_GAP: f32 = 0.25;
 const HIGH_GAP: f32 = 0.4;
@@ -78,8 +89,9 @@ const NOT_A_SOUND: [&str; 17] = [
     "children's music",
 ];
 
-/// Top-level genres in Rate Your Music's hierarchy, and catch-all names that
-/// are not RYM genres. Albums tagged with these are refined, never suggested.
+/// Top-level genres, and catch-all names that are not RYM genres. Albums
+/// tagged with these, or with any main genre of `rym_genres`, are refined,
+/// never suggested.
 const BROAD: [&str; 25] = [
     "rock",
     "pop",
@@ -195,19 +207,18 @@ enum Role {
     Broad,
     /// Checked and suggested.
     Specific,
+    /// A Rate Your Music subgenre on a few albums: checked against its other
+    /// albums, never suggested.
+    Rare,
     /// Too few albums to know its sound; left alone.
     Small,
 }
 
-/// Lower case, `&` as "and", letters and digits only: "Rock & Roll" and
-/// "Rock And Roll" fold to the same key.
-fn fold(genre: &str) -> String {
-    genre
-        .to_lowercase()
-        .replace('&', "and")
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+impl Role {
+    /// Whether albums with this genre are compared with its average sound.
+    fn has_sound(self) -> bool {
+        matches!(self, Role::Specific | Role::Rare)
+    }
 }
 
 fn roles(counts: &HashMap<&str, usize>) -> HashMap<String, Role> {
@@ -222,13 +233,21 @@ fn roles(counts: &HashMap<&str, usize>) -> HashMap<String, Role> {
         .iter()
         .map(|(genre, count)| {
             let lower = genre.to_lowercase();
+            let level = rym_genres::level(genre);
             let role = if NOT_A_SOUND.contains(&lower.as_str()) {
                 Role::Skip
-            } else if BROAD.contains(&lower.as_str()) || by_fold[&fold(genre)].0 != *genre {
+            } else if BROAD.contains(&lower.as_str())
+                || level == Some(Level::Main)
+                || by_fold[&fold(genre)].0 != *genre
+            {
                 // A less common spelling of another genre is refined towards it.
                 Role::Broad
-            } else if *count >= MIN_ALBUMS {
+            } else if *count >= MIN_ALBUMS
+                || (level == Some(Level::Sub) && *count >= MIN_RYM_SUGGESTED)
+            {
                 Role::Specific
+            } else if level == Some(Level::Sub) && *count >= MIN_RYM_CHECKED {
+                Role::Rare
             } else {
                 Role::Small
             };
@@ -296,6 +315,8 @@ pub(crate) fn find(albums: &[Album]) -> Vec<Flag> {
 /// The specific genres' sounds and how typical each member is of its own.
 struct Genres<'a> {
     names: Vec<&'a str>,
+    /// Whether the genre may be suggested to other albums (not `Role::Rare`).
+    suggested: Vec<bool>,
     members: Vec<Vec<usize>>,
     centroids: Vec<Vec<f32>>,
     /// Each member's similarity to its own genre without itself.
@@ -310,9 +331,13 @@ impl<'a> Genres<'a> {
         let distinct: HashSet<&str> = albums.iter().map(|album| album.genre.as_str()).collect();
         let mut names: Vec<&str> = distinct
             .into_iter()
-            .filter(|genre| roles[*genre] == Role::Specific)
+            .filter(|genre| roles[*genre].has_sound())
             .collect();
         names.sort_unstable();
+        let suggested = names
+            .iter()
+            .map(|genre| roles[*genre] == Role::Specific)
+            .collect();
         let index: HashMap<&str, usize> = names.iter().enumerate().map(|(i, g)| (*g, i)).collect();
         let mut members: Vec<Vec<usize>> = vec![Vec::new(); names.len()];
         let mut sums = vec![vec![0f32; DIMENSIONS]; names.len()];
@@ -363,6 +388,7 @@ impl<'a> Genres<'a> {
             .collect();
         Self {
             names,
+            suggested,
             members,
             centroids,
             own,
@@ -371,14 +397,26 @@ impl<'a> Genres<'a> {
         }
     }
 
-    /// The specific genres other than `except` this sound would be most
+    /// "of Hard Rock albums", or "of the 8 Neoclassical New Age albums" for a
+    /// genre on few albums, where each album weighs in the percentage.
+    fn albums_of(&self, genre: usize) -> String {
+        let name = self.names[genre];
+        let count = self.members[genre].len();
+        if count < MIN_ALBUMS {
+            format!("of the {count} {name} albums")
+        } else {
+            format!("of {name} albums")
+        }
+    }
+
+    /// The suggestable genres other than `except` this sound would be most
     /// typical of, by the share of each genre's albums it is closer than.
     fn closest(&self, vector: &[f32], except: Option<usize>) -> Vec<NearGenre> {
         let mut near: Vec<(f64, f32, usize)> = self
             .centroids
             .iter()
             .enumerate()
-            .filter(|(genre, _)| Some(*genre) != except)
+            .filter(|(genre, _)| Some(*genre) != except && self.suggested[*genre])
             .map(|(genre, centroid)| {
                 let similarity = dot(vector, centroid);
                 (
@@ -450,7 +488,7 @@ fn retag(
                 .centroids
                 .iter()
                 .enumerate()
-                .filter(|(other, _)| *other != genre)
+                .filter(|(other, _)| *other != genre && genres.suggested[*other])
                 .map(|(other, centroid)| (other, dot(vector, centroid)))
                 .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)));
             let flagged = best.and_then(|(other, best)| {
@@ -472,9 +510,11 @@ fn retag(
                     }),
                     strength: f64::from(gap),
                     summary: format!(
-                        "Sounds more like {to} than {name}: closer to {to}'s average sound than {}% of {to} albums, and further from {name}'s than {}% of {name} albums.",
+                        "Sounds more like {to} than {name}: closer to {to}'s average sound than {}% {}, and further from {name}'s than {}% {}.",
                         percent(other_share),
+                        genres.albums_of(other),
                         percent(1.0 - own_share),
+                        genres.albums_of(genre),
                     ),
                     neighbours: closest_albums(
                         albums,
@@ -492,8 +532,9 @@ fn retag(
                     confidence: None,
                     strength: own_share,
                     summary: format!(
-                        "Sounds like {name}: closer to its average sound than {}% of {name} albums.",
+                        "Sounds like {name}: closer to its average sound than {}% {}.",
                         percent(own_share),
+                        genres.albums_of(genre),
                     ),
                     neighbours: Vec::new(),
                     closest: genres.closest(vector, Some(genre)),
@@ -549,7 +590,13 @@ fn nearest(albums: &[Album], sources: &[usize], pool: &[usize]) -> Vec<Vec<(f32,
 }
 
 fn refine(albums: &[Album], genres: &Genres, sources: &[usize], report_fits: bool) -> Vec<Flag> {
-    let pool: Vec<usize> = genres.members.iter().flatten().copied().collect();
+    let pool: Vec<usize> = genres
+        .members
+        .iter()
+        .zip(&genres.suggested)
+        .filter(|(_, suggested)| **suggested)
+        .flat_map(|(members, _)| members.iter().copied())
+        .collect();
     if pool.len() < NEIGHBOURS {
         return Vec::new();
     }
@@ -922,7 +969,7 @@ fn count_roles(
     for index in indices {
         match roles[albums[index].genre.as_str()] {
             Role::Skip | Role::Small => counts.not_checked += 1,
-            Role::Broad | Role::Specific => counts.checked += 1,
+            Role::Broad | Role::Specific | Role::Rare => counts.checked += 1,
         }
     }
 }
@@ -1058,8 +1105,20 @@ mod tests {
             ("Hard Rock", 2500),
             ("Drama", 4000),
             ("Krautrock", 12),
+            ("Ambient", 495),
+            ("New Age", 21),
+            ("Doom Metal", 12),
+            ("Neoclassical New Age", 8),
+            ("Celtic New Age", 2),
         ]);
         let roles = roles(&counts);
+        // Rate Your Music's main genres are broad; its subgenres count from
+        // a few albums, other genres from 30.
+        assert!(roles["Ambient"] == Role::Broad);
+        assert!(roles["New Age"] == Role::Broad);
+        assert!(roles["Doom Metal"] == Role::Specific);
+        assert!(roles["Neoclassical New Age"] == Role::Rare);
+        assert!(roles["Celtic New Age"] == Role::Small);
         assert!(roles["Rock & Roll"] == Role::Specific);
         assert!(roles["Rock And Roll"] == Role::Broad);
         assert!(roles["Rock"] == Role::Broad);
@@ -1073,7 +1132,7 @@ mod tests {
         let mut albums = Vec::new();
         genre(&mut albums, "Synthwave", 0, 40);
         genre(&mut albums, "Hard Rock", 1, 40);
-        genre(&mut albums, "Ambient", 2, 40);
+        genre(&mut albums, "Dark Ambient", 2, 40);
         // Scores sound like anything; they are never checked or suggested.
         genre(&mut albums, "Drama", 3, 40);
         albums.push(album("drama-ambient".into(), "Drama", vector(2, 101, 0.3)));
@@ -1093,7 +1152,7 @@ mod tests {
         for index in 0..7 {
             albums.push(album(
                 format!("split-am-{index}"),
-                "Ambient",
+                "Dark Ambient",
                 vector(6, 160 + index, 0.2),
             ));
         }
@@ -1157,7 +1216,7 @@ mod tests {
                 fits.summary
                     .starts_with("Sounds like Synthwave: closer to its average sound than")
             );
-            // Every other specific genre: Hard Rock and Ambient.
+            // Every other suggestable genre: Hard Rock and Dark Ambient.
             assert_eq!(fits.closest.len(), 2);
             assert!(fits.closest.iter().all(|near| near.genre != "Synthwave"));
         }
@@ -1175,9 +1234,67 @@ mod tests {
         assert!(
             vague[0]
                 .summary
-                .contains("do not agree on a specific one: Hard Rock 8, Ambient 7"),
+                .contains("do not agree on a specific one: Hard Rock 8, Dark Ambient 7"),
             "{}",
             vague[0].summary
+        );
+    }
+
+    #[test]
+    fn checks_rare_genres_but_never_suggests_them() {
+        let mut albums = Vec::new();
+        genre(&mut albums, "Synthwave", 0, 40);
+        genre(&mut albums, "Hard Rock", 1, 40);
+        // A Rate Your Music subgenre on six albums, one of them hard rock.
+        genre(&mut albums, "Neoclassical New Age", 7, 5);
+        albums.push(album(
+            "rock-as-new-age".into(),
+            "Neoclassical New Age",
+            vector(1, 102, 0.1),
+        ));
+        // A synthwave album that sounds like the rare genre.
+        albums.push(album(
+            "new-age-as-synthwave".into(),
+            "Synthwave",
+            vector(7, 101, 0.1),
+        ));
+        let flags = find(&albums);
+        let rock = flags
+            .iter()
+            .find(|flag| albums[flag.album].id == "rock-as-new-age")
+            .expect("the rare genre's odd album is checked");
+        assert_eq!(rock.genre, "Hard Rock");
+        assert!(
+            rock.summary
+                .ends_with("further from Neoclassical New Age's than 100% of the 6 Neoclassical New Age albums."),
+            "{}",
+            rock.summary
+        );
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.genre != "Neoclassical New Age")
+        );
+        assert!(
+            flags
+                .iter()
+                .flat_map(|flag| &flag.closest)
+                .all(|near| near.genre != "Neoclassical New Age")
+        );
+
+        // A chosen album of the rare genre that fits it says so.
+        let fits = find_for(&albums, Some(&HashSet::from([albums.len() - 3])));
+        assert_eq!(fits.len(), 1);
+        assert_eq!(fits[0].kind, Kind::Fits);
+        assert!(
+            fits[0]
+                .summary
+                .starts_with("Sounds like Neoclassical New Age: closer to its average sound than")
+                && fits[0]
+                    .summary
+                    .ends_with("of the 6 Neoclassical New Age albums."),
+            "{}",
+            fits[0].summary
         );
     }
 
@@ -1207,7 +1324,7 @@ mod tests {
         let clap = catalog_path.parent().unwrap().join("music-clap.sqlite3");
         // A few chosen albums, as from the Albums page's menu.
         let chosen: Vec<String> = connection
-            .prepare("SELECT id FROM (SELECT id, canonical_genre, ROW_NUMBER() OVER (PARTITION BY canonical_genre ORDER BY id) AS n FROM albums WHERE canonical_genre IN ('Synthwave', 'Rock', 'Hard Rock', 'Drama')) WHERE n <= 2")
+            .prepare("SELECT id FROM (SELECT id, canonical_genre, ROW_NUMBER() OVER (PARTITION BY canonical_genre ORDER BY id) AS n FROM albums WHERE canonical_genre IN ('Synthwave', 'Rock', 'Hard Rock', 'Drama', 'Neoclassical New Age')) WHERE n <= 3")
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()

@@ -223,7 +223,7 @@ export function soundCheckSummary(result: SoundCheck, chosen: boolean): string {
       const near = reviewed[0]?.evidence?.closest.map((item) => item.genre) ?? [];
       return near.length ? `Sounds like its genre. Next closest: ${near.join(", ")}.` : "Sounds like its genre.";
     }
-    if (result.notChecked) return "Not checked: score and other non-sound genres, and genres on fewer than 30 albums, are left alone.";
+    if (result.notChecked) return "Not checked: score and other non-sound genres are left alone, and so are genres on only one or two albums (or on fewer than 30 when they are not Rate Your Music genres).";
     return "Not checked: this album has no analyzed tracks or no genre yet.";
   }
   const parts: string[] = [];

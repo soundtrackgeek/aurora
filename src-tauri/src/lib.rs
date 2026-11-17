@@ -52,6 +52,7 @@ mod rating_missions;
 mod ratings;
 mod remote_affinity;
 mod replay_gain;
+mod rym_genres;
 mod saved_views;
 mod shortcuts;
 mod single_instance;

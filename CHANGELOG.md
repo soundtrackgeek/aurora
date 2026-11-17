@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.74.0] - 2026-11-17
+
+### Changed
+- The genre check by sound knows Rate Your Music's genre list (`src-tauri/data/rym-genres.csv`). A Rate Your Music subgenre is checked once three albums carry it, instead of 30: each album is compared with the genre's other albums, so Secret Garden's Neoclassical New Age albums are now checked. A subgenre on at least 10 albums can also be suggested. Genres that are not Rate Your Music genres still need 30 albums.
+- Every Rate Your Music main genre counts as broad: albums tagged Ambient, New Age, Darkwave, Easy Listening or Singer-Songwriter are refined to a specific genre, and those genres are never suggested.
+- For a genre on fewer than 30 albums, the evidence says how many, as in "88% of the 8 Neoclassical New Age albums".
+- The message for an album that is not checked explains the new limits.
+
 ## [0.73.0] - 2026-11-17
 
 ### Added

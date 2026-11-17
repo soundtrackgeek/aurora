@@ -132,7 +132,7 @@ describe("proposal helpers", () => {
       .toBe("Sounds like its genre. Next closest: New Wave, Synthpop.");
     expect(assistant.soundCheckSummary({ proposal: { ...proposal, albums: [fits, fits] }, checked: 2, fitting: 2, unanalyzed: 0, notChecked: 0 }, true))
       .toBe("2 albums sound like their genre");
-    expect(assistant.soundCheckSummary(result(0, { notChecked: 1 }), true)).toMatch(/^Not checked: score/);
+    expect(assistant.soundCheckSummary(result(0, { notChecked: 1 }), true)).toMatch(/^Not checked: score.*one or two albums/);
     expect(assistant.soundCheckSummary(result(0, { unanalyzed: 1 }), true)).toMatch(/no analyzed tracks/);
     expect(assistant.soundCheckSummary(result(1, { checked: 4, fitting: 3, notChecked: 1, unanalyzed: 2 }), true))
       .toBe("1 album to review · 3 albums sound like their genre · 1 album with a score or rare genre not checked · 2 albums not analyzed yet");

@@ -6,7 +6,7 @@ To check only some albums, right-click an album, or a selection of albums, on th
 
 - **Opened for review.** A different genre fits its sound better.
 - **Sounds like its genre.** For one album, the message also names its next closest genres, such as "Sounds like its genre. Next closest: New Wave, Synthpop."
-- **Not checked.** Its genre is a score genre, another genre that is not a sound, or is used on fewer than 30 albums.
+- **Not checked.** Its genre is a score genre or another genre that is not a sound, or too rare to have a sound of its own: a Rate Your Music subgenre on only one or two albums, or another genre on fewer than 30 albums.
 - **Not analyzed yet.** The album has no analyzed tracks, or no genre.
 
 Every checked album opens in the review (0.70.0), including those that fit. An album that fits keeps its genre, shows **Fits its genre** with how typical of it the album is, and starts unticked. Its next closest genres help with borderline albums: tick it and pick one of them to change the genre.
@@ -31,10 +31,17 @@ Tag errors come first, then refinements, each strongest first, up to 500 albums.
 
 ## What it suggests
 
-Only genres you already use on at least 30 albums, so suggestions stay within your own genre names (Rate Your Music genres for this library). Never suggested:
+Only genres you already use, so suggestions stay within your own genre names. Aurora knows Rate Your Music's genre list (`src-tauri/data/rym-genres.csv`, 29 main genres and about 2,800 subgenres, since 0.74.0):
+
+- **Rate Your Music subgenres** are suggested once at least 10 albums carry them. From 3 albums they are checked: each album is compared with the average sound of the genre's other albums, so Secret Garden's eight Neoclassical New Age albums are checked against each other. A genre on 3 to 9 albums is never suggested to other albums, since its average is mostly one artist's sound. On the real library a 6-album Tech House was the best match for a punk album; with at least 10 albums such mismatches mostly go away.
+- **Other genres** need at least 30 albums, as before.
+
+When a genre has fewer than 30 albums, the evidence says how many, as in "closer to its average sound than 88% of the 8 Neoclassical New Age albums", since each album then moves the percentage a lot.
+
+Never suggested:
 
 - **Not a sound.** Score genres named after the kind of film or game (Action, Animation, Anime, Comedy, Documentary, Drama, Fantasy, Horror, Sci-Fi, Thriller, TV, Video Game, Western) and Soundtrack, Trailer, Christmas Music and Children's Music. Albums with these genres are never checked either.
-- **Broad.** RYM's top-level genres (Rock, Pop, Electronic, Metal, Jazz, Country, Blues, Folk, Classical, Hip Hop, Rap, Dance, Punk, R&B, Experimental) and catch-all names that are not RYM genres (Electronica, Oldies, Funk / Soul, Classic, Vocal, Visa, Instrumental). Albums with these genres are refined.
+- **Broad.** Every main genre in Rate Your Music's list (Rock, Pop, Electronic, Metal, Jazz, Ambient, New Age, Darkwave, Easy Listening, Singer-Songwriter, Gospel and the rest), a few other top-level names (Classical, Rap, Punk, R&B) and catch-all names that are not RYM genres (Electronica, Oldies, Funk / Soul, Classic, Vocal, Visa, Instrumental). Albums with these genres are refined. Since 0.74.0 that includes Ambient, New Age, Darkwave, Easy Listening and Singer-Songwriter, which were checked as specific genres before.
 - **Other spellings.** When two genres differ only in case, punctuation or `&` versus "and", such as Rock & Roll and Rock And Roll, the less common spelling is never suggested, and its albums are refined towards the common one.
 
 The genre field in the review stays editable.
