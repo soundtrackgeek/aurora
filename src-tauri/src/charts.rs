@@ -314,7 +314,7 @@ fn source_label(source: ChartSource) -> &'static str {
         ChartSource::Norsktoppen => "Norsktoppen",
         ChartSource::Billboard => "Billboard",
         ChartSource::AuroraScore => "Aurora Score",
-        ChartSource::PublishedUs => "US weekly",
+        ChartSource::PublishedUs => "Published weekly",
     }
 }
 

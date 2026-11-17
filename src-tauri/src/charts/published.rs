@@ -8,7 +8,26 @@ use std::collections::{BTreeMap, HashSet};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PublishedSeries {
     chart: String,
+    /// "US" or "UK", from the yearly book the chart is printed in.
+    country: &'static str,
     years: Vec<i32>,
+}
+
+/// Every singles book Music Library publishes, named `YYYY_<country>_singles`
+/// (`1985_us_singles`, `1985_uk_singles`). Chart names are unique across countries.
+const SINGLES_BOOKS: &str = "[0-9][0-9][0-9][0-9]_*_singles";
+
+fn book_country(book: &str) -> &'static str {
+    if book.ends_with("_uk_singles") {
+        "UK"
+    } else {
+        "US"
+    }
+}
+
+/// The singles books printed for one year, in any country.
+fn year_books(year: i32) -> String {
+    format!("{year}_*_singles")
 }
 
 fn require_archive(conn: &Connection) -> Result<(), String> {
@@ -17,27 +36,40 @@ fn require_archive(conn: &Connection) -> Result<(), String> {
         [], |row| row.get::<_, i64>(0),
     ).map_err(|e| e.to_string())?;
     if ready != 2 {
-        return Err("Open Published Charts in Music Library to prepare the bundled US weekly archive, then refresh Aurora Charts. Aurora reads the same catalog; the annual Singles CSV import is separate.".into());
+        return Err("Open Published Charts in Music Library to prepare the bundled weekly singles archive, then refresh Aurora Charts. Aurora reads the same catalog; the annual Singles CSV import is separate.".into());
     }
     Ok(())
 }
 
 pub(super) fn series(conn: &Connection) -> Result<Vec<PublishedSeries>, String> {
     require_archive(conn)?;
-    let mut statement = conn.prepare("SELECT chart, CAST(substr(book, 1, 4) AS INTEGER) FROM published_chart_books WHERE row_count > 0 AND substr(book, 5) = '_us_singles' ORDER BY chart COLLATE NOCASE, book").map_err(|e| e.to_string())?;
-    let mut grouped = BTreeMap::<String, Vec<i32>>::new();
+    let mut statement = conn.prepare("SELECT chart, CAST(substr(book, 1, 4) AS INTEGER), book FROM published_chart_books WHERE row_count > 0 AND book GLOB ?1 ORDER BY chart COLLATE NOCASE, book").map_err(|e| e.to_string())?;
+    let mut grouped = BTreeMap::<String, (&'static str, Vec<i32>)>::new();
     for row in statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+        .query_map([SINGLES_BOOKS], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i32>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(|e| e.to_string())?
     {
-        let (chart, year) = row.map_err(|e| e.to_string())?;
-        grouped.entry(chart).or_default().push(year);
+        let (chart, year, book) = row.map_err(|e| e.to_string())?;
+        let series = grouped
+            .entry(chart)
+            .or_insert_with(|| (book_country(&book), Vec::new()));
+        if series.1.last() != Some(&year) {
+            series.1.push(year);
+        }
     }
     Ok(grouped
         .into_iter()
-        .map(|(chart, years)| PublishedSeries { chart, years })
+        .map(|(chart, (country, years))| PublishedSeries {
+            chart,
+            country,
+            years,
+        })
         .collect())
 }
 
@@ -45,12 +77,10 @@ pub(super) fn weeks(conn: &Connection, chart: &str, year: i32) -> Result<Vec<Str
     require_archive(conn)?;
     let mut statement = conn.prepare(
         "SELECT DISTINCT e.week_ending FROM published_chart_books b JOIN published_chart_entries e ON e.book_id = b.id
-         WHERE b.chart = ?1 AND b.book = ?2 ORDER BY e.week_ending",
+         WHERE b.chart = ?1 AND b.book GLOB ?2 ORDER BY e.week_ending",
     ).map_err(|e| e.to_string())?;
     statement
-        .query_map(params![chart, format!("{year}_us_singles")], |row| {
-            row.get(0)
-        })
+        .query_map(params![chart, year_books(year)], |row| row.get(0))
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -74,7 +104,7 @@ fn rows(conn: &Connection, request: &ChartPageRequest) -> Result<Vec<WeeklyRow>,
         .published_chart
         .as_deref()
         .filter(|v| !v.trim().is_empty() && v.len() <= 300)
-        .ok_or("Choose a US weekly chart.")?;
+        .ok_or("Choose a published weekly chart.")?;
     let date = request.published_week.as_deref().unwrap_or("");
     if request.scope == ChartScope::Week {
         let valid = conn
@@ -92,16 +122,16 @@ fn rows(conn: &Connection, request: &ChartPageRequest) -> Result<Vec<WeeklyRow>,
         "SELECT e.artist, e.title, e.week_ending, e.position, NULLIF(CAST(e.last_week AS INTEGER), 0),
                 CAST(e.weeks_on_chart AS INTEGER), NULLIF(e.entry_date, ''), NULLIF(CAST(e.peak_position AS INTEGER), 0)
          FROM published_chart_books b JOIN published_chart_entries e ON e.book_id = b.id
-         WHERE b.chart = ?1 AND b.book = ?2 AND (?3 = 0 OR e.week_ending = ?4)
+         WHERE b.chart = ?1 AND b.book GLOB ?2 AND (?3 = 0 OR e.week_ending = ?4)
          ORDER BY e.week_ending, e.position, e.source_row",
-    ).map_err(|e| format!("Could not read US weekly charts: {e}"))?;
+    ).map_err(|e| format!("Could not read published weekly charts: {e}"))?;
     let mut seen = HashSet::new();
     let mut result = Vec::new();
     for row in statement
         .query_map(
             params![
                 chart,
-                format!("{}_us_singles", request.selected_year),
+                year_books(request.selected_year),
                 request.scope == ChartScope::Week,
                 date
             ],
@@ -147,6 +177,22 @@ fn parenthetical_key(title: &str) -> Option<String> {
         .filter(|base| !base.is_empty())
 }
 
+/// The sides of a double A-side single, as printed ("Lost John / Stewball").
+/// Single-sided titles return nothing.
+fn sides(title: &str) -> Vec<&str> {
+    let parts = title
+        .split(" / ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() > 1 { parts } else { Vec::new() }
+}
+
+/// The printed title first, then each side of a double A-side.
+fn match_titles(title: &str) -> Vec<&str> {
+    std::iter::once(title).chain(sides(title)).collect()
+}
+
 #[derive(Clone)]
 struct Match {
     track_id: String,
@@ -163,9 +209,12 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         .iter()
         .filter(|e| e.matched_track_id.is_none())
         .flat_map(|e| {
-            let mut titles = vec![key(&e.title), title_key(&e.title)];
-            if let Some(base) = parenthetical_key(&e.title) {
-                titles.push(base);
+            let mut titles = Vec::new();
+            for title in match_titles(&e.title) {
+                titles.extend([key(title), title_key(title)]);
+                if let Some(base) = parenthetical_key(title) {
+                    titles.push(base);
+                }
             }
             titles
                 .into_iter()
@@ -182,11 +231,19 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         .iter()
         .filter(|e| e.matched_track_id.is_none())
         .flat_map(|e| {
-            let titles = [key(&e.title), title_key(&e.title)];
+            let titles = match_titles(&e.title)
+                .into_iter()
+                .flat_map(|title| [key(title), title_key(title)])
+                .collect::<Vec<_>>();
             main_performers(&e.artist)
                 .into_iter()
                 .take(1)
-                .flat_map(move |performer| titles.clone().map(|title| (performer.clone(), title)))
+                .flat_map(move |performer| {
+                    titles
+                        .clone()
+                        .into_iter()
+                        .map(move |title| (performer.clone(), title))
+                })
         })
         .collect::<HashSet<_>>();
     let candidate_performers = wanted_performers
@@ -323,13 +380,20 @@ pub(super) fn match_entries(conn: &Connection, entries: &mut [ChartEntry]) -> Re
         matches.push(candidate);
     }
     for entry in entries.iter_mut().filter(|e| e.matched_track_id.is_none()) {
-        let candidates = song_index.resolve(
-            &[artist_key(&entry.artist)],
-            &main_performers(&entry.artist),
-            &key(&entry.title),
-            &[title_key(&entry.title)],
-            parenthetical_key(&entry.title).as_deref(),
-        );
+        // A double A-side matches by its first side found in the library.
+        let candidates = match_titles(&entry.title)
+            .into_iter()
+            .map(|title| {
+                song_index.resolve(
+                    &[artist_key(&entry.artist)],
+                    &main_performers(&entry.artist),
+                    &key(title),
+                    &[title_key(title)],
+                    parenthetical_key(title).as_deref(),
+                )
+            })
+            .find(|candidates| !candidates.is_empty())
+            .unwrap_or_default();
         if let Some(found) = candidates
             .iter()
             .map(|id| &matches[*id])
@@ -482,14 +546,17 @@ pub(super) fn page(conn: &Connection, request: ChartPageRequest) -> Result<Chart
         entries.len()
     };
     entries.truncate(request.entry_limit());
-    let chart = request.published_chart.as_deref().unwrap_or("US weekly");
+    let chart = request
+        .published_chart
+        .as_deref()
+        .unwrap_or("Published weekly");
     Ok(ChartPage {
         chart_title: if request.scope == ChartScope::Week {
             chart.into()
         } else {
             format!("{chart} · {} year chart", request.selected_year)
         },
-        source_label: "US weekly",
+        source_label: "Published weekly",
         annual_only: false,
         chart_date: if request.scope == ChartScope::Week {
             request.published_week.clone()
@@ -515,7 +582,7 @@ pub(super) fn detail(
     Ok(ChartItemDetail {
         source_ranks: vec![ChartSourceRank {
             source: ChartSource::PublishedUs,
-            label: "US weekly",
+            label: "Published weekly",
             best_rank: rows.iter().map(|r| r.position).min(),
             appearances: rows.len() as u32,
             weeks_at_number_one: rows.iter().filter(|r| r.position == 1).count() as u32,
@@ -576,21 +643,97 @@ mod tests {
     }
 
     #[test]
-    fn weekly_browser_series_list_only_us_books_until_uk_weeks_are_supported() {
+    fn weekly_browser_lists_and_reads_every_published_singles_chart() {
         let conn = fixture();
         conn.execute_batch(
-            "INSERT INTO published_chart_books VALUES (3,'NME Singles Chart','1985_uk_singles',9);",
+            "INSERT INTO published_chart_books VALUES (3,'NME Singles Chart','1985_uk_singles',2),
+               (4,'NME Singles Chart','1986_uk_singles',1),(5,'Empty Chart','1985_uk_singles',0),
+               (6,'Not Singles','1985_us_albums',3);
+             INSERT INTO published_chart_entries VALUES
+               (3,'Band Aid','Do They Know It''s Christmas?','1985-01-05',1,'1','4','1984-12-15',1,'1'),
+               (3,'Wham!','Last Christmas','1985-01-05',2,'','1','1985-01-05',2,'2'),
+               (3,'Wham!','Last Christmas','1985-01-12',1,'2','2','1985-01-05',3,'1');",
         )
         .unwrap();
         let charts = series(&conn)
             .unwrap()
             .into_iter()
-            .map(|item| item.chart)
+            .map(|item| (item.chart, item.country, item.years))
             .collect::<Vec<_>>();
         assert_eq!(
             charts,
-            vec!["Country Singles Chart", "Mainstream Rock Tracks"]
+            vec![
+                ("Country Singles Chart".to_string(), "US", vec![1993]),
+                ("Mainstream Rock Tracks".to_string(), "US", vec![1993]),
+                ("NME Singles Chart".to_string(), "UK", vec![1985, 1986]),
+            ]
         );
+        assert_eq!(
+            weeks(&conn, "NME Singles Chart", 1985).unwrap(),
+            ["1985-01-05", "1985-01-12"]
+        );
+        let mut uk = request();
+        uk.published_chart = Some("NME Singles Chart".into());
+        uk.selected_year = 1985;
+        uk.published_week = Some("1985-01-12".into());
+        let week = super::page(&conn, uk.clone()).unwrap();
+        assert_eq!(week.chart_title, "NME Singles Chart");
+        assert_eq!(week.entries[0].title, "Last Christmas");
+        assert_eq!(week.entries[0].movement, Some(1));
+        uk.scope = ChartScope::Period;
+        let year = super::page(&conn, uk).unwrap();
+        assert_eq!(year.chart_title, "NME Singles Chart · 1985 year chart");
+        assert_eq!(year.entries[0].title, "Last Christmas");
+        assert_eq!(year.entries[0].appearances, 2);
+    }
+
+    #[test]
+    fn uk_charts_filter_by_library_and_match_double_a_sides() {
+        let conn = fixture();
+        conn.execute_batch(
+            "INSERT INTO published_chart_books VALUES (3,'Official UK Singles Chart','1956_uk_singles',3);
+             INSERT INTO published_chart_entries VALUES
+               (3,'The Platters','The Great Pretender / Only You (And You Alone)','1956-09-07',1,'','1','',1,'1'),
+               (3,'Lonnie Donegan','Lost John / Stewball','1956-09-07',2,'','1','',2,'2'),
+               (3,'Nobody','Missing Song','1956-09-07',3,'','1','',3,'3'),
+               (3,'Duo','Side A / Side B','1956-09-07',4,'','1','',4,'4');
+             INSERT INTO tracks VALUES
+               (20,'Only You (And You Alone)','The Platters','The Platters','artist-album',80,'',''),
+               (21,'The Great Pretender','The Platters','The Platters','artist-album',80,'','L'),
+               (22,'Stewball','Lonnie Donegan','Lonnie Donegan','artist-album',80,'',''),
+               (23,'Side B','Duo','Duo','artist-album',80,'',''),
+               (24,'Side A / Side B','Duo','Duo','artist-album',80,'','');",
+        )
+        .unwrap();
+        let mut request = request();
+        request.published_chart = Some("Official UK Singles Chart".into());
+        request.selected_year = 1956;
+        request.published_week = Some("1956-09-07".into());
+        let chart = query_page(&conn, request.clone()).unwrap();
+        let matched = |position: usize| {
+            chart
+                .entries
+                .iter()
+                .find(|e| e.position == position)
+                .unwrap()
+                .matched_track_id
+                .clone()
+        };
+        // The first side wins when both are in the library.
+        assert_eq!(matched(1), Some("21".into()));
+        assert!(chart.entries[0].loved);
+        // The second side is tried when the first is missing.
+        assert_eq!(matched(2), Some("22".into()));
+        assert_eq!(matched(3), None);
+        // A track carrying the full printed title outranks either side.
+        assert_eq!(matched(4), Some("24".into()));
+        request.library_status = "notInLibrary".into();
+        let missing = query_page(&conn, request.clone()).unwrap();
+        assert_eq!(missing.total_entries, 1);
+        assert_eq!(missing.entries[0].title, "Missing Song");
+        request.library_status = "inLibrary".into();
+        assert_eq!(query_page(&conn, request).unwrap().total_entries, 3);
+        assert!(sides("AC/DC Song").is_empty());
     }
 
     #[test]
@@ -949,6 +1092,7 @@ mod tests {
             "Mainstream Rock Tracks",
             "Country Singles Chart",
             "Billboard Hot 100",
+            "Official UK Singles Chart",
         ] {
             let mut request = request();
             request.published_chart = Some(chart.into());

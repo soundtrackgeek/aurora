@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.73.0] - 2026-11-17
+
+### Added
+- Charts → Singles shows every singles chart from Music Library's Published Charts, not only the US ones: the 20 UK series (Official UK Singles Chart, NME, Melody Maker, Record Mirror, Disc, Audio Streaming, Official Digital Download and others) sit beside the 88 US series. The Chart list groups them by country, and Find a chart also matches `UK` or `US`.
+- UK published charts are matched to library songs, so the In Library and Not In Library filters, play buttons and Play this chart work on them.
+- Double A-sides printed as "Side A / Side B" match the first side found in the library when no track carries the full printed title, on US and UK charts alike.
+
+### Changed
+- The "US weekly" source is now called "Published weekly".
+
 ## [0.72.0] - 2026-11-17
 
 ### Added

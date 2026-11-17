@@ -267,7 +267,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
     norsktoppen: "Norsktoppen",
     billboard: "Billboard",
     auroraScore: "Aurora Score",
-    publishedUs: "US weekly",
+    publishedUs: "Published weekly",
   };
   const scoreYear = (album: AlbumScoreEntry) => request.yearBasis === "year" ? album.originalYear : album.releaseYear;
   const scores = previewScores
@@ -366,9 +366,13 @@ export async function loadChartQueue(request: ChartPageRequest): Promise<Track[]
   return invoke<Track[]>("chart_queue_tracks", { request });
 }
 
-export interface PublishedChartSeries { chart: string; years: number[] }
+export interface PublishedChartSeries { chart: string; country: "US" | "UK"; years: number[] }
 export async function loadPublishedChartSeries(): Promise<PublishedChartSeries[]> {
-  if (!isTauriRuntime()) return ["Billboard Hot 100", "Country Singles Chart", "Mainstream Rock Tracks", "Modern Rock Tracks"].map(chart => ({ chart, years: [1985, 1993, 2025] }));
+  if (!isTauriRuntime()) {
+    const us = ["Billboard Hot 100", "Country Singles Chart", "Mainstream Rock Tracks", "Modern Rock Tracks"].map((chart) => ({ chart, country: "US" as const, years: [1985, 1993, 2025] }));
+    const uk = ["NME Singles Chart", "Official UK Singles Chart"].map((chart) => ({ chart, country: "UK" as const, years: [1985, 1993, 2023] }));
+    return [...us, ...uk];
+  }
   return invoke("published_chart_series");
 }
 export async function loadPublishedChartWeeks(chart: string, year: number): Promise<string[]> {

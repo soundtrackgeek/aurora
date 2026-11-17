@@ -71,7 +71,7 @@ interface ChartStudioProps {
 
 const sourceOptions: Record<ChartKind, ReadonlyArray<{ source: ChartSource; label: string; annual?: boolean }>> = {
   singles: [
-    { source: "publishedUs", label: "US weekly" },
+    { source: "publishedUs", label: "Published weekly" },
     { source: "officialUk", label: "Official UK" },
     { source: "vgLista", label: "VG Lista" },
     { source: "tiISkuddet", label: "Ti i Skuddet" },
@@ -548,6 +548,6 @@ export function ChartInspector({
     {track ? <div className="chart-inspector__tags"><label>Your rating</label><InlineRatingControl trackKey={track.trackKey} title={track.title} rating={track.rating} busy={busy} allowClear onRatingChange={(rating) => onRatingChange(track, rating)} /><label>Love</label><InlineLoveControl title={track.title} loveState={track.loveState} busy={busy} onLoveChange={(state) => onLoveChange(track, state)} /></div> : null}
     <button type="button" className="button button--primary chart-inspector__play" disabled={busy || (!entry.matchedTrackId && !entry.matchedAlbumId)} onClick={onPlay}>{busy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />} Play</button>
     <button type="button" className="button button--quiet chart-inspector__open" disabled={!entry.matchedTrackId && !entry.matchedAlbumId} onClick={onOpenLibrary}><Library aria-hidden="true" /> Open in Library</button>
-    <p><Star aria-hidden="true" /> Weekly US charts use published dates. Printed entry dates and source peaks can describe the full chart run. Billboard annual and Aurora Score remain separate.</p>
+    <p><Star aria-hidden="true" /> Published weekly charts (US and UK) use printed week-ending dates. Printed entry dates and source peaks can describe the full chart run. Billboard annual and Aurora Score remain separate.</p>
   </div>;
 }

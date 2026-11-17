@@ -238,9 +238,9 @@ it("opens a US chart song's matched album and returns to its exact chart", async
   vi.spyOn(charts, "loadChartEntryTrack").mockResolvedValue(track);
   render(<App />);
   await navigate("Charts");
-  fireEvent.click(await screen.findByRole("tab", { name: "US weekly" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Published weekly" }));
   await screen.findByRole("heading", { name: "Billboard Hot 100" });
-  fireEvent.change(screen.getByRole("combobox", { name: "US chart" }), { target: { value: "Mainstream Rock Tracks" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Chart" }), { target: { value: "Mainstream Rock Tracks" } });
   await screen.findByRole("heading", { name: "Mainstream Rock Tracks" });
   fireEvent.click(await screen.findByRole("button", { name: "Viva la Vida (2008)" }));
   expect(screen.getByRole("textbox", { name: "Search your music universe" })).toHaveValue('album:"Viva la Vida"');

@@ -216,7 +216,7 @@ describe("ChartStudio", () => {
     vi.spyOn(charts, "loadPublishedChartSeries").mockRejectedValue(new Error("Open Published Charts in Music Library"));
     renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });
-    fireEvent.click(screen.getByRole("tab", { name: "US weekly" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Published weekly" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Open Published Charts in Music Library");
     expect(document.querySelector(".chart-studio")).toHaveAttribute("aria-busy", "false");
     expect(screen.queryByText("Updating chart… Previous results remain visible.")).not.toBeInTheDocument();
@@ -226,9 +226,9 @@ describe("ChartStudio", () => {
     const load = vi.spyOn(charts, "loadChartPage");
     renderStudio();
     await screen.findByRole("heading", { name: "Official UK Singles Chart" });
-    fireEvent.click(screen.getByRole("tab", { name: "US weekly" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Published weekly" }));
     await screen.findByRole("heading", { name: "Billboard Hot 100" });
-    fireEvent.change(screen.getByRole("combobox", { name: "US chart" }), { target: { value: "Country Singles Chart" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Chart" }), { target: { value: "Country Singles Chart" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Chart year" }), { target: { value: "1993" } });
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Week ending" })).toHaveValue("1993-01-05"));
     fireEvent.click(screen.getByRole("button", { name: "Next published week" }));
@@ -236,6 +236,21 @@ describe("ChartStudio", () => {
     expect(JSON.parse(localStorage.getItem("aurora:charts:v1")!).request.publishedWeek).toBe("1993-01-12");
     fireEvent.click(screen.getByRole("tab", { name: "Year chart" }));
     expect(await screen.findByRole("heading", { name: "Country Singles Chart · 1993 year chart" })).toBeVisible();
+  });
+
+  it("lists UK published charts beside US ones and finds them by country", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "Published weekly" }));
+    await screen.findByRole("heading", { name: "Billboard Hot 100" });
+    expect(screen.getByRole("group", { name: "United Kingdom" })).toHaveTextContent("NME Singles Chart");
+    expect(screen.getByText(/4 US and 2 UK singles charts/)).toBeVisible();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a chart" }), { target: { value: "uk" } });
+    // Only the chart already chosen stays in the United States group.
+    expect(screen.getByRole("group", { name: "United States" })).not.toHaveTextContent("Country Singles Chart");
+    fireEvent.change(screen.getByRole("combobox", { name: "Chart" }), { target: { value: "NME Singles Chart" } });
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ source: "publishedUs", publishedChart: "NME Singles Chart" })));
   });
 
   it("opens the selected track's real album with its year", async () => {

@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.73.0** shows every singles chart from Music Library's **Published Charts** under **Charts → Singles → Published weekly** (formerly "US weekly"): the 88 US series plus the 20 UK series, such as the Official UK Singles Chart, NME, Melody Maker, Record Mirror, Disc and the Audio Streaming and Digital Download charts. The **Chart** list groups them under United States and United Kingdom, and **Find a chart** matches chart names or a country (`UK`). UK charts are matched to your library like the US ones, so **Library: In Library / Not In Library** filters them, and double A-sides such as "The Great Pretender / Only You" match whichever side you have.
+
 Aurora **0.72.0** searches the singles charts in Albums. `sbb:`, `suk:`, `sti:` and `snt:` (Billboard, Official UK, Ti i skuddet and Norsktoppen singles) find albums with a track that charted as a single in the range: `year:1990 AND sti:5..10` finds 1990 albums with a track that peaked between 5th and 10th place on Ti i skuddet. They take `yes`, `no` and ranges like the other chart fields, and in Songs they read the song's own singles rank. Aurora NG 0.24.0 has them too. See [Singles charts on Albums](docs/search.md#singles-charts-on-albums).
 
 Aurora **0.71.0** colours the seek bar by sound. The waveform shows brightness (blue dull, gold bright) or stereo width (orange narrow, cyan wide) from Music Library's per-second timelines, switchable with the palette button beside it. Faint ticks mark where the sound changes. Tracks with a long quiet intro get **Skip intro**, which jumps to where the main part starts. See [Coloured seek bar](docs/seek-bar.md).
@@ -470,7 +472,7 @@ Previous update: Opening Tags now requeues saved album-artist edits when the cat
 
 Aurora 0.28.0 adds **Charts → Singles → US weekly**. Search for Country, Rock, Hot 100, or any imported US series, then choose an available year and exact week-ending date. Previous/next controls move between published weeks; **Year chart** ranks songs by weeks at number one, chart weeks, and best position within that year. Printed ranks, previous positions, weeks on chart, source peaks, and entry dates stay attached to each song. Use the result controls to browse the full chart.
 
-Weekly charts read Music Library's `published_chart_books` and `published_chart_entries` tables in the configured catalog, without modifying the database. If the archive is missing, open **Published Charts** in Music Library, let preparation finish, then refresh the US picker in Aurora. The older Billboard annual Singles CSV import is separate. Available series, years, and dates reflect the imported archive. Browser preview uses sample songs and dates.
+Weekly charts read Music Library's `published_chart_books` and `published_chart_entries` tables in the configured catalog, without modifying the database. Since 0.73.0 every `YYYY_<country>_singles` book is listed (US and UK), and the tab is called **Published weekly**. If the archive is missing, open **Published Charts** in Music Library, let preparation finish, then refresh the picker in Aurora. The older Billboard annual Singles CSV import is separate. Available series, years, and dates reflect the imported archive. Browser preview uses sample songs and dates.
 
 Songs match conservatively against the local catalog using artist and title, including explicit LP/album-version suffixes while retaining live and remix distinctions. Matched songs support playback and library navigation; the Charts Track sidebar now includes a clickable **Album (Year)** that opens the matched album. **Back to Charts** retains your view, and the selected US series, year, date, filters, and song are saved with Charts preferences. Printed source peaks and entry dates may describe the full song run; the generated Year chart is not an official year-end ranking. Chart playback remains limited to the first 100 matched songs.
 
@@ -986,6 +988,8 @@ Frontend verification uses two test workers to avoid CPU contention on shared re
 Chart song matching tries the full artist/title first, then existing title aliases, then a fallback that removes balanced parenthetical groups from either the chart title or the library title. For example, `In And Out Of Love (Edit)` can match `In And Out Of Love` by Bon Jovi, and `We Don't Need Another Hero (Thunderdome)` can match the shorter Tina Turner title. Artist matching remains required; printed chart titles and audio-file tags are unchanged.
 
 An exact title always takes priority. Different parenthetical versions are not matched to each other by stripping both titles; a bare title that could select several different versions stays unmatched. Duplicate copies of the same title retain the usual album preference. Empty or malformed parenthetical titles do not gain fallback matches.
+
+A double A-side printed as `Side A / Side B` (common on UK charts) first tries the full printed title, then each side in printed order, and matches the first side found in the library. A library file titled with both sides therefore wins over either side alone.
 
 ### A journey that fits your time
 
