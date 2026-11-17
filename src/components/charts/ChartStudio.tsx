@@ -315,8 +315,14 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
   })();
 
   function applyPeriod(period: ChartPeriod) {
-    setRequest((current) => ({ ...current, period, selectedYear: period.fromYear, selectedWeek: period.fromWeek, scope: "period" }));
+    // Published charts keep their picked year and week, so the picker stays on a
+    // year the chart was printed in while the range spans others.
+    setRequest((current) => current.source === "publishedUs"
+      ? { ...current, period, scope: "period" }
+      : { ...current, period, selectedYear: period.fromYear, selectedWeek: period.fromWeek, scope: "period" });
   }
+
+  const fullYearPeriod = request.period.fromYear === request.period.toYear && request.period.fromWeek === 1 && request.period.toWeek === 53;
 
   function changeKind(kind: ChartKind) {
     setRequest((current) => ({ ...current, kind, source: kind === "albums" ? "auroraScore" : "officialUk", scope: kind === "albums" ? "period" : "week" }));
@@ -374,7 +380,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
       </div>
       <div className="chart-scope" role="tablist" aria-label="Chart calculation">
         <button type="button" role="tab" aria-selected={request.scope === "week"} disabled={annualSource} onClick={() => changeScope("week")}>Selected week</button>
-        <button type="button" role="tab" aria-selected={request.scope === "period"} onClick={() => changeScope("period")}>{request.source === "publishedUs" ? "Year chart" : "Period chart"}</button>
+        <button type="button" role="tab" aria-selected={request.scope === "period"} onClick={() => changeScope("period")}>{request.source === "publishedUs" && fullYearPeriod ? "Year chart" : "Period chart"}</button>
       </div>
     </div>
 
@@ -393,7 +399,7 @@ export function ChartStudio({ catalogRevision = 0, onSelectionChange, onSelectTr
 
     {request.source === "publishedUs" ? <>
       <PublishedChartPicker request={request} onChange={setRequest} revision={catalogRevision} onRefresh={() => setReloadToken((value) => value + 1)} />
-      {Object.values(request.filters ?? {}).some(Boolean) ? <p className="chart-period-note">Artist filters are active. <button type="button" onClick={() => setRequest((current) => ({ ...current, filters: undefined }))}>Clear artist filters</button></p> : null}
+      <ChartPeriodControls period={request.period} filters={request.filters} onApply={applyPeriod} onFilters={(filters) => setRequest((current) => ({ ...current, filters }))} />
     </> : <>
     <ChartPeriodControls period={request.period} filters={request.filters} onApply={applyPeriod} onFilters={(filters) => setRequest((current) => ({ ...current, filters }))} />
 

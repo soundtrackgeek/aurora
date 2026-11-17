@@ -86,6 +86,24 @@ pub(super) fn weeks(conn: &Connection, chart: &str, year: i32) -> Result<Vec<Str
         .map_err(|e| e.to_string())
 }
 
+/// The week-ending dates a chart period covers. Week `n` of a year is days
+/// `7n-6..=7n`, the same "nth chart of the year" numbering the other weekly
+/// sources store, so week 53 reaches the end of December and no further.
+fn period_dates(conn: &Connection, period: &ChartPeriod) -> Result<(String, String), String> {
+    conn.query_row(
+        "SELECT date(?1 || '-01-01', '+' || ((?2 - 1) * 7) || ' days'),
+                min(date(?3 || '-01-01', '+' || (?4 * 7 - 1) || ' days'), ?3 || '-12-31')",
+        params![
+            format!("{:04}", period.from_year),
+            period.from_week,
+            format!("{:04}", period.to_year),
+            period.to_week
+        ],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[derive(Clone)]
 struct WeeklyRow {
     artist: String,
@@ -118,23 +136,37 @@ fn rows(conn: &Connection, request: &ChartPageRequest) -> Result<Vec<WeeklyRow>,
             return Err("Choose a published week-ending date in the selected year.".into());
         }
     }
+    // A week chart reads one printed week; a period chart reads every week
+    // ending inside the range, across as many yearly books as it spans.
+    let (from_year, to_year, from_date, to_date) = if request.scope == ChartScope::Week {
+        (
+            request.selected_year,
+            request.selected_year,
+            date.to_owned(),
+            date.to_owned(),
+        )
+    } else {
+        let (from_date, to_date) = period_dates(conn, &request.period)?;
+        (
+            request.period.from_year,
+            request.period.to_year,
+            from_date,
+            to_date,
+        )
+    };
     let mut statement = conn.prepare(
         "SELECT e.artist, e.title, e.week_ending, e.position, NULLIF(CAST(e.last_week AS INTEGER), 0),
                 CAST(e.weeks_on_chart AS INTEGER), NULLIF(e.entry_date, ''), NULLIF(CAST(e.peak_position AS INTEGER), 0)
          FROM published_chart_books b JOIN published_chart_entries e ON e.book_id = b.id
-         WHERE b.chart = ?1 AND b.book GLOB ?2 AND (?3 = 0 OR e.week_ending = ?4)
+         WHERE b.chart = ?1 AND b.book GLOB ?2 AND CAST(substr(b.book, 1, 4) AS INTEGER) BETWEEN ?3 AND ?4
+           AND e.week_ending BETWEEN ?5 AND ?6
          ORDER BY e.week_ending, e.position, e.source_row",
     ).map_err(|e| format!("Could not read published weekly charts: {e}"))?;
     let mut seen = HashSet::new();
     let mut result = Vec::new();
     for row in statement
         .query_map(
-            params![
-                chart,
-                year_books(request.selected_year),
-                request.scope == ChartScope::Week,
-                date
-            ],
+            params![chart, SINGLES_BOOKS, from_year, to_year, from_date, to_date],
             |r| {
                 Ok(WeeklyRow {
                     artist: r.get(0)?,
@@ -554,7 +586,7 @@ pub(super) fn page(conn: &Connection, request: ChartPageRequest) -> Result<Chart
         chart_title: if request.scope == ChartScope::Week {
             chart.into()
         } else {
-            format!("{chart} · {} year chart", request.selected_year)
+            format!("{chart} · {}", request.period.label)
         },
         source_label: "Published weekly",
         annual_only: false,
@@ -681,10 +713,86 @@ mod tests {
         assert_eq!(week.entries[0].title, "Last Christmas");
         assert_eq!(week.entries[0].movement, Some(1));
         uk.scope = ChartScope::Period;
+        uk.period = ChartPeriod {
+            from_year: 1985,
+            from_week: 1,
+            to_year: 1985,
+            to_week: 53,
+            label: "1985 year chart".into(),
+        };
         let year = super::page(&conn, uk).unwrap();
         assert_eq!(year.chart_title, "NME Singles Chart · 1985 year chart");
         assert_eq!(year.entries[0].title, "Last Christmas");
         assert_eq!(year.entries[0].appearances, 2);
+    }
+
+    #[test]
+    fn period_charts_cover_custom_week_ranges_across_years() {
+        let conn = fixture();
+        conn.execute_batch(
+            "INSERT INTO published_chart_books VALUES (3,'Mainstream Rock Tracks','1992_us_singles',3),
+               (4,'Mainstream Rock Tracks','1994_us_singles',1);
+             INSERT INTO published_chart_entries VALUES
+               (3,'Early','Song','1992-01-04',1,'','1','',1,''),
+               (3,'Late','Song','1992-12-26',1,'','1','',2,''),
+               (3,'Artist','Song (LP Version)','1992-12-31',5,'','1','',3,''),
+               (4,'Later','Song','1994-01-08',1,'','1','',1,'');",
+        )
+        .unwrap();
+        let mut request = request();
+        request.scope = ChartScope::Period;
+        let titles = |request: &ChartPageRequest| {
+            let mut artists = super::page(&conn, request.clone())
+                .unwrap()
+                .entries
+                .into_iter()
+                .map(|e| e.artist)
+                .collect::<Vec<_>>();
+            artists.sort();
+            artists
+        };
+        // 1992 week 52 starts on 23 December (1992 is a leap year) and
+        // 1993 week 1 ends on 7 January.
+        request.period = ChartPeriod {
+            from_year: 1992,
+            from_week: 52,
+            to_year: 1993,
+            to_week: 1,
+            label: "1992 W52 – 1993 W1".into(),
+        };
+        assert_eq!(titles(&request), ["Artist", "Artist", "Late", "Unmatched"]);
+        let page = super::page(&conn, request.clone()).unwrap();
+        assert_eq!(
+            page.chart_title,
+            "Mainstream Rock Tracks · 1992 W52 – 1993 W1"
+        );
+        let song = page.entries.iter().find(|e| e.artist == "Artist").unwrap();
+        // Two weeks on the chart: 31 Dec 1992 and 2 Jan 1993.
+        assert_eq!(song.appearances, 2);
+        assert_eq!(song.peak_position, Some(2));
+        // Three full years reach every book in between.
+        request.period = ChartPeriod {
+            from_year: 1992,
+            from_week: 1,
+            to_year: 1994,
+            to_week: 53,
+            label: "1992 – 1994".into(),
+        };
+        assert_eq!(titles(&request).len(), 6);
+        // Week 53 stops at 31 December.
+        request.period.to_year = 1993;
+        assert!(!titles(&request).contains(&"Later".to_string()));
+        // The detail panel reads the same range.
+        let detail = super::detail(
+            &conn,
+            ChartItemDetailRequest {
+                page: request,
+                artist_key: "Early".into(),
+                title_key: "Song".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(detail.source_ranks[0].appearances, 1);
     }
 
     #[test]
@@ -1111,5 +1219,34 @@ mod tests {
             );
             assert!(!page.entries.is_empty());
         }
+        let mut range = request();
+        range.published_chart = Some("Billboard Hot 100".into());
+        range.scope = ChartScope::Period;
+        range.limit = 100;
+        range.period = ChartPeriod {
+            from_year: 1985,
+            from_week: 1,
+            to_year: 1994,
+            to_week: 53,
+            label: "1985 – 1994".into(),
+        };
+        let started = std::time::Instant::now();
+        let page = super::page(&conn, range.clone()).unwrap();
+        eprintln!(
+            "Hot 100 1985-1994: {} entries, top {} by {}, {:?}",
+            page.total_entries,
+            page.entries[0].title,
+            page.entries[0].artist,
+            started.elapsed()
+        );
+        assert!(page.total_entries > 1000);
+        range.library_status = "notInLibrary".into();
+        let started = std::time::Instant::now();
+        let missing = super::page(&conn, range).unwrap();
+        eprintln!(
+            "Hot 100 1985-1994 not in library: {} entries, {:?}",
+            missing.total_entries,
+            started.elapsed()
+        );
     }
 }

@@ -290,7 +290,7 @@ function browserChartPage(request: ChartPageRequest): ChartPage {
   return {
     request: effectiveRequest,
     sourceLabel: sourceLabel[request.source],
-    chartTitle: request.source === "publishedUs" ? `${request.publishedChart ?? "Billboard Hot 100"}${request.scope === "period" ? ` · ${request.selectedYear} year chart` : ""}` : request.source === "auroraScore"
+    chartTitle: request.source === "publishedUs" ? `${request.publishedChart ?? "Billboard Hot 100"}${request.scope === "period" ? ` · ${request.period.label}` : ""}` : request.source === "auroraScore"
       ? `Aurora Album Score · ${request.period.label}`
       : `${sourceLabel[request.source]} ${request.kind === "singles" ? "Singles" : "Albums"}${effectiveRequest.scope === "period" ? ` · ${request.period.label}` : " Chart"}`,
     annualOnly,

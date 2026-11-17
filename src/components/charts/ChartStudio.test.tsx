@@ -253,6 +253,28 @@ describe("ChartStudio", () => {
     await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ source: "publishedUs", publishedChart: "NME Singles Chart" })));
   });
 
+  it("applies a custom range to a published chart without moving its picked year", async () => {
+    const load = vi.spyOn(charts, "loadChartPage");
+    renderStudio();
+    await screen.findByRole("heading", { name: "Official UK Singles Chart" });
+    fireEvent.click(screen.getByRole("tab", { name: "Published weekly" }));
+    await screen.findByRole("heading", { name: "Billboard Hot 100" });
+    const year = (screen.getByRole("combobox", { name: "Chart year" }) as HTMLSelectElement).value;
+    fireEvent.change(screen.getByRole("spinbutton", { name: "From Year" }), { target: { value: "1984" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To Year" }), { target: { value: "1986" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "From Week" }), { target: { value: "10" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To Week" }), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply range" }));
+    await waitFor(() => expect(load).toHaveBeenLastCalledWith(expect.objectContaining({
+      source: "publishedUs",
+      scope: "period",
+      period: expect.objectContaining({ fromYear: 1984, fromWeek: 10, toYear: 1986, toWeek: 20 }),
+    })));
+    expect(screen.getByRole("combobox", { name: "Chart year" })).toHaveValue(year);
+    expect(screen.getByRole("tab", { name: "Period chart" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Billboard Hot 100 · 1984 W10 – 1986 W20" })).toBeVisible();
+  });
+
   it("opens the selected track's real album with its year", async () => {
     const callbacks = renderStudio();
     await waitFor(() => expect(callbacks.onSelectTrack).toHaveBeenCalled());

@@ -8,6 +8,14 @@
 - For a genre on fewer than 30 albums, the evidence says how many, as in "88% of the 8 Neoclassical New Age albums".
 - The message for an album that is not checked explains the new limits.
 
+## [0.74.0] - 2026-11-17
+
+### Added
+- Published weekly charts have the period controls the other weekly sources have: preset periods, a custom From/To Year and Week (or Month) range with Apply range, and Advanced filters. A range can span several years, so for example the Billboard Hot 100 can be ranked over 1985–1994; the In Library and Not In Library filters work on ranges too.
+
+### Changed
+- The Year chart tab on Published weekly reads Period chart while a custom range is applied, and period chart titles show the range, such as "Billboard Hot 100 · 1984 W10 – 1986 W20".
+
 ## [0.73.0] - 2026-11-17
 
 ### Added
