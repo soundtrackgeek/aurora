@@ -1,8 +1,11 @@
 import { useEffect, useRef } from "react";
+import { seekBarColour, type SeekBarColour, type SoundMap } from "../soundMap";
 import type { TrackWaveform } from "../waveform";
 
 export function WaveformTimeline({
   waveform,
+  soundMap = null,
+  colour = "plain",
   position,
   duration,
   disabled,
@@ -10,6 +13,9 @@ export function WaveformTimeline({
   onCommit,
 }: {
   waveform: TrackWaveform | null;
+  /** Colours the waveform and marks sections, when the track has one. */
+  soundMap?: SoundMap | null;
+  colour?: SeekBarColour;
   position: number;
   duration: number;
   disabled: boolean;
@@ -47,10 +53,16 @@ export function WaveformTimeline({
       const peaks = waveform.peaks;
 
       const gradient = drawingContext.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, "#d946ef");
-      gradient.addColorStop(0.38, "#a855f7");
-      gradient.addColorStop(0.68, "#2787ff");
-      gradient.addColorStop(1, "#22d3ee");
+      const lane = soundMap && colour !== "plain" ? soundMap[colour] : null;
+      if (lane?.length) {
+        const last = Math.max(lane.length - 1, 1);
+        lane.forEach((value, index) => gradient.addColorStop(index / last, seekBarColour(colour as Exclude<SeekBarColour, "plain">, value)));
+      } else {
+        gradient.addColorStop(0, "#d946ef");
+        gradient.addColorStop(0.38, "#a855f7");
+        gradient.addColorStop(0.68, "#2787ff");
+        gradient.addColorStop(1, "#22d3ee");
+      }
       const progress = duration > 0 ? Math.min(Math.max(position / duration, 0), 1) : 0;
 
       function traceWaveform() {
@@ -87,6 +99,25 @@ export function WaveformTimeline({
       context.globalAlpha = 1;
       context.fillStyle = "rgba(154, 164, 181, 0.15)";
       context.fillRect(0, Math.floor(height / 2), width, 1);
+      if (soundMap && duration > 0) {
+        // Faint ticks where the sound changes, and a marker where the main part starts.
+        context.fillStyle = "rgba(233, 231, 255, 0.3)";
+        for (const second of soundMap.sections) {
+          const x = Math.round(Math.min(second / duration, 1) * width);
+          context.fillRect(x, 0, 1, 4);
+          context.fillRect(x, height - 4, 1, 4);
+        }
+        if (soundMap.mainStart !== null) {
+          const x = Math.min(soundMap.mainStart / duration, 1) * width;
+          context.fillStyle = "rgba(143, 221, 232, 0.95)";
+          context.beginPath();
+          context.moveTo(x - 4, 0);
+          context.lineTo(x + 4, 0);
+          context.lineTo(x, 5);
+          context.closePath();
+          context.fill();
+        }
+      }
       if (progress > 0) {
         const x = Math.min(width - 1, progress * width);
         context.fillStyle = "rgba(233, 231, 255, 0.82)";
@@ -98,10 +129,10 @@ export function WaveformTimeline({
     const observer = new ResizeObserver(draw);
     observer.observe(containerElement);
     return () => observer.disconnect();
-  }, [duration, position, waveform]);
+  }, [colour, duration, position, soundMap, waveform]);
 
   return (
-    <div className="waveform-timeline" data-loading={!waveform || undefined}>
+    <div className="waveform-timeline" data-loading={!waveform || undefined} data-colour={soundMap ? colour : undefined}>
       <canvas ref={canvasRef} aria-hidden="true" />
       <input
         type="range"

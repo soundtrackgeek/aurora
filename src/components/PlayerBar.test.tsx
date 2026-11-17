@@ -96,6 +96,28 @@ describe("PlayerBar", () => {
     expect(screen.queryByRole("button", { name: "Open artist page for Alexandre Desplat" })).not.toBeInTheDocument();
   });
 
+  it("offers to skip a long quiet intro and hides it once past", async () => {
+    const playerProps = props(10);
+    const { rerender } = render(<PlayerBar {...playerProps} />);
+    // The browser preview marks the main part 12% into the track: 0:29 of 4:00.
+    const skip = await screen.findByRole("button", { name: "Skip intro" });
+    expect(skip).toHaveAttribute("title", "Skip the quiet intro to the main part at 0:29");
+    fireEvent.click(skip);
+    expect(playerProps.onSeek).toHaveBeenCalledWith(29);
+    rerender(<PlayerBar {...playerProps} playback={snapshot(40)} />);
+    expect(screen.queryByRole("button", { name: "Skip intro" })).not.toBeInTheDocument();
+  });
+
+  it("cycles the seek bar colour and remembers it", () => {
+    window.localStorage.removeItem("aurora.seekBarColour");
+    render(<PlayerBar {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Seek bar colour: Brightness. Change to Stereo width" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seek bar colour: Stereo width. Change to Plain" }));
+    expect(window.localStorage.getItem("aurora.seekBarColour")).toBe("plain");
+    fireEvent.click(screen.getByRole("button", { name: "Seek bar colour: Plain. Change to Brightness" }));
+    expect(window.localStorage.getItem("aurora.seekBarColour")).toBe("brightness");
+  });
+
   it("toggles total time to a live remaining-time readout", () => {
     const initial = props();
     const { rerender } = render(<PlayerBar {...initial} />);

@@ -1,6 +1,8 @@
 import {
+  ChevronsRight,
   Headphones,
   ListMusic,
+  Palette,
   Pause,
   Play,
   Repeat2,
@@ -14,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { displayTrackArtist, displayTrackArtistId, formatDuration, type Track } from "../library";
 import type { PlaybackSnapshot, RepeatMode } from "../playback";
 import type { LoveState } from "../tags";
+import { loadSeekBarColour, loadTrackSoundMap, nextSeekBarColour, saveSeekBarColour, seekBarColourNames, type SeekBarColour, type SoundMap } from "../soundMap";
 import { loadTrackWaveform, type TrackWaveform } from "../waveform";
 import { Artwork } from "./Artwork";
 import { ArtistSmartLink } from "./ArtistSmartLink";
@@ -90,10 +93,14 @@ export function PlayerBar({
     waveform: TrackWaveform | null;
     failed: boolean;
   } | null>(null);
+  const [soundMapResult, setSoundMapResult] = useState<SoundMap | null>(null);
+  const [colour, setColour] = useState<SeekBarColour>(loadSeekBarColour);
   const track = playback.currentTrack;
   const trackId = track?.id ?? null;
   const trackKey = track?.trackKey ?? null;
+  const trackDuration = track?.durationSeconds ?? null;
   const waveform = waveformResult?.trackKey === trackKey ? waveformResult.waveform : null;
+  const soundMap = soundMapResult?.trackKey === trackKey ? soundMapResult : null;
   const waveformFailed = waveformResult?.trackKey === trackKey && waveformResult.failed;
   const duration = Math.max(track?.durationSeconds ?? 0, 0);
   const clockPosition = playback.status === "playing"
@@ -136,6 +143,22 @@ export function PlayerBar({
     };
   }, [trackId, trackKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!trackId || !trackKey) return () => { cancelled = true; };
+    // A track without a timeline keeps the plain waveform.
+    void loadTrackSoundMap({ id: trackId, trackKey, durationSeconds: trackDuration })
+      .then((next) => { if (!cancelled) setSoundMapResult(next); })
+      .catch(() => { if (!cancelled) setSoundMapResult(null); });
+    return () => { cancelled = true; };
+  }, [trackDuration, trackId, trackKey]);
+
+  function changeColour() {
+    const next = nextSeekBarColour(colour);
+    setColour(next);
+    saveSeekBarColour(next);
+  }
+
   function changeSeekDraft(value: number) {
     if (trackKey) setSeekDraft({ trackKey, value });
   }
@@ -159,6 +182,7 @@ export function PlayerBar({
     });
   }
 
+  const showSkip = soundMap?.mainStart != null && position < soundMap.mainStart - 2;
   const endTime = showRemaining
     ? `−${formatDuration(Math.max(duration - position, 0))}`
     : formatDuration(track?.durationSeconds ?? null);
@@ -232,8 +256,15 @@ export function PlayerBar({
           </div>
           <div className="timeline">
             <span>{formatDuration(position)}</span>
+            {showSkip && soundMap?.mainStart != null && (
+              <button type="button" className="timeline__skip" title={`Skip the quiet intro to the main part at ${formatDuration(soundMap.mainStart)}`} onClick={() => commitSeek(soundMap.mainStart ?? 0)}>
+                <ChevronsRight aria-hidden="true" />Skip intro
+              </button>
+            )}
             <WaveformTimeline
               waveform={waveform}
+              soundMap={soundMap}
+              colour={colour}
               position={position}
               duration={duration}
               disabled={!track}
@@ -249,6 +280,18 @@ export function PlayerBar({
               onClick={() => setShowRemaining((current) => !current)}
             >
               {endTime}
+            </button>
+            <button
+              type="button"
+              className="timeline__colour"
+              aria-label={`Seek bar colour: ${seekBarColourNames[colour]}. Change to ${seekBarColourNames[nextSeekBarColour(colour)]}`}
+              title={soundMap || colour === "plain"
+                ? `Seek bar colour: ${seekBarColourNames[colour]}${colour === "brightness" ? " (blue dull, gold bright)" : colour === "width" ? " (orange narrow, cyan wide)" : ""}`
+                : `Seek bar colour: ${seekBarColourNames[colour]}. This track has no sound timeline from Music Library yet.`}
+              data-colour={colour}
+              onClick={changeColour}
+            >
+              <Palette aria-hidden="true" />
             </button>
           </div>
         </div>

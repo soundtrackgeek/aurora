@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.0] - 2026-11-17
+
+### Added
+- The seek bar's waveform is coloured by sound from Music Library's per-second timelines: by brightness (blue dull, gold bright, the default) or stereo width (orange narrow, cyan wide). The palette button at the end of the seek bar switches between them and the plain gradient, and Aurora remembers the choice. Tracks without a current timeline keep the plain waveform.
+- Faint ticks on the waveform mark where the sound changes, at least 10 seconds apart.
+- **Skip intro** appears on tracks of two minutes or more that open with at least 30 quiet seconds (6 dB or more below the track's median level). It jumps to where the main part starts, marked on the waveform, and goes away once playback is past it. About 3% of tracks have one. See [docs/seek-bar.md](docs/seek-bar.md).
+
 ## [0.70.0] - 2026-11-16
 
 ### Added

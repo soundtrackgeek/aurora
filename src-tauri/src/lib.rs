@@ -68,6 +68,7 @@ mod sonic_journey;
 mod sonic_performance;
 mod sonic_worlds;
 mod sound_descriptors;
+mod sound_map;
 mod sound_tools;
 mod state_store;
 mod state_sync;
@@ -1663,6 +1664,23 @@ async fn playback_clear_queue(app: AppHandle) -> Result<PlaybackSnapshot, String
     with_playback_snapshot(app, "playback_clear_queue", PlaybackRuntime::clear_queue).await
 }
 
+/// Brightness, stereo width, sections and the main part's start for the
+/// coloured seek bar, from Music Library's per-second timeline. None when the
+/// track has no current timeline.
+#[tauri::command]
+async fn track_sound_map(
+    app: AppHandle,
+    track_id: String,
+    track_key: String,
+) -> Result<Option<sound_map::SoundMap>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        sound_map::for_track(&track_id, &track_key, &store)
+    })
+    .await
+    .map_err(|error| format!("The sound map stopped unexpectedly: {error}"))?
+}
+
 #[tauri::command]
 async fn track_waveform(
     app: AppHandle,
@@ -2609,6 +2627,7 @@ pub fn run() {
             playback_move_queue_item,
             playback_clear_queue,
             track_waveform,
+            track_sound_map,
             track_tag_state,
             update_track_tags,
             tag_editor_state,

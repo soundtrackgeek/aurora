@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.71.0** colours the seek bar by sound. The waveform shows brightness (blue dull, gold bright) or stereo width (orange narrow, cyan wide) from Music Library's per-second timelines, switchable with the palette button beside it. Faint ticks mark where the sound changes. Tracks with a long quiet intro get **Skip intro**, which jumps to where the main part starts. See [Coloured seek bar](docs/seek-bar.md).
+
 Aurora **0.70.0** shows close genres in the genre check by sound. Each album in **Review genre changes** lists the three other genres it sounds most typical of, and the genre field offers them. Albums you check from the right-click menu now all open in the review: those that fit keep their genre and start unticked, with their next closest genres for borderline cases. A single album's message reads, for example, "Sounds like its genre. Next closest: New Wave, Synthpop." The full library check is faster, about 8 seconds. See [Genre check by sound](docs/genre-check.md).
 
 Aurora **0.69.0** checks genres by sound from the Albums page too. Right-click an album, or a selection of albums, and choose **Check genre by sound**. Albums whose sound fits another of your genres open in **Review genre changes**; the others are reported as sounding like their genre. See [Genre check by sound](docs/genre-check.md).
