@@ -956,10 +956,11 @@ enum ExtendedSearchField {
     Vg,
     Ti,
     Nt,
-    /// `sbb:`, `suk:`, `sti:` and `snt:` are singles charts. On Albums they
+    /// `sbb:`, `suk:`, `svg:`, `sti:` and `snt:` are singles charts. On Albums they
     /// match albums with a track that charted as a single in that range.
     SingleBillboard,
     SingleUk,
+    SingleVg,
     SingleTi,
     SingleNt,
 }
@@ -970,6 +971,7 @@ impl ExtendedSearchField {
         match self {
             Self::SingleBillboard => Some(Self::Billboard),
             Self::SingleUk => Some(Self::Uk),
+            Self::SingleVg => Some(Self::Vg),
             Self::SingleTi => Some(Self::Ti),
             Self::SingleNt => Some(Self::Nt),
             _ => None,
@@ -1269,6 +1271,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
             ExtendedSearchField::SingleBillboard,
         )),
         "suk" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleUk)),
+        "svg" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleVg)),
         "sti" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleTi)),
         "snt" => Some(CatalogSearchField::Extended(ExtendedSearchField::SingleNt)),
         "artist" => Some(CatalogSearchField::Artist),
@@ -3941,7 +3944,7 @@ mod tests {
             assert!(run(&format!("{field}:yes"), true).is_empty());
         }
         // Singles charts: songs read the singles rank, albums any of their tracks.
-        for field in ["sbb", "suk", "sti", "snt"] {
+        for field in ["sbb", "suk", "svg", "sti", "snt"] {
             for album in [false, true] {
                 for suffix in ["yes", "1..5", "..5", "1"] {
                     assert_eq!(
@@ -3955,12 +3958,14 @@ mod tests {
                 assert_eq!(run(&format!("{field}:1 AND minutes:..44"), album), vec![1]);
             }
         }
-        db.execute_batch(
-            "INSERT INTO tracks VALUES (4, 2, 'Person', 200, 7, NULL, NULL, 7, NULL);",
-        )
-        .unwrap();
+        db.execute_batch("INSERT INTO tracks VALUES (4, 2, 'Person', 200, 7, NULL, 9, 7, NULL);")
+            .unwrap();
         assert_eq!(run("sti:5..10", true), vec![2]);
         assert_eq!(run("sbb:5..10", true), vec![2]);
+        assert_eq!(run("svg:5..10", true), vec![2]);
+        assert_eq!(run("svg:5..10", false), vec![4]);
+        // vg: on Albums still reads the album chart, not the album's singles.
+        assert_eq!(run("vg:5..10", true), vec![1]);
         assert_eq!(run("sti:no", true), vec![3]);
         assert!(run("snt:5..10", true).is_empty());
         db.execute_batch("DELETE FROM tracks WHERE id = 4;")

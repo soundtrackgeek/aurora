@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.76.0] - 2026-11-18
+
+### Added
+- `svg:` searches the VG-lista singles chart, like `sbb:`, `suk:`, `sti:` and `snt:`. In Albums, an album matches when one of its tracks charted as a single on VG-lista in the range, so `year:1985 AND svg:..10` finds 1985 albums with a top-ten VG-lista single; `vg:` still searches the album chart. In Songs it matches the song's own VG-lista rank, like `vg:`.
+
 ## [0.75.0] - 2026-11-17
 
 ### Added

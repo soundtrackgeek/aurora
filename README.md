@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.76.0** adds `svg:` for the VG-lista singles chart, alongside `sbb:`, `suk:`, `sti:` and `snt:`. In Albums, `year:1985 AND svg:..10` finds 1985 albums with a track that reached the VG-lista singles top ten; `vg:` still searches the album chart. Aurora NG 0.25.0 has it too. See [Singles charts on Albums](docs/search.md#singles-charts-on-albums).
+
 Aurora **0.75.0** gives **Published weekly** charts the same period controls as Official UK, VG Lista and Ti i Skuddet: a **Preset period** (seasons, months) and a **Custom** range with From/To Year and From/To Week or Month, plus **Advanced filters**. **Apply range** ranks a chosen chart by weeks at number one, chart weeks, then peak over the whole range, which can span up to 20 years of its yearly books, for example the Billboard Hot 100 from 1985 W1 to 1994 W53. Week *n* means the *n*th seven days of the year, as for the other weekly sources. The chart picker keeps its year and week, so **Selected week** still shows the printed week, and the **Year chart** tab reads **Period chart** while a custom range is applied.
 
 Aurora **0.74.0** checks rare genres by sound. It knows Rate Your Music's genre list: a subgenre on as few as three albums, such as Neoclassical New Age, is now checked, and one on ten albums can be suggested. Rate Your Music's main genres (Ambient and New Age among them) count as broad and are refined to a subgenre. See [Genre check by sound](docs/genre-check.md).

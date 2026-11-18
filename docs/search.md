@@ -249,16 +249,17 @@ Reversed ranges, empty ranges (`..`), non-finite numbers, out-of-range ratings, 
 
 ### Singles charts on Albums
 
-`sbb:`, `suk:`, `sti:`, and `snt:` search the singles charts in Albums too. An album matches when at least one of its tracks charted as a single in the range:
+`sbb:`, `suk:`, `svg:`, `sti:`, and `snt:` search the singles charts in Albums too. An album matches when at least one of its tracks charted as a single in the range:
 
 | Singles chart | Presence | Absence | Closed range | Lower bound | Upper bound |
 | --- | --- | --- | --- | --- | --- |
 | Billboard | `sbb:yes` | `sbb:no` | `sbb:5..10` | `sbb:5..` | `sbb:..10` |
 | Official UK | `suk:yes` | `suk:no` | `suk:5..10` | `suk:5..` | `suk:..10` |
+| VG-lista | `svg:yes` | `svg:no` | `svg:5..10` | `svg:5..` | `svg:..10` |
 | Ti i skuddet | `sti:yes` | `sti:no` | `sti:5..10` | `sti:5..` | `sti:..10` |
 | Norsktoppen | `snt:yes` | `snt:no` | `snt:5..10` | `snt:5..` | `snt:..10` |
 
-`year:1990 AND sti:5..10` finds albums from 1990 with a track that peaked between 5th and 10th place on Ti i skuddet. `snt:no` finds albums none of whose tracks charted on Norsktoppen. On Songs, the fields are the same as `bb:`, `uk:`, `ti:`, and `nt:`: the song's own singles rank. The ranks follow the same rules as the other chart fields.
+`year:1990 AND sti:5..10` finds albums from 1990 with a track that peaked between 5th and 10th place on Ti i skuddet. `snt:no` finds albums none of whose tracks charted on Norsktoppen. On Songs, the fields are the same as `bb:`, `uk:`, `vg:`, `ti:`, and `nt:`: the song's own singles rank. On Albums, `vg:` still reads the album's own VG-lista album rank, and `svg:` its tracks' VG-lista singles ranks. The ranks follow the same rules as the other chart fields.
 
 ### Prefix and exact matching
 
