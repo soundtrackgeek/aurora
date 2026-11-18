@@ -2918,31 +2918,29 @@ fn discogs_detail(id: &str) -> Result<ReleaseCandidateDetail, String> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let disc_total = rows
-        .iter()
-        .filter_map(|row| text(row, "position").and_then(|value| parse_disc_track(&value).0))
-        .max();
     let playable = rows
         .iter()
         .filter(|row| text(row, "type_").as_deref() != Some("heading"))
         .collect::<Vec<_>>();
-    let total = playable.len() as u32;
+    let positions = discogs_positions(
+        &playable
+            .iter()
+            .map(|row| text(row, "position").unwrap_or_default())
+            .collect::<Vec<_>>(),
+    );
+    let disc_total = positions.iter().filter_map(|position| position.disc).max();
     let tracks = playable
         .into_iter()
+        .zip(positions)
         .enumerate()
-        .map(|(index, row)| {
-            let (disc, position) = text(row, "position")
-                .map(|value| parse_disc_track(&value))
-                .unwrap_or((None, None));
-            ReleaseTrack {
-                title: text(row, "title").unwrap_or_else(|| format!("Track {}", index + 1)),
-                artist: None,
-                track_number: Some(normalize_discogs_track_number(position, index, total)),
-                track_total: Some(total),
-                disc_number: disc,
-                disc_total,
-                duration_ms: text(row, "duration").and_then(|value| parse_duration_ms(&value)),
-            }
+        .map(|(index, (row, position))| ReleaseTrack {
+            title: text(row, "title").unwrap_or_else(|| format!("Track {}", index + 1)),
+            artist: None,
+            track_number: Some(position.track),
+            track_total: Some(position.track_total),
+            disc_number: position.disc,
+            disc_total,
+            duration_ms: text(row, "duration").and_then(|value| parse_duration_ms(&value)),
         })
         .collect::<Vec<_>>();
     let labels = value
@@ -3282,6 +3280,90 @@ fn parse_disc_track(value: &str) -> (Option<u32>, Option<u32>) {
     // Returning no numeric position lets the release-order index become 01, 02, 03….
     (None, None)
 }
+/// Where one playable Discogs row sits on its disc.
+#[derive(Debug, PartialEq, Eq)]
+struct DiscogsPosition {
+    disc: Option<u32>,
+    track: u32,
+    track_total: u32,
+}
+
+/// The sort key of a position without a disc prefix: "7" is (None, 7) and the vinyl "B3" is (Some('B'), 3).
+fn implicit_position_key(value: &str) -> Option<(Option<char>, u32)> {
+    let value = value.trim();
+    let side = value
+        .chars()
+        .next()
+        .filter(char::is_ascii_alphabetic)
+        .map(|side| side.to_ascii_uppercase());
+    let digits = &value[side.map_or(0, char::len_utf8)..];
+    if digits.is_empty() {
+        return side.map(|side| (Some(side), 0));
+    }
+    digits
+        .chars()
+        .all(|character| character.is_ascii_digit())
+        .then(|| digits.parse().ok())
+        .flatten()
+        .map(|number| (side, number))
+}
+
+/// Gives each playable Discogs row a disc and a track number on that disc.
+///
+/// Discogs often lists a 2CD as two headings whose positions both start at 1 ("1"…"10", "1"…"10")
+/// instead of "1-01"…"2-10". When no row names its disc, numbering that restarts (or a vinyl side
+/// that goes back to A) starts the next disc, so both halves are not tagged as tracks 1–10 of one disc.
+fn discogs_positions(positions: &[String]) -> Vec<DiscogsPosition> {
+    let parsed = positions
+        .iter()
+        .map(|value| parse_disc_track(value))
+        .collect::<Vec<_>>();
+    let discs = if parsed.iter().any(|(disc, _)| disc.is_some()) {
+        parsed.iter().map(|(disc, _)| *disc).collect::<Vec<_>>()
+    } else {
+        let mut disc = 1;
+        let mut previous = None;
+        let inferred = positions
+            .iter()
+            .map(|value| {
+                let key = implicit_position_key(value);
+                if let (Some(current), Some(last)) = (key, previous)
+                    && current <= last
+                {
+                    disc += 1;
+                }
+                previous = key.or(previous);
+                disc
+            })
+            .collect::<Vec<_>>();
+        if disc > 1 {
+            inferred.into_iter().map(Some).collect()
+        } else {
+            vec![None; positions.len()]
+        }
+    };
+    let mut totals = HashMap::<Option<u32>, u32>::new();
+    for disc in &discs {
+        *totals.entry(*disc).or_default() += 1;
+    }
+    let mut seen = HashMap::<Option<u32>, usize>::new();
+    parsed
+        .into_iter()
+        .zip(discs)
+        .map(|((_, number), disc)| {
+            let index = seen.entry(disc).or_default();
+            let track_total = totals[&disc];
+            let track = normalize_discogs_track_number(number, *index, track_total);
+            *index += 1;
+            DiscogsPosition {
+                disc,
+                track,
+                track_total,
+            }
+        })
+        .collect()
+}
+
 fn normalize_discogs_track_number(position: Option<u32>, index: usize, total: u32) -> u32 {
     position
         .filter(|position| (1..=total).contains(position))
@@ -3333,6 +3415,93 @@ mod tests {
         assert_eq!(parse_disc_track("3"), (None, Some(3)));
         assert_eq!(parse_disc_track("A1"), (None, None));
         assert_eq!(parse_disc_track("B1"), (None, None));
+    }
+
+    fn positions(values: &[&str]) -> Vec<(Option<u32>, u32, u32)> {
+        discogs_positions(
+            &values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .map(|position| (position.disc, position.track, position.track_total))
+        .collect()
+    }
+
+    #[test]
+    fn discogs_numbering_that_restarts_under_headings_starts_the_next_disc() {
+        // Michael McDermott, Lighthouse On The Shore / East Jesus (2CD): two headings, both numbered 1–10.
+        let values = (1..=10)
+            .chain(1..=10)
+            .map(|number| number.to_string())
+            .collect::<Vec<_>>();
+        let parsed = discogs_positions(&values);
+        assert_eq!(parsed.len(), 20);
+        assert_eq!(
+            parsed[0],
+            DiscogsPosition {
+                disc: Some(1),
+                track: 1,
+                track_total: 10
+            }
+        );
+        assert_eq!(
+            parsed[9],
+            DiscogsPosition {
+                disc: Some(1),
+                track: 10,
+                track_total: 10
+            }
+        );
+        assert_eq!(
+            parsed[10],
+            DiscogsPosition {
+                disc: Some(2),
+                track: 1,
+                track_total: 10
+            }
+        );
+        assert_eq!(
+            parsed[19],
+            DiscogsPosition {
+                disc: Some(2),
+                track: 10,
+                track_total: 10
+            }
+        );
+    }
+
+    #[test]
+    fn discogs_vinyl_sides_that_go_back_to_a_start_the_next_record() {
+        assert_eq!(
+            positions(&["A1", "A2", "B1", "B2", "A1", "B1"]),
+            vec![
+                (Some(1), 1, 4),
+                (Some(1), 2, 4),
+                (Some(1), 3, 4),
+                (Some(1), 4, 4),
+                (Some(2), 1, 2),
+                (Some(2), 2, 2),
+            ]
+        );
+        // A double LP lettered A–D stays one running sequence, as before.
+        assert_eq!(
+            positions(&["A1", "B1", "C1", "D1"]),
+            vec![(None, 1, 4), (None, 2, 4), (None, 3, 4), (None, 4, 4)]
+        );
+    }
+
+    #[test]
+    fn discogs_single_discs_and_explicit_discs_keep_their_numbering() {
+        assert_eq!(
+            positions(&["1", "2", "3"]),
+            vec![(None, 1, 3), (None, 2, 3), (None, 3, 3)]
+        );
+        assert_eq!(
+            positions(&["1-1", "1-2", "2-1"]),
+            vec![(Some(1), 1, 2), (Some(1), 2, 2), (Some(2), 1, 1)]
+        );
     }
 
     #[test]

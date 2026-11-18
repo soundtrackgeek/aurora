@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.76.1] - 2026-11-18
+
+### Fixed
+- The Inbox Album Auto-Tagger now recognises a multi-disc Discogs release whose discs are headed sections numbered from 1 each time (for example the 2CD *Lighthouse On The Shore / East Jesus*). Before, every track got no Disc Number, both discs were tagged as tracks 1–10, and merging the disc folders failed with "Add a Disc Number tag to … before merging this multi-disc release". Restarting numbering, or a vinyl side that goes back to A, now starts the next disc, and each disc gets its own track total. A double LP lettered A–D is still one sequence.
+- When the chosen release has no disc numbers at all, tracks in a multi-folder selection take their Disc Number and Disc Total from the order of the selected disc folders.
+
 ## [0.76.0] - 2026-11-18
 
 ### Added

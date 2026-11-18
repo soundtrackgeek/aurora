@@ -239,6 +239,12 @@ export function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSetti
       return;
     }
     setBusy("apply"); setError(null);
+    // A release without disc numbers still spans several disc folders here (already in disc order),
+    // so each folder supplies its disc number and the folders can be merged on rename.
+    const folderDisc = new Map(albums.length > 1
+      ? albums.flatMap((candidate, index) => candidate.tracks.map((track) => [track.path, index + 1] as const))
+      : []);
+    const folderDiscTotal = albums.length > 1 ? albums.length : null;
     try {
       const trackUpdates = reconciliation.rows.flatMap((match) => {
           if (match.localIndex === null || match.releaseIndex === null || (match.status !== "exact" && match.status !== "likely" && match.status !== "confirmed")) return [];
@@ -256,8 +262,8 @@ export function AlbumAutoTagger({ albums, tracks, discogsConfigured, onOpenSetti
             releaseYear: values.releaseYear ? Number(values.releaseYear) : null,
             trackNumber: releaseTrack?.trackNumber ?? match.releaseIndex + 1,
             trackTotal: releaseTrack?.trackTotal ?? detail.tracks.length,
-            discNumber: discNumber ? Number(discNumber) : releaseTrack?.discNumber ?? null,
-            discTotal: discTotal ? Number(discTotal) : releaseTrack?.discTotal ?? detail.discTotal ?? null,
+            discNumber: discNumber ? Number(discNumber) : releaseTrack?.discNumber ?? folderDisc.get(track.path) ?? null,
+            discTotal: discTotal ? Number(discTotal) : releaseTrack?.discTotal ?? detail.discTotal ?? folderDiscTotal,
           };
           return [{ path: track.path, values: next }];
       });
