@@ -122,14 +122,15 @@ describe("TagEditor", () => {
 
     expect(await screen.findByDisplayValue("America Town")).toBeInTheDocument();
     const genre = screen.getByLabelText("Genre");
-    expect(genre).toHaveAttribute("list", "tag-editor-genre-suggestions");
-    await waitFor(() => expect(document.querySelector(
-      '#tag-editor-genre-suggestions option[value="Electronic"]',
-    )).toBeInTheDocument());
+    expect(genre).toHaveAttribute("role", "combobox");
     expect(screen.getByLabelText("Track title")).toHaveAttribute("placeholder", "Mixed");
     expect(screen.getByLabelText("Write Track title")).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Save 0 fields to 2 MP3s" })).toBeDisabled();
     expect(screen.getByText("2 MP3s")).toBeInTheDocument();
+    fireEvent.change(genre, { target: { value: "elec" } });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "Electronic" }));
+    expect(genre).toHaveValue("Electronic");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("omits an untouched mixed title and sends the full revision snapshot", async () => {

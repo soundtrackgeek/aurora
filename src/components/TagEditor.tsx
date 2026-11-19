@@ -5,6 +5,7 @@ import type { ChangeEvent } from "react";
 import { type Track } from "../library";
 import { selectAlbumCoverImage, type SelectedArtwork } from "../artworkSelection";
 import { loadGenreNames } from "../genres";
+import { GenreSuggestInput } from "./GenreSuggestInput";
 import {
   aggregateEditableTagValues,
   EDITABLE_TAG_FIELDS,
@@ -164,12 +165,12 @@ interface TagFieldProps {
   value: string;
   disabled: boolean;
   error: string | null;
-  suggestionListId?: string;
+  genreSuggestions?: readonly string[];
   onCheck: (field: EditableTagField, checked: boolean) => void;
   onChange: (field: EditableTagField, value: string) => void;
 }
 
-function TagField({ definition, aggregate, checked, value, disabled, error, suggestionListId, onCheck, onChange }: TagFieldProps) {
+function TagField({ definition, aggregate, checked, value, disabled, error, genreSuggestions, onCheck, onChange }: TagFieldProps) {
   const { field, label, kind } = definition;
   const placeholder = aggregate.mixed && !checked
     ? "Mixed"
@@ -206,10 +207,11 @@ function TagField({ definition, aggregate, checked, value, disabled, error, sugg
           <option value="">{aggregate.mixed && !checked ? "Mixed" : "Unrated"}</option>
           {ratingOptions.map((rating) => <option value={rating} key={rating}>{rating.toFixed(1)} stars</option>)}
         </select>
+      ) : field === "genre" && genreSuggestions ? (
+        <GenreSuggestInput {...controlProps} suggestions={genreSuggestions} placeholder={placeholder} />
       ) : (
         <input
           {...controlProps}
-          list={field === "genre" ? suggestionListId : undefined}
           type={kind === "text" ? "text" : "number"}
           inputMode={kind === "text" ? undefined : "numeric"}
           min={kind === "year" ? 1000 : kind === "position" ? 1 : undefined}
@@ -482,9 +484,6 @@ export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, s
           pending={artworkDraft !== null}
           onChoose={() => void chooseArtwork()}
         /> : null}
-        <datalist id="tag-editor-genre-suggestions">
-          {genreSuggestions.map((genre) => <option value={genre} key={genre} />)}
-        </datalist>
         {primaryFields.map((definition) => (
           <TagField
             key={definition.field}
@@ -494,7 +493,7 @@ export function ManualTagEditor({ kind, label, loadSnapshot, onSnapshotLoaded, s
             value={draft[definition.field]}
             disabled={isWorking}
             error={validation[definition.field]}
-            suggestionListId="tag-editor-genre-suggestions"
+            genreSuggestions={genreSuggestions}
             onCheck={checkField}
             onChange={editField}
           />

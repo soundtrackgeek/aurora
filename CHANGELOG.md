@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.76.2] - 2026-11-19
+
+### Fixed
+- Genre suggestions in the Tags editor (sidebar, context dialog and Inbox) and the Album Auto-Tagger match the start of each typed word again, so `alt dan` finds Alternative Dance. The fields used the web engine's built-in `<datalist>` matching, which a WebView2 update narrowed to whole-substring matches. Aurora now has its own suggestion list: exact and leading matches come first, then word-start matches, then other substrings. Case and accents are ignored, and arrow keys, Enter, Escape and mouse clicks work. The Down arrow in an empty field lists every genre.
+
 ## [0.76.1] - 2026-11-18
 
 ### Fixed

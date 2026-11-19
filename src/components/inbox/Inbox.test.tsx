@@ -336,10 +336,10 @@ describe("Inbox", () => {
     expect(await screen.findByRole("dialog", { name: "Album Auto-Tagger" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("MusicBrainz").length).toBeGreaterThan(0));
     const genre = screen.getByRole("combobox", { name: "Genre" });
-    expect(genre).toHaveAttribute("list", "inbox-auto-tagger-genre-suggestions");
-    await waitFor(() => expect(document.querySelector(
-      '#inbox-auto-tagger-genre-suggestions option[value="Electronic"]',
-    )).toBeInTheDocument());
+    const genreBefore = (genre as HTMLInputElement).value;
+    fireEvent.change(genre, { target: { value: "elec" } });
+    expect(await screen.findByRole("option", { name: "Electronic" })).toBeInTheDocument();
+    fireEvent.change(genre, { target: { value: genreBefore } });
     expect(screen.getAllByText("Discogs").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Release title 1")).toHaveValue("Memories Calling");
     expect(screen.getByRole("checkbox", { name: /Rename after tagging/ })).toBeChecked();

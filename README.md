@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.76.2** brings back word-start matching in the Genre fields of the Tags editor and the Album Auto-Tagger. Typing `alt dan` suggests Alternative Dance again: each word you type matches the start of a word in the genre, in order, ignoring case and accents. Aurora now shows its own suggestion list (use the arrow keys and Enter, or click), so a WebView2 update can no longer change how genres match. Press the Down arrow in an empty Genre field to browse every genre.
+
 Aurora **0.76.1** lets the Inbox Album Auto-Tagger recognise a 2CD release that Discogs lists as two headed sections both numbered from 1 (such as Michael McDermott's *Lighthouse On The Shore / East Jesus*). Restarting numbering, or vinyl sides going back to A, now starts the next disc. Each disc gets its own Disc Number and track count, so the disc folders merge on rename instead of failing with "Add a Disc Number tag … before merging this multi-disc release". If a release still has no disc numbers, the tagger uses the selected disc folder each track came from.
 
 Aurora **0.76.0** adds `svg:` for the VG-lista singles chart, alongside `sbb:`, `suk:`, `sti:` and `snt:`. In Albums, `year:1985 AND svg:..10` finds 1985 albums with a track that reached the VG-lista singles top ten; `vg:` still searches the album chart. Aurora NG 0.25.0 has it too. See [Singles charts on Albums](docs/search.md#singles-charts-on-albums).
