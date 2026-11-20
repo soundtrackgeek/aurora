@@ -1,9 +1,11 @@
 import { lazy, Suspense, type ComponentProps } from "react";
 import type { AlbumMoveOperation as AlbumMoveComponent } from "../../components/explorer/AlbumMoveOperation";
+import type { AlbumBatchRemoval as AlbumBatchRemovalComponent } from "../../components/explorer/AlbumBatchRemoval";
 import type { SettingsDialog as SettingsComponent } from "../../components/SettingsDialog";
 import type { TagEditor as TagEditorComponent } from "../../components/TagEditor";
 
 const LazyAlbumMove = lazy(async () => ({ default: (await import("../../components/explorer/AlbumMoveOperation")).AlbumMoveOperation }));
+const LazyAlbumBatchRemoval = lazy(async () => ({ default: (await import("../../components/explorer/AlbumBatchRemoval")).AlbumBatchRemoval }));
 const LazySettings = lazy(async () => ({ default: (await import("../../components/SettingsDialog")).SettingsDialog }));
 const LazyTagEditor = lazy(async () => ({ default: (await import("../../components/TagEditor")).TagEditor }));
 
@@ -13,6 +15,10 @@ function DialogLoading({ label }: { label: string }) {
 
 export function AlbumMoveOperation(props: ComponentProps<typeof AlbumMoveComponent>) {
   return <Suspense fallback={<DialogLoading label="Opening album operation…" />}><LazyAlbumMove {...props} /></Suspense>;
+}
+
+export function AlbumBatchRemoval(props: ComponentProps<typeof AlbumBatchRemovalComponent>) {
+  return <Suspense fallback={<DialogLoading label="Opening album removal…" />}><LazyAlbumBatchRemoval {...props} /></Suspense>;
 }
 
 export function SettingsDialog(props: ComponentProps<typeof SettingsComponent>) {

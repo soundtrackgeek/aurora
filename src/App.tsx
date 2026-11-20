@@ -94,7 +94,8 @@ import type { ChartSelectionContext } from "./components/charts/ChartStudio";
 import { TrackChartInfo } from "./components/charts/TrackChartInfo";
 import { ContentTransition } from "./components/ContentTransition";
 import type { AlbumMoveRequest } from "./components/explorer/AlbumMoveOperation";
-import { AlbumMoveOperation, SettingsDialog, TagEditor } from "./app/components/LazyPanels";
+import type { AlbumBatchRemovalRequest, AlbumBatchRemovalSummary } from "./components/explorer/AlbumBatchRemoval";
+import { AlbumBatchRemoval, AlbumMoveOperation, SettingsDialog, TagEditor } from "./app/components/LazyPanels";
 import {
   type ExplorerAlbum,
   type ExplorerFilters,
@@ -236,6 +237,9 @@ function App() {
   const refreshSavedViews = useCallback(() => { void listSavedViews().then(setSavedViews).catch((error:unknown)=>setPlaylistSaveMessage(String(error))); }, []);
   useEffect(() => { refreshSavedViews(); window.addEventListener("focus",refreshSavedViews); return()=>window.removeEventListener("focus",refreshSavedViews); },[refreshSavedViews]);
   const [albumMoveRequest, setAlbumMoveRequest] = useState<AlbumMoveRequest | null>(null);
+  const [albumBatchRemoval, setAlbumBatchRemoval] = useState<AlbumBatchRemovalRequest | null>(null);
+  // One album operation at a time: Music Library keeps a single pending plan.
+  const albumOperationBusy = albumMoveRequest !== null || albumBatchRemoval !== null;
   const [autoTagAlbum, setAutoTagAlbum] = useState<ExplorerAlbum | null>(null);
   const [renamingAlbumId, setRenamingAlbumId] = useState<string | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
@@ -805,7 +809,7 @@ function App() {
       if (key !== "r" && key !== "t") return;
       if (key === "r") event.preventDefault();
       if (artistPageName || activeNav !== "Albums") return;
-      if (autoTagAlbum || albumMoveRequest || renamingAlbumId) return;
+      if (autoTagAlbum || albumOperationBusy || renamingAlbumId) return;
       const openAlbum = explorerAlbums.find((album) => album.id === selectedAlbumId) ?? null;
       const selected = explorerSelection?.kind === "albums" && explorerSelection.albums.length ? explorerSelection.albums : null;
       if (key === "t" && event.shiftKey) {
@@ -820,7 +824,7 @@ function App() {
     }
     window.addEventListener("keydown", handleAlbumShortcut);
     return () => window.removeEventListener("keydown", handleAlbumShortcut);
-  }, [activeNav, albumMoveRequest, artistPageName, autoTagAlbum, explorerAlbums, explorerSelection, renameAlbumsToMatchTags, renamingAlbumId, selectedAlbumId]);
+  }, [activeNav, albumOperationBusy, artistPageName, autoTagAlbum, explorerAlbums, explorerSelection, renameAlbumsToMatchTags, renamingAlbumId, selectedAlbumId]);
 
   const startBackgroundIntake = useCallback((
     request: LibraryIntakeApplyRequest,
@@ -1178,7 +1182,7 @@ function App() {
     }, "page");
   }
 
-  async function handleAlbumRemoved(albumId: string, warnings: string[], destination: string) {
+  function dropRemovedAlbumFromView(albumId: string) {
     // Invalidate pending requests before removing the row, so stale detail/page responses cannot restore it.
     if (selectedAlbumIdRef.current === albumId) albumRequestRef.current += 1;
     exploreRequestRef.current += 1;
@@ -1192,9 +1196,37 @@ function App() {
     setSelectedAlbumId((current) => current === albumId ? null : current);
     setAlbumTracks((current) => current.filter((track) => track.albumId !== albumId));
     if (selectedTrackRef.current?.albumId === albumId) setSelectedTrack(null);
+  }
+
+  async function handleAlbumRemoved(albumId: string, warnings: string[], destination: string) {
+    dropRemovedAlbumFromView(albumId);
     const message = warnings.length > 0
       ? `Album removed from Music Library. ${warnings.join(" ")}`
       : `Album moved to ${destination} and removed from Music Library.`;
+    try {
+      await refreshCatalogIfChanged();
+      setSyncMessage(message);
+    } catch (error) {
+      setSyncMessage(`${message} Catalog refresh needs a retry: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
+  /** One album keeps the preview-first review; several are reviewed as a list and removed in turn. */
+  function requestAlbumRemoval(albums: readonly ExplorerAlbum[]) {
+    if (albumOperationBusy || albums.length === 0) return;
+    if (albums.length === 1) setAlbumMoveRequest({ album: albums[0], mode: "remove" });
+    else setAlbumBatchRemoval({ albums: albums.map(({ id, title, artist, totalTracks }) => ({ id, title, artist, totalTracks })) });
+  }
+
+  async function handleAlbumBatchFinished(summary: AlbumBatchRemovalSummary) {
+    const message = summary.failure
+      ? `Removed ${summary.removed} of ${summary.total} albums. Stopped at ${summary.failure}`
+      : `Removed ${summary.removed} of ${summary.total} albums to D:\\MUSIC_NOT_ALBUMS.${summary.warnings.length ? ` ${summary.warnings.join(" ")}` : ""}`;
+    if (summary.removed === 0) {
+      setSyncMessage(message);
+      return;
+    }
     try {
       await refreshCatalogIfChanged();
       setSyncMessage(message);
@@ -1281,6 +1313,11 @@ function App() {
   const explorerAlbumInspectorContext = artistPageName === null && explorerViewForDestination(activeNav) !== null && explorerView === "albums"
     ? resolveExplorerAlbumInspectorContext(explorerAlbums, selectedAlbumId, albumTracks, selectedTrack)
     : null;
+  // The inspector's Remove button covers the whole selection when the open album is part of it.
+  const inspectorRemovalAlbums: readonly ExplorerAlbum[] = !explorerAlbumInspectorContext ? []
+    : explorerSelection?.kind === "albums" && explorerSelection.albums.length > 1
+      && explorerSelection.albums.some((album) => album.id === explorerAlbumInspectorContext.album.id)
+      ? explorerSelection.albums : [explorerAlbumInspectorContext.album];
   const selectedInspectorTrack = explorerAlbumInspectorContext
     ? explorerAlbumInspectorContext.track
     : selectedTrack;
@@ -1528,7 +1565,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.76.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.77.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1947,8 +1984,9 @@ function App() {
                       onRequestMoveToInbox={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "inbox" })}
                       onRequestAutoTag={setAutoTagAlbum}
                       onRequestRename={(album) => void renameAlbumToMatchTags(album)}
-                      onRequestRemoveAlbum={(album) => setAlbumMoveRequest((current) => current ?? { album, mode: "remove" })}
-                      albumMoveBusy={albumMoveRequest !== null || renamingAlbumId !== null}
+                      onRequestRemoveAlbum={(album) => requestAlbumRemoval([album])}
+                      onRequestRemoveAlbums={requestAlbumRemoval}
+                      albumMoveBusy={albumOperationBusy || renamingAlbumId !== null}
                       onSelectionChange={(selection) => {
                         setExplorerSelection(selection);
                         setTagSelectionKind(selection.kind === "albums" ? "album" : "track");
@@ -2035,7 +2073,7 @@ function App() {
               ratingDigits={2}
             />
             {albumSonicPanel(explorerAlbumInspectorContext.album.id)}
-            <RemoveAlbumButton disabled={albumMoveRequest !== null} onRequest={() => setAlbumMoveRequest((current) => current ?? { album: explorerAlbumInspectorContext.album, mode: "remove" })} />
+            <RemoveAlbumButton disabled={albumOperationBusy} albumCount={inspectorRemovalAlbums.length} onRequest={() => requestAlbumRemoval(inspectorRemovalAlbums)} />
           </div>
         ) : inspectorView === "album" && activeNav === "Publishers" && selectedPublisherAlbum ? (
           <div className="inspector-scroll">
@@ -2120,6 +2158,7 @@ function App() {
         </Suspense>
       ) : null}
       {albumMoveRequest ? <AlbumMoveOperation request={albumMoveRequest} onDismiss={() => setAlbumMoveRequest(null)} onRemoved={handleAlbumRemoved} /> : null}
+      {albumBatchRemoval ? <AlbumBatchRemoval request={albumBatchRemoval} onDismiss={() => setAlbumBatchRemoval(null)} onAlbumRemoved={dropRemovedAlbumFromView} onFinished={handleAlbumBatchFinished} /> : null}
 
       {queueOpen && (
         <QueuePanel

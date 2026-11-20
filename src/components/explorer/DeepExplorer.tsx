@@ -182,6 +182,8 @@ export interface DeepExplorerProps {
   onRequestAutoTag?: (album: ExplorerAlbum) => void;
   onRequestRename?: (album: ExplorerAlbum) => void;
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
+  /** Removes every selected album; offered in the Albums view toolbar. */
+  onRequestRemoveAlbums?: (albums: readonly ExplorerAlbum[]) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
   onCreatePlaylist?: (selection: ExplorerSelection, smart: boolean) => void;
@@ -1529,6 +1531,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onRequestAutoTag,
     onRequestRename,
     onRequestRemoveAlbum,
+    onRequestRemoveAlbums,
     albumMoveBusy,
     onSelectionChange,
   } = props;
@@ -1684,6 +1687,13 @@ export function DeepExplorer(props: DeepExplorerProps) {
           <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: tracks.filter(t => selectedTrackKeys.has(t.trackKey)) } : { kind: "albums", albums: albums.filter(a => selectedAlbumIds.has(a.id)) }, false)} disabled={loadState !== "ready" || (view === "tracks" ? selectedTrackKeys.size === 0 : selectedAlbumIds.size === 0)}>Create playlist</button>
           <button type="button" onClick={() => props.onCreatePlaylist?.(view === "tracks" ? { kind: "tracks", tracks: [] } : { kind: "albums", albums: [] }, true)}>Create Smart playlist</button>
         </>}
+        {onRequestRemoveAlbums && view === "albums" ? (() => {
+          // Removed albums leave `albums`, so the count never includes an album that is already gone.
+          const selectedAlbums = albums.filter((album) => selectedAlbumIds.has(album.id));
+          return <button type="button" className="deep-explorer-remove-selected" disabled={loadState !== "ready" || albumMoveBusy || selectedAlbums.length === 0} onClick={() => onRequestRemoveAlbums(selectedAlbums)}>
+            <FolderOutput aria-hidden="true" />{selectedAlbums.length > 1 ? `Remove ${selectedAlbums.length} albums` : "Remove album"}
+          </button>;
+        })() : null}
         <SortControl
           view={view}
           current={filters.sort}

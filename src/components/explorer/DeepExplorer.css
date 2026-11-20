@@ -310,3 +310,9 @@
 .album-move-operation svg { width: 16px; height: 16px; flex-shrink: 0; }
 .album-move-operation p { margin: 8px 0; overflow-wrap: anywhere; }
 .album-move-operation button { margin-right: 8px; padding: 6px 12px; color: #e9edf2; background: #172c3d; border: 1px solid #426276; border-radius: 5px; cursor: pointer; }
+.album-batch-removal__list { max-height: 240px; margin: 10px 0 0; padding: 8px 8px 8px 28px; overflow-y: auto; border: 1px solid #2b3a4a; border-radius: 6px; background: #0b111a; }
+.album-batch-removal__list li { margin: 2px 0; overflow-wrap: anywhere; }
+.album-batch-removal__list span { color: #93a4b5; }
+.album-batch-removal__progress { width: 100%; margin: 4px 0 8px; }
+.deep-explorer-filters > .deep-explorer-remove-selected { display: inline-flex; align-items: center; gap: 6px; }
+.deep-explorer-remove-selected svg { width: 13px; height: 13px; }

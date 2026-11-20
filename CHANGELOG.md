@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.77.0] - 2026-11-20
+
+### Added
+- Remove several albums at once. Select albums in Albums with Ctrl+click or Shift+click, then use **Remove N albums** in the toolbar, or **Remove N Albums** in the Album inspector when the open album is part of the selection. One confirmation lists every album, with its track count. Music Library keeps a single pending plan and a removal plan holds one album, so Aurora previews and applies each album in turn: every copy to `D:\MUSIC_NOT_ALBUMS\` is verified before the catalog changes and the original folder is removed. Each removed album leaves the Albums view as it goes, and the catalog refreshes once at the end. The progress card names the album being moved and offers **Stop after this album**. If an album is blocked or fails, the batch stops there and the remaining albums are not touched. A single selected album still opens the usual preview with its source and destination folders.
+
 ## [0.76.2] - 2026-11-19
 
 ### Fixed
