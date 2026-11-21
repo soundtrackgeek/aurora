@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.77.1] - 2026-11-21
+
+### Fixed
+- Removing several albums no longer stops when Music Library is still settling the previous album. Music Library writes a large catalog backup for each removal; right after a commit, the next album's backup could find the database busy and fail with "Music Library database is locked by another operation". No files are removed in that case: the verified copy is deleted and the source stays. Aurora now waits and retries that album with a fresh preview, after 5, 15 and 30 seconds, and the progress card says it is waiting. Any other failure still stops the batch at once.
+
 ## [0.77.0] - 2026-11-20
 
 ### Added

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as ingest from "../../ingest";
 import { AlbumBatchRemoval, type AlbumBatchRemovalRequest } from "./AlbumBatchRemoval";
+import { isLibraryBusyFailure } from "./albumBatchRemovalRetry";
 
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
@@ -91,5 +92,55 @@ describe("removing several albums", () => {
     await waitFor(() => expect(finishFirst).toBeDefined());
     finishFirst();
     await waitFor(() => expect(onFinished).toHaveBeenCalledWith(expect.objectContaining({ removed: 1, stopped: true, failure: null })));
+  });
+
+  const busy = "Music Library could not complete applyBatch: Copied destination folders were removed after exact verification; sources remain: The catalog apply failed; sources remain: Music Library database is locked by another operation; retry the removal after it finishes (transferFailed)";
+
+  it("recognises only Music Library's busy catalog failures as retryable", () => {
+    expect(isLibraryBusyFailure(busy)).toBe(true);
+    expect(isLibraryBusyFailure("The catalog changed while its recovery backup was being prepared; retry the removal")).toBe(true);
+    expect(isLibraryBusyFailure("The removal destination already exists")).toBe(false);
+  });
+
+  it("retries an album with a fresh preview when the catalog was busy, then continues", async () => {
+    const calls: string[] = [];
+    let failOnce = true;
+    vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockImplementation(async (albumId) => {
+      calls.push(`preview:${albumId}`);
+      return preview(albumId);
+    });
+    vi.spyOn(ingest.libraryIntakeAdapter, "apply").mockImplementation(async ({ planId }) => {
+      calls.push(`apply:${planId}`);
+      if (planId === "plan-a2" && failOnce) {
+        failOnce = false;
+        throw new Error(busy);
+      }
+      return applied(planId);
+    });
+    const onFinished = vi.fn().mockResolvedValue(undefined);
+    render(<AlbumBatchRemoval request={request} busyRetryDelaysMs={[0, 0, 0]} onDismiss={vi.fn()} onAlbumRemoved={vi.fn()} onFinished={onFinished} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove 3 Albums" }));
+    await waitFor(() => expect(onFinished).toHaveBeenCalled());
+    expect(calls).toEqual(["preview:a1", "apply:plan-a1", "preview:a2", "apply:plan-a2", "preview:a2", "apply:plan-a2", "preview:a3", "apply:plan-a3"]);
+    expect(onFinished).toHaveBeenCalledWith(expect.objectContaining({ removed: 3, failure: null }));
+  });
+
+  it("does not retry other failures, and gives up after the last busy retry", async () => {
+    vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockImplementation(async (albumId) => preview(albumId));
+    const apply = vi.spyOn(ingest.libraryIntakeAdapter, "apply").mockRejectedValue(new Error(busy));
+    const onFinished = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(<AlbumBatchRemoval request={request} busyRetryDelaysMs={[0, 0]} onDismiss={vi.fn()} onAlbumRemoved={vi.fn()} onFinished={onFinished} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove 3 Albums" }));
+    await waitFor(() => expect(onFinished).toHaveBeenCalledWith(expect.objectContaining({ removed: 0, failure: expect.stringContaining("locked") })));
+    expect(apply).toHaveBeenCalledTimes(3);
+    unmount();
+
+    apply.mockClear();
+    apply.mockRejectedValue(new Error("The removal destination already exists"));
+    const second = vi.fn().mockResolvedValue(undefined);
+    render(<AlbumBatchRemoval request={request} busyRetryDelaysMs={[0, 0]} onDismiss={vi.fn()} onAlbumRemoved={vi.fn()} onFinished={second} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove 3 Albums" }));
+    await waitFor(() => expect(second).toHaveBeenCalled());
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { FolderOutput, LoaderCircle } from "lucide-react";
 import { libraryIntakeAdapter, previewLibraryRemoveAlbum } from "../../ingest";
 import { useLibraryIntakeProgress } from "../inbox/useLibraryIntakeProgress";
+import { BUSY_RETRY_DELAYS_MS, isLibraryBusyFailure } from "./albumBatchRemovalRetry";
 
 export const REMOVED_ALBUMS_FOLDER = "D:\\MUSIC_NOT_ALBUMS";
 
@@ -21,23 +22,28 @@ export interface AlbumBatchRemovalSummary {
 
 type Stage = "review" | "moving" | "completed" | "failed";
 
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+
 /**
  * Music Library keeps one pending plan at a time (a new preview discards an unapplied one) and
  * a removal plan holds exactly one album, so the reviewed selection is removed album by album:
  * preview, then apply, before the next album is touched. Each album keeps the single-album
  * guarantees: the copy is verified before the catalog changes and the original folder goes.
  */
-export function AlbumBatchRemoval({ request, onDismiss, onAlbumRemoved, onFinished }: {
+export function AlbumBatchRemoval({ request, onDismiss, onAlbumRemoved, onFinished, busyRetryDelaysMs = BUSY_RETRY_DELAYS_MS }: {
   request: AlbumBatchRemovalRequest;
   onDismiss: () => void;
   onAlbumRemoved: (albumId: string) => void;
   onFinished: (summary: AlbumBatchRemovalSummary) => Promise<void>;
+  busyRetryDelaysMs?: readonly number[];
 }) {
   const { albums } = request;
   const [stage, setStage] = useState<Stage>("review");
   const [current, setCurrent] = useState<{ index: number; albumId: string; planId: string | null } | null>(null);
   const [removedCount, setRemovedCount] = useState(0);
   const [message, setMessage] = useState("");
+  const [waitMessage, setWaitMessage] = useState<string | null>(null);
   const [stopRequested, setStopRequested] = useState(false);
   const stopRef = useRef(false);
   const running = useRef(false);
@@ -59,20 +65,32 @@ export function AlbumBatchRemoval({ request, onDismiss, onAlbumRemoved, onFinish
     let failure: string | null = null;
     for (const [index, album] of albums.entries()) {
       if (stopRef.current) break;
-      setCurrent({ index, albumId: album.id, planId: null });
-      try {
-        const preview = await previewLibraryRemoveAlbum(album.id);
-        if (!preview.canApply) throw new Error("Music Library blocked the removal preview. No files moved for this album.");
-        setCurrent({ index, albumId: album.id, planId: preview.planId });
-        const result = await libraryIntakeAdapter.apply({ planId: preview.planId, sessionId: preview.sessionId });
-        removed += 1;
-        setRemovedCount(removed);
-        warnings.push(...result.cleanupWarnings.map((warning) => `${describe(album)}: ${warning}`));
-        onAlbumRemoved(album.id);
-      } catch (error) {
-        failure = `${describe(album)}: ${error instanceof Error ? error.message : String(error)}`;
-        break;
+      for (let attempt = 0; ; attempt += 1) {
+        setCurrent({ index, albumId: album.id, planId: null });
+        try {
+          const preview = await previewLibraryRemoveAlbum(album.id);
+          if (!preview.canApply) throw new Error("Music Library blocked the removal preview. No files moved for this album.");
+          setCurrent({ index, albumId: album.id, planId: preview.planId });
+          const result = await libraryIntakeAdapter.apply({ planId: preview.planId, sessionId: preview.sessionId });
+          removed += 1;
+          setRemovedCount(removed);
+          warnings.push(...result.cleanupWarnings.map((warning) => `${describe(album)}: ${warning}`));
+          onAlbumRemoved(album.id);
+          break;
+        } catch (error) {
+          const text = errorMessage(error);
+          const delay = busyRetryDelaysMs[attempt];
+          if (delay === undefined || !isLibraryBusyFailure(text) || stopRef.current) {
+            failure = `${describe(album)}: ${text}`;
+            break;
+          }
+          setCurrent({ index, albumId: album.id, planId: null });
+          setWaitMessage(`Music Library is busy finishing the previous album. Nothing was removed for this one; retrying in ${Math.round(delay / 1000)} s (attempt ${attempt + 2} of ${busyRetryDelaysMs.length + 1}).`);
+          await pause(delay);
+          setWaitMessage(null);
+        }
       }
+      if (failure) break;
     }
     setCurrent(null);
     const stopped = !failure && removed < albums.length;
@@ -85,7 +103,7 @@ export function AlbumBatchRemoval({ request, onDismiss, onAlbumRemoved, onFinish
     try {
       await onFinished(summary);
     } catch (error) {
-      text += ` Aurora could not refresh the catalog: ${error instanceof Error ? error.message : String(error)}`;
+      text += ` Aurora could not refresh the catalog: ${errorMessage(error)}`;
       failure ??= "refresh";
     }
     setMessage(text);
@@ -113,7 +131,7 @@ export function AlbumBatchRemoval({ request, onDismiss, onAlbumRemoved, onFinish
       <strong>{stage === "moving" ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FolderOutput aria-hidden="true" />}{label}</strong>
       {stage === "moving" && active && current ? <>
         <p>Album {current.index + 1} of {albums.length} · {describe(active)}</p>
-        <p>{liveMessage}</p>
+        <p>{waitMessage ?? liveMessage}</p>
         <progress className="album-batch-removal__progress" max={albums.length} value={removedCount} aria-label={`${removedCount} of ${albums.length} albums removed`} />
         <button type="button" disabled={stopRequested} onClick={requestStop}>{stopRequested ? "Stopping after this album…" : "Stop after this album"}</button>
       </> : <p>{message}</p>}
