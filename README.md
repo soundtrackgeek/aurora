@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.77.2** publishes releases faster. The release workflow now verifies and builds the installers in parallel, and the Rust build cache survives GitHub runner image updates, so a new version should reach in-app updates in about 10 minutes instead of 15 to 50.
+
 Aurora **0.77.1** keeps a multi-album removal going when Music Library is still busy with the previous album. If the next album's catalog backup finds the database locked, nothing is removed for that album. Aurora waits 5, 15 and then 30 seconds, says so on the progress card, and tries that album again with a fresh preview. Other errors still stop the batch.
 
 Aurora **0.77.0** removes several albums at once. In Albums, select albums with Ctrl+click or Shift+click, then choose **Remove N albums** in the toolbar, or **Remove N Albums** in the Album inspector when the open album is part of the selection. A confirmation lists every selected album. Aurora then moves them to `D:\MUSIC_NOT_ALBUMS\` one at a time, with the same verified copy and Music Library update as **Remove Album**, and refreshes the catalog once at the end. A progress card shows which album is moving; **Stop after this album** ends the batch cleanly. If an album cannot be removed, Aurora stops there and the albums after it stay in the library. Choosing a single album keeps the usual preview with its source and destination folders.
@@ -953,7 +955,7 @@ npm run tauri -- build
 
 ## Releases and in-app updates
 
-Every successful push to `master` runs verification first, then builds a Windows NSIS setup executable, signs the updater artifact, creates the matching SemVer tag and GitHub Release, and uploads `latest.json`. The workflow can also be started manually to retry publication of the current version.
+Every successful push to `master` that changes the version runs the verification gate on Windows and macOS while it builds the Windows NSIS setup executable and the signed, notarized macOS universal app in parallel. Only when every verification and build job passes does it sign the updater artifacts, create the matching SemVer tag and GitHub Release, and upload `latest.json`. The Rust caches leave out rust-cache's environment hash, so a runner image that ships a newer preinstalled Rust does not force a full rebuild; the pinned `rust-toolchain.toml` is still part of each key. The workflow can also be started manually to retry publication of the current version.
 
 Before pushing a new version:
 

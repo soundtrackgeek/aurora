@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.77.2] - 2026-11-21
+
+### Changed
+- Releases publish sooner. The release workflow now runs the verification gate (lint, frontend and release-asset tests, frontend build, `cargo fmt`, Clippy and Rust tests) in its own Windows and macOS jobs, alongside the installer builds, instead of before them in the same job. Publishing still waits for every verification and build job to pass.
+- The Rust build caches in CI and the release workflow no longer include rust-cache's environment hash. That hash covers every Rust toolchain on the runner image, so the macOS image's update to a newer preinstalled Rust (1.100.0) dropped the macOS cache and the 0.77.1 release compiled from scratch in 52 minutes instead of about 15. The pinned `rust-toolchain.toml` is still part of the cache key.
+
 ## [0.77.1] - 2026-11-21
 
 ### Fixed
