@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.78.2** makes multi-album removal steadier. With Music Library 0.218.4, Music Library's background maintenance after each removal (smart playlists and catalog optimize) makes the next album wait for it instead of failing with "database is locked". Aurora also retries an album whose preview finds the catalog busy, waiting up to 60 seconds between attempts.
+
 Aurora **0.77.2** publishes releases faster. The release workflow now verifies and builds the installers in parallel, and the Rust build cache survives GitHub runner image updates, so a new version should reach in-app updates in about 10 minutes instead of 15 to 50.
 
 Aurora **0.77.1** keeps a multi-album removal going when Music Library is still busy with the previous album. If the next album's catalog backup finds the database locked, nothing is removed for that album. Aurora waits 5, 15 and then 30 seconds, says so on the progress card, and tries that album again with a fresh preview. Other errors still stop the batch.

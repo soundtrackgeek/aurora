@@ -99,6 +99,8 @@ describe("removing several albums", () => {
   it("recognises only Music Library's busy catalog failures as retryable", () => {
     expect(isLibraryBusyFailure(busy)).toBe(true);
     expect(isLibraryBusyFailure("The catalog changed while its recovery backup was being prepared; retry the removal")).toBe(true);
+    expect(isLibraryBusyFailure("Music Library could not complete previewRemoveAlbum: database is locked: Error code 5: The database file is locked (databaseBusy)")).toBe(true);
+    expect(isLibraryBusyFailure("Another Aurora album intake is already running")).toBe(true);
     expect(isLibraryBusyFailure("The removal destination already exists")).toBe(false);
   });
 
@@ -142,5 +144,22 @@ describe("removing several albums", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove 3 Albums" }));
     await waitFor(() => expect(second).toHaveBeenCalled());
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an album whose preview found the catalog locked", async () => {
+    let failOnce = true;
+    const previewSpy = vi.spyOn(ingest, "previewLibraryRemoveAlbum").mockImplementation(async (albumId) => {
+      if (albumId === "a3" && failOnce) {
+        failOnce = false;
+        throw new Error("Music Library could not complete previewRemoveAlbum: database is locked: Error code 5: The database file is locked (databaseBusy)");
+      }
+      return preview(albumId);
+    });
+    vi.spyOn(ingest.libraryIntakeAdapter, "apply").mockImplementation(async ({ planId }) => applied(planId));
+    const onFinished = vi.fn().mockResolvedValue(undefined);
+    render(<AlbumBatchRemoval request={request} busyRetryDelaysMs={[0]} onDismiss={vi.fn()} onAlbumRemoved={vi.fn()} onFinished={onFinished} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove 3 Albums" }));
+    await waitFor(() => expect(onFinished).toHaveBeenCalledWith(expect.objectContaining({ removed: 3, failure: null })));
+    expect(previewSpy.mock.calls.map(([id]) => id)).toEqual(["a1", "a2", "a3", "a3"]);
   });
 });

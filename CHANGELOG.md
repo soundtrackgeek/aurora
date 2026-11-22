@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.78.2] - 2026-11-22
+
+### Fixed
+- A multi-album removal now also retries an album when Music Library's preview finds the catalog locked ("database is locked … (databaseBusy)"), not only when the removal itself does, and when another Music Library process holds the album workflow. Retries now wait 5, 15, 30 and 60 seconds. The cause was Music Library's background maintenance after each removal (smart playlist refresh and catalog optimize), which wrote to the catalog without making Aurora wait. Music Library 0.218.4 fixes that at the source, so with it these retries should rarely be needed.
+
 ## [0.78.1] - 2026-11-22
 
 ### Fixed
