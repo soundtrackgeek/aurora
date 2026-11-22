@@ -558,6 +558,9 @@ describe("DeepExplorer", () => {
 
     expect(screen.getAllByLabelText("Album rating 4.33 out of 5 stars")).toHaveLength(2);
     expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
+    // The card keeps only the stars, so Score and Rank fit on narrow cards; Album Detail keeps the value.
+    expect(document.querySelector(".deep-explorer-album__metrics .deep-explorer-album-rating")).not.toHaveTextContent("4.33");
+    expect(document.querySelector(".deep-explorer-album-score .deep-explorer-album-rating")).toHaveTextContent("4.33");
     expect(screen.getByText("Score 412.49")).toBeInTheDocument();
     expect(screen.getByText("Album Score 412.49")).toBeInTheDocument();
     expect(screen.getByText((_, element) => (

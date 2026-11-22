@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.78.1] - 2026-11-22
+
+### Fixed
+- Album cards show the Album Rating as stars only, without the number, so the stars, Score and Rank fit on one line at every card size. On narrow cards the number used to overflow onto the Score. Hovering over the stars shows the exact rating, and Album Detail still shows it next to the stars.
+
 ## [0.78.0] - 2026-11-22
 
 ### Added

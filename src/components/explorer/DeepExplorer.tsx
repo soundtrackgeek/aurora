@@ -435,12 +435,15 @@ function AlbumNamingBadge({ naming }: { naming: AlbumNamingCheck | undefined }) 
   );
 }
 
-function AlbumRatingStars({ rating }: { rating: number | null }) {
+/** Album cards show the stars alone; the exact value stays in the label and tooltip. */
+function AlbumRatingStars({ rating, showValue = true }: { rating: number | null; showValue?: boolean }) {
   const visualRating = rating === null ? 0 : Math.round(rating * 2) / 2;
+  const label = rating === null ? "Album unrated" : `Album rating ${rating.toFixed(2)} out of 5 stars`;
   return (
     <span
       className={`deep-explorer-album-rating${rating === null ? " is-unrated" : ""}`}
-      aria-label={rating === null ? "Album unrated" : `Album rating ${rating.toFixed(2)} out of 5 stars`}
+      aria-label={label}
+      title={showValue ? undefined : label}
     >
       <span className="deep-explorer-album-rating__stars" aria-hidden="true">
         {[1, 2, 3, 4, 5].map((star) => {
@@ -453,7 +456,7 @@ function AlbumRatingStars({ rating }: { rating: number | null }) {
           );
         })}
       </span>
-      <span>{rating === null ? "—" : rating.toFixed(2)}</span>
+      {showValue ? <span>{rating === null ? "—" : rating.toFixed(2)}</span> : null}
     </span>
   );
 }
@@ -1217,7 +1220,7 @@ function AlbumGrid({
                   </small>
                   {chartRanks?.[album.id]?.length ? <span className="deep-explorer-album__charts"><CatalogChartRanks kind="album" ranks={chartRanks[album.id]} /></span> : null}
                   <span className="deep-explorer-album__metrics">
-                    <AlbumRatingStars rating={album.rating} />
+                    <AlbumRatingStars rating={album.rating} showValue={false} />
                     <span aria-hidden="true">·</span>
                     <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(2)}`}>
                       Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}
