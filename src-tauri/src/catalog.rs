@@ -1883,7 +1883,7 @@ const EXACT_TEXT_COLUMNS: [&str; 6] = [
     "title",
 ];
 
-const SCORE_GENRE_GROUP: [&str; 13] = [
+pub(crate) const SCORE_GENRE_GROUP: [&str; 13] = [
     "action",
     "animation",
     "comedy",

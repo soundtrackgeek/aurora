@@ -39,7 +39,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type AlbumNamingCheck, type Artist, type CatalogGroupHeading, type Track, type YearBasis } from "../../library";
+import { albumRankPool, displayTrackArtist, formatCount, formatDuration, officialSingleLabel, type AlbumNamingCheck, type AlbumRankPool, type Artist, type CatalogGroupHeading, type Track, type YearBasis } from "../../library";
 import { Artwork } from "../Artwork";
 import { ArtistSmartLink } from "../ArtistSmartLink";
 import { ArtistPortrait } from "../ArtistPortrait";
@@ -132,6 +132,8 @@ export interface ExplorerAlbum {
   lovedTracks: number;
   ratedTracks: number;
   albumScore: number | null;
+  /** Place by Album Score among the original year's albums in the same genre pool. */
+  yearRank?: number | null;
   naming?: AlbumNamingCheck;
 }
 
@@ -452,6 +454,26 @@ function AlbumRatingStars({ rating }: { rating: number | null }) {
         })}
       </span>
       <span>{rating === null ? "—" : rating.toFixed(2)}</span>
+    </span>
+  );
+}
+
+const RANK_POOL_LABELS: Record<AlbumRankPool, string> = {
+  scores: "scores",
+  soundtrack: "soundtracks",
+  general: "albums, excluding scores and soundtracks",
+};
+
+/** The album's place by Album Score among its original year's albums in the same genre pool. */
+function AlbumYearRank({ album }: { album: ExplorerAlbum }) {
+  const rank = album.yearRank ?? null;
+  const year = album.originalYear ?? null;
+  const label = rank === null || year === null
+    ? "Rank unavailable"
+    : `Rank ${rank} by Album Score among ${year} ${RANK_POOL_LABELS[albumRankPool(album.genre)]}`;
+  return (
+    <span className="deep-explorer-album-rank" aria-label={label} title={label}>
+      Rank {rank === null ? "—" : rank}
     </span>
   );
 }
@@ -1200,6 +1222,8 @@ function AlbumGrid({
                     <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(2)}`}>
                       Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}
                     </span>
+                    <span aria-hidden="true">·</span>
+                    <AlbumYearRank album={album} />
                   </span>
                 </span>
                 <ChevronRight aria-hidden="true" />
@@ -1348,6 +1372,8 @@ function AlbumDetail({
             <AlbumRatingStars rating={album.rating} />
             <span aria-hidden="true">·</span>
             <span><Gauge aria-hidden="true" /> Album Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}</span>
+            <span aria-hidden="true">·</span>
+            <AlbumYearRank album={album} />
           </span>
         </div>
         {onRequestRemoveAlbum || onRequestMoveToInbox || onRequestAutoTag || renameOffer ? <div className="deep-explorer-album-actions">

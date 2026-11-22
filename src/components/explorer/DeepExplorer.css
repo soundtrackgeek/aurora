@@ -212,6 +212,7 @@
 .deep-explorer-album-rating__empty { fill: transparent; }
 .deep-explorer-album-rating__fill { color: #e6bc68; fill: currentColor; }
 .deep-explorer-album-rating__star.is-half .deep-explorer-album-rating__fill { clip-path: inset(0 50% 0 0); }
+.deep-explorer-album-rank { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 
 .deep-explorer-album-detail { grid-column: 1 / -1; min-width: 0; margin: 4px -10px 8px; overflow: visible; border-top: 1px solid var(--explorer-border-strong); border-bottom: 1px solid var(--explorer-border); background: rgba(5, 11, 17, .82); box-shadow: inset 0 14px 28px rgba(0, 0, 0, .18); }
 .deep-explorer-album-detail > header { position: sticky; z-index: 3; top: 0; display: grid; grid-template-columns: var(--aurora-album-detail-cover) 1fr auto auto; gap: 12px; align-items: center; min-height: calc(var(--aurora-album-detail-cover) + 24px); padding: 12px; border-bottom: 1px solid var(--explorer-border); background: rgba(8, 15, 23, .96); backdrop-filter: blur(12px); }

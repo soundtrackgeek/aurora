@@ -158,7 +158,7 @@ pub(crate) struct AlbumPageRequest {
     pub(crate) random_seed: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AlbumSummary {
     pub(crate) id: String,
@@ -177,6 +177,8 @@ pub(crate) struct AlbumSummary {
     pub(crate) duration_seconds: i64,
     pub(crate) rating: Option<f64>,
     pub(crate) album_score: Option<f64>,
+    /// Place by Album Score among the original year's albums in the same genre pool.
+    pub(crate) year_rank: Option<u32>,
     pub(crate) formats: Vec<String>,
     pub(crate) avg_bitrate_kbps: Option<f64>,
     /// Whether the folder and track files follow the tags; set on Albums view pages.
@@ -1118,6 +1120,7 @@ fn map_album_row(row: &Row<'_>) -> rusqlite::Result<AlbumSummary> {
         duration_seconds: row.get(8)?,
         rating: effective_rating.map(|rating| rating / 20.0),
         album_score: row.get(9)?,
+        year_rank: None,
         formats: match row.as_ref().column_index("formats") {
             Ok(index) => row
                 .get::<_, Option<String>>(index)?
@@ -1401,6 +1404,7 @@ fn album_page_from_connection(
     for album in &mut items {
         album.naming = naming.remove(&album.id);
     }
+    crate::album_rank::attach(connection, &mut items)?;
     Ok(AlbumPage {
         items,
         next_cursor,
@@ -1806,6 +1810,7 @@ fn album_detail_with_file_refresh(
         album.rating = live.effective_rating;
         album.album_score = live.album_score;
     }
+    crate::album_rank::attach(connection, std::slice::from_mut(&mut album))?;
     album.naming = crate::library_naming::check_albums(connection, &[album_id]).remove(album_id);
     Ok(AlbumDetail {
         album,
@@ -1813,6 +1818,19 @@ fn album_detail_with_file_refresh(
         tracks_truncated,
         popularity: crate::lastfm::AlbumPopularity::default(),
     })
+}
+
+/// Fresh year ranks for albums already on screen, read through saved rating edits.
+pub(crate) fn load_album_year_ranks(
+    album_ids: Vec<String>,
+    store: &StateStore,
+) -> Result<std::collections::HashMap<String, Option<u32>>, String> {
+    if album_ids.len() > 2_000 {
+        return Err("Too many albums to rank at once.".to_owned());
+    }
+    let connection = open_catalog(&default_catalog_path()?)?;
+    crate::catalog::attach_local_aurora_state(&connection, store)?;
+    crate::album_rank::ranks_for_ids(&connection, &album_ids)
 }
 
 pub(crate) fn load_artist_detail(

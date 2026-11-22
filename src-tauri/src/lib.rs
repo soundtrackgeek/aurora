@@ -1,4 +1,5 @@
 mod album_naming;
+mod album_rank;
 mod artist_discovery;
 mod artist_identity;
 mod artwork;
@@ -683,6 +684,19 @@ async fn album_detail(
     })
     .await
     .map_err(|error| format!("The album detail worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn album_year_ranks(
+    app: AppHandle,
+    album_ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, Option<u32>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<StateStore>();
+        explorer::load_album_year_ranks(album_ids, &store)
+    })
+    .await
+    .map_err(|error| format!("The album rank worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -2550,6 +2564,7 @@ pub fn run() {
             explore_albums,
             explore_artists,
             album_detail,
+            album_year_ranks,
             album_popularity,
             track_popularity,
             delete_album_track,

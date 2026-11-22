@@ -238,6 +238,8 @@ export interface AlbumSummary {
   durationSeconds: number | null;
   rating: number | null;
   albumScore: number | null;
+  /** Place by Album Score among the original year's albums in the same genre pool. */
+  yearRank?: number | null;
   formats?: string[];
   avgBitrateKbps?: number | null;
   naming?: AlbumNamingCheck;
@@ -545,7 +547,41 @@ export async function searchLibraryTracks(query: string): Promise<Track[]> {
   return invoke<Track[]>("search_tracks", { query });
 }
 
+/** Genres under the Scores umbrella; `genre:scores` expands to the same list. */
+export const SCORE_UMBRELLA_GENRES: ReadonlySet<string> = new Set([
+  "action", "animation", "comedy", "documentary", "drama", "fantasy", "horror",
+  "sci-fi", "thriller", "tv", "video game", "western", "anime",
+]);
+
+export type AlbumRankPool = "scores" | "soundtrack" | "general";
+
+/** Scores rank among scores, soundtracks among soundtracks, everything else together. */
+export function albumRankPool(genre: string | null | undefined): AlbumRankPool {
+  const normalized = (genre ?? "").trim().toLowerCase();
+  if (SCORE_UMBRELLA_GENRES.has(normalized)) return "scores";
+  return normalized === "soundtrack" ? "soundtrack" : "general";
+}
+
+/** Competition ranks (1, 2, 2, 4) by Album Score within each original year and pool. */
+export function withAlbumYearRanks<T extends AlbumSummary>(albums: readonly T[]): T[] {
+  return albums.map((album) => {
+    const year = album.originalYear ?? null;
+    if (album.albumScore === null || year === null) return { ...album, yearRank: null };
+    const pool = albumRankPool(album.genre);
+    const higher = albums.filter((other) => other.id !== album.id
+      && (other.originalYear ?? null) === year
+      && other.albumScore !== null
+      && albumRankPool(other.genre) === pool
+      && other.albumScore > album.albumScore! + 1e-9).length;
+    return { ...album, yearRank: higher + 1 };
+  });
+}
+
 function browserAlbumSummaries(): AlbumSummary[] {
+  return withAlbumYearRanks(browserAlbumSummaryRows());
+}
+
+function browserAlbumSummaryRows(): AlbumSummary[] {
   const groups = new Map<string, Track[]>();
   for (const track of browserPreview.tracks) {
     if (!track.albumId) continue;
@@ -747,6 +783,18 @@ export async function loadAlbumDetail(albumId: string, options: { localOnly?: bo
     return { album, tracks: applyAlbumPopularity(tracks, popularity), tracksTruncated: false, popularity };
   }
   return invoke<AlbumDetail>("album_detail", { albumId, localOnly: options.localOnly ?? false });
+}
+
+/** Current year ranks for albums on screen, keyed by album ID. */
+export async function loadAlbumYearRanks(albumIds: readonly string[]): Promise<Record<string, number | null>> {
+  if (albumIds.length === 0) return {};
+  if (!isTauriRuntime()) {
+    const wanted = new Set(albumIds);
+    return Object.fromEntries(browserAlbumSummaries()
+      .filter((album) => wanted.has(album.id))
+      .map((album) => [album.id, album.yearRank ?? null]));
+  }
+  return invoke<Record<string, number | null>>("album_year_ranks", { albumIds: [...albumIds] });
 }
 
 export async function loadAlbumPopularity(albumId: string): Promise<AlbumPopularity> {

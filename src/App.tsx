@@ -60,6 +60,7 @@ import { useRatingsDomain } from "./app/domains/useRatingsDomain";
 import { useYearsDomain } from "./app/domains/useYearsDomain";
 import { explorerCountKey, explorerRequestKey } from "./app/explorer/explorerQueries";
 import { useExplorerResults } from "./app/explorer/useExplorerResults";
+import { useAlbumRankRefresh } from "./app/explorer/useAlbumRankRefresh";
 import { useExplorerWorkspace } from "./app/explorer/useExplorerWorkspace";
 import { useInspectorMetadata } from "./app/inspector/useInspectorMetadata";
 import { useTrackPopularity } from "./app/inspector/useTrackPopularity";
@@ -244,6 +245,7 @@ function App() {
   const [renamingAlbumId, setRenamingAlbumId] = useState<string | null>(null);
   const [initialViewPreferences] = useState(loadViewPreferences);
   const explorerWorkspace = useExplorerWorkspace(initialViewPreferences);
+  useAlbumRankRefresh(explorerWorkspace.explorerAlbums, explorerWorkspace.setExplorerAlbums);
   const {
     explorerView,
     setExplorerView,
@@ -1565,7 +1567,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.77.2</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.78.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.78.0] - 2026-11-22
+
+### Added
+- **Rank** on album cards and in Album Detail, after the Album Rating and Score: the album's place by Album Score among the albums of its original year (`Rank 1` is the year's highest score). Only the Album Score counts, never the Album Rating. Albums under the Scores umbrella are ranked only against other scores, Soundtrack albums only against other soundtracks, and everything else against the rest of the library without scores and soundtracks. Equal scores share a rank. Rank reads saved rating and genre edits that Music Library has not caught up with yet, so it moves with the Score: after a rating change, every album of that year on screen is ranked again.
+
 ## [0.77.2] - 2026-11-21
 
 ### Changed
