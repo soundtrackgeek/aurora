@@ -1220,15 +1220,14 @@ function AlbumGrid({
                     <ArtistSmartLink artist={album.artist} albumId={album.id} onOpen={onOpenArtistAlbums} nested />
                   </span>
                   <small className="deep-explorer-album__metadata">
-                    {album.originalYear ?? "Year unknown"} <span aria-hidden="true">—</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">—</span> {album.publisher ?? "Publisher unknown"}
+                    {album.originalYear ?? "Year unknown"} <span aria-hidden="true">·</span> {album.genre ?? "Genre unknown"} <span aria-hidden="true">·</span> {album.publisher ?? "Publisher unknown"}
                   </small>
                   <small className="deep-explorer-album__length">
-                    {formatCount(album.totalTracks)} tracks <span aria-hidden="true">—</span> {formatDuration(album.durationSeconds)}
+                    {formatCount(album.totalTracks)} tracks <span aria-hidden="true">·</span> {formatDuration(album.durationSeconds)} <span aria-hidden="true">·</span>{" "}
+                    <AlbumRatingStars rating={album.rating} showValue={false} />
                   </small>
                   {chartRanks?.[album.id]?.length ? <span className="deep-explorer-album__charts"><CatalogChartRanks kind="album" ranks={chartRanks[album.id]} /></span> : null}
                   <span className="deep-explorer-album__metrics">
-                    <AlbumRatingStars rating={album.rating} showValue={false} />
-                    <span aria-hidden="true">·</span>
                     <span aria-label={album.albumScore === null ? "Album Score unavailable" : `Album Score ${album.albumScore.toFixed(2)}`}>
                       Score {album.albumScore === null ? "—" : album.albumScore.toFixed(2)}
                     </span>

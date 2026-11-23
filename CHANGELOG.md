@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.78.5] - 2026-11-23
+
+### Fixed
+- Album cards no longer cut off Rank when an Album Score passes 100. The rating stars moved up beside the track count and length ("10 tracks · 37:13 · ★★★★½"), so the bottom line holds only Score and Rank. The year, genre and publisher line and the tracks line now use short `·` separators instead of long dashes.
+
 ## [0.78.4] - 2026-11-23
 
 ### Fixed

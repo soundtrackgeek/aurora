@@ -571,18 +571,19 @@ describe("DeepExplorer", () => {
 
     expect(screen.getAllByLabelText("Album rating 4.33 out of 5 stars")).toHaveLength(2);
     expect(document.querySelectorAll(".deep-explorer-album-rating__star.is-half")).toHaveLength(2);
-    // The card keeps only the stars, so Score and Rank fit on narrow cards; Album Detail keeps the value.
-    expect(document.querySelector(".deep-explorer-album__metrics .deep-explorer-album-rating")).not.toHaveTextContent("4.33");
+    // The card shows only the stars, beside the track count and length, so Score and Rank fit on their own line.
+    expect(document.querySelector(".deep-explorer-album__length .deep-explorer-album-rating")).not.toHaveTextContent("4.33");
+    expect(document.querySelector(".deep-explorer-album__metrics .deep-explorer-album-rating")).toBeNull();
     expect(document.querySelector(".deep-explorer-album-score .deep-explorer-album-rating")).toHaveTextContent("4.33");
     expect(screen.getByText("Score 412.49")).toBeInTheDocument();
     expect(screen.getByText("Album Score 412.49")).toBeInTheDocument();
     expect(screen.getByText((_, element) => (
       element?.classList.contains("deep-explorer-album__metadata") === true
-      && element.textContent?.replace(/\s+/g, " ").trim() === "1985 — Synthwave — EMI Records"
+      && element.textContent?.replace(/\s+/g, " ").trim() === "1985 · Synthwave · EMI Records"
     ))).toBeVisible();
     expect(screen.getByText((_, element) => (
       element?.classList.contains("deep-explorer-album__length") === true
-      && element.textContent?.replace(/\s+/g, " ").trim() === "12 tracks — 47:24"
+      && element.textContent?.replace(/\s+/g, " ").trim() === "12 tracks · 47:24 ·"
     ))).toBeVisible();
     const albumDetail = screen.getByRole("complementary", { name: "Night Geometry album details" });
     expect(within(albumDetail).getByText((_, element) => (

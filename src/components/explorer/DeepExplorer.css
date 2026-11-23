@@ -201,6 +201,8 @@
 .deep-explorer-album__artist > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .deep-explorer-album__artist .aurora-country-flag { width: 16px; }
 .deep-explorer-album__copy small { margin-top: 3px; color: #697789; font-size: max(var(--aurora-font-min), calc(8px + var(--aurora-font-offset))); }
+.deep-explorer-album__copy > .deep-explorer-album__length { display: flex; align-items: center; gap: 4px; }
+.deep-explorer-album__length > .deep-explorer-album-rating { flex: 0 0 auto; }
 .deep-explorer-album__copy > .deep-explorer-album__charts { display: flex; align-items: center; margin-top: 4px; overflow: hidden; }
 .deep-explorer-album__charts .catalog-chart-ranks--album { margin-left: 0; }
 .deep-explorer-album__copy > .deep-explorer-album__metrics { display: flex; align-items: center; gap: 3px; margin-top: 5px; overflow: hidden; color: #8896a5; font-size: max(var(--aurora-font-min), calc(7px + var(--aurora-font-offset))); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -212,7 +214,6 @@
 .deep-explorer-album-rating__empty { fill: transparent; }
 .deep-explorer-album-rating__fill { color: #e6bc68; fill: currentColor; }
 .deep-explorer-album-rating__star.is-half .deep-explorer-album-rating__fill { clip-path: inset(0 50% 0 0); }
-.deep-explorer-album__metrics > .deep-explorer-album-rating { flex: 0 0 auto; }
 .deep-explorer-album-rank { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .deep-explorer-album-rank.is-complete { color: #78d5a1; }
 
