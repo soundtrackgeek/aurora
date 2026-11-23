@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.78.3] - 2026-11-23
+
+### Changed
+- Rank now counts only fully rated albums (every track rated, 100% complete), matching the Album Score chart. An album still being rated is placed among the finished albums of its year, so its Rank moves live as you rate it, but it never pushes a finished album down until it is finished itself.
+- Rank turns green once every track of the album is rated, so a final Rank stands apart from a provisional one. Hovering over a provisional Rank says so.
+
 ## [0.78.2] - 2026-11-22
 
 ### Fixed

@@ -24,6 +24,18 @@ describe("album year ranks", () => {
     });
   });
 
+  it("ranks every album among the fully rated ones only", () => {
+    const partial = { ...album("partial", 2026, "Rock", 400), ratedTracks: 1 };
+    const ranks = Object.fromEntries(withAlbumYearRanks([
+      partial,
+      album("done-high", 2026, "Rock", 9),
+      album("done-low", 2026, "Rock", 3),
+      { ...album("partial-mid", 2026, "Rock", 5), ratedTracks: 4 },
+    ]).map((entry) => [entry.id, entry.yearRank]));
+    // A partly rated album never pushes a finished one down.
+    expect(ranks).toEqual({ partial: 1, "done-high": 1, "done-low": 2, "partial-mid": 2 });
+  });
+
   it("keeps scores and soundtracks in their own pools", () => {
     const ranks = Object.fromEntries(withAlbumYearRanks([
       album("pop", 2026, "Pop", 4),

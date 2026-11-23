@@ -544,6 +544,19 @@ describe("DeepExplorer", () => {
     expect(albumTracks.getByRole("row", { name: /Third/ })).not.toHaveTextContent("💿");
   });
 
+  it("shows Rank in green only once every track of the album is rated", () => {
+    const partial: ExplorerAlbum = { ...albums[0], yearRank: 3 };
+    const { rerender } = render(<DeepExplorer {...explorerProps({ view: "albums", albums: [partial] })} />);
+    const rank = () => document.querySelector(".deep-explorer-album__metrics .deep-explorer-album-rank");
+    expect(rank()).toHaveTextContent("Rank 3");
+    expect(rank()).not.toHaveClass("is-complete");
+    expect(rank()).toHaveAttribute("title", expect.stringContaining("provisional"));
+
+    rerender(<DeepExplorer {...explorerProps({ view: "albums", albums: [{ ...partial, ratedTracks: partial.totalTracks }] })} />);
+    expect(rank()).toHaveClass("is-complete");
+    expect(rank()).toHaveAttribute("title", expect.not.stringContaining("provisional"));
+  });
+
   it("shows two-decimal Album Rating and Album Score together on album cards and detail", () => {
     render(
       <DeepExplorer

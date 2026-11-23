@@ -238,7 +238,7 @@ export interface AlbumSummary {
   durationSeconds: number | null;
   rating: number | null;
   albumScore: number | null;
-  /** Place by Album Score among the original year's albums in the same genre pool. */
+  /** Place by Album Score among the original year's fully rated albums in the same genre pool. */
   yearRank?: number | null;
   formats?: string[];
   avgBitrateKbps?: number | null;
@@ -571,6 +571,7 @@ export function withAlbumYearRanks<T extends AlbumSummary>(albums: readonly T[])
     const higher = albums.filter((other) => other.id !== album.id
       && (other.originalYear ?? null) === year
       && other.albumScore !== null
+      && other.totalTracks > 0 && other.ratedTracks >= other.totalTracks
       && albumRankPool(other.genre) === pool
       && other.albumScore > album.albumScore! + 1e-9).length;
     return { ...album, yearRank: higher + 1 };

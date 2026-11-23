@@ -132,7 +132,7 @@ export interface ExplorerAlbum {
   lovedTracks: number;
   ratedTracks: number;
   albumScore: number | null;
-  /** Place by Album Score among the original year's albums in the same genre pool. */
+  /** Place by Album Score among the original year's fully rated albums in the same genre pool. */
   yearRank?: number | null;
   naming?: AlbumNamingCheck;
 }
@@ -467,15 +467,22 @@ const RANK_POOL_LABELS: Record<AlbumRankPool, string> = {
   general: "albums, excluding scores and soundtracks",
 };
 
-/** The album's place by Album Score among its original year's albums in the same genre pool. */
+/** The album's place by Album Score among its original year's fully rated albums in the same genre pool. */
 function AlbumYearRank({ album }: { album: ExplorerAlbum }) {
   const rank = album.yearRank ?? null;
   const year = album.originalYear ?? null;
   const label = rank === null || year === null
     ? "Rank unavailable"
-    : `Rank ${rank} by Album Score among ${year} ${RANK_POOL_LABELS[albumRankPool(album.genre)]}`;
+    : `Rank ${rank} by Album Score among fully rated ${year} ${RANK_POOL_LABELS[albumRankPool(album.genre)]}`;
+  // Green once every track is rated, so a final Rank stands apart from a provisional one.
+  const complete = album.totalTracks > 0 && album.ratedTracks >= album.totalTracks;
+  const fullLabel = rank === null ? label : `${label}${complete ? "" : " (provisional until every track is rated)"}`;
   return (
-    <span className="deep-explorer-album-rank" aria-label={label} title={label}>
+    <span
+      className={`deep-explorer-album-rank${complete && rank !== null ? " is-complete" : ""}`}
+      aria-label={fullLabel}
+      title={fullLabel}
+    >
       Rank {rank === null ? "—" : rank}
     </span>
   );
