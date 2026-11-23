@@ -320,3 +320,20 @@ it.each(["Inbox", "Observatory", "Songs", "Albums", "Artists", "Publishers", "Ge
   expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
 });
 
+
+it("shows catalog syntax and inserts only the current clause's completion", async () => {
+  render(<App />);
+  await navigate("Albums");
+  const input = screen.getByRole("textbox", { name: "Search your music universe" });
+  const syntax = screen.getByRole("button", { name: "Syntax" });
+  fireEvent.click(syntax);
+  const help = screen.getByRole("region", { name: "Catalog search syntax" });
+  expect(within(help).getByText("sbb:")).toBeVisible();
+  fireEvent.change(input, { target: { value: 'year:1985 AND genre:"video' } });
+  expect(within(help).getByText("Close the quoted value with a double quote.")).toBeVisible();
+  fireEvent.click(within(help).getByRole("button", { name: "video game" }));
+  expect(input).toHaveValue('year:1985 AND genre:"video game"');
+  expect(input).toHaveFocus();
+  fireEvent.submit(screen.getByRole("search"));
+  expect(syntax).toHaveAttribute("aria-expanded", "false");
+});

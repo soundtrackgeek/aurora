@@ -10,7 +10,11 @@ vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }
 
 // These checks exercise request ordering and navigation, not cold transforms.
 beforeAll(async () => {
-  await Promise.all([import("./app/routes/LibraryRoute"), import("./app/routes/ArtistRoute")]);
+  await Promise.all([
+    import("./app/routes/LibraryRoute"),
+    import("./app/routes/ArtistRoute"),
+    import("./app/routes/ArtistInspector"),
+  ]);
 });
 
 afterEach(() => {
@@ -141,6 +145,7 @@ it("reveals artist intelligence without waiting for the catalog summary", async 
   vi.spyOn(library, "loadArtistDetail").mockImplementation(() => new Promise((resolve) => { finishCatalog = resolve; }));
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Explore M83, 94 tracks" }));
+  await act(async () => { await vi.dynamicImportSettled(); });
   expect(await screen.findByRole("region", { name: "MusicBrainz identity status" })).toBeInTheDocument();
   expect(screen.queryByLabelText("Local catalog summary")).not.toBeInTheDocument();
   finishCatalog(detail);

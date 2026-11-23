@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { ExplorerFilters, ExplorerLoadState, ExplorerView } from "../../components/explorer/DeepExplorer";
 import type { SidebarDestination } from "../../components/navigation/SidebarNavigation";
 import { applyAlbumPopularity, applyAlbumTrackMetricsProjection, loadAlbumDetail, type Track } from "../../library";
@@ -13,6 +13,7 @@ import {
 import { explorerViewForDestination } from "../../viewPreferences";
 import { loadWorkspacePages, restoreWorkspaceScroll } from "../../workspaceRestoration";
 import { explorerCountKey, explorerRequestKey, loadExplorerPage, replaceExplorerAlbum, type ExplorerResult } from "./explorerQueries";
+import { searchSyntaxHint } from "./searchHelp";
 import type { ExplorerWorkspace } from "./useExplorerWorkspace";
 import type { WorkspaceRestoration } from "../navigation/useWorkspaceRestoration";
 
@@ -41,7 +42,8 @@ export interface ExplorerResultsOptions {
   initialSelectedAlbumId: string | null;
 }
 
-const explorerSearchDebounceMs = 2_000;
+const explorerSearchDebounceMs = 450;
+const incompleteSearchDebounceMs = 800;
 
 /** Loads bounded explorer windows and rejects work belonging to a superseded view. */
 export function useExplorerResults({ explorer, workspace, selection, activeNav, artistPageName, libraryReady, initialSelectedAlbumId }: ExplorerResultsOptions) {
@@ -80,6 +82,8 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     setAlbumFileRefreshRequest
   } = selection;
   const { initialWorkspace, mainScrollRef, scrollPositionByDestinationRef, restoringScrollRef, scrollReadyRef } = workspace;
+  const pendingSearchRef = useRef<(() => void) | null>(null);
+  const submitExplorerSearch = useCallback(() => pendingSearchRef.current?.(), []);
   const [queueExplorerRefresh] = useState(() => createExplorerRefreshQueue<ExplorerResult>());
 
   const refreshExplorerFiles = useCallback((
@@ -148,16 +152,23 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     const requestId = ++exploreRequestRef.current;
     let cancelled = false;
     const selectionRequestId = preservingCurrentView ? albumRequestRef.current : ++albumRequestRef.current;
-    const clearDetailTimer = window.setTimeout(() => {
-      if (cancelled) return;
+    let detailsCleared = false;
+    const clearPendingDetails = () => {
+      if (detailsCleared || cancelled) return;
+      detailsCleared = true;
       setIsLoadingMore(false);
       if (!preservingCurrentView && selectionRequestId === albumRequestRef.current) {
         if (!restoredAlbumId) setSelectedAlbumId(null);
         setAlbumTracks([]);
         setAlbumTracksTruncated(false);
       }
-    }, 0);
-    const timer = window.setTimeout(() => {
+    };
+    const clearDetailTimer = window.setTimeout(clearPendingDetails, 0);
+    const runSearch = () => {
+      if (pendingSearchRef.current !== runSearch) return;
+      pendingSearchRef.current = null;
+      window.clearTimeout(timer);
+      clearPendingDetails();
       if (!preservingCurrentView) setExplorerLoadState("loading");
       setExplorerError(null);
       setExplorerCursor(null);
@@ -263,10 +274,16 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
             setExplorerLoadState("error");
           }
         });
-    }, preservingCurrentView ? 0 : (explorerFilters.query.trim() ? explorerSearchDebounceMs : 0));
+    };
+    const query = explorerFilters.query.trim();
+    const delay = preservingCurrentView || !query ? 0
+      : searchSyntaxHint(query) ? incompleteSearchDebounceMs : explorerSearchDebounceMs;
+    const timer = window.setTimeout(runSearch, delay);
+    pendingSearchRef.current = runSearch;
     return () => {
       cancelled = true;
       window.clearTimeout(clearDetailTimer);
+      if (pendingSearchRef.current === runSearch) pendingSearchRef.current = null;
       window.clearTimeout(timer);
     };
   }, [activeNav, artistPageName, libraryReady, explorerView, explorerFilters, explorerReloadToken, initialSelectedAlbumId, initialWorkspace, refreshExplorerFiles, albumRequestRef, exploreRequestRef, explorerCursorRef, explorerLoadedRef, explorerLocalOnlyRef, explorerRestorationPendingRef, loadedExplorerRequestKeyRef, loadedExplorerViewKeyRef, mainScrollRef, pendingExplorerAlbumIdRef, preserveExplorerOnReloadRef, restoringScrollRef, scrollPositionByDestinationRef, scrollReadyRef, selectedAlbumIdRef, selectedTrackRef, setAlbumDetailState, setAlbumFileRefreshRequest, setAlbumTracks, setAlbumTracksTruncated, setExplorerAlbums, setExplorerArtists, setExplorerCount, setExplorerCursor, setExplorerError, setExplorerLoadState, setExplorerTracks, setIsLoadingMore, setSelectedAlbumId, setSelectedTrack]);
@@ -311,5 +328,5 @@ export function useExplorerResults({ explorer, workspace, selection, activeNav, 
     }
   }
 
-  return { loadMoreExplorerResults };
+  return { loadMoreExplorerResults, submitExplorerSearch };
 }

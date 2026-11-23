@@ -8,7 +8,11 @@ import * as playback from "./playback";
 vi.mock("./components/WaveformTimeline", () => ({ WaveformTimeline: () => null }));
 
 beforeAll(async () => {
-  await Promise.all([import("./app/routes/LibraryRoute"), import("./app/routes/ChartsRoute")]);
+  await Promise.all([
+    import("./app/routes/LibraryRoute"),
+    import("./app/routes/ChartsRoute"),
+    import("./components/TagEditor"),
+  ]);
 });
 
 let player: ReturnType<typeof playback.usePlayback>;

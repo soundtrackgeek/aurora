@@ -53,11 +53,29 @@ it("rejects a late response from the search replaced during debounce", async () 
   const { result } = renderHook(() => useResults(selection));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   act(() => result.current.setExplorerFilters((filters) => ({ ...filters, query: "replacement" })));
-  await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(450); });
   expect(result.current.explorerTracks.map((item) => item.title)).toEqual(["Replacement"]);
   await act(async () => { resolveFirst(page("Obsolete")); await Promise.resolve(); });
   expect(result.current.explorerTracks.map((item) => item.title)).toEqual(["Replacement"]);
   expect(result.current.explorerLoadState).toBe("ready");
+});
+
+it("submits the latest query immediately and cancels its delayed dispatch", async () => {
+  vi.useFakeTimers();
+  const load = vi.spyOn(queries, "loadExplorerPage").mockResolvedValue(page("Loaded"));
+  const selection = selectionPort();
+  const { result } = renderHook(() => useResults(selection));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  load.mockClear();
+  act(() => result.current.setExplorerFilters((filters) => ({ ...filters, query: "obsolete" })));
+  act(() => result.current.setExplorerFilters((filters) => ({ ...filters, query: "year:1985" })));
+  await act(async () => { await vi.advanceTimersByTimeAsync(449); });
+  expect(load).not.toHaveBeenCalled();
+  act(() => result.current.submitExplorerSearch());
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith("tracks", expect.objectContaining({ query: "year:1985" }), undefined, true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(450); });
+  expect(load.mock.calls.filter(([, , , localOnly]) => localOnly)).toHaveLength(1);
 });
 
 it("does not paginate with the old cursor while a new query is waiting", async () => {
@@ -71,7 +89,7 @@ it("does not paginate with the old cursor while a new query is waiting", async (
   act(() => result.current.setExplorerFilters((filters) => ({ ...filters, query: "replacement" })));
   await act(async () => { await result.current.loadMoreExplorerResults(); });
   expect(load).not.toHaveBeenCalled();
-  await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(450); });
   expect(load).toHaveBeenCalledWith("tracks", expect.objectContaining({ query: "replacement" }), undefined, true);
   expect(result.current.explorerTracks).toHaveLength(1);
 });

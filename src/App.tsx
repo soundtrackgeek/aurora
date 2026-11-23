@@ -59,6 +59,7 @@ import { usePublishersDomain } from "./app/domains/usePublishersDomain";
 import { useRatingsDomain } from "./app/domains/useRatingsDomain";
 import { useYearsDomain } from "./app/domains/useYearsDomain";
 import { explorerCountKey, explorerRequestKey } from "./app/explorer/explorerQueries";
+import { CatalogSearchHelp, CatalogSearchHint } from "./app/explorer/CatalogSearchHelp";
 import { useExplorerResults } from "./app/explorer/useExplorerResults";
 import { useAlbumRankRefresh } from "./app/explorer/useAlbumRankRefresh";
 import { useExplorerWorkspace } from "./app/explorer/useExplorerWorkspace";
@@ -214,7 +215,6 @@ const displayViewByDestination: Record<SidebarDestination, DisplayViewKey> = {
   History: "history",
 };
 
-const trackSearchHelp = "Fields: artist (Display Artist), aartist (Album Artist display), album, genre, year (Year), ryear (Release Year), publisher, country (Album Artist origin), title, cr (album rating completeness), love (album loved-track count), single (official singles: per album in Albums, per track in Songs), and sonic (saved audio analysis: yes/no). Every field accepts : or =. Numeric fields accept inclusive ranges such as year:1985..1987, cr:50..80, love:1..3, and single:2..5; either bound may be omitted. The shorthands cr:80 (0–80%), love:1 and single:1 (one or more), and love:0 and single:0 (none) keep their meanings. Use commas or uppercase AND between groups; uppercase OR inherits the preceding field; NOT or a leading - excludes. Quote a complete value for an exact match. genre:scores includes film, TV, animation, anime, and game scores.";
 function historyDateLabel(timestamp: number | null): string {
   if (timestamp === null) return "Never";
   return new Intl.DateTimeFormat(undefined, {
@@ -875,7 +875,8 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [backgroundIntakeNotice]);
 
-  const { loadMoreExplorerResults } = useExplorerResults({
+  const [searchHelpOpen, setSearchHelpOpen] = useState(false);
+  const { loadMoreExplorerResults, submitExplorerSearch } = useExplorerResults({
     explorer: explorerWorkspace, workspace: workspaceRestoration, activeNav, artistPageName, libraryReady,
     initialSelectedAlbumId: initialViewPreferences.selectedAlbumId,
     selection: {
@@ -1310,6 +1311,8 @@ function App() {
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
+    setSearchHelpOpen(false);
+    if (explorerViewForDestination(activeNav)) submitExplorerSearch();
   }
 
   const explorerAlbumInspectorContext = artistPageName === null && explorerViewForDestination(activeNav) !== null && explorerView === "albums"
@@ -1417,6 +1420,7 @@ function App() {
   const showExplorerCount = snapshot !== null
     && artistPageName === null
     && !["Inbox", "Observatory", "Charts", "Playlists", "History", "Genres", "Publishers", "Years", "Ratings"].includes(activeNav);
+  const catalogSearch = explorerViewForDestination(activeNav) !== null;
   const topbarSearchValue = activeNav === "Playlists" || activeNav === "Inbox"
     ? ""
     : activeNav === "Observatory"
@@ -1567,7 +1571,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.78.5</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.78.6</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1587,7 +1591,17 @@ function App() {
           >
             <LeftSidebarIcon aria-hidden="true" />
           </button>
-          <form className={`search${activeNav === "Years" || activeNav === "Inbox" || activeNav === "Playlists" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}>
+          <form className={`search${activeNav === "Years" || activeNav === "Inbox" || activeNav === "Playlists" ? " is-disabled" : ""}`} role="search" onSubmit={submitSearch}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setSearchHelpOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !searchHelpOpen) return;
+              event.stopPropagation();
+              setSearchHelpOpen(false);
+              searchRef.current?.focus();
+            }}
+          >
             <Search aria-hidden="true" />
             <input
               ref={searchRef}
@@ -1600,12 +1614,29 @@ function App() {
               onChange={(event) => updateTopbarSearch(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               aria-label={topbarSearchLabel}
-              title={explorerView === "tracks" && !["Inbox", "Observatory", "History", "Genres", "Publishers", "Years", "Playlists"].includes(activeNav) ? trackSearchHelp : undefined}
+              aria-describedby={catalogSearch ? "catalog-search-hint" : undefined}
               disabled={activeNav === "Years" || activeNav === "Inbox" || activeNav === "Playlists"}
             />
             {topbarSearchValue
               ? <button type="button" aria-label="Clear search" onClick={() => updateTopbarSearch("")}><X aria-hidden="true" /></button>
               : activeNav !== "Years" && activeNav !== "Inbox" && activeNav !== "Playlists" ? <kbd>Ctrl K</kbd> : null}
+            {catalogSearch && (
+              <button type="button" className="search-help-toggle" aria-expanded={searchHelpOpen}
+                aria-controls={searchHelpOpen ? "catalog-search-help" : undefined}
+                onClick={() => {
+                  setSearchHelpOpen((open) => !open);
+                  searchRef.current?.focus();
+                }}>
+                Syntax
+              </button>
+            )}
+            {catalogSearch && searchHelpOpen && (
+              <CatalogSearchHelp query={topbarSearchValue} view={explorerView} onInsert={(query) => {
+                updateTopbarSearch(query);
+                searchRef.current?.focus();
+              }} />
+            )}
+            {catalogSearch && !searchHelpOpen && <CatalogSearchHint query={topbarSearchValue} />}
           </form>
           {showExplorerCount ? (
             <output className="search-result-count" aria-live="polite" aria-busy={currentExplorerCount === null}>

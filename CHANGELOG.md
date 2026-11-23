@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.6] - 2026-11-23
+
+### Added
+- Open **Syntax** beside catalog search for field examples and clickable field, genre, country and sound completions. Inline hints flag common syntax issues while typing.
+
+### Fixed
+- Enter runs the pending catalog search immediately. Complete queries start after 450 ms of inactivity.
+
 ## [0.78.5] - 2026-11-23
 
 ### Fixed

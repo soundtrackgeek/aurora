@@ -20,6 +20,8 @@ On the local 1.1-million-track / 72,600-album catalog, the October 6 benchmark f
 
 ## Quick start
 
+Press **Enter** to search immediately, or pause for about half a second for a complete query. Open **Syntax** in the search bar to browse the fields for the current view and insert completions for the clause you are typing.
+
 - Press `Ctrl+K` to focus the top search box.
 - Start typing. In Songs, Albums, and Artists, Aurora waits for a two-second pause before running the query so a complete expression runs once. Clearing the box is immediate.
 - The number beside the box is the exact total for the filtered Songs, Albums, or Artists result set, even though Aurora loads only one bounded page at a time.

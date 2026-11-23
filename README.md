@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.78.6** runs catalog search on **Enter** or after a 450 ms pause for a complete query. The search bar's **Syntax** panel offers field examples and clickable completions for genres, countries and sound descriptors. The bar also flags unfinished quotes and common clause mistakes as you type. See the [search guide](docs/search.md).
+
 Aurora **0.78.5** keeps Rank visible on album cards. The rating stars now sit beside the track count and length, so Score and Rank have the bottom line to themselves even when a Score passes 100.
 
 Aurora **0.78.4** finds artists without their accents. Typing `gunther` in Artists finds Günther and `tiesto` finds Tiësto, and exact searches such as `aartist:"motley crue"` find Mötley Crüe. See [docs/search.md](docs/search.md#catalog-search-songs-albums-and-artists).
