@@ -893,8 +893,19 @@ const scoreGenreGroup = new Set([
   "sci-fi", "thriller", "tv", "video game", "western", "anime",
 ]);
 
+const foldedLetters: Record<string, string> = { æ: "ae", œ: "oe", ß: "ss", þ: "th", ø: "o", ð: "d", đ: "d", ł: "l", ı: "i" };
+
+/** Lowercase without accents, so `gunther` finds Günther. Mirrors `search_fold` in src-tauri/src/catalog.rs. */
+export function foldSearchText(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[æœßþøðđłı]/gu, (letter) => foldedLetters[letter] ?? letter);
+}
+
 function searchTerms(value: string): string[] {
-  return value.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return foldSearchText(value).match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 function tokenizeLibrarySearch(input: string): LibrarySearchToken[] {
@@ -1236,8 +1247,8 @@ function matchesLibrarySearchAlternative(
     return values.some((value) => scoreGenreGroup.has(value.trim().toLocaleLowerCase()));
   }
   if (alternative.exact) {
-    const exact = alternative.value.trim().toLocaleLowerCase();
-    return values.some((value) => value.trim().toLocaleLowerCase() === exact);
+    const exact = foldSearchText(alternative.value.trim());
+    return values.some((value) => foldSearchText(value.trim()) === exact);
   }
   const queryTerms = searchTerms(alternative.value);
   return queryTerms.every((term) => values.some((value) => (

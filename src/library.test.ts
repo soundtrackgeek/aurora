@@ -38,6 +38,14 @@ it("filters partial sonic coverage with boolean search syntax", () => {
   expect(() => filterTracks(partial, "sonic:maybe", null)).toThrow(/sonic:yes/);
 });
 
+it("finds accented names typed without their accents", () => {
+  expect(filterTracks(tracks, "aartist:sigur ros", null)).toEqual([tracks[0]]);
+  expect(filterTracks(tracks, 'aartist:"SIGUR ROS"', null)).toEqual([tracks[0]]);
+  expect(filterTracks(tracks, "saeglopur", null)).toEqual([tracks[0]]);
+  expect(filterTracks(tracks, "artist:jonsi", null)).toEqual([tracks[0]]);
+  expect(filterTracks(tracks, "aartist:sigur rós", null)).toEqual([tracks[0]]);
+});
+
 it("accepts vibe descriptions, which the preview cannot score", () => {
   expect(filterTracks(tracks, 'vibe:"dark ambient drone"', null)).toEqual([]);
   expect(filterTracks(tracks, 'NOT vibe:"dark ambient"', null)).toEqual(tracks);

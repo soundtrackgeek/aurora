@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.78.4** finds artists without their accents. Typing `gunther` in Artists finds Günther and `tiesto` finds Tiësto, and exact searches such as `aartist:"motley crue"` find Mötley Crüe. See [docs/search.md](docs/search.md#catalog-search-songs-albums-and-artists).
+
 Aurora **0.78.2** makes multi-album removal steadier. With Music Library 0.218.4, Music Library's background maintenance after each removal (smart playlists and catalog optimize) makes the next album wait for it instead of failing with "database is locked". Aurora also retries an album whose preview finds the catalog busy, waiting up to 60 seconds between attempts.
 
 Aurora **0.77.2** publishes releases faster. The release workflow now verifies and builds the installers in parallel, and the Rust build cache survives GitHub runner image updates, so a new version should reach in-app updates in about 10 minutes instead of 15 to 50.

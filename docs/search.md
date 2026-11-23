@@ -44,6 +44,8 @@ Every named catalog field accepts either `:` or `=` as its separator. This guide
 
 Punctuation in an unquoted value separates words. Use quotes when the entire stored value must match exactly.
 
+Searches ignore case and accents, so you can type names without their special letters: `aartist:gunther` finds Günther, `tiesto` finds Tiësto, and `aartist:"motley crue"` finds Mötley Crüe. This also holds for exact quoted values and for the plain-text filter in Artists. Quoted values and the Artists filter also treat `ø` as `o`, `æ` as `ae`, `ß` as `ss` and `ł` as `l` (`"royksopp"` finds Røyksopp); unquoted word searches use Music Library's word index, which drops accents but keeps those letters as they are.
+
 In Charts, an album's **Open in Library** action opens a fresh exact album search, such as `album:"Sports"`. Aurora uses the stored title of the already-matched library album, so a chart title of `Sports` can open `album:"Sports (Expanded Edition)"` when that is the matched release's library title. If the catalog title is unavailable, the chart title is used. Results include every album with that exact title and do not match artists or longer album names. This reuses existing chart-to-library matches; it does not guess new fuzzy matches. Embedded quotation marks are escaped by doubling them.
 
 ### Search fields

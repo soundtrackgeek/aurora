@@ -1498,8 +1498,8 @@ fn artist_page_from_connection(
             });
         }
         if parsed_search.plain_fts_query().is_some() {
-            rollup_where.push_str(" AND a.album_artist_display LIKE ? ESCAPE '\\' COLLATE NOCASE");
-            let escaped = search
+            rollup_where.push_str(" AND search_fold(a.album_artist_display) LIKE ? ESCAPE '\\'");
+            let escaped = crate::catalog::search_fold(&search)
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
@@ -3622,6 +3622,66 @@ mod tests {
         .expect("fielded artist search");
         assert_eq!(artists.items.len(), 1);
         assert_eq!(artists.items[0].name, "Sigur Rós");
+    }
+
+    #[test]
+    fn searches_find_accented_names_typed_without_accents() {
+        let connection = fixture();
+        for search in ["sigur ros", "SIGUR RÓS", "gur r"] {
+            let artists = artist_page_from_connection(
+                &connection,
+                ArtistPageRequest {
+                    search: Some(search.to_owned()),
+                    ..ArtistPageRequest::default()
+                },
+            )
+            .expect(search);
+            assert_eq!(
+                artists
+                    .items
+                    .iter()
+                    .map(|artist| artist.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["Sigur Rós"],
+                "{search}"
+            );
+        }
+        for search in ["aartist:\"sigur ros\"", "album:\"agaetis byrjun\""] {
+            let albums = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(search.to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .expect(search);
+            assert!(albums.total_count > 0, "{search}");
+            assert!(
+                albums.items.iter().all(|album| album.artist == "Sigur Rós"),
+                "{search}"
+            );
+        }
+        let tracks = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("title:\"saeglopur\"".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .expect("exact accent-free title");
+        assert_eq!(tracks.items.len(), 1);
+        assert_eq!(tracks.items[0].title, "Sæglópur");
+    }
+
+    #[test]
+    fn search_fold_drops_case_and_accents() {
+        assert_eq!(crate::catalog::search_fold("Günther"), "gunther");
+        assert_eq!(crate::catalog::search_fold("Tiësto"), "tiesto");
+        assert_eq!(crate::catalog::search_fold("Mötley Crüe"), "motley crue");
+        assert_eq!(crate::catalog::search_fold("Røyksopp"), "royksopp");
+        assert_eq!(crate::catalog::search_fold("Sæglópur"), "saeglopur");
+        assert_eq!(crate::catalog::search_fold("AC/DC"), "ac/dc");
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.78.4] - 2026-11-23
+
+### Fixed
+- Searches ignore accents everywhere. The plain-text filter in Artists now finds Günther for `gunther` and Tiësto for `tiesto`, as word searches in Songs and Albums already did, and exact quoted values such as `aartist:"tiesto"` or `album:"agaetis byrjun"` match their accented spelling. Quoted values and the Artists filter also treat `ø`, `æ`, `ß` and `ł` as `o`, `ae`, `ss` and `l`. The browser preview's search does the same.
+
 ## [0.78.3] - 2026-11-23
 
 ### Changed

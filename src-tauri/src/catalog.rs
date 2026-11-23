@@ -13,6 +13,7 @@ use std::{
     path::{Component, Path, PathBuf},
     time::Duration,
 };
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 pub(crate) const COVER_ROOT: &str = r"C:\_code\music_backup_v5\AlbumCovers";
 
@@ -206,6 +207,45 @@ pub(crate) fn prepare_single_keys(connection: &Connection) -> Result<(), String>
         .map_err(|error| format!("Could not prepare the singles search: {error}"))
 }
 
+/// Lowercase without accents, so `gunther` finds Günther and `tiesto` Tiësto,
+/// like the catalog's full-text index already does for word searches.
+pub(crate) fn search_fold(value: &str) -> String {
+    if value.is_ascii() {
+        return value.to_ascii_lowercase();
+    }
+    value
+        .to_lowercase()
+        .nfd()
+        .filter(|character| !is_combining_mark(*character))
+        .fold(
+            String::with_capacity(value.len()),
+            |mut folded, character| {
+                match character {
+                    'æ' => folded.push_str("ae"),
+                    'œ' => folded.push_str("oe"),
+                    'ß' => folded.push_str("ss"),
+                    'þ' => folded.push_str("th"),
+                    'ø' => folded.push('o'),
+                    'ð' | 'đ' => folded.push('d'),
+                    'ł' => folded.push('l'),
+                    'ı' => folded.push('i'),
+                    _ => folded.push(character),
+                }
+                folded
+            },
+        )
+}
+
+/// Whether `value` folds to `folded` (already passed through [`search_fold`]).
+/// Exact searches compare every track, so ASCII values skip allocating.
+fn search_fold_eq(value: &str, folded: &str) -> bool {
+    if value.is_ascii() {
+        value.eq_ignore_ascii_case(folded)
+    } else {
+        search_fold(value) == folded
+    }
+}
+
 pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), String> {
     connection
         .create_scalar_function(
@@ -215,6 +255,35 @@ pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), 
             |context| context.get::<String>(0).map(|value| value.to_lowercase()),
         )
         .map_err(|error| format!("Could not configure Unicode catalog matching: {error}"))?;
+    connection
+        .create_scalar_function(
+            "search_fold",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                Ok(context
+                    .get::<Option<String>>(0)?
+                    .map(|value| search_fold(&value)))
+            },
+        )
+        .map_err(|error| format!("Could not configure accent-free catalog matching: {error}"))?;
+    connection
+        .create_scalar_function(
+            "search_fold_eq",
+            2,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                let text = |index| match context.get_raw(index) {
+                    rusqlite::types::ValueRef::Text(bytes) => std::str::from_utf8(bytes).ok(),
+                    _ => None,
+                };
+                Ok(match (text(0), text(1)) {
+                    (Some(value), Some(folded)) => search_fold_eq(value, folded),
+                    _ => false,
+                })
+            },
+        )
+        .map_err(|error| format!("Could not configure accent-free catalog matching: {error}"))?;
     connection
         .create_scalar_function(
             "aurora_file_missing",
@@ -1911,13 +1980,13 @@ fn exact_text_predicate(
             EXACT_TEXT_COLUMNS
                 .iter()
                 .map(|column| {
-                    params.push(Value::Text(value.to_owned()));
+                    params.push(Value::Text(search_fold(value)));
                     let expression = if *column == "canonical_genre" {
                         crate::live_genres::track_sql(alias)
                     } else {
                         format!("{alias}.{column}")
                     };
-                    format!("TRIM(COALESCE(({expression}), '')) = ? COLLATE NOCASE")
+                    format!("search_fold_eq(TRIM(COALESCE(({expression}), '')), ?)")
                 })
                 .collect::<Vec<_>>()
                 .join(" OR ")
@@ -1926,13 +1995,13 @@ fn exact_text_predicate(
     let column = field
         .sql_column()
         .expect("exact text search uses a text field");
-    params.push(Value::Text(value.to_owned()));
+    params.push(Value::Text(search_fold(value)));
     let expression = if field == CatalogSearchField::Genre {
         crate::live_genres::track_sql(alias)
     } else {
         format!("{alias}.{column}")
     };
-    format!("TRIM(COALESCE(({expression}), '')) = ? COLLATE NOCASE")
+    format!("search_fold_eq(TRIM(COALESCE(({expression}), '')), ?)")
 }
 
 fn non_prefix_predicate(
