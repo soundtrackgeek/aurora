@@ -1,3 +1,4 @@
+import { openMusicLibraryAlbum, useMusicLibraryPlaybackLinks } from "./musicLibraryPlayback";
 import { SonicAlbumPanel } from "./components/SonicAlbumPanel";
 import { checkGenresBySound, listenToAssistantShow, listenToGenreProposals, loadGenreProposals, soundCheckSummary, upsertProposal, type GenreProposal } from "./assistant";
 import { AlbumSidesPanel } from "./components/AlbumSidesPanel";
@@ -415,6 +416,17 @@ function App() {
     endGenreQueue,
     selectTrack,
   });
+  const [musicLibraryPlaybackError, setMusicLibraryPlaybackError] = useState<string | null>(null);
+  useMusicLibraryPlaybackLinks({
+    play: (tracks, context) => {
+      setMusicLibraryPlaybackError(null);
+      return startPlaylistQueue(tracks, 0, false, context);
+    },
+    queue: (tracks) => {
+      setMusicLibraryPlaybackError(null);
+      return playback.enqueue(tracks, false);
+    },
+  }, setMusicLibraryPlaybackError);
   const sonicJourney = useSonicJourney(() => setPlaylistsReloadToken(t => t + 1));
 
   const {
@@ -1008,7 +1020,12 @@ function App() {
     await playback.play(tracks, tracks[0].id);
   }
   function albumSonicPanel(albumId: string) {
-    return <><AlbumSidesPanel key={`sides-${albumId}`} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlay={async selected => {
+    return <><button type="button" className="track-album-link" onClick={() => {
+      setMusicLibraryPlaybackError(null);
+      void openMusicLibraryAlbum(albumId).catch((reason: unknown) => {
+        setMusicLibraryPlaybackError(reason instanceof Error ? reason.message : String(reason));
+      });
+    }}>Open album in Music Library</button><AlbumSidesPanel key={`sides-${albumId}`} albumId={albumId} onOpenAlbum={openSonicAlbum} onPlay={async selected => {
       const detail = await loadAlbumDetail(selected[0].albumId);
       const keys = new Set(selected.map(t => t.trackKey));
       const tracks = detail.tracks.filter(t => keys.has(t.trackKey) && t.loveState !== "banned");
@@ -1574,7 +1591,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.79.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.80.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2222,9 +2239,12 @@ function App() {
         tagBusy={playback.state.currentTrack
           ? inlineSavingKeys.has(playback.state.currentTrack.trackKey)
           : false}
-        error={playback.error}
+        error={musicLibraryPlaybackError ?? playback.error}
         queueOpen={queueOpen}
-        onDismissError={playback.dismissError}
+        onDismissError={() => {
+          if (musicLibraryPlaybackError) setMusicLibraryPlaybackError(null);
+          else playback.dismissError();
+        }}
         onToggle={() => void playback.toggle()}
         onPrevious={() => void playback.previous()}
         onNext={() => void playback.next()}

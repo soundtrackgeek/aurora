@@ -896,6 +896,25 @@ fn fanart_settings() -> fanart::Status {
 }
 
 #[tauri::command]
+fn open_music_library_album(album_id: String) -> Result<(), String> {
+    if album_id.trim().is_empty() || album_id.len() > 2048 || album_id.chars().any(char::is_control)
+    {
+        return Err("Choose a valid Music Library album.".into());
+    }
+    let mut url = url::Url::parse("musiclibrary://album/").map_err(|error| error.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "Could not open the Music Library album.".to_owned())?
+        .pop_if_empty()
+        .push(&album_id);
+    url.query_pairs_mut()
+        .append_pair("request", &uuid::Uuid::new_v4().to_string());
+    tauri_plugin_opener::open_url(url.as_str(), None::<&str>).map_err(|_| {
+        "Could not open Music Library. Install Music Library 0.220.0 or later on this computer."
+            .into()
+    })
+}
+
+#[tauri::command]
 fn open_artist_link(url: String) -> Result<(), String> {
     artist_discovery::open_link(&url)
 }
@@ -2397,6 +2416,7 @@ pub fn run() {
     tauri::Builder::default()
         // Reject duplicate launches before plugins or setup acquire shared resources.
         .plugin(single_instance::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -2598,6 +2618,7 @@ pub fn run() {
             artist_listening,
             fanart_settings,
             open_artist_link,
+            open_music_library_album,
             update_fanart_credentials,
             genre_index,
             genre_names,

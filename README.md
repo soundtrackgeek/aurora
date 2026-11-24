@@ -1,5 +1,15 @@
 # Aurora
 
+## Play from Music Library
+
+Music Library **0.220.0** can open Aurora and play an album, track, or saved
+playlist from the shared catalog. **Queue in Aurora** adds the selection at the
+end of the current queue. Use **Play in Aurora** for playlists longer than the
+queue capacity. Use **Open album in Music Library** in the Aurora album
+inspector to return to the catalog.
+
+## Universe
+
 Aurora **0.79.0** makes **Universe** a listening home. Its eight planets come from registered plays across your available devices. Switch between **90 days** and **All time** to see who you’ve been listening to. Resume the saved queue at its current position, open recent Inbox imports or albums with one or two ratings left before their year Rank is final, and play loved or five-star tracks you last heard at least a year ago.
 
 Aurora **0.78.6** runs catalog search on **Enter** or after a 450 ms pause for a complete query. The search bar's **Syntax** panel offers field examples and clickable completions for genres, countries and sound descriptors. The bar also flags unfinished quotes and common clause mistakes as you type. See the [search guide](docs/search.md).

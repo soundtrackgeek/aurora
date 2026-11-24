@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.0] - 2026-11-24
+
+### Added
+
+- Accept **Play in Aurora** and **Queue in Aurora** requests from Music Library 0.220.0 or later on cold and warm launches.
+- Added **Open album in Music Library** to the Aurora album inspector.
+
 ## [0.79.0] - 2026-11-24
 
 ### Added
