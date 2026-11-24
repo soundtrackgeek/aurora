@@ -2177,6 +2177,29 @@ async fn listening_history_page(
 }
 
 #[tauri::command]
+async fn universe_top_artists(
+    app: AppHandle,
+    recent_only: bool,
+) -> Result<Vec<history::UniverseArtist>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<HistoryStore>()
+            .universe_top_artists(recent_only)
+    })
+    .await
+    .map_err(|error| format!("The Universe history worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn universe_rediscover(app: AppHandle) -> Result<Vec<history::RediscoverTrack>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<HistoryStore>()
+            .universe_rediscover(&app.state::<StateStore>())
+    })
+    .await
+    .map_err(|error| format!("The Rediscover worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
 async fn listening_history_report(
     app: AppHandle,
     request: HistoryReportRequest,
@@ -2662,6 +2685,8 @@ pub fn run() {
             set_laptop_mode,
             listening_history_page,
             listening_history_report,
+            universe_top_artists,
+            universe_rediscover,
             track_history_insight,
             set_history_play_threshold,
             library_play_export_status,

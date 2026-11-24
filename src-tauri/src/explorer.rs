@@ -141,6 +141,10 @@ pub(crate) enum AlbumSort {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AlbumPageRequest {
     pub(crate) page_size: Option<u16>,
+    #[serde(default)]
+    pub(crate) near_final_rank: bool,
+    #[serde(default)]
+    pub(crate) inbox_additions_only: bool,
     pub(crate) cursor: Option<ExploreCursor>,
     pub(crate) search: Option<String>,
     pub(crate) rating: Option<f64>,
@@ -1289,6 +1293,15 @@ fn album_page_from_connection(
         group_columns(group.as_ref())
     );
     let mut sql = String::from(" WHERE 1 = 1");
+    if request.inbox_additions_only {
+        sql.push_str(" AND a.id IN (SELECT album_id FROM aurora_state.album_additions)");
+    }
+    if request.near_final_rank {
+        sql.push_str(&format!(
+            " AND a.year BETWEEN 1000 AND 2999 AND ({live_rated_tracks}) > 0
+              AND ({live_total_tracks}) - ({live_rated_tracks}) BETWEEN 1 AND 2"
+        ));
+    }
     if let Some(match_query) = plain_match_query {
         sql.push_str(" AND a.id IN (SELECT album_id FROM album_search_fts WHERE album_search_fts MATCH ? AND album_id NOT IN (SELECT album_id FROM temp.aurora_live_album_genres) UNION ALL SELECT album_id FROM temp.aurora_live_album_genre_fts WHERE aurora_live_album_genre_fts MATCH ?)");
         params.push(Value::Text(match_query.clone()));
@@ -3122,6 +3135,18 @@ mod tests {
                 [],
             )
             .expect("recorded album addition");
+        let inbox_only = album_page_from_connection(
+            &connection,
+            AlbumPageRequest {
+                inbox_additions_only: true,
+                sort: Some(AlbumSort::Newest),
+                ..AlbumPageRequest::default()
+            },
+        )
+        .expect("Inbox additions");
+        assert_eq!(inbox_only.total_count, 1);
+        assert_eq!(inbox_only.items[0].id, "a1");
+
         let album_added_asc = album_page_from_connection(
             &connection,
             AlbumPageRequest {

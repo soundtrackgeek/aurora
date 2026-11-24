@@ -15,6 +15,27 @@ use std::{
 };
 
 const HISTORY_SCHEMA_VERSION: i64 = 1;
+const DAY_MS: i64 = 86_400_000;
+
+type ArtistInsightsByIdentity = HashMap<String, (ArtistProfile, ArtistHistoryInsight)>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UniverseArtist {
+    id: String,
+    name: String,
+    disambiguation: Option<String>,
+    plays: i64,
+    #[serde(skip)]
+    last_played_at_ms: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RediscoverTrack {
+    track: TrackSummary,
+    last_listened_at_ms: i64,
+}
 mod artist_profiles;
 use artist_profiles::{ArtistProfile, ArtistProfiles};
 
@@ -1675,14 +1696,53 @@ impl HistoryStore {
 
     pub(crate) fn artist_insights(&self) -> Result<HashMap<String, ArtistHistoryInsight>, String> {
         let mut profiles = ArtistProfiles::open()?;
-        self.artist_insights_with_profiles(&mut profiles)
+        Ok(self
+            .artist_insights_since(&mut profiles, 0)?
+            .into_iter()
+            .map(|(key, (_, insight))| (key, insight))
+            .collect())
     }
 
-    fn artist_insights_with_profiles(
+    pub(crate) fn universe_top_artists(
+        &self,
+        recent_only: bool,
+    ) -> Result<Vec<UniverseArtist>, String> {
+        let after = if recent_only {
+            state_sync::now_ms() - 90 * DAY_MS
+        } else {
+            0
+        };
+        let mut profiles = ArtistProfiles::open()?;
+        let mut artists = self
+            .artist_insights_since(&mut profiles, after)?
+            .into_iter()
+            .map(|(id, (profile, insight))| UniverseArtist {
+                id: profile.id.unwrap_or(id),
+                name: profile.name,
+                disambiguation: profile.disambiguation,
+                plays: insight.plays,
+                last_played_at_ms: insight.last_played_at_ms,
+            })
+            .filter(|artist| {
+                !artist.id.starts_with("history-unresolved:") && !artist.name.trim().is_empty()
+            })
+            .collect::<Vec<_>>();
+        artists.sort_unstable_by(|a, b| {
+            b.plays
+                .cmp(&a.plays)
+                .then_with(|| b.last_played_at_ms.cmp(&a.last_played_at_ms))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        artists.truncate(8);
+        Ok(artists)
+    }
+
+    fn artist_insights_since(
         &self,
         profiles: &mut ArtistProfiles,
-    ) -> Result<HashMap<String, ArtistHistoryInsight>, String> {
-        let mut insights: HashMap<String, ArtistHistoryInsight> = HashMap::new();
+        after_ms: i64,
+    ) -> Result<ArtistInsightsByIdentity, String> {
+        let mut insights = ArtistInsightsByIdentity::new();
         for source in self.available_sources() {
             let (metadata, connection) = match open_valid_history_source(&source) {
                 Ok(Some(value)) => value,
@@ -1693,9 +1753,9 @@ impl HistoryStore {
             if source != self.path && metadata.device_id == self.device_id {
                 continue;
             }
-            let mut statement=connection.prepare("SELECT track_key,title,artist,album,directory,filename,COUNT(*),MAX(started_at_ms) FROM listening_sessions WHERE registered_play=1 GROUP BY track_key,title,artist,album,directory,filename").map_err(|e|e.to_string())?;
+            let mut statement=connection.prepare("SELECT track_key,title,artist,album,directory,filename,COUNT(*),MAX(started_at_ms) FROM listening_sessions WHERE registered_play=1 AND started_at_ms >= ?1 GROUP BY track_key,title,artist,album,directory,filename").map_err(|e|e.to_string())?;
             for value in statement
-                .query_map([], |r| {
+                .query_map([after_ms], |r| {
                     Ok((
                         HistoryRow {
                             track_key: r.get(0)?,
@@ -1714,12 +1774,100 @@ impl HistoryStore {
             {
                 let (mut row, plays, last) = value.map_err(|e| e.to_string())?;
                 profiles.project(&mut row)?;
-                let combined = insights.entry(row.artist_key()).or_default();
+                let profile = row.artist_profile();
+                let (_, combined) = insights
+                    .entry(profile.key())
+                    .or_insert_with(|| (profile, ArtistHistoryInsight::default()));
                 combined.plays = combined.plays.saturating_add(plays);
                 combined.last_played_at_ms = combined.last_played_at_ms.max(last);
             }
         }
         Ok(insights)
+    }
+
+    pub(crate) fn universe_rediscover(
+        &self,
+        store: &StateStore,
+    ) -> Result<Vec<RediscoverTrack>, String> {
+        let mut latest = HashMap::<String, (i64, StoredQueueEntry)>::new();
+        for source in self.available_sources() {
+            let (metadata, connection) = match open_valid_history_source(&source) {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(_) if source != self.path => continue,
+                Err(error) => return Err(error),
+            };
+            if source != self.path && metadata.device_id == self.device_id {
+                continue;
+            }
+            let mut statement = connection
+                .prepare(
+                    "SELECT track_key, MAX(started_at_ms), directory, filename
+                 FROM listening_sessions WHERE listened_seconds > 0 GROUP BY track_key",
+                )
+                .map_err(|error| format!("Could not prepare Rediscover history: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(|error| format!("Could not read Rediscover history: {error}"))?;
+            for row in rows {
+                let (key, time, directory, filename) =
+                    row.map_err(|error| format!("Could not decode Rediscover history: {error}"))?;
+                let entry = StoredQueueEntry {
+                    track_id: String::new(),
+                    track_key: Some(key.clone()),
+                    directory: Some(directory),
+                    filename: Some(filename),
+                };
+                let latest = latest.entry(key).or_insert_with(|| (time, entry.clone()));
+                if time > latest.0 {
+                    *latest = (time, entry);
+                }
+            }
+        }
+        let before = state_sync::now_ms() - 365 * DAY_MS;
+        let mut candidates = latest
+            .values()
+            .filter(|(time, _)| *time <= before)
+            .collect::<Vec<_>>();
+        candidates.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.track_key.cmp(&b.1.track_key))
+        });
+
+        let mut result = Vec::new();
+        for batch in candidates.chunks(REPORT_CATALOG_BATCH_SIZE) {
+            let references = batch
+                .iter()
+                .map(|(_, reference)| reference.clone())
+                .collect::<Vec<_>>();
+            let (tracks, _, _) = catalog::load_tracks_by_references(&references, store)?;
+            for track in tracks {
+                if track.love_state != crate::tag_model::LoveState::Banned
+                    && (track.loved || track.rating == Some(5.0))
+                    && !crate::file_observations::confirmed_missing(
+                        &track.directory,
+                        &track.filename,
+                    )
+                {
+                    let last_listened_at_ms = latest[&track.track_key].0;
+                    result.push(RediscoverTrack {
+                        track,
+                        last_listened_at_ms,
+                    });
+                    if result.len() == 4 {
+                        return Ok(result);
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
     pub(crate) fn artist_listening(&self, artist: &str) -> Result<ArtistListening, String> {

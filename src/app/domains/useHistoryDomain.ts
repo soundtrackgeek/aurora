@@ -158,6 +158,7 @@ export function useHistoryDomain({
     setHistoryLoadingMore,
     historySavingThreshold,
     historyThresholdMessage,
+    historyReloadToken,
     setHistoryReloadToken,
     universeHistoryPage,
     loadMoreHistory,

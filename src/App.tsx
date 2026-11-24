@@ -50,6 +50,7 @@ import { AppStoreProvider } from "./app/AppStoreProvider";
 import { useArtistNavigation } from "./app/artist/useArtistNavigation";
 import { EmptyInspector } from "./app/components/EmptyInspector";
 import { Universe } from "./app/components/Universe";
+import type { UniversePeriod } from "./universe";
 import { UpdateDialog } from "./app/components/UpdateDialog";
 import { useGenresDomain } from "./app/domains/useGenresDomain";
 import { useHistoryDomain } from "./app/domains/useHistoryDomain";
@@ -527,6 +528,7 @@ function App() {
     setHistoryLoadingMore,
     historySavingThreshold,
     historyThresholdMessage,
+    historyReloadToken,
     setHistoryReloadToken,
     universeHistoryPage,
     loadMoreHistory,
@@ -875,6 +877,7 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [backgroundIntakeNotice]);
 
+  const [universePeriod, setUniversePeriod] = useState<UniversePeriod>("recent");
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
   const { loadMoreExplorerResults, submitExplorerSearch } = useExplorerResults({
     explorer: explorerWorkspace, workspace: workspaceRestoration, activeNav, artistPageName, libraryReady,
@@ -1142,7 +1145,7 @@ function App() {
       : { ...current, libraryExpanded: true });
   }
 
-  function focusArtist(artist: Artist, destination: "tracks" | "albums" = "tracks") {
+  function focusArtist(artist: Pick<Artist, "id">, destination: "tracks" | "albums" = "tracks") {
     transitionContent(() => {
       setSelectedArtistId(artist.id);
       setActiveNav(destination === "albums" ? "Albums" : "Artists");
@@ -1571,7 +1574,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.78.6</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.79.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -1947,7 +1950,12 @@ function App() {
               </RememberedPage>
               <ReactActivity mode={showExplorerCount ? "visible" : "hidden"}>
                 {activeNav === "Universe" ? <>
-                  <Universe artists={snapshot.artists} activeArtist={explorerFilters.artist} onSelect={focusArtist} />
+                  <Universe period={universePeriod} onPeriodChange={setUniversePeriod}
+                    catalogRevision={explorerReloadToken} historyRevision={historyReloadToken}
+                    playback={playback.state} playbackBusy={playback.isWorking}
+                    onResume={() => void playback.toggle()} onSelectArtist={focusArtist}
+                    onOpenAlbum={openAlbum} onPlayTrack={playTrack}
+                  />
                   <section className="stats" aria-label="Library overview">
                     {stats.map(({ label, value, detail, icon: Icon, tone }) => (
                       <article className={`stat stat--${tone}`} key={label}>

@@ -436,6 +436,7 @@ mod tests {
         )
         .unwrap();
         let conn = store.open().unwrap();
+        let now = state_sync::now_ms();
         for (index, name) in [
             (1, "Creed"),
             (2, "Creed"),
@@ -444,14 +445,20 @@ mod tests {
             (5, "The Kids"),
         ] {
             let row = row(index, name);
-            conn.execute("INSERT INTO listening_sessions(session_id,track_key,title,artist,album,directory,filename,started_at_ms,listened_seconds,registered_play,threshold_seconds,outcome) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,30,1,30,'completed')",params![row.session_id,row.track_key,row.title,row.artist,row.album,row.directory,row.filename,state_sync::now_ms()-index*1000]).unwrap();
+            conn.execute("INSERT INTO listening_sessions(session_id,track_key,title,artist,album,directory,filename,started_at_ms,listened_seconds,registered_play,threshold_seconds,outcome) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,30,1,30,'completed')",params![row.session_id,row.track_key,row.title,row.artist,row.album,row.directory,row.filename,now-index*1000]).unwrap();
         }
         let mut profiles = ArtistProfiles::new(Some(catalog_fixture())).unwrap();
-        let totals = store.artist_insights_with_profiles(&mut profiles).unwrap();
+        let totals = store.artist_insights_since(&mut profiles, 0).unwrap();
         assert_eq!(totals.len(), 5);
+        let recent = store
+            .artist_insights_since(&mut profiles, now - 3500)
+            .unwrap();
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent["artist:1"].1.plays, 1);
+        assert!(!recent.contains_key("artist:4"));
         for index in 1..=5 {
             let id = format!("artist:{index}");
-            assert_eq!(totals[&id].plays, 1);
+            assert_eq!(totals[&id].1.plays, 1);
             let detail = store
                 .artist_listening_with_profiles(&id, &mut profiles)
                 .unwrap();

@@ -144,7 +144,7 @@ it("reveals artist intelligence without waiting for the catalog summary", async 
   let finishCatalog!: (value: library.ArtistDetail) => void;
   vi.spyOn(library, "loadArtistDetail").mockImplementation(() => new Promise((resolve) => { finishCatalog = resolve; }));
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Explore M83, 94 tracks" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Explore M83,/ }));
   await act(async () => { await vi.dynamicImportSettled(); });
   expect(await screen.findByRole("region", { name: "MusicBrainz identity status" })).toBeInTheDocument();
   expect(screen.queryByLabelText("Local catalog summary")).not.toBeInTheDocument();

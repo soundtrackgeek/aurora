@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.79.0] - 2026-11-24
+
+### Added
+
+- **Universe** ranks its artist planets by registered plays across available devices, with 90-day and all-time views.
+- Four home shelves let you resume the saved queue, finish ratings on albums close to a final year Rank, open recent Inbox imports, and rediscover loved or five-star tracks last heard at least a year ago.
+
 ## [0.78.6] - 2026-11-23
 
 ### Added

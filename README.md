@@ -1,5 +1,7 @@
 # Aurora
 
+Aurora **0.79.0** makes **Universe** a listening home. Its eight planets come from registered plays across your available devices. Switch between **90 days** and **All time** to see who you’ve been listening to. Resume the saved queue at its current position, open recent Inbox imports or albums with one or two ratings left before their year Rank is final, and play loved or five-star tracks you last heard at least a year ago.
+
 Aurora **0.78.6** runs catalog search on **Enter** or after a 450 ms pause for a complete query. The search bar's **Syntax** panel offers field examples and clickable completions for genres, countries and sound descriptors. The bar also flags unfinished quotes and common clause mistakes as you type. See the [search guide](docs/search.md).
 
 Aurora **0.78.5** keeps Rank visible on album cards. The rating stars now sit beside the track count and length, so Score and Rank have the bottom line to themselves even when a Score passes 100.

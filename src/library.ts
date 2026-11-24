@@ -357,6 +357,8 @@ export type AlbumSort =
 
 export interface AlbumPageRequest {
   pageSize?: number;
+  nearFinalRank?: boolean;
+  inboxAdditionsOnly?: boolean;
   cursor?: ExplorerCursor;
   search?: string;
   rating?: number;
@@ -704,6 +706,10 @@ function previewAlbumPage(request: AlbumPageRequest): AlbumPage {
     ? new Set(filterTracks(browserPreview.tracks, request.search ?? "", null).map((track) => track.albumId))
     : null;
   const items = browserAlbumSummaries()
+    .filter((album) => !request.nearFinalRank || (
+      (album.originalYear ?? 0) >= 1000 && (album.originalYear ?? 0) <= 2999
+      && album.ratedTracks > 0 && [1, 2].includes(album.totalTracks - album.ratedTracks)
+    ))
     .filter((album) => fieldedAlbumIds
       ? fieldedAlbumIds.has(album.id)
       : includesExplorerText([album.title, album.artist, album.genre], request.search))
