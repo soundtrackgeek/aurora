@@ -65,6 +65,8 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `title:` | Track title | `title:"Running Up That Hill"` |
 | `cr:` | Album rating-completeness percentage or range | `cr:50..80` |
 | `love:` | Loved-track count or range for the album | `love:1..3` |
+| `rank:` | The Rank shown on the album card, provisional or final: per album in Albums and Artists, the containing album's in Songs. See [Album Rank](#album-rank-rank-and-frank) | `rank:1`, `rank:..3` |
+| `frank:` | Final Rank only: like `rank:`, for albums with every track rated | `frank:1`, `frank:..10` |
 | `single:` | Official-single count or range: per album in Albums and Artists, per track in Songs (`singles:` is an alias) | `single:2..5` |
 | `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
@@ -165,6 +167,8 @@ A `sort:` in the search replaces the **Sort** menu's choice while it is in the q
 | `sort:minutes..` / `sort:..minutes` | Track duration, shortest / longest first | ✓ | — | — |
 | `sort:plays..` / `sort:..plays` | Plays, fewest / most first | ✓ | — | — |
 | `sort:love..` / `sort:..love` | Love state | ✓ | — | — |
+| `sort:rank` / `sort:..rank` | Rank as the album card shows it, best / worst first; equal ranks by Album Score, highest first. `sort:rank..` is the same as `sort:rank`. See [Album Rank](#album-rank-rank-and-frank) | — | ✓ | — |
+| `sort:frank` / `sort:..frank` | Final Rank only, best / worst first; albums still being rated come last | — | ✓ | — |
 | `sort:az` / `sort:za` | Title A–Z / Z–A: the song title in Songs, the album title in Albums, the artist name in Artists | ✓ | ✓ | ✓ |
 | `sort:title az` / `sort:title za` | Same as `sort:az` / `sort:za` | ✓ | ✓ | ✓ |
 | `sort:album az` / `sort:album za` | Album title (`sort:albums` works too) | ✓ | ✓ | — |
@@ -221,6 +225,27 @@ All range boundaries are **inclusive**, like `year:`: `..2004` means through 200
 | Album rating (0–5 stars) | `ar:3..4` | `ar:..4.34` | `ar:4.34..` |
 
 `minutes:` uses total album duration on Albums and individual track duration on Songs. Stored seconds are compared without rounding to whole minutes; decimal bounds are supported. `ar:` always uses the containing album's catalog rating, including on Songs, using effective, calculated, then stored album rating in that order. It does not round ratings to whole or half stars. Pending edits may need Music Library synchronization before this catalog rating changes. Missing durations or ratings do not match ranges. Bounds are inclusive: `ar:..4.34` includes 4.34 and `minutes:33..` includes exactly 33 minutes. Single values such as `ar:4.34` are also accepted.
+
+### Album Rank: `rank:` and `frank:`
+
+`rank:` searches the **Rank** shown on album cards: an album's place by Album Score among the fully rated albums of its original year. Albums under the Scores umbrella (`genre:scores`) are ranked only against other scores, Soundtrack albums only against other soundtracks, and every other album against the rest of the library. So each year has three #1 albums: one score, one soundtrack, and one of everything else.
+
+`rank:` includes **provisional** ranks, the grey Rank of an album still being rated. That album is placed among the finished albums of its year without pushing them down, so two albums of one year can both be Rank 1 while one of them is still being rated. `frank:` (final rank) only matches albums with every track rated, the green Rank on the card.
+
+| Search | Finds |
+| --- | --- |
+| `rank:1` | Every year's #1 albums in each pool, including albums that would be #1 if their ratings held |
+| `frank:1` | Every year's settled #1 albums, one per pool unless scores tie |
+| `frank:..3` | Every year's final top three in each pool |
+| `rank:..3 AND NOT frank:1..` | Albums still being rated that are heading for a year's top three |
+| `frank:4..10` | Fourth through tenth |
+| `frank:1 AND genre:scores` | Every year's best score |
+| `frank:1 AND NOT genre:scores AND NOT genre:soundtrack` | Every year's best album outside scores and soundtracks |
+| `frank:..10 AND year:1980..1989` | The final top ten of each year in the 1980s, in each pool |
+
+Albums without an Album Score or an original year have no Rank. Equal scores share a rank (1, 2, 2, 4), so `frank:2` can match none and `frank:1` can match two albums of one year and pool. Bounds are positive whole numbers and inclusive. On Songs, `rank:` and `frank:` match the tracks of albums with that Rank.
+
+`sort:rank` orders Albums by the Rank number on the card: all #1 albums first, from every year and every pool, then the #2s, and so on. Inside one rank, the higher Album Score comes first. Albums without a Rank come last. `sort:frank` does the same with final ranks only, so albums still being rated come last with the unranked ones. Add a genre to stay in one pool, such as `genre:soundtrack sort:frank`, or `group:year sort:frank` to see each year's albums in order. `sort:..rank` and `sort:..frank` reverse the order and still put albums without a Rank last. Both sorts are available in Albums only.
 
 ### Chart status and ranks
 

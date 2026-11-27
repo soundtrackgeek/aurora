@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.81.0] - 2026-11-27
+
+### Added
+
+- Search Albums, Songs and Artists by album Rank with `rank:` (the Rank on the album card, provisional ranks included) and `frank:` (final ranks only, for fully rated albums), such as `frank:1`, `rank:..3` or `frank:1 AND genre:scores`.
+- Sort Albums by Rank with `sort:rank` and `sort:frank`: every #1 album first, from every year and every pool, then the #2s, with equal ranks ordered by Album Score. `sort:..rank` and `sort:..frank` reverse the order. Albums without a Rank, or without a final Rank for `sort:frank`, come last.
+
+### Fixed
+
+- The search field suggestions show "Album artist’s origin", "varèse" and "0–5" instead of garbled characters.
+
 ## [0.80.0] - 2026-11-24
 
 ### Added

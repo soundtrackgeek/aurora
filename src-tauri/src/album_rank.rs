@@ -29,6 +29,43 @@ pub(crate) fn pool(genre: Option<&str>) -> RankPool {
     }
 }
 
+/// One row per album with an Album Score and an original year: `album_id`,
+/// `album_score`, `album_rank` and `final_rank`. `album_rank` is the Rank the
+/// album card shows: one more than the fully rated albums of its year and pool
+/// with a higher score, so an album still being rated is placed among them.
+/// `final_rank` is the same number once every track is rated, NULL before.
+/// `rank:`/`sort:rank` and `frank:`/`sort:frank` use them. Reads the catalog
+/// connection's live rating projection, which `catalog::prepare` always creates.
+pub(crate) fn ranks_sql() -> String {
+    let scores = crate::catalog::SCORE_GENRE_GROUP
+        .iter()
+        .map(|genre| format!("'{genre}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // EXCLUDE GROUP leaves out the album and its equal scores: the fully rated
+    // albums that remain all score higher.
+    format!(
+        "SELECT album_id, album_score, album_rank, CASE WHEN complete THEN album_rank END AS final_rank \
+         FROM (SELECT album_id, album_score, complete, \
+             1 + COALESCE(SUM(complete) OVER (PARTITION BY year, pool ORDER BY album_score DESC \
+               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW EXCLUDE GROUP), 0) AS album_rank \
+           FROM (SELECT ranked_album.id AS album_id, ranked_album.year AS year, \
+               CASE WHEN ranked_live.album_id IS NOT NULL THEN ranked_live.album_score \
+                    ELSE ranked_album.album_score END AS album_score, \
+               CASE WHEN ranked_state.album_id IS NOT NULL \
+                    THEN ranked_state.total_tracks > 0 AND ranked_state.rated_tracks >= ranked_state.total_tracks \
+                    ELSE ranked_album.total_tracks > 0 AND ranked_album.rated_tracks >= ranked_album.total_tracks END AS complete, \
+               CASE lower(trim(COALESCE({genre}, ''))) WHEN 'soundtrack' THEN 2 \
+                    ELSE CASE WHEN lower(trim(COALESCE({genre}, ''))) IN ({scores}) THEN 1 ELSE 0 END END AS pool \
+             FROM albums AS ranked_album \
+             LEFT JOIN temp.aurora_live_album_metrics AS ranked_live ON ranked_live.album_id = ranked_album.id \
+             LEFT JOIN temp.aurora_live_album_rating_state AS ranked_state ON ranked_state.album_id = ranked_album.id \
+             WHERE ranked_album.year BETWEEN 1000 AND 2999) \
+           WHERE album_score IS NOT NULL)",
+        genre = crate::live_genres::album_sql("ranked_album"),
+    )
+}
+
 /// Fully rated albums' IDs and scores by original year and genre pool.
 type RankPools = HashMap<(i64, RankPool), Vec<(String, f64)>>;
 

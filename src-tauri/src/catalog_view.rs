@@ -32,6 +32,16 @@ pub(crate) enum ViewSort {
     Love {
         descending: bool,
     },
+    /// The album card's Rank in its year and pool, 1 first, provisional ranks
+    /// included; equal ranks by Album Score, highest first. Albums without a
+    /// Rank come last.
+    Rank {
+        descending: bool,
+    },
+    /// The same with final ranks only: albums still being rated come last.
+    FinalRank {
+        descending: bool,
+    },
     /// The item's own title: the song title in Songs, the album title in Albums.
     Title {
         descending: bool,
@@ -140,7 +150,7 @@ pub(crate) struct CatalogView {
     pub(crate) group: Option<CatalogGroup>,
 }
 
-const SORT_HELP: &str = "Use sort:random, sort:year.., sort:..year, sort:ryear.., sort:added.., sort:rating.., sort:az, sort:za, sort:title az, sort:album az, sort:aartist za or sort:vibe.";
+const SORT_HELP: &str = "Use sort:random, sort:year.., sort:..year, sort:ryear.., sort:added.., sort:rating.., sort:rank, sort:frank, sort:az, sort:za, sort:title az, sort:album az, sort:aartist za or sort:vibe.";
 const GROUP_HELP: &str = "Use group:genre, group:aartist, group:artist, group:album, group:publisher, group:country, group:year, group:ryear, group:decade, group:love, group:ar or group:sound.";
 
 /// Fields that order by a number and take `name..` / `..name`.
@@ -153,6 +163,8 @@ fn numeric_sort(name: &str, descending: bool) -> Option<ViewSort> {
         "minutes" => ViewSort::Minutes { descending },
         "plays" => ViewSort::Plays { descending },
         "love" => ViewSort::Love { descending },
+        "rank" => ViewSort::Rank { descending },
+        "frank" => ViewSort::FinalRank { descending },
         _ => return None,
     })
 }
@@ -175,6 +187,9 @@ fn parse_sort(value: &str, direction: Option<bool>) -> Result<ViewSort, String> 
         "" => return Err(format!("sort: needs a value. {SORT_HELP}")),
         "random" => return Ok(ViewSort::Random),
         "vibe" => return Ok(ViewSort::Vibe),
+        // Best first, the same as `sort:rank..` and `sort:frank..`.
+        "rank" => return Ok(ViewSort::Rank { descending: false }),
+        "frank" => return Ok(ViewSort::FinalRank { descending: false }),
         "az" => return Ok(ViewSort::Title { descending: false }),
         "za" => return Ok(ViewSort::Title { descending: true }),
         _ => {}
@@ -327,6 +342,8 @@ fn sort_name(sort: ViewSort) -> &'static str {
         ViewSort::Minutes { .. } => "minutes",
         ViewSort::Plays { .. } => "plays",
         ViewSort::Love { .. } => "love",
+        ViewSort::Rank { .. } => "rank",
+        ViewSort::FinalRank { .. } => "frank",
         ViewSort::Title { .. } => "title",
         ViewSort::Album { .. } => "album",
         ViewSort::AlbumArtist { .. } => "aartist",
@@ -336,7 +353,7 @@ fn sort_name(sort: ViewSort) -> &'static str {
     }
 }
 
-pub(crate) fn track_sort(sort: ViewSort) -> TrackSort {
+pub(crate) fn track_sort(sort: ViewSort) -> Result<TrackSort, String> {
     let pick = |descending: bool, ascending_sort, descending_sort| {
         if descending {
             descending_sort
@@ -344,7 +361,7 @@ pub(crate) fn track_sort(sort: ViewSort) -> TrackSort {
             ascending_sort
         }
     };
-    match sort {
+    Ok(match sort {
         ViewSort::Random => TrackSort::Random,
         ViewSort::Year { descending } => pick(descending, TrackSort::YearAsc, TrackSort::YearDesc),
         ViewSort::ReleaseYear { descending } => pick(
@@ -382,7 +399,10 @@ pub(crate) fn track_sort(sort: ViewSort) -> TrackSort {
         ),
         // The explorer orders by the vibe score itself (`vibe_sort`).
         ViewSort::Vibe => TrackSort::default(),
-    }
+        other @ (ViewSort::Rank { .. } | ViewSort::FinalRank { .. }) => {
+            return Err(unavailable("Songs", other));
+        }
+    })
 }
 
 pub(crate) fn album_sort(sort: ViewSort) -> Result<AlbumSort, String> {
@@ -411,6 +431,12 @@ pub(crate) fn album_sort(sort: ViewSort) -> Result<AlbumSort, String> {
         ViewSort::AlbumArtist { descending } => {
             pick(descending, AlbumSort::ArtistAsc, AlbumSort::ArtistDesc)
         }
+        ViewSort::Rank { descending } => pick(descending, AlbumSort::RankAsc, AlbumSort::RankDesc),
+        ViewSort::FinalRank { descending } => pick(
+            descending,
+            AlbumSort::FinalRankAsc,
+            AlbumSort::FinalRankDesc,
+        ),
         // The explorer orders by the vibe score itself (`vibe_sort`).
         ViewSort::Vibe => AlbumSort::default(),
         other => return Err(unavailable("Albums", other)),
@@ -690,6 +716,29 @@ mod tests {
             split("sort:..rating").1.sort,
             Some(ViewSort::Rating { descending: true })
         );
+        // Plain sort:rank is best first, like sort:rank..
+        for best_first in ["sort:rank", "sort:rank.."] {
+            assert_eq!(
+                split(best_first).1.sort,
+                Some(ViewSort::Rank { descending: false }),
+                "{best_first}"
+            );
+        }
+        assert_eq!(
+            split("sort:..rank").1.sort,
+            Some(ViewSort::Rank { descending: true })
+        );
+        for best_first in ["sort:frank", "sort:frank.."] {
+            assert_eq!(
+                split(best_first).1.sort,
+                Some(ViewSort::FinalRank { descending: false }),
+                "{best_first}"
+            );
+        }
+        assert_eq!(
+            split("sort:..frank").1.sort,
+            Some(ViewSort::FinalRank { descending: true })
+        );
         // A NOT keeps its clause; a query without sort: or group: is untouched.
         assert_eq!(
             split("genre:rock AND sort:az AND NOT year:1997").0,
@@ -726,8 +775,22 @@ mod tests {
         );
         assert!(album_sort(ViewSort::Genre { descending: false }).is_err());
         assert_eq!(
-            track_sort(ViewSort::Added { descending: true }),
+            album_sort(ViewSort::Rank { descending: false }).unwrap(),
+            AlbumSort::RankAsc
+        );
+        assert_eq!(
+            album_sort(ViewSort::Rank { descending: true }).unwrap(),
+            AlbumSort::RankDesc
+        );
+        assert_eq!(
+            track_sort(ViewSort::Added { descending: true }).unwrap(),
             TrackSort::Newest
+        );
+        assert!(track_sort(ViewSort::Rank { descending: false }).is_err());
+        assert!(track_sort(ViewSort::FinalRank { descending: false }).is_err());
+        assert_eq!(
+            album_sort(ViewSort::FinalRank { descending: true }).unwrap(),
+            AlbumSort::FinalRankDesc
         );
         assert_eq!(
             artist_sort(ViewSort::Title { descending: true }).unwrap(),

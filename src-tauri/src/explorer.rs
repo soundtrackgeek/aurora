@@ -134,6 +134,13 @@ pub(crate) enum AlbumSort {
     ReleaseYearDesc,
     RatingAsc,
     RatingDesc,
+    /// The Rank on the album card, best first (`sort:rank`), provisional
+    /// ones included; see `RANK_SORT_EXPRESSION`.
+    RankAsc,
+    RankDesc,
+    /// Final Rank only (`sort:frank`); albums still being rated come last.
+    FinalRankAsc,
+    FinalRankDesc,
     Random,
 }
 
@@ -948,6 +955,7 @@ fn track_page_from_connection(
     let sort_choice = view
         .sort
         .map(crate::catalog_view::track_sort)
+        .transpose()?
         .or(request.sort);
     let group = view.group.map(|group| {
         crate::catalog_view::group_sql(group, GroupTarget::Tracks, |column| {
@@ -1230,7 +1238,62 @@ fn album_sort(sort: AlbumSort) -> SortDefinition<'static> {
             descending: true,
             cursor_kind: CursorKind::NullableInteger,
         },
+        AlbumSort::RankAsc => SortDefinition {
+            cursor_tag: "album-rank-asc",
+            expression: RANK_SORT_EXPRESSION,
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::RankDesc => SortDefinition {
+            cursor_tag: "album-rank-desc",
+            expression: RANK_SORT_EXPRESSION,
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::FinalRankAsc => SortDefinition {
+            cursor_tag: "album-final-rank-asc",
+            expression: FINAL_RANK_SORT_EXPRESSION,
+            descending: false,
+            cursor_kind: CursorKind::NullableInteger,
+        },
+        AlbumSort::FinalRankDesc => SortDefinition {
+            cursor_tag: "album-final-rank-desc",
+            expression: FINAL_RANK_SORT_EXPRESSION,
+            descending: true,
+            cursor_kind: CursorKind::NullableInteger,
+        },
     }
+}
+
+/// One integer per album for `sort:rank`: the Rank in the billions, less the
+/// Album Score in thousandths, so equal ranks put the higher score first and one
+/// keyset cursor pages through both. Albums without a Rank are NULL and come
+/// last. Reads `temp.aurora_album_ranks` (`prepare_album_ranks`).
+const RANK_SORT_EXPRESSION: &str = "(SELECT rank_order.rank_key FROM temp.aurora_album_ranks AS rank_order WHERE rank_order.album_id = a.id)";
+/// The same for `sort:frank`, NULL until every track is rated.
+const FINAL_RANK_SORT_EXPRESSION: &str = "(SELECT rank_order.final_rank_key FROM temp.aurora_album_ranks AS rank_order WHERE rank_order.album_id = a.id)";
+
+/// Materializes every album's Rank for one `sort:rank` or `sort:frank` page,
+/// from the connection's live ratings, so the sort reads an indexed table per row.
+fn prepare_album_ranks(connection: &Connection) -> Result<(), String> {
+    let query_only: bool = connection
+        .pragma_query_value(None, "query_only", |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    connection
+        .pragma_update(None, "query_only", false)
+        .map_err(|error| error.to_string())?;
+    let result = connection.execute_batch(&format!(
+        "CREATE TEMP TABLE IF NOT EXISTS aurora_album_ranks (album_id TEXT PRIMARY KEY, rank_key INTEGER NOT NULL, final_rank_key INTEGER) WITHOUT ROWID;
+         DELETE FROM temp.aurora_album_ranks;
+         INSERT INTO temp.aurora_album_ranks (album_id, rank_key, final_rank_key)
+         SELECT album_id, album_rank * 1000000000 - score_key, final_rank * 1000000000 - score_key
+         FROM (SELECT *, MIN(999999999, MAX(0, CAST(ROUND(album_score * 1000) AS INTEGER))) AS score_key FROM ({}));",
+        crate::album_rank::ranks_sql()
+    ));
+    connection
+        .pragma_update(None, "query_only", query_only)
+        .map_err(|error| error.to_string())?;
+    result.map_err(|error| format!("Could not rank the albums: {error}"))
 }
 
 fn album_page_from_connection(
@@ -1279,6 +1342,16 @@ fn album_page_from_connection(
     } else if sort_choice == Some(AlbumSort::Random) {
         register_random_order(connection, request.random_seed.unwrap_or(0))?;
         sort.cursor_tag = &random_tag;
+    } else if matches!(
+        sort_choice,
+        Some(
+            AlbumSort::RankAsc
+                | AlbumSort::RankDesc
+                | AlbumSort::FinalRankAsc
+                | AlbumSort::FinalRankDesc
+        )
+    ) {
+        prepare_album_ranks(connection)?;
     }
     let mut params = Vec::<Value>::new();
     let origin_key = crate::artist_identity::key_sql(connection, "a.album_artist_display");
@@ -3707,6 +3780,123 @@ mod tests {
         assert_eq!(crate::catalog::search_fold("Røyksopp"), "royksopp");
         assert_eq!(crate::catalog::search_fold("Sæglópur"), "saeglopur");
         assert_eq!(crate::catalog::search_fold("AC/DC"), "ac/dc");
+    }
+
+    #[test]
+    fn rank_search_and_sort_use_final_ranks_in_each_pool() {
+        let connection = fixture();
+        // a3 (House, 2001, 88) is the only fully rated album in the fixture; a1 and
+        // a2 are still being rated, so they have no final Rank.
+        connection
+            .execute_batch(
+                "INSERT INTO albums VALUES
+                   ('b1', 'Homework', 'Daft Punk', 'House', 1997, 1, 1, 1.0, 0, 300, 90, 90, 2001, NULL),
+                   ('b2', 'Gladiator', 'Hans Zimmer', 'Drama', 2000, 1, 1, 1.0, 0, 300, 10, 60, 2001, NULL),
+                   ('b3', 'Moulin Rouge!', 'Various Artists', 'Soundtrack', 2001, 1, 1, 1.0, 0, 300, 5, 50, 2001, NULL),
+                   ('b4', 'Kid A', 'Radiohead', 'Rock', 2000, 1, 1, 1.0, 0, 300, 50, 80, 1999, NULL);",
+            )
+            .unwrap();
+        let album_ids = |search: &str, page_size: Option<u16>| {
+            let mut ids = Vec::new();
+            let mut cursor = None;
+            loop {
+                let page = album_page_from_connection(
+                    &connection,
+                    AlbumPageRequest {
+                        search: Some(search.to_owned()),
+                        page_size,
+                        cursor,
+                        ..AlbumPageRequest::default()
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{search}: {error}"));
+                ids.extend(page.items.into_iter().map(|album| album.id));
+                cursor = page.next_cursor;
+                if cursor.is_none() {
+                    return ids;
+                }
+            }
+        };
+
+        let sorted = |mut ids: Vec<String>| {
+            ids.sort();
+            ids
+        };
+        // Each pool has its own #1 per year; scores and soundtracks never push the
+        // general pool down, so a3 is #2 behind b1 only. frank: counts final
+        // ranks only.
+        assert_eq!(sorted(album_ids("frank:1", None)), ["b1", "b2", "b3", "b4"]);
+        assert_eq!(album_ids("frank:2", None), ["a3"]);
+        assert_eq!(album_ids("frank:2 OR 3..", None), ["a3"]);
+        assert_eq!(sorted(album_ids("NOT frank:1..", None)), ["a1", "a2"]);
+        // rank: is the card's Rank: a1 and a2 (1999) are still being rated but
+        // already outscore b4, the year's only finished album, without pushing
+        // it down.
+        assert_eq!(
+            sorted(album_ids("rank:1", None)),
+            ["a1", "a2", "b1", "b2", "b3", "b4"]
+        );
+        assert_eq!(album_ids("rank:2", None), ["a3"]);
+        assert!(album_ids("NOT rank:1..", None).is_empty());
+        for album in album_page_from_connection(&connection, AlbumPageRequest::default())
+            .unwrap()
+            .items
+        {
+            let card = album.year_rank.expect("every fixture album has a Rank");
+            // The card and rank: agree, provisional or final.
+            assert!(
+                album_ids(&format!("rank:{card}"), None).contains(&album.id),
+                "{} shows Rank {card}",
+                album.id
+            );
+        }
+
+        // sort:rank puts every #1 first, the higher Album Score first among them;
+        // sort:frank puts albums without a final Rank last. Paging keeps the order.
+        let best_first = ["a1", "b1", "a2", "b4", "b2", "b3", "a3"];
+        assert_eq!(album_ids("sort:rank", None), best_first);
+        assert_eq!(album_ids("sort:rank", Some(2)), best_first);
+        assert_eq!(
+            album_ids("sort:..rank", Some(3)),
+            ["a3", "b3", "b2", "b4", "a2", "b1", "a1"]
+        );
+        let final_first = ["b1", "b4", "b2", "b3", "a3", "a1", "a2"];
+        assert_eq!(album_ids("sort:frank", None), final_first);
+        assert_eq!(album_ids("sort:frank", Some(2)), final_first);
+        assert_eq!(
+            album_ids("sort:..frank", Some(3)),
+            ["a3", "b3", "b2", "b4", "b1", "a2", "a1"]
+        );
+
+        // On Songs, rank: is the containing album's; sort:rank is Albums only.
+        let songs = track_page_from_connection(
+            &connection,
+            TrackPageRequest {
+                search: Some("rank:2".to_owned()),
+                ..TrackPageRequest::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            songs
+                .items
+                .iter()
+                .map(|track| track.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Digital Love"]
+        );
+        assert!(
+            track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    search: Some("sort:rank".to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .is_err()
+        );
     }
 
     #[test]

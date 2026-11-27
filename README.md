@@ -1,5 +1,16 @@
 # Aurora
 
+## Search and sort by Rank
+
+Aurora **0.81.0** searches and sorts by the **Rank** on album cards. `rank:`
+finds the Rank the card shows, provisional ranks included, and `frank:` finds
+final ranks only, once every track is rated: `frank:1` lists every year's
+settled #1 albums. Each year has a #1 in each of three pools: scores,
+soundtracks and everything else. Add `genre:scores`, `genre:soundtrack` or
+`NOT genre:scores AND NOT genre:soundtrack` to stay in one pool. `sort:rank`
+and `sort:frank` put every #1 first, then the #2s, with the higher Album Score
+first among equal ranks. See `docs/search.md` for more examples.
+
 ## Play from Music Library
 
 Music Library **0.220.0** can open Aurora and play an album, track, or saved

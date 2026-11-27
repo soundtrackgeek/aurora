@@ -1020,6 +1020,11 @@ enum ExtendedSearchField {
     Born,
     Minutes,
     AlbumRating,
+    /// `rank:` is the Rank on the album card, provisional or final, and
+    /// `frank:` only a final one (see `album_rank`); on Songs, the containing
+    /// album's.
+    Rank,
+    FinalRank,
     Billboard,
     Uk,
     Vg,
@@ -1331,6 +1336,8 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "ar" => Some(CatalogSearchField::Extended(
             ExtendedSearchField::AlbumRating,
         )),
+        "rank" => Some(CatalogSearchField::Extended(ExtendedSearchField::Rank)),
+        "frank" => Some(CatalogSearchField::Extended(ExtendedSearchField::FinalRank)),
         "bb" => Some(CatalogSearchField::Extended(ExtendedSearchField::Billboard)),
         "uk" => Some(CatalogSearchField::Extended(ExtendedSearchField::Uk)),
         "vg" => Some(CatalogSearchField::Extended(ExtendedSearchField::Vg)),
@@ -1523,6 +1530,19 @@ fn extended_search_predicate(
         let condition = extended_search_predicate("search_album", true, matcher, params)?;
         return Some(format!(
             "EXISTS (SELECT 1 FROM albums AS search_album WHERE search_album.id = {alias}.album_id AND {condition})"
+        ));
+    }
+    if matches!(field, Rank | FinalRank) {
+        let rank = if *field == Rank {
+            "ranked.album_rank"
+        } else {
+            "ranked.final_rank"
+        };
+        let condition = range(rank, params);
+        let column = if album { "id" } else { "album_id" };
+        return Some(format!(
+            "{alias}.{column} IN (SELECT ranked.album_id FROM ({}) AS ranked WHERE {condition})",
+            crate::album_rank::ranks_sql()
         ));
     }
     if album && matches!(field, Ti | Nt) {
