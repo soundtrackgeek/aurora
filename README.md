@@ -8,8 +8,9 @@ explicit total of 0 and `disc:none` the albums whose Disc Total is blank. Music
 Library's catalog has no Disc Total, so Aurora reads it from the files in the
 background into `aurora-disc-totals.sqlite3`. The first pass over a large
 library takes a few hours, and an album appears in `disc:` results once its
-files have been read. Edits made in Aurora count within seconds. See
-`docs/search.md`.
+files have been read. Edits made in Aurora count within seconds. Follow the
+scan in **Settings → Metadata → Disc Total scan** (Aurora **0.83.1**), which
+shows files read, a progress bar and the time left. See `docs/search.md`.
 
 ## Find and rename misnamed albums
 

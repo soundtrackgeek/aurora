@@ -43,6 +43,7 @@ import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
 import { JevSettingsPanel } from "./JevSettingsPanel";
 import { AssistantSettingsPanel } from "./AssistantSettingsPanel";
 import { FanartSettingsPanel } from "./FanartSettingsPanel";
+import { DiscTotalScanPanel } from "./DiscTotalScanPanel";
 
 export type SettingsTab = "display" | "audio" | "shortcuts" | "metadata" | "connections";
 
@@ -368,6 +369,7 @@ function MetadataSettingsPanel({
         {status?.lastFmConfigured ? <label className="metadata-remove"><input type="checkbox" checked={removeLastFmCredentials} onChange={(event) => onRemoveLastFmCredentialsChange(event.target.checked)} /> Remove the saved Last.fm credentials</label> : null}
       </section>
       <FanartSettingsPanel />
+      <DiscTotalScanPanel />
       <div className="metadata-settings__note"><ShieldCheck aria-hidden="true" /><span><strong>MusicBrainz needs no key.</strong><small>Aurora identifies itself and observes MusicBrainz's one-request-per-second limit.</small></span></div>
       <section className="display-settings__section" aria-labelledby="musicbrainz-settings-heading">
         <header>

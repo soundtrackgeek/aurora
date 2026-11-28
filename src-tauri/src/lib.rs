@@ -892,6 +892,13 @@ async fn artist_listening(
 }
 
 #[tauri::command]
+async fn disc_total_scan_status() -> Result<disc_totals::ScanStatus, String> {
+    tauri::async_runtime::spawn_blocking(disc_totals::status)
+        .await
+        .map_err(|_| "The Disc Total status worker stopped.".to_owned())?
+}
+
+#[tauri::command]
 fn fanart_settings() -> fanart::Status {
     fanart::status()
 }
@@ -2618,6 +2625,7 @@ pub fn run() {
             artist_artwork,
             artist_listening,
             fanart_settings,
+            disc_total_scan_status,
             open_artist_link,
             open_music_library_album,
             update_fanart_credentials,

@@ -6,10 +6,12 @@
 //! Total; a file without a row has not been read yet and matches no `disc:` term.
 use crate::{device_mode, state_store::StateStore};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::Serialize;
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::Mutex,
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
@@ -21,6 +23,100 @@ const FILL_REST: Duration = Duration::from_secs(10 * 60);
 const VERIFY_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// Aurora's own tag writes are re-read this often while they wait for import.
 const PENDING_EVERY: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Activity {
+    Starting,
+    /// Reading catalog tracks that have no cached Disc Total.
+    Reading,
+    /// Checking cached files for changes made outside Aurora.
+    Checking,
+    /// Every catalog track has been looked at; waiting for new ones.
+    Resting,
+    /// Network or Laptop Mode: files are not read on this device.
+    Paused,
+}
+
+struct Progress {
+    activity: Activity,
+    session_reads: u64,
+    first_read: Option<Instant>,
+    error: Option<String>,
+}
+
+static PROGRESS: Mutex<Progress> = Mutex::new(Progress {
+    activity: Activity::Starting,
+    session_reads: 0,
+    first_read: None,
+    error: None,
+});
+
+fn progress() -> std::sync::MutexGuard<'static, Progress> {
+    PROGRESS.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+fn set_activity(activity: Activity) {
+    progress().activity = activity;
+}
+
+fn count_reads(count: usize) {
+    if count == 0 {
+        return;
+    }
+    let mut progress = progress();
+    progress.first_read.get_or_insert_with(Instant::now);
+    progress.session_reads += count as u64;
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScanStatus {
+    pub(crate) activity: Activity,
+    /// Files with a cached Disc Total, capped at the catalog's file count.
+    pub(crate) read_files: i64,
+    pub(crate) catalog_files: i64,
+    /// Read rate since Aurora started, once there is enough to measure.
+    pub(crate) files_per_minute: Option<f64>,
+    pub(crate) error: Option<String>,
+}
+
+/// What the scanner is doing and how much of the catalog it has read.
+pub(crate) fn status() -> Result<ScanStatus, String> {
+    let catalog_path = crate::catalog::default_catalog_path()?;
+    let catalog_files = if catalog_path.is_file() {
+        crate::catalog::open_catalog_for_lookup(&catalog_path)?
+            .query_row(
+                "SELECT count(*) FROM tracks WHERE file_path IS NOT NULL AND filename IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("Could not count catalog files: {error}"))?
+    } else {
+        0
+    };
+    let cached = match cache_path().filter(|path| path.is_file()) {
+        Some(path) => open_cache(&path)?
+            .query_row("SELECT count(*) FROM disc_totals", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(|error| error.to_string())?,
+        None => 0,
+    };
+    let progress = progress();
+    let files_per_minute = progress.first_read.and_then(|first| {
+        let minutes = first.elapsed().as_secs_f64() / 60.0;
+        (minutes >= 1.0 && progress.session_reads >= 50)
+            .then(|| progress.session_reads as f64 / minutes)
+    });
+    Ok(ScanStatus {
+        activity: progress.activity,
+        read_files: cached.min(catalog_files),
+        catalog_files,
+        files_per_minute,
+        error: progress.error.clone(),
+    })
+}
 
 pub(crate) fn cache_path() -> Option<PathBuf> {
     #[cfg(test)]
@@ -367,8 +463,21 @@ impl Scanner {
     /// Laptop Mode; the cache then keeps what the home PC read.
     pub(crate) fn run_slice(&mut self, store: &StateStore, budget: Duration) -> Result<(), String> {
         if crate::connections::network_mode() || device_mode::laptop_mode_enabled() {
+            set_activity(Activity::Paused);
             return Ok(());
         }
+        let outcome = self.work(store, budget);
+        let mut progress = progress();
+        progress.activity = match self.phase {
+            Phase::Fill { .. } => Activity::Reading,
+            Phase::Verify { .. } => Activity::Checking,
+            Phase::Rest { .. } => Activity::Resting,
+        };
+        progress.error = outcome.as_ref().err().cloned();
+        outcome
+    }
+
+    fn work(&mut self, store: &StateStore, budget: Duration) -> Result<(), String> {
         let Some(cache_path) = cache_path() else {
             return Ok(());
         };
@@ -461,6 +570,7 @@ fn fill_batch(
         }
     }
     save(cache, &readings, &[])?;
+    count_reads(readings.len());
     Ok(Some(reached))
 }
 
@@ -660,6 +770,24 @@ mod tests {
             after = Some(last);
         }
         assert_eq!(totals(&cache), [("02.mp3".to_owned(), Some(0))]);
+    }
+
+    #[test]
+    fn status_serializes_for_the_settings_panel() {
+        let status = ScanStatus {
+            activity: Activity::Reading,
+            read_files: 2,
+            catalog_files: 3,
+            files_per_minute: None,
+            error: None,
+        };
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({
+                "activity": "reading", "readFiles": 2, "catalogFiles": 3,
+                "filesPerMinute": null, "error": null
+            })
+        );
     }
 
     #[test]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.83.1] - 2026-11-28
+
+### Added
+
+- **Settings → Metadata → Disc Total scan** shows how far the background Disc Total read behind `disc:` has come: files read out of the catalog, a percentage and progress bar, an estimate of the time left while reading, and whether the scan is checking for changes, up to date, or paused in Network or Laptop Mode.
+
 ## [0.83.0] - 2026-11-28
 
 ### Added

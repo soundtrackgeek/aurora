@@ -542,7 +542,10 @@ svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .settings-tabs { display: flex; gap: 4px; min-height: 42px; padding: 7px 18px; border-bottom: 1px solid rgba(150,176,199,.1); background: rgba(2,8,14,.24); }.settings-tabs button { display: flex; align-items: center; gap: 6px; min-width: 104px; padding: 0 12px; border: 1px solid transparent; border-radius: 7px; color: #7e8b98; background: transparent; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); cursor: pointer; }.settings-tabs button[aria-selected="true"] { border-color: rgba(188,101,245,.24); color: #e2c7ee; background: rgba(130,48,177,.14); }.settings-tabs svg { width: 13px; height: 13px; }
 .metadata-settings { display: grid; gap: 12px; }
 .metadata-connection { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
-.metadata-connection.is-connected { color: #72d69b; }.metadata-connection svg { width: 13px; }
+.metadata-connection.is-connected { color: #72d69b; }
+.disc-total-scan__progress { width: 100%; margin-top: 12px; accent-color: #72d69b; }
+.disc-total-scan__summary { margin: 8px 0 0; color: #c9d2dd; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); font-variant-numeric: tabular-nums; }
+.disc-total-scan__error { margin: 8px 0 0; color: #ff9b8f; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }.metadata-connection svg { width: 13px; }
 .metadata-token-field { display: grid; gap: 6px; margin-top: 12px; color: #c9d2dd; font-size: max(var(--aurora-font-min), calc(10px + var(--aurora-font-offset))); }
 .metadata-auth-mode { display: grid; grid-template-columns: 160px minmax(0,1fr); align-items: center; gap: 10px; margin-top: 11px; color: #c9d2dd; font-size: max(var(--aurora-font-min), calc(9px + var(--aurora-font-offset))); }
 .metadata-auth-mode select { height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: #080f17; color: #e6e9ef; }
