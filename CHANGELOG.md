@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.82.0] - 2026-11-28
+
+### Added
+
+- Search Albums, Songs and Artists by the rename icon with `rename:yes` (folder or track files not named after the tags) and `rename:no` (everything else, including albums that cannot be checked). The search uses the same naming check as the icon on the album card.
+- **Rename N albums** in the Albums toolbar renames every selected album that shows the rename icon, next to **Remove N albums**. Selected albums that are already named after their tags are skipped.
+
 ## [0.81.0] - 2026-11-27
 
 ### Added

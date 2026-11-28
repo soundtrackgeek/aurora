@@ -70,6 +70,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `single:` | Official-single count or range: per album in Albums and Artists, per track in Songs (`singles:` is an alias) | `single:2..5` |
 | `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
+| `rename:` | The rename icon on the album card: `yes` for albums whose folder or track files do not follow the tags, `no` for the rest. In Songs, the containing album's. See [Album naming](#album-naming-rename) | `rename:yes`, `rename:no` |
 | `sound:` | A sound descriptor heard in the audio: per track in Songs; in Albums and Artists, on at least a third of an album's tracks | `sound:choir`, `sound:synth OR chiptune` |
 | `vibe:` | A description of the sound in your own words: the best-fitting 2% of tracks in Songs, of albums in Albums and Artists | `vibe:"dark ambient drone"`, `vibe:"heroic brass fanfare" sort:vibe` |
 
@@ -225,6 +226,12 @@ All range boundaries are **inclusive**, like `year:`: `..2004` means through 200
 | Album rating (0–5 stars) | `ar:3..4` | `ar:..4.34` | `ar:4.34..` |
 
 `minutes:` uses total album duration on Albums and individual track duration on Songs. Stored seconds are compared without rounding to whole minutes; decimal bounds are supported. `ar:` always uses the containing album's catalog rating, including on Songs, using effective, calculated, then stored album rating in that order. It does not round ratings to whole or half stars. Pending edits may need Music Library synchronization before this catalog rating changes. Missing durations or ratings do not match ranges. Bounds are inclusive: `ar:..4.34` includes 4.34 and `minutes:33..` includes exactly 33 minutes. Single values such as `ar:4.34` are also accepted.
+
+### Album naming: `rename:`
+
+`rename:yes` finds the albums that show the amber folder icon on their cover: the folder is not named `Album Artist - Album (Year)`, or some track files are not named `1-01 - Artist - Title` (`01 - Artist - Title` without a disc number). These are the albums **Rename to match tags** would change. `rename:no` finds every other album, both albums already named after their tags and albums with the grey question mark, whose missing or disagreeing tags keep them from being checked.
+
+The search uses the same check as the icon, so the two always agree. Select the results and use **Rename N albums** in the Albums toolbar, or Ctrl+R, to rename them all. Combine it with other fields to work through the library in parts, such as `rename:yes AND genre:scores` or `rename:yes AND year:1990..1999`. On Songs, `rename:` matches the tracks of those albums.
 
 ### Album Rank: `rank:` and `frank:`
 

@@ -12,6 +12,7 @@ cr|Rating completeness (%)|cr:50..80
 love|Loved tracks|love:1..3
 rank|Album Rank in its year|rank:..3
 frank|Final album Rank (fully rated)|frank:1
+rename|Album needs renaming (yes/no)|rename:yes
 single|Official singles|single:1
 sonic|Saved sonic analysis|sonic:yes|sat
 sound|Sound descriptor|sound:choir

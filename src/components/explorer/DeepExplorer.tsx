@@ -186,6 +186,8 @@ export interface DeepExplorerProps {
   onRequestRemoveAlbum?: (album: ExplorerAlbum) => void;
   /** Removes every selected album; offered in the Albums view toolbar. */
   onRequestRemoveAlbums?: (albums: readonly ExplorerAlbum[]) => void;
+  /** Renames the selected albums that show the rename icon; offered in the Albums view toolbar. */
+  onRequestRenameAlbums?: (albums: readonly ExplorerAlbum[]) => void;
   albumMoveBusy?: boolean;
   onSelectionChange?: (selection: ExplorerSelection) => void;
   onCreatePlaylist?: (selection: ExplorerSelection, smart: boolean) => void;
@@ -1567,6 +1569,7 @@ export function DeepExplorer(props: DeepExplorerProps) {
     onRequestRename,
     onRequestRemoveAlbum,
     onRequestRemoveAlbums,
+    onRequestRenameAlbums,
     albumMoveBusy,
     onSelectionChange,
   } = props;
@@ -1727,6 +1730,13 @@ export function DeepExplorer(props: DeepExplorerProps) {
           const selectedAlbums = albums.filter((album) => selectedAlbumIds.has(album.id));
           return <button type="button" className="deep-explorer-remove-selected" disabled={loadState !== "ready" || albumMoveBusy || selectedAlbums.length === 0} onClick={() => onRequestRemoveAlbums(selectedAlbums)}>
             <FolderOutput aria-hidden="true" />{selectedAlbums.length > 1 ? `Remove ${selectedAlbums.length} albums` : "Remove album"}
+          </button>;
+        })() : null}
+        {onRequestRenameAlbums && view === "albums" ? (() => {
+          // Only albums with the rename icon; the rest are already named after their tags or cannot be checked.
+          const misnamed = albums.filter((album) => selectedAlbumIds.has(album.id) && album.naming?.status === "misnamed");
+          return <button type="button" className="deep-explorer-remove-selected deep-explorer-rename-selected" disabled={loadState !== "ready" || albumMoveBusy || misnamed.length === 0} title={selectedAlbumIds.size > 0 && misnamed.length === 0 ? "No selected album needs renaming" : "Rename the folders and files to match the tags (Ctrl+R)"} onClick={() => onRequestRenameAlbums(misnamed)}>
+            <FolderPen aria-hidden="true" />{misnamed.length > 1 ? `Rename ${misnamed.length} albums` : "Rename album"}
           </button>;
         })() : null}
         <SortControl

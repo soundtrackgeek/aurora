@@ -3900,6 +3900,99 @@ mod tests {
     }
 
     #[test]
+    fn rename_search_matches_the_album_naming_icon() {
+        let connection = fixture();
+        // Every fixture album sits in an artist folder, so all three show the rename
+        // icon. b1 is named after its tags; b2 lacks a Title tag, so it is unchecked
+        // and has no rename icon.
+        connection
+            .execute_batch(
+                r#"INSERT INTO albums VALUES
+                     ('b1', 'Homework', 'Daft Punk', 'House', 1997, 1, 0, 0.0, 0, 300, NULL, NULL, 1997, NULL),
+                     ('b2', 'Untitled', 'Daft Punk', 'House', 1997, 1, 0, 0.0, 0, 300, NULL, NULL, 1997, NULL);
+                   INSERT INTO tracks VALUES
+                     (20, 1, 'b1', 'Revolution 909', 'Daft Punk', 'Daft Punk', 'Homework', 'House', NULL, NULL, '', NULL, 1997, 300, 'H:\Music\Daft Punk - Homework (1997)', '01 - Daft Punk - Revolution 909.mp3', NULL, 1, 1997),
+                     (21, 1, 'b2', NULL, 'Daft Punk', 'Daft Punk', 'Untitled', 'House', NULL, NULL, '', NULL, 1997, 300, 'H:\Music\Untitled', 'x.mp3', NULL, 1, 1997);"#,
+            )
+            .unwrap();
+        let album_ids = |search: &str| {
+            let mut ids = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(search.to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{search}: {error}"))
+            .items
+            .into_iter()
+            .map(|album| album.id)
+            .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+
+        assert_eq!(album_ids("rename:yes"), ["a1", "a2", "a3"]);
+        assert_eq!(album_ids("rename:YES"), ["a1", "a2", "a3"]);
+        assert_eq!(album_ids("rename:no"), ["b1", "b2"]);
+        assert_eq!(album_ids("NOT rename:yes"), ["b1", "b2"]);
+        assert_eq!(album_ids("rename:yes AND aartist:\"daft punk\""), ["a3"]);
+        // The search and the card's icon agree for every album.
+        for album in album_page_from_connection(&connection, AlbumPageRequest::default())
+            .unwrap()
+            .items
+        {
+            let icon = matches!(
+                album.naming,
+                Some(crate::library_naming::AlbumNamingCheck::Misnamed { .. })
+            );
+            assert_eq!(
+                album_ids("rename:yes").contains(&album.id),
+                icon,
+                "{}",
+                album.id
+            );
+        }
+        assert!(
+            album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some("rename:maybe".to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .is_err()
+        );
+
+        // On Songs, rename: matches the tracks of those albums.
+        let song_titles = |search: &str| {
+            let mut titles = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    search: Some(search.to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{search}: {error}"))
+            .items
+            .into_iter()
+            .map(|track| track.title)
+            .collect::<Vec<_>>();
+            titles.sort();
+            titles
+        };
+        assert_eq!(
+            song_titles("rename:no AND aartist:\"daft punk\""),
+            ["Revolution 909", "Untitled"]
+        );
+        assert_eq!(
+            song_titles("rename:yes AND aartist:\"daft punk\""),
+            ["Digital Love"]
+        );
+    }
+
+    #[test]
     fn album_metric_search_filters_tracks_albums_and_artists() {
         let connection = fixture();
 

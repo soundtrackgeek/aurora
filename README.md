@@ -1,5 +1,15 @@
 # Aurora
 
+## Find and rename misnamed albums
+
+Aurora **0.82.0** can search for the albums that show the rename icon on their
+cover. `rename:yes` lists the albums whose folder or track files do not follow
+their tags, and `rename:no` lists the rest. Select several albums in the Albums
+view and click **Rename N albums** in the toolbar, next to **Remove N albums**,
+to rename them all to match their tags in one go; albums that are already
+named correctly are left alone. Try `rename:yes AND genre:scores` to work
+through one part of the library at a time. See `docs/search.md`.
+
 ## Search and sort by Rank
 
 Aurora **0.81.0** searches and sorts by the **Rank** on album cards. `rank:`

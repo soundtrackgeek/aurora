@@ -1591,7 +1591,7 @@ function App() {
 
         <div className="profile">
           <CircleUserRound aria-hidden="true" />
-          <span><strong>Jørn</strong><small>Aurora 0.81.0</small></span>
+          <span><strong>Jørn</strong><small>Aurora 0.82.0</small></span>
           <Settings aria-hidden="true" />
         </div>
       </aside>}
@@ -2044,6 +2044,7 @@ function App() {
                       onRequestRename={(album) => void renameAlbumToMatchTags(album)}
                       onRequestRemoveAlbum={(album) => requestAlbumRemoval([album])}
                       onRequestRemoveAlbums={requestAlbumRemoval}
+                      onRequestRenameAlbums={(albums) => void renameAlbumsToMatchTags(albums)}
                       albumMoveBusy={albumOperationBusy || renamingAlbumId !== null}
                       onSelectionChange={(selection) => {
                         setExplorerSelection(selection);

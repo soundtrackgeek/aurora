@@ -306,6 +306,7 @@ pub(crate) fn register_catalog_functions(connection: &Connection) -> Result<(), 
             },
         )
         .map_err(|error| format!("Could not configure live catalog file checks: {error}"))?;
+    crate::library_naming::register(connection)?;
     crate::vibe::register(connection)
 }
 
@@ -1025,6 +1026,9 @@ enum ExtendedSearchField {
     /// album's.
     Rank,
     FinalRank,
+    /// `rename:yes` finds albums with the rename icon, whose folder or track
+    /// files a rename would change (see `library_naming`); on Songs, their tracks.
+    Rename,
     Billboard,
     Uk,
     Vg,
@@ -1338,6 +1342,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         )),
         "rank" => Some(CatalogSearchField::Extended(ExtendedSearchField::Rank)),
         "frank" => Some(CatalogSearchField::Extended(ExtendedSearchField::FinalRank)),
+        "rename" => Some(CatalogSearchField::Extended(ExtendedSearchField::Rename)),
         "bb" => Some(CatalogSearchField::Extended(ExtendedSearchField::Billboard)),
         "uk" => Some(CatalogSearchField::Extended(ExtendedSearchField::Uk)),
         "vg" => Some(CatalogSearchField::Extended(ExtendedSearchField::Vg)),
@@ -1383,8 +1388,13 @@ fn parse_extended_search(
     value: &str,
 ) -> Result<CatalogSearchMatch, String> {
     use ExtendedSearchField::*;
-    if (matches!(field, Dissolved | Dead | Billboard | Uk | Vg | Ti | Nt)
-        || field.single_chart().is_some())
+    if field == Rename && !matches!(value.to_ascii_lowercase().as_str(), "yes" | "no") {
+        return Err("Use rename:yes or rename:no to find albums by the rename icon.".into());
+    }
+    if (matches!(
+        field,
+        Dissolved | Dead | Rename | Billboard | Uk | Vg | Ti | Nt
+    ) || field.single_chart().is_some())
         && matches!(value.to_ascii_lowercase().as_str(), "yes" | "no")
     {
         return Ok(CatalogSearchMatch::Extended {
@@ -1531,6 +1541,25 @@ fn extended_search_predicate(
         return Some(format!(
             "EXISTS (SELECT 1 FROM albums AS search_album WHERE search_album.id = {alias}.album_id AND {condition})"
         ));
+    }
+    if *field == Rename {
+        let columns = crate::library_naming::naming_columns_sql("naming_track");
+        let misnamed = if album {
+            // Correlated, so other terms narrow the albums before their tracks are read.
+            format!(
+                "(SELECT aurora_album_misnamed({columns}) FROM tracks AS naming_track WHERE naming_track.album_id = {alias}.id) IS 1"
+            )
+        } else {
+            // One pass over the catalog instead of rechecking an album for each track.
+            format!(
+                "{alias}.album_id IN (SELECT naming_track.album_id FROM tracks AS naming_track WHERE naming_track.album_id IS NOT NULL GROUP BY naming_track.album_id HAVING aurora_album_misnamed({columns}) = 1)"
+            )
+        };
+        return Some(if *present == Some(false) {
+            format!("NOT ({misnamed})")
+        } else {
+            misnamed
+        });
     }
     if matches!(field, Rank | FinalRank) {
         let rank = if *field == Rank {

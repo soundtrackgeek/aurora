@@ -443,6 +443,34 @@ describe("DeepExplorer", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "albums", albums: extraAlbums.slice(1) });
   });
 
+  it("renames only the misnamed albums in the selection from the toolbar", () => {
+    const misnamed = { status: "misnamed" as const, issues: ["Folder should be renamed"] };
+    const namedAlbums = [
+      albums[0],
+      { ...albums[0], id: "album-2", title: "Electric Dawn" },
+      { ...albums[0], id: "album-3", title: "Violet Static" },
+    ].map((album, index) => ({ ...album, naming: index === 1 ? { status: "organized" as const } : misnamed }));
+    const onRequestRenameAlbums = vi.fn();
+    render(<DeepExplorer {...explorerProps({
+      view: "albums",
+      albums: namedAlbums,
+      onRequestRenameAlbums,
+      pageInfo: { loaded: 3, hasMore: false, isLoadingMore: false },
+    })} />);
+    expect(screen.getByRole("button", { name: "Rename album" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Night Geometry/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Violet Static/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Rename 2 albums" }));
+    expect(onRequestRenameAlbums).toHaveBeenCalledWith([namedAlbums[0], namedAlbums[2]]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Night Geometry/ }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Violet Static/ }), { ctrlKey: true });
+    const button = screen.getByRole("button", { name: "Rename album" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "No selected album needs renaming");
+  });
+
   it("shows each track's display artist beside its title in album detail", () => {
     const soundtrackTrack: Track = {
       ...tracks[0],

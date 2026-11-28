@@ -196,15 +196,92 @@ pub(crate) fn check_albums(
     }
 }
 
+/// The track columns the check reads, in [`CatalogNamingTrack`] order, for `alias`.
+pub(crate) fn naming_columns_sql(alias: &str) -> String {
+    format!(
+        "COALESCE({alias}.file_path, ''), COALESCE({alias}.filename, ''), {alias}.album_artist_display,          {alias}.album, {alias}.year, {alias}.display_artist, {alias}.title, {alias}.track_number, {alias}.disc_number"
+    )
+}
+
+/// `aurora_album_misnamed(<naming_columns_sql>)` aggregates one album's tracks and
+/// returns 1 when the album shows the rename icon (`Misnamed`), else 0. `rename:`
+/// searches with it, so a search and the icon never disagree.
+struct MisnamedAggregate;
+
+impl rusqlite::functions::Aggregate<Vec<CatalogNamingTrack>, i64> for MisnamedAggregate {
+    fn init(
+        &self,
+        _: &mut rusqlite::functions::Context<'_>,
+    ) -> rusqlite::Result<Vec<CatalogNamingTrack>> {
+        Ok(Vec::new())
+    }
+
+    fn step(
+        &self,
+        context: &mut rusqlite::functions::Context<'_>,
+        tracks: &mut Vec<CatalogNamingTrack>,
+    ) -> rusqlite::Result<()> {
+        use rusqlite::types::ValueRef;
+        let text = |index| match context.get_raw(index) {
+            ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+            ValueRef::Integer(value) => Some(value.to_string()),
+            ValueRef::Real(value) => Some(value.to_string()),
+            ValueRef::Null | ValueRef::Blob(_) => None,
+        };
+        // Lenient like the catalog: a number stored as text still counts.
+        let number = |index| match context.get_raw(index) {
+            ValueRef::Integer(value) => Some(value),
+            ValueRef::Real(value) if value.fract() == 0.0 => Some(value as i64),
+            ValueRef::Text(bytes) => std::str::from_utf8(bytes).ok()?.trim().parse().ok(),
+            _ => None,
+        };
+        tracks.push(CatalogNamingTrack {
+            directory: text(0).unwrap_or_default(),
+            filename: text(1).unwrap_or_default(),
+            album_artist: text(2),
+            album: text(3),
+            year: number(4).and_then(|year| i32::try_from(year).ok()),
+            artist: text(5),
+            title: text(6),
+            track_number: number(7).and_then(|value| u32::try_from(value).ok()),
+            disc_number: number(8).and_then(|value| u32::try_from(value).ok()),
+        });
+        Ok(())
+    }
+
+    fn finalize(
+        &self,
+        _: &mut rusqlite::functions::Context<'_>,
+        tracks: Option<Vec<CatalogNamingTrack>>,
+    ) -> rusqlite::Result<i64> {
+        Ok(i64::from(matches!(
+            tracks.map(|tracks| check_album(&tracks)),
+            Some(AlbumNamingCheck::Misnamed { .. })
+        )))
+    }
+}
+
+pub(crate) fn register(connection: &Connection) -> Result<(), String> {
+    connection
+        .create_aggregate_function(
+            "aurora_album_misnamed",
+            9,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            MisnamedAggregate,
+        )
+        .map_err(|error| format!("Could not configure album naming search: {error}"))
+}
+
 fn read_tracks(
     connection: &Connection,
     album_ids: &[&str],
 ) -> rusqlite::Result<HashMap<String, Vec<CatalogNamingTrack>>> {
     let placeholders = vec!["?"; album_ids.len()].join(", ");
     let sql = format!(
-        "SELECT CAST(album_id AS TEXT), COALESCE(file_path, ''), COALESCE(filename, ''),
-                album_artist_display, album, year, display_artist, title, track_number, disc_number
-         FROM tracks WHERE album_id IN ({placeholders})"
+        "SELECT CAST(tracks.album_id AS TEXT), {}
+         FROM tracks WHERE album_id IN ({placeholders})",
+        naming_columns_sql("tracks")
     );
     let mut statement = connection.prepare(&sql)?;
     let params = album_ids
