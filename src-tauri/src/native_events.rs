@@ -150,6 +150,13 @@ impl NativeBackgroundTasks {
             Ok(())
         })?;
 
+        // Fills the `disc:` search cache from the files, a few seconds at a time.
+        let disc_app = app.clone();
+        let mut disc_scanner = crate::disc_totals::Scanner::default();
+        self.schedule("aurora-disc-totals", Duration::from_secs(2), move || {
+            disc_scanner.run_slice(&disc_app.state::<StateStore>(), Duration::from_secs(3))
+        })?;
+
         let tags_app = app.clone();
         let mut tag_previous = None;
         let mut pacer = ReconciliationPacer::default();

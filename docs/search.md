@@ -71,6 +71,7 @@ In Charts, an album's **Open in Library** action opens a fresh exact album searc
 | `genres:` | Number of genres in the genre tags as written: per album in Albums and Artists, per track in Songs. A single number is exact | `genres:2..` |
 | `sonic:` | Saved compatible audio analysis on a track | `sonic:yes`, `sonic:no` |
 | `rename:` | The rename icon on the album card: `yes` for albums whose folder or track files do not follow the tags, `no` for the rest. In Songs, the containing album's. See [Album naming](#album-naming-rename) | `rename:yes`, `rename:no` |
+| `disc:` | The Disc Total tag: per track in Songs; in Albums and Artists, an album with a track that has it. `disc:none` finds a blank Disc Total, `disc:0` an explicit 0. See [Disc Total](#disc-total-disc) | `disc:3`, `disc:2..`, `disc:none` |
 | `sound:` | A sound descriptor heard in the audio: per track in Songs; in Albums and Artists, on at least a third of an album's tracks | `sound:choir`, `sound:synth OR chiptune` |
 | `vibe:` | A description of the sound in your own words: the best-fitting 2% of tracks in Songs, of albums in Albums and Artists | `vibe:"dark ambient drone"`, `vibe:"heroic brass fanfare" sort:vibe` |
 
@@ -232,6 +233,14 @@ All range boundaries are **inclusive**, like `year:`: `..2004` means through 200
 `rename:yes` finds the albums that show the amber folder icon on their cover: the folder is not named `Album Artist - Album (Year)`, or some track files are not named `1-01 - Artist - Title` (`01 - Artist - Title` without a disc number). These are the albums **Rename to match tags** would change. `rename:no` finds every other album, both albums already named after their tags and albums with the grey question mark, whose missing or disagreeing tags keep them from being checked.
 
 The search uses the same check as the icon, so the two always agree. Select the results and use **Rename N albums** in the Albums toolbar, or Ctrl+R, to rename them all. Combine it with other fields to work through the library in parts, such as `rename:yes AND genre:scores` or `rename:yes AND year:1990..1999`. On Songs, `rename:` matches the tracks of those albums.
+
+### Disc Total: `disc:`
+
+`disc:3` finds the albums with three discs according to their Disc Total tag, the second number in TPOS (`1/3`). Ranges work like other numbers: `disc:2..` is every album with two or more discs. `disc:0` finds tags with an explicit total of 0 (`1/0`), and `disc:none` finds tags with no total at all, such as `1` or an empty Disc# field.
+
+Music Library's catalog does not store Disc Total, so Aurora reads it from the MP3 files in the background and keeps it in `aurora-disc-totals.sqlite3`. The first pass over a large library takes a few hours. Until a file has been read it matches no `disc:` term, not even `disc:none`. Files Aurora edits are read again within seconds, new albums within about ten minutes, and files changed by other programs at the next check, every six hours. Network Mode and Laptop Mode do not read files; they search what the home PC has already read.
+
+An album matches when any of its tracks has the Disc Total, so an album whose tracks disagree appears under each value. In Songs, `disc:` checks each track's own tag. `NOT disc:3` also lists albums that have not been read yet.
 
 ### Album Rank: `rank:` and `frank:`
 

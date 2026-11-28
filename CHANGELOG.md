@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.83.0] - 2026-11-28
+
+### Added
+
+- Search Albums, Songs and Artists by the Disc Total tag with `disc:`: `disc:3` finds three-disc albums, `disc:2..` two or more, `disc:0` an explicit total of 0 and `disc:none` a blank Disc Total. Aurora reads Disc Total from the MP3 files in the background, because Music Library's catalog does not store it; the first pass over a large library takes a few hours, and files that have not been read yet match no `disc:` term.
+
 ## [0.82.0] - 2026-11-28
 
 ### Added

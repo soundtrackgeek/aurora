@@ -174,6 +174,7 @@ pub(crate) fn open_catalog(path: &Path) -> Result<Connection, String> {
         &connection,
         crate::sound_descriptors::cache_path().as_deref(),
     )?;
+    crate::disc_totals::prepare_search(&connection, crate::disc_totals::cache_path().as_deref())?;
     prepare_single_keys(&connection)?;
     connection
         .busy_timeout(Duration::from_secs(2))
@@ -1029,6 +1030,9 @@ enum ExtendedSearchField {
     /// `rename:yes` finds albums with the rename icon, whose folder or track
     /// files a rename would change (see `library_naming`); on Songs, their tracks.
     Rename,
+    /// `disc:` is a track's Disc Total tag (see `disc_totals`): `disc:none` for a
+    /// blank one. On Albums and Artists, an album with such a track.
+    DiscTotal,
     Billboard,
     Uk,
     Vg,
@@ -1343,6 +1347,7 @@ fn parse_search_field(value: &str) -> Option<CatalogSearchField> {
         "rank" => Some(CatalogSearchField::Extended(ExtendedSearchField::Rank)),
         "frank" => Some(CatalogSearchField::Extended(ExtendedSearchField::FinalRank)),
         "rename" => Some(CatalogSearchField::Extended(ExtendedSearchField::Rename)),
+        "disc" => Some(CatalogSearchField::Extended(ExtendedSearchField::DiscTotal)),
         "bb" => Some(CatalogSearchField::Extended(ExtendedSearchField::Billboard)),
         "uk" => Some(CatalogSearchField::Extended(ExtendedSearchField::Uk)),
         "vg" => Some(CatalogSearchField::Extended(ExtendedSearchField::Vg)),
@@ -1391,6 +1396,14 @@ fn parse_extended_search(
     if field == Rename && !matches!(value.to_ascii_lowercase().as_str(), "yes" | "no") {
         return Err("Use rename:yes or rename:no to find albums by the rename icon.".into());
     }
+    if field == DiscTotal && value.eq_ignore_ascii_case("none") {
+        return Ok(CatalogSearchMatch::Extended {
+            field,
+            from: None,
+            to: None,
+            present: Some(false),
+        });
+    }
     if (matches!(
         field,
         Dissolved | Dead | Rename | Billboard | Uk | Vg | Ti | Nt
@@ -1406,7 +1419,12 @@ fn parse_extended_search(
     }
     let number = |raw: &str| -> Result<f64, String> {
         let n = raw.parse::<f64>().map_err(|_| {
-            "Search requires a number, range, or supported yes/no value.".to_owned()
+            if field == DiscTotal {
+                "Use disc:3, a range such as disc:2..4, or disc:none for a blank Disc Total."
+                    .to_owned()
+            } else {
+                "Search requires a number, range, or supported yes/no value.".to_owned()
+            }
         })?;
         let valid = n.is_finite()
             && n >= 0.0
@@ -1416,6 +1434,7 @@ fn parse_extended_search(
                 Dissolved | Founded | Dead | Born => {
                     n.fract() == 0.0 && (1.0..=9999.0).contains(&n)
                 }
+                DiscTotal => n.fract() == 0.0 && n <= f64::from(u32::MAX),
                 _ => n.fract() == 0.0 && (1.0..=i32::MAX as f64).contains(&n),
             };
         if valid {
@@ -1559,6 +1578,23 @@ fn extended_search_predicate(
             format!("NOT ({misnamed})")
         } else {
             misnamed
+        });
+    }
+    if *field == DiscTotal {
+        let condition = if *present == Some(false) {
+            "disc.disc_total IS NULL".to_owned()
+        } else {
+            range("disc.disc_total", params)
+        };
+        return Some(if album {
+            // Driven by the cache's value index, then each file's catalog row.
+            format!(
+                "{alias}.id IN (SELECT disc_track.album_id FROM temp.aurora_disc_totals AS disc JOIN tracks AS disc_track ON disc_track.file_path = disc.file_path AND disc_track.filename = disc.filename WHERE {condition})"
+            )
+        } else {
+            format!(
+                "EXISTS (SELECT 1 FROM temp.aurora_disc_totals AS disc WHERE disc.file_path = {alias}.file_path AND disc.filename = {alias}.filename AND {condition})"
+            )
         });
     }
     if matches!(field, Rank | FinalRank) {

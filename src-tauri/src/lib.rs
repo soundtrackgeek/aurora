@@ -18,6 +18,7 @@ mod curation;
 mod curation_store;
 mod desktop_reveal;
 mod device_mode;
+mod disc_totals;
 mod explorer;
 mod fanart;
 mod file_observations;

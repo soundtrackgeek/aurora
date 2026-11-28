@@ -1,5 +1,16 @@
 # Aurora
 
+## Search by Disc Total
+
+Aurora **0.83.0** searches the Disc Total tag. `disc:3` lists the albums with
+three discs, `disc:2..` every multi-disc album, `disc:0` the tags with an
+explicit total of 0 and `disc:none` the albums whose Disc Total is blank. Music
+Library's catalog has no Disc Total, so Aurora reads it from the files in the
+background into `aurora-disc-totals.sqlite3`. The first pass over a large
+library takes a few hours, and an album appears in `disc:` results once its
+files have been read. Edits made in Aurora count within seconds. See
+`docs/search.md`.
+
 ## Find and rename misnamed albums
 
 Aurora **0.82.0** can search for the albums that show the rename icon on their

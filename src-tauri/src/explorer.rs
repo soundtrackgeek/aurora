@@ -3993,6 +3993,81 @@ mod tests {
     }
 
     #[test]
+    fn disc_search_matches_the_cached_disc_total_tag() {
+        let connection = fixture();
+        crate::disc_totals::prepare_search(&connection, None).unwrap();
+        // a1 has a three-disc track and a blank one, a2 an explicit 0. a3 has not
+        // been read yet, so no disc: term matches it.
+        connection
+            .execute_batch(
+                r#"INSERT INTO temp.aurora_disc_totals VALUES
+                     ('H:\Music\Sigur Rós', '01.mp3', 3),
+                     ('H:\Music\Sigur Rós', '02.mp3', NULL),
+                     ('H:\Music\Sigur Rós', '03.mp3', 0);"#,
+            )
+            .unwrap();
+        let album_ids = |search: &str| {
+            let mut ids = album_page_from_connection(
+                &connection,
+                AlbumPageRequest {
+                    search: Some(search.to_owned()),
+                    ..AlbumPageRequest::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{search}: {error}"))
+            .items
+            .into_iter()
+            .map(|album| album.id)
+            .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        assert_eq!(album_ids("disc:3"), ["a1"]);
+        assert_eq!(album_ids("disc:0"), ["a2"]);
+        assert_eq!(album_ids("disc:none"), ["a1"]);
+        assert_eq!(album_ids("disc:NONE"), ["a1"]);
+        assert_eq!(album_ids("disc:0..3"), ["a1", "a2"]);
+        assert_eq!(album_ids("disc:2"), Vec::<String>::new());
+        assert_eq!(album_ids("NOT disc:3"), ["a2", "a3"]);
+        assert_eq!(album_ids("disc:3 AND genre:house"), Vec::<String>::new());
+
+        let song_titles = |search: &str| {
+            let mut titles = track_page_from_connection(
+                &connection,
+                TrackPageRequest {
+                    search: Some(search.to_owned()),
+                    ..TrackPageRequest::default()
+                },
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{search}: {error}"))
+            .items
+            .into_iter()
+            .map(|track| track.title)
+            .collect::<Vec<_>>();
+            titles.sort();
+            titles
+        };
+        assert_eq!(song_titles("disc:3"), ["Sæglópur"]);
+        assert_eq!(song_titles("disc:none"), ["Hoppípolla"]);
+        assert_eq!(song_titles("disc:0"), ["Svefn-g-englar"]);
+
+        for invalid in ["disc:many", "disc:1.5", "disc:4..2"] {
+            assert!(
+                album_page_from_connection(
+                    &connection,
+                    AlbumPageRequest {
+                        search: Some(invalid.to_owned()),
+                        ..AlbumPageRequest::default()
+                    },
+                )
+                .is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn album_metric_search_filters_tracks_albums_and_artists() {
         let connection = fixture();
 
